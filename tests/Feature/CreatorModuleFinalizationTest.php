@@ -102,10 +102,18 @@ class CreatorModuleFinalizationTest extends TestCase
         $dash->assertForbidden();
         $dash->assertJsonFragment(['error' => 'creator_module_inactive', 'action' => 'upgrade']);
 
+        $this->brand->update([
+            'settings' => array_merge($this->brand->settings ?? [], [
+                'creator_module_approver_user_ids' => [$this->manager->id],
+            ]),
+        ]);
+        $extra = User::factory()->create();
+        $extra->tenants()->attach($this->tenant->id, ['role' => 'member']);
+
         $assign = $this->actingAs($this->manager)
             ->withSession($this->sessionFor($this->manager))
             ->postJson("/app/api/brands/{$this->brand->id}/prostaff/members", [
-                'user_id' => $this->contributor->id,
+                'email' => $extra->email,
             ]);
         $assign->assertForbidden();
         $assign->assertJsonFragment(['error' => 'creator_module_inactive']);

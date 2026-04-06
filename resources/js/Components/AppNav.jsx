@@ -5,13 +5,14 @@ import { showWorkspaceSwitchingOverlay } from '../utils/workspaceSwitchOverlay'
 import AppBrandLogo from './AppBrandLogo'
 import JackpotLogo from './JackpotLogo'
 import AgencyStripBrandSelect from './agency/AgencyStripBrandSelect'
-import WorkspaceSwitcher from './Workspace/WorkspaceSwitcher'
 import GlobalUserControls from './Layout/GlobalUserControls'
 import {
     ArrowDownTrayIcon,
     BookOpenIcon,
+    ChartBarIcon,
     ChevronDownIcon,
     ChevronRightIcon,
+    Cog6ToothIcon,
     FolderIcon,
     HomeIcon,
     PhotoIcon,
@@ -21,7 +22,56 @@ import {
     UserGroupIcon,
 } from '@heroicons/react/24/outline'
 
-export default function AppNav({ brand, tenant, variant, hideWorkspaceAppNav = false, hideAgencyStrip = false }) {
+/** Build `rgba(...)` from `#RRGGBB` for translucent brand accents (e.g. Overview → Creators row). */
+function rgbaFromHex(hex, alpha) {
+    const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(String(hex || '').trim())
+    if (!m) {
+        return `rgba(99, 102, 241, ${alpha})`
+    }
+    return `rgba(${parseInt(m[1], 16)}, ${parseInt(m[2], 16)}, ${parseInt(m[3], 16)}, ${alpha})`
+}
+
+/**
+ * ---------------------------------------------------------------------------
+ * AGENCY NAV (TOP STRIP) — LOCKING PRODUCT CONTRACT — READ BEFORE CHANGING
+ * ---------------------------------------------------------------------------
+ * The thin row ABOVE the main white nav is the “agency nav” (agency workspace strip).
+ *
+ * LOCK — WHO MAY EVER SEE IT:
+ *   - ONLY users who are part of an agency workflow. Concretely: `auth.companies` must include
+ *     at least one tenant with `is_agency === true` (`agencyHomeCompany`). If that row does not
+ *     exist, the agency nav MUST NOT render. No exceptions for “just add a switcher”.
+ *
+ * LOCK — WHEN IT IS VISIBLE (session context):
+ *   - Active workspace is the agency tenant itself (`activeCompany.is_agency === true`), OR
+ *   - Active workspace is a client company that is tied to an agency via provisioning
+ *     (`activeCompany.is_agency_managed === true`). Viewing that client company IS agency context;
+ *     the user is operating inside the agency’s client portfolio, not a standalone “basic company”.
+ *
+ * LOCK — WHO MUST NEVER SEE IT:
+ *   - Pure / basic company users: active tenant is neither `is_agency` nor `is_agency_managed`.
+ *     They get the main nav only. Do not add a second top row for them (no WorkspaceSwitcher bar,
+ *     no agency strip).
+ *   - Collection-only / external collection / guest chrome (`isExternalCollectionChrome`).
+ *   - When `hideAgencyStrip` is true (call site override — must remain respected).
+ *
+ * LOCK — DO NOT “HELP” BY LOOSENING CONDITIONS:
+ *   - Widening `agencyStripVisible` to show for all `/app` pages or for every multi-company user
+ *     will regress basic-company UX and duplicate chrome. If unsure, default to hidden.
+ *
+ * Backend alignment: `is_agency` on tenants and `is_agency_managed` on the active company in
+ * shared Inertia `auth.companies` are authoritative; this file only reflects them.
+ * ---------------------------------------------------------------------------
+ */
+
+export default function AppNav({
+    brand,
+    tenant,
+    variant,
+    hideWorkspaceAppNav = false,
+    /** LOCK (agency nav): When true, the agency top strip is suppressed — keep for dashboards that must not show agency chrome. */
+    hideAgencyStrip = false,
+}) {
     const page = usePage()
     const {
         auth,
@@ -97,12 +147,13 @@ export default function AppNav({ brand, tenant, variant, hideWorkspaceAppNav = f
     }
 
     const activeCompany = auth.companies?.find((c) => c.is_active)
-    /** Direct tenant membership (not agency-provisioned). Agency client workspaces use the agency strip / brand switcher. */
-    const directWorkspaceCompanies = Array.isArray(auth.companies)
-        ? auth.companies.filter((c) => !c.is_agency_managed)
-        : []
+
+    // --- LOCK: Agency nav data prerequisites (see file-level AGENCY NAV contract) ---
+    // LOCK: `agency_flat_brands` is ONLY for the agency strip brand picker; backend must not send it for non-agency users.
     const agencyFlatBrands = Array.isArray(auth.agency_flat_brands) ? auth.agency_flat_brands : []
+    // LOCK: `agencyHomeCompany` === user has an agency tenant in their workspace list. No row => no agency nav, ever.
     const agencyHomeCompany = auth.companies?.find((c) => c.is_agency === true) ?? null
+    // LOCK: Synonym for “this user is agency-capable” for quick links; still gated by `agencyStripVisible` for actual strip.
     const showAgencyQuickLink = Boolean(agencyHomeCompany)
 
     const goAgencyDashboardFromMenu = () => {
@@ -167,14 +218,6 @@ export default function AppNav({ brand, tenant, variant, hideWorkspaceAppNav = f
     const workspaceBrandColor = activeBrand?.primary_color || activeCompany?.primary_color || '#6366f1'
     const agencyBrandColor = agencyHomeCompany?.primary_color || '#4f46e5'
 
-    const currentWorkspace = activeCompany
-        ? {
-              id: activeCompany.id,
-              name: activeCompany.name,
-              type: activeCompany.is_agency ? 'agency_workspace' : 'company',
-          }
-        : page.props.currentWorkspace ?? null
-
     /** Cinematic app shell (Overview, etc.): keep dark translucent chrome on hover — avoid flipping to solid white. */
     const isCinematicNav = variant === 'transparent'
     /** Same easing/duration as nav + agency strip so cinematic header surfaces stay in sync */
@@ -222,14 +265,26 @@ export default function AppNav({ brand, tenant, variant, hideWorkspaceAppNav = f
     const isAppPage = currentUrl.startsWith('/app')
     /** Agency dashboard (etc.): hide brand workspace links — keep logo, agency strip, notifications, user menu */
     const suppressWorkspaceChrome = Boolean(hideWorkspaceAppNav && isAppPage && !isExternalCollectionChrome)
+
+    // --- LOCK: Agency nav — active workspace classification (see file-level contract) ---
+    // LOCK: User is literally inside the agency tenant workspace (not a client).
     const activeWorkspaceIsAgency = activeCompany?.is_agency === true
-    /** Incubated / agency-provisioned client tenant (pivot `is_agency_managed`) — top bar stays agency context (Velvet Hammer), never “client as Company”. */
+    // LOCK: User is inside a client company that is associated with / provisioned by an agency (`brand_user`/tenant pivot).
+    //       This is STILL agency context: show agency nav so they never think they are a standalone basic company.
     const activeWorkspaceIsAgencyManagedClient = activeCompany?.is_agency_managed === true
+
     /**
-     * Agency strip: show while working under the agency OR an agency-managed client workspace.
-     * If we only showed it when `activeWorkspaceIsAgency`, switching into St Croix would hide the strip and
-     * `WorkspaceSwitcher` would show the client name + “Company” — wrong; this row is agency chrome only.
-     * Collection / external guests never see it.
+     * LOCK — `agencyStripVisible` (agency nav render gate): ALL of the following are mandatory.
+     *
+     *   1. `isAppPage` — agency nav is app shell only.
+     *   2. `showAgencyQuickLink` / `agencyHomeCompany` — user MUST be agency-capable (tenant with is_agency in auth.companies).
+     *      If you remove this, basic-company-only users could see agency UI when props leak — forbidden.
+     *   3. `!hideAgencyStrip` — honor parent override (e.g. agency dashboard layouts).
+     *   4. `!isExternalCollectionChrome` — guests / collection-only never see agency chrome.
+     *   5. `(activeWorkspaceIsAgency || activeWorkspaceIsAgencyManagedClient)` — active tenant must be agency OR
+     *      agency-managed client. Basic direct company (`!is_agency && !is_agency_managed`) => MUST be false.
+     *
+     * LOCK: Do not OR in extra cases (e.g. “has multiple companies”) without product sign-off — that broke basic UX before.
      */
     const agencyStripVisible = Boolean(
         isAppPage &&
@@ -239,12 +294,6 @@ export default function AppNav({ brand, tenant, variant, hideWorkspaceAppNav = f
         !isExternalCollectionChrome &&
         (activeWorkspaceIsAgency || activeWorkspaceIsAgencyManagedClient)
     )
-    /**
-     * Thin workspace row above the logo: fallback when the user has an agency home tenant but is not on the agency
-     * strip (e.g. direct-only company membership). Agency + agency-managed client sessions use `agencyStripVisible` instead.
-     */
-    const showWorkspaceContextBar =
-        isAppPage && !isExternalCollectionChrome && !agencyStripVisible && Boolean(agencyHomeCompany)
     // Check if we're in admin area - never show plan limit banner in admin
     const isAdminPage = currentUrl.startsWith('/app/admin')
     
@@ -458,7 +507,7 @@ export default function AppNav({ brand, tenant, variant, hideWorkspaceAppNav = f
                     />
                 </Link>
                 <div
-                    className={`absolute left-0 top-full z-[100] min-w-[11rem] pt-1.5 transition-all duration-200 ease-out motion-reduce:transition-none ${
+                    className={`absolute left-0 top-full z-[100] min-w-[13.5rem] pt-1.5 transition-all duration-200 ease-out motion-reduce:transition-none ${
                         overviewNavHover
                             ? 'pointer-events-auto translate-y-0 opacity-100'
                             : 'pointer-events-none translate-y-1 opacity-0'
@@ -472,14 +521,65 @@ export default function AppNav({ brand, tenant, variant, hideWorkspaceAppNav = f
                         }
                         style={{ '--overview-dd-accent': accent }}
                     >
+                        {showCreatorsNav ? (
+                            <Link
+                                href={route('brands.creators', { brand: activeBrand.id })}
+                                className={`${subLinkBase} ${creatorsPathActive ? subLinkActive : subLinkInactive}`}
+                                style={creatorsPathActive ? { borderLeftColor: accent } : undefined}
+                            >
+                                <span className="inline-flex min-w-0 items-center gap-2.5">
+                                    <span
+                                        className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg"
+                                        style={{
+                                            backgroundColor: rgbaFromHex(
+                                                accent,
+                                                variant === 'transparent' ? 0.38 : 0.14
+                                            ),
+                                            boxShadow: `inset 0 0 0 1px ${rgbaFromHex(accent, variant === 'transparent' ? 0.55 : 0.22)}`,
+                                        }}
+                                    >
+                                        <UserGroupIcon
+                                            className={
+                                                variant === 'transparent'
+                                                    ? 'h-4 w-4 shrink-0 text-white'
+                                                    : 'h-4 w-4 shrink-0'
+                                            }
+                                            style={variant === 'transparent' ? undefined : { color: accent }}
+                                            aria-hidden="true"
+                                        />
+                                    </span>
+                                    <span
+                                        className={`truncate font-semibold tracking-tight ${
+                                            variant === 'transparent' ? 'text-white' : ''
+                                        }`}
+                                        style={variant === 'transparent' ? undefined : { color: accent }}
+                                    >
+                                        Creators
+                                    </span>
+                                </span>
+                            </Link>
+                        ) : null}
                         {showInsightsNav ? (
                             <Link
                                 href={route('insights.overview')}
                                 className={`${subLinkBase} ${insightsPathActive ? subLinkActive : subLinkInactive}`}
                                 style={insightsPathActive ? { borderLeftColor: accent } : undefined}
                             >
-                                Insights
+                                <span className="inline-flex items-center gap-2">
+                                    <ChartBarIcon className="h-4 w-4 shrink-0 opacity-70" aria-hidden="true" />
+                                    Insights
+                                </span>
                             </Link>
+                        ) : null}
+                        {(showCreatorsNav || showInsightsNav) && showBrandSettings ? (
+                            <div
+                                role="separator"
+                                className={
+                                    variant === 'transparent'
+                                        ? 'mx-2 my-1 border-t border-white/10'
+                                        : 'mx-2 my-1 border-t border-slate-200/90 dark:border-white/10'
+                                }
+                            />
                         ) : null}
                         {showBrandSettings ? (
                             <Link
@@ -488,18 +588,9 @@ export default function AppNav({ brand, tenant, variant, hideWorkspaceAppNav = f
                                 className={`${subLinkBase} ${brandSettingsPathActive ? subLinkActive : subLinkInactive}`}
                                 style={brandSettingsPathActive ? { borderLeftColor: accent } : undefined}
                             >
-                                Settings
-                            </Link>
-                        ) : null}
-                        {showCreatorsNav ? (
-                            <Link
-                                href={route('brands.creators', { brand: activeBrand.id })}
-                                className={`${subLinkBase} ${creatorsPathActive ? subLinkActive : subLinkInactive}`}
-                                style={creatorsPathActive ? { borderLeftColor: accent } : undefined}
-                            >
                                 <span className="inline-flex items-center gap-2">
-                                    <UserGroupIcon className="h-4 w-4 shrink-0 opacity-70" aria-hidden="true" />
-                                    Creators
+                                    <Cog6ToothIcon className="h-4 w-4 shrink-0 opacity-70" aria-hidden="true" />
+                                    Settings
                                 </span>
                             </Link>
                         ) : null}
@@ -518,7 +609,10 @@ export default function AppNav({ brand, tenant, variant, hideWorkspaceAppNav = f
         { href: '/app/collections', label: 'Collections', shortLabel: 'Coll', icon: FolderIcon, isActive: (url) => url.startsWith('/app/collections') },
     ]
 
-    /** When the agency strip is visible, park notifications + user menu there. */
+    /**
+     * LOCK (agency nav): Relocate notifications + avatar menu into the agency strip ONLY when `agencyStripVisible`.
+     * Never tie this to unrelated layout flags — otherwise basic-company users get duplicate or misplaced chrome.
+     */
     const relocateUserChromeToAgencyStrip = agencyStripVisible
 
     const globalUserControls = (
@@ -630,36 +724,28 @@ export default function AppNav({ brand, tenant, variant, hideWorkspaceAppNav = f
                 </div>
             )}
 
-            {/* Cinematic header group: shared hover + matched bg transition between agency strip and nav */}
+            {/*
+              LOCK (agency nav): Cinematic header wrapper groups agency strip + main nav hover for transparent variant only.
+              Do not use this wrapper to inject non-agency top rows — basic companies must see a single nav stack.
+            */}
             <div
                 className={variant === 'transparent' ? 'relative z-[55] flex flex-col overflow-visible' : undefined}
                 onMouseEnter={variant === 'transparent' ? () => setNavHovered(true) : undefined}
                 onMouseLeave={variant === 'transparent' ? () => setNavHovered(false) : undefined}
             >
-            {/* Workspace context row when no agency strip (direct company switcher) */}
-            {showWorkspaceContextBar && (
-                <div
-                    className={`flex min-h-[48px] items-center ${
-                        variant === 'transparent'
-                            ? 'border-b border-white/10 bg-black/30 text-white backdrop-blur-md'
-                            : 'border-b border-slate-200/90 bg-slate-50/95'
-                    }`}
-                    role="region"
-                    aria-label="Workspace context"
-                >
-                    <div className="flex w-full items-center px-4 sm:px-6 lg:px-8">
-                        <WorkspaceSwitcher
-                            currentWorkspace={currentWorkspace}
-                            availableWorkspaces={directWorkspaceCompanies}
-                            accentColor={workspaceBrandColor}
-                            variant="bar"
-                            isTransparentVariant={isCinematicNav}
-                        />
-                    </div>
-                </div>
-            )}
-
-            {/* Agency strip — workspace label + name + dashboard; agency primary color as left accent (light + cinematic) */}
+            {/*
+              =============================================================================
+              AGENCY NAV (TOP STRIP) — RENDER — LOCKING REMINDERS
+              =============================================================================
+              LOCK: This block is the only allowed “second row” above the main nav for agency workflows.
+              LOCK: Gated exclusively by `agencyStripVisible` (see boolean LOCK comment above). Do not add a
+                    parallel strip or duplicate switcher for basic companies.
+              LOCK: Shows agency name + brand picker + agency dashboard entry — meaningful ONLY when the user
+                    is agency-capable AND (on agency tenant OR agency-managed client). Client companies with
+                    `is_agency_managed` are explicitly included — that association IS agency context.
+              LOCK: `aria-label` must stay agency-scoped; do not reuse this region for generic “Company” chrome.
+              =============================================================================
+            */}
             {agencyStripVisible && (
                 <div
                     className={`relative z-[60] flex items-center transition-colors duration-300 ${
@@ -806,16 +892,21 @@ export default function AppNav({ brand, tenant, variant, hideWorkspaceAppNav = f
                         {isAppPage ? (isExternalCollectionChrome ? (
                             <div className="hidden min-w-0 flex-1 sm:flex sm:min-w-0 sm:items-center sm:gap-6 lg:gap-8 sm:pl-4 lg:pl-6 overflow-x-auto" data-collection-only="true">
                                 {(() => {
-                                    const colOnlyMuted = textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)'
+                                    /** Inactive but available (e.g. Collections tab when not on collection URL) */
+                                    const colOnlyMuted = textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.72)' : 'rgba(0, 0, 0, 0.55)'
+                                    /** Unavailable main nav — clearly weaker than active / allowed tabs */
+                                    const colOnlyDisabledColor =
+                                        textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.38)' : '#9ca3af'
                                     const colOnlyDisabledClass =
-                                        'inline-flex items-center gap-1.5 border-b-2 border-transparent px-1 py-2 text-sm font-medium cursor-not-allowed select-none pointer-events-none'
-                                    const colOnlyDisabledTitle = 'Not available with collection-only access'
+                                        'inline-flex items-center gap-1.5 border-b-2 border-transparent px-1 py-2 text-sm font-medium cursor-not-allowed select-none pointer-events-none opacity-[0.42]'
+                                    const colOnlyDisabledTitle =
+                                        'Not available for your access — use Collections and Downloads to work with shared content'
                                     return (
                                         <>
                                             <div className="shrink-0">
                                                 <span
                                                     className={colOnlyDisabledClass}
-                                                    style={{ color: colOnlyMuted, borderBottomColor: 'transparent' }}
+                                                    style={{ color: colOnlyDisabledColor, borderBottomColor: 'transparent' }}
                                                     title={colOnlyDisabledTitle}
                                                     aria-disabled="true"
                                                 >
@@ -826,7 +917,7 @@ export default function AppNav({ brand, tenant, variant, hideWorkspaceAppNav = f
                                             <div className="app-nav-main-links flex min-w-0 flex-1 items-center gap-6 overflow-x-auto lg:gap-8">
                                                 <span
                                                     className={colOnlyDisabledClass}
-                                                    style={{ color: colOnlyMuted, borderBottomColor: 'transparent' }}
+                                                    style={{ color: colOnlyDisabledColor, borderBottomColor: 'transparent' }}
                                                     title={colOnlyDisabledTitle}
                                                     aria-disabled="true"
                                                 >
@@ -835,7 +926,7 @@ export default function AppNav({ brand, tenant, variant, hideWorkspaceAppNav = f
                                                 </span>
                                                 <span
                                                     className={colOnlyDisabledClass}
-                                                    style={{ color: colOnlyMuted, borderBottomColor: 'transparent' }}
+                                                    style={{ color: colOnlyDisabledColor, borderBottomColor: 'transparent' }}
                                                     title={colOnlyDisabledTitle}
                                                     aria-disabled="true"
                                                 >
@@ -921,7 +1012,7 @@ export default function AppNav({ brand, tenant, variant, hideWorkspaceAppNav = f
                                                 ) : (
                                                     <span
                                                         className={colOnlyDisabledClass}
-                                                        style={{ color: colOnlyMuted, borderBottomColor: 'transparent' }}
+                                                        style={{ color: colOnlyDisabledColor, borderBottomColor: 'transparent' }}
                                                         title={colOnlyDisabledTitle}
                                                         aria-disabled="true"
                                                     >
@@ -931,7 +1022,7 @@ export default function AppNav({ brand, tenant, variant, hideWorkspaceAppNav = f
                                                 )}
                                                 <span
                                                     className={colOnlyDisabledClass}
-                                                    style={{ color: colOnlyMuted, borderBottomColor: 'transparent' }}
+                                                    style={{ color: colOnlyDisabledColor, borderBottomColor: 'transparent' }}
                                                     title={colOnlyDisabledTitle}
                                                     aria-disabled="true"
                                                 >
@@ -1165,8 +1256,8 @@ export default function AppNav({ brand, tenant, variant, hideWorkspaceAppNav = f
                                 {['Overview', 'Assets', DELIVERABLES_PAGE_LABEL].map((label) => (
                                     <div
                                         key={label}
-                                        className="flex items-center px-3 py-3 rounded-lg text-sm font-medium text-gray-400 opacity-60 cursor-not-allowed select-none"
-                                        title="Collection-only access — not available"
+                                        className="flex items-center px-3 py-3 rounded-lg text-sm font-medium text-gray-400 opacity-40 cursor-not-allowed select-none"
+                                        title="Not available for your access — use Collections and Downloads for shared content"
                                         aria-disabled="true"
                                     >
                                         {label}
@@ -1215,15 +1306,15 @@ export default function AppNav({ brand, tenant, variant, hideWorkspaceAppNav = f
                                     </Link>
                                 ) : (
                                     <div
-                                        className="flex items-center px-3 py-3 rounded-lg text-sm font-medium text-gray-400 opacity-60 cursor-not-allowed select-none"
+                                        className="flex items-center px-3 py-3 rounded-lg text-sm font-medium text-gray-400 opacity-40 cursor-not-allowed select-none"
                                         aria-disabled="true"
                                     >
                                         {collectionMainNavTabLabel}
                                     </div>
                                 )}
                                 <div
-                                    className="flex items-center px-3 py-3 rounded-lg text-sm font-medium text-gray-400 opacity-60 cursor-not-allowed select-none"
-                                    title="Collection-only access — not available"
+                                    className="flex items-center px-3 py-3 rounded-lg text-sm font-medium text-gray-400 opacity-40 cursor-not-allowed select-none"
+                                    title="Not available for your access — use Collections and Downloads for shared content"
                                     aria-disabled="true"
                                 >
                                     Generative

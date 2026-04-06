@@ -79,6 +79,7 @@ export default function GatewayIndex({ context, mode: initialMode, invite_token,
                     <BrandSelector
                         brands={context.available_brands}
                         tenant={context.tenant}
+                        tenantMemberWithoutBrands={Boolean(context.tenant_member_without_brands)}
                     />
                 )
 

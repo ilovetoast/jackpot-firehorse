@@ -162,6 +162,129 @@ class TenantMetadataFieldServiceTest extends TestCase
     }
 
     /**
+     * Creating a field whose key matches an archived row reuses that row (avoids unique index duplicate).
+     */
+    public function test_create_recycles_archived_field_with_same_key(): void
+    {
+        $tenant = Tenant::create([
+            'name' => 'Test Tenant',
+            'slug' => 'test-tenant-recycle',
+        ]);
+
+        $planServiceMock = $this->createMock(PlanService::class);
+        $planServiceMock->method('getPlanLimits')
+            ->with($tenant)
+            ->willReturn(['max_custom_metadata_fields' => 10]);
+
+        $service = new TenantMetadataFieldService($planServiceMock);
+
+        $fieldId = $service->createField($tenant, [
+            'key' => 'custom__reuse_me',
+            'system_label' => 'Original',
+            'type' => 'text',
+            'applies_to' => 'all',
+        ]);
+
+        $service->archiveField($tenant, $fieldId, false);
+
+        $this->assertNotNull(DB::table('metadata_fields')->where('id', $fieldId)->value('archived_at'));
+
+        $sameId = $service->createField($tenant, [
+            'key' => 'custom__reuse_me',
+            'system_label' => 'Recreated',
+            'type' => 'text',
+            'applies_to' => 'all',
+        ]);
+
+        $this->assertSame($fieldId, $sameId);
+
+        $row = DB::table('metadata_fields')->where('id', $fieldId)->first();
+        $this->assertNull($row->archived_at);
+        $this->assertTrue((bool) $row->is_active);
+        $this->assertSame('Recreated', $row->system_label);
+    }
+
+    /**
+     * Recycling an archived field that still has asset values cannot change the field type.
+     */
+    public function test_recycle_archived_field_rejects_type_change_when_values_exist(): void
+    {
+        $tenant = Tenant::create([
+            'name' => 'Test Tenant',
+            'slug' => 'test-tenant-recycle-type',
+        ]);
+
+        $planServiceMock = $this->createMock(PlanService::class);
+        $planServiceMock->method('getPlanLimits')
+            ->with($tenant)
+            ->willReturn(['max_custom_metadata_fields' => 10]);
+
+        $service = new TenantMetadataFieldService($planServiceMock);
+
+        $fieldId = $service->createField($tenant, [
+            'key' => 'custom__typed_field',
+            'system_label' => 'Typed',
+            'type' => 'text',
+            'applies_to' => 'all',
+        ]);
+
+        $storageBucket = StorageBucket::create([
+            'tenant_id' => $tenant->id,
+            'name' => 'test-bucket',
+            'status' => \App\Enums\StorageBucketStatus::ACTIVE,
+            'region' => 'us-east-1',
+        ]);
+
+        $uploadSession = UploadSession::create([
+            'tenant_id' => $tenant->id,
+            'brand_id' => null,
+            'storage_bucket_id' => $storageBucket->id,
+            'status' => \App\Enums\UploadStatus::COMPLETED,
+            'type' => \App\Enums\UploadType::DIRECT,
+            'expected_size' => 1024,
+            'uploaded_size' => 1024,
+        ]);
+
+        $asset = Asset::create([
+            'tenant_id' => $tenant->id,
+            'brand_id' => null,
+            'upload_session_id' => $uploadSession->id,
+            'storage_bucket_id' => $storageBucket->id,
+            'status' => AssetStatus::VISIBLE,
+            'type' => AssetType::ASSET,
+            'title' => 'Test Asset',
+            'original_filename' => 'test.jpg',
+            'mime_type' => 'image/jpeg',
+            'size_bytes' => 1024,
+            'storage_root_path' => 'test/path',
+        ]);
+
+        DB::table('asset_metadata')->insert([
+            'asset_id' => $asset->id,
+            'metadata_field_id' => $fieldId,
+            'value_json' => json_encode('x'),
+            'source' => 'user',
+            'approved_at' => now(),
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $service->archiveField($tenant, $fieldId, false);
+
+        try {
+            $service->createField($tenant, [
+                'key' => 'custom__typed_field',
+                'system_label' => 'Typed',
+                'type' => 'number',
+                'applies_to' => 'all',
+            ]);
+            $this->fail('Expected ValidationException when changing type with existing values.');
+        } catch (ValidationException $e) {
+            $this->assertArrayHasKey('type', $e->errors());
+        }
+    }
+
+    /**
      * Test that keys must be unique per tenant.
      */
     public function test_keys_must_be_unique_per_tenant(): void

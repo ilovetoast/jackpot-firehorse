@@ -158,27 +158,31 @@ export default function EditCollectionModal({
             })
     }, [collection?.id, allowsExternalGuests, showRolePickers])
 
+    // Hydrate only when the dialog opens or the collection id changes — not when Inertia replaces
+    // `selected_collection` with a new object reference (same id), or role toggles snap back.
     useEffect(() => {
-        if (open && collection) {
-            setName(collection.name ?? '')
-            setDescription(collection.description ?? '')
-            setAccessMode(deriveAccessMode(collection))
-            setAllowedBrandRoles(
-                Array.isArray(collection.allowed_brand_roles) ? [...collection.allowed_brand_roles] : []
-            )
-            setAllowsExternalGuests(!!collection.allows_external_guests)
-            setIsPublic(!!collection.is_public)
-            setError(null)
-            setInviteError(null)
-            setInternalError(null)
-            setInviteEmail('')
-            setPickUserId('')
-            setActiveTab('settings')
-            setStats({ loading: false, error: null, data: null })
-            statsFetchedRef.current = false
-            setExternalAccessCountsHydrated(false)
+        if (!open || !collection?.id) {
+            return
         }
-    }, [open, collection])
+        setName(collection.name ?? '')
+        setDescription(collection.description ?? '')
+        setAccessMode(deriveAccessMode(collection))
+        setAllowedBrandRoles(
+            Array.isArray(collection.allowed_brand_roles) ? [...collection.allowed_brand_roles] : []
+        )
+        setAllowsExternalGuests(!!collection.allows_external_guests)
+        setIsPublic(!!collection.is_public)
+        setError(null)
+        setInviteError(null)
+        setInternalError(null)
+        setInviteEmail('')
+        setPickUserId('')
+        setActiveTab('settings')
+        setStats({ loading: false, error: null, data: null })
+        statsFetchedRef.current = false
+        setExternalAccessCountsHydrated(false)
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally omit `collection` reference; see comment above.
+    }, [open, collection?.id])
 
     useEffect(() => {
         if (!open || !collection?.id || activeTab !== 'stats') return
@@ -227,6 +231,10 @@ export default function EditCollectionModal({
         const trimmedName = name.trim()
         if (!trimmedName) {
             setError('Name is required.')
+            return
+        }
+        if (accessMode === 'role_limited' && allowedBrandRoles.length === 0) {
+            setError('Select at least one brand role, or choose another access option.')
             return
         }
         setSubmitting(true)

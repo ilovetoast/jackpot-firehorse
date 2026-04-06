@@ -8,8 +8,10 @@ use App\Models\Category;
 use App\Services\AI\Insights\AiInsightSuggestionActionService;
 use App\Services\AI\Insights\AiSuggestionSuppressionService;
 use App\Services\AI\Insights\InsightSuggestionReason;
+use App\Services\FeatureGate;
 use App\Services\TenantPermissionResolver;
 use App\Support\AssetVariant;
+use App\Support\Roles\PermissionMap;
 use App\Support\DeliveryContext;
 use App\Support\Metadata\CategoryTypeResolver;
 use Illuminate\Http\JsonResponse;
@@ -37,15 +39,74 @@ class AiReviewController extends Controller
 
         $user = $request->user();
         $tenant = app('tenant');
+        $brand = app()->bound('brand') ? app('brand') : null;
+
         $canCreateFieldFromSuggestion = false;
         if ($user && $tenant) {
             $canCreateFieldFromSuggestion = $this->canCreateFieldFromSuggestion($user, $tenant);
         }
 
+        $canViewAi = $this->userCanViewAiSuggestions($user, $brand);
+        $canViewUploadApprovals = false;
+        $creatorModuleEnabled = false;
+        if ($user && $tenant && $brand) {
+            $featureGate = app(FeatureGate::class);
+            if ($featureGate->approvalsEnabled($tenant)) {
+                $brandRole = $user->getRoleForBrand($brand);
+                $canViewUploadApprovals = (bool) ($brandRole && PermissionMap::canApproveAssets($brandRole));
+            }
+            $creatorModuleEnabled = $featureGate->creatorModuleEnabled($tenant);
+        }
+
+        $requestedWorkspace = (string) $request->query('workspace', '');
+        if ($requestedWorkspace !== '' && ! in_array($requestedWorkspace, ['ai', 'uploads'], true)) {
+            $requestedWorkspace = '';
+        }
+
+        if ($requestedWorkspace === '') {
+            $workspace = $canViewAi ? 'ai' : ($canViewUploadApprovals ? 'uploads' : 'ai');
+        } else {
+            $workspace = $requestedWorkspace;
+        }
+
+        if ($workspace === 'ai' && ! $canViewAi && $canViewUploadApprovals) {
+            $workspace = 'uploads';
+        }
+        if ($workspace === 'uploads' && ! $canViewUploadApprovals && $canViewAi) {
+            $workspace = 'ai';
+        }
+
+        $approvalQueue = (string) $request->query('approval_queue', 'team');
+        if (! in_array($approvalQueue, ['team', 'creator'], true)) {
+            $approvalQueue = 'team';
+        }
+        if (! $creatorModuleEnabled && $approvalQueue === 'creator') {
+            $approvalQueue = 'team';
+        }
+
         return Inertia::render('Insights/Review', [
             'initialTab' => $tab,
+            'initialWorkspace' => $workspace,
+            'initialApprovalQueue' => $approvalQueue,
+            'canViewAi' => $canViewAi,
+            'canViewUploadApprovals' => $canViewUploadApprovals,
+            'creatorModuleEnabled' => $creatorModuleEnabled,
             'canCreateFieldFromSuggestion' => $canCreateFieldFromSuggestion,
         ]);
+    }
+
+    private function userCanViewAiSuggestions($user, $brand): bool
+    {
+        if (! $user || ! $brand) {
+            return false;
+        }
+
+        $resolver = app(TenantPermissionResolver::class);
+        $isContributor = strtolower((string) $user->getRoleForBrand($brand)) === 'contributor';
+        $canViewAll = ! $isContributor && $resolver->hasForBrand($user, $brand, 'metadata.suggestions.view');
+        $canReviewOthers = $isContributor && $resolver->hasForBrand($user, $brand, 'metadata.review_candidates');
+
+        return $canViewAll || $canReviewOthers;
     }
 
     public function data(Request $request, TenantPermissionResolver $resolver): JsonResponse

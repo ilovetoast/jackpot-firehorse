@@ -1,3 +1,4 @@
+import { Link } from '@inertiajs/react'
 import { motion } from 'framer-motion'
 
 function periodLabel(periodType) {
@@ -16,13 +17,14 @@ function statusBadge(status) {
         complete: 'border-emerald-400/40 bg-emerald-500/15 text-emerald-100',
     }
     const cls = map[s] || 'border-white/15 bg-white/10 text-white/70'
-    const label = s === 'on_track' ? 'On track' : s ? s.replace(/_/g, ' ') : '—'
+    const labels = {
+        behind: '🔴 Behind Pace',
+        on_track: '🟡 On Track',
+        complete: '🟢 Complete',
+    }
+    const label = labels[s] || '—'
     return (
-        <span
-            className={`inline-flex rounded-full border px-2.5 py-0.5 text-xs font-medium capitalize ${cls}`}
-        >
-            {label}
-        </span>
+        <span className={`inline-flex rounded-full border px-2.5 py-0.5 text-xs font-medium ${cls}`}>{label}</span>
     )
 }
 
@@ -104,6 +106,22 @@ export default function CreatorProgressCard({ data, loading = false, brandColor 
                 />
             </div>
             <p className="mt-2 text-right text-xs tabular-nums text-white/40">{pct.toFixed(1)}% complete</p>
+            <div className="relative mt-4 border-t border-white/10 pt-4">
+                <Link
+                    href={
+                        typeof route === 'function'
+                            ? route('overview.creator-progress')
+                            : '/app/overview/creator-progress'
+                    }
+                    className="inline-flex items-center gap-1 text-sm font-semibold text-white/80 transition hover:text-white"
+                >
+                    Open creator dashboard
+                    <span aria-hidden className="text-white/45">
+                        →
+                    </span>
+                </Link>
+                <p className="mt-1 text-xs text-white/35">Pipeline, comparisons, and detailed profile</p>
+            </div>
         </motion.div>
     )
 }

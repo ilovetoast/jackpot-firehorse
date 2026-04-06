@@ -27,13 +27,8 @@ use Tests\TestCase;
  *
  * Phase L.6.3 — Approval Notifications
  *
- * Tests that:
- * - Correct recipients are selected (users with asset.publish permission)
- * - Tenant and brand scoping is enforced
- * - Uploader is excluded if they are not an approver
- * - Email is sent to all approvers
- * - Failures are logged but non-blocking
- * - Listener does not fire for non-approval uploads
+ * When plan approval notifications are enabled, per-upload email is skipped in favor of
+ * {@see \App\Console\Commands\SendPendingApprovalDigestsCommand} (batched digest).
  */
 class SendAssetPendingApprovalNotificationTest extends TestCase
 {
@@ -59,6 +54,8 @@ class SendAssetPendingApprovalNotificationTest extends TestCase
             'name' => 'Test Tenant',
             'slug' => 'test-tenant',
         ]);
+
+        $this->tenant->forceFill(['manual_plan_override' => 'pro'])->save();
 
         $this->brand = Brand::create([
             'tenant_id' => $this->tenant->id,
@@ -155,27 +152,14 @@ class SendAssetPendingApprovalNotificationTest extends TestCase
         Mail::fake();
     }
 
-    public function test_notification_sent_to_approvers(): void
+    public function test_listener_does_not_send_immediate_email_when_notifications_enabled(): void
     {
         $event = new AssetPendingApproval($this->asset, $this->uploader, $this->category->name);
         $listener = new SendAssetPendingApprovalNotification();
-        
+
         $listener->handle($event);
 
-        // Assert email was sent to approver
-        Mail::assertSent(\App\Mail\AssetPendingApprovalNotification::class, function ($mail) {
-            return $mail->hasTo($this->approver->email);
-        });
-
-        // Assert email was NOT sent to uploader (they don't have permission)
-        Mail::assertNotSent(\App\Mail\AssetPendingApprovalNotification::class, function ($mail) {
-            return $mail->hasTo($this->uploader->email);
-        });
-
-        // Assert email was NOT sent to non-approver (different tenant)
-        Mail::assertNotSent(\App\Mail\AssetPendingApprovalNotification::class, function ($mail) {
-            return $mail->hasTo($this->nonApprover->email);
-        });
+        Mail::assertNothingSent();
     }
 
     public function test_notification_respects_tenant_scoping(): void
@@ -202,10 +186,7 @@ class SendAssetPendingApprovalNotificationTest extends TestCase
         
         $listener->handle($event);
 
-        // Assert email was NOT sent to approver from other tenant
-        Mail::assertNotSent(\App\Mail\AssetPendingApprovalNotification::class, function ($mail) use ($otherApprover) {
-            return $mail->hasTo($otherApprover->email);
-        });
+        Mail::assertNothingSent();
     }
 
     public function test_notification_respects_brand_scoping(): void
@@ -235,23 +216,17 @@ class SendAssetPendingApprovalNotificationTest extends TestCase
         
         $listener->handle($event);
 
-        // Assert email was NOT sent to approver from other brand
-        Mail::assertNotSent(\App\Mail\AssetPendingApprovalNotification::class, function ($mail) use ($otherBrandApprover) {
-            return $mail->hasTo($otherBrandApprover->email);
-        });
+        Mail::assertNothingSent();
     }
 
     public function test_notification_excludes_uploader_if_not_approver(): void
     {
         $event = new AssetPendingApproval($this->asset, $this->uploader, $this->category->name);
         $listener = new SendAssetPendingApprovalNotification();
-        
+
         $listener->handle($event);
 
-        // Uploader should not receive email (they don't have asset.publish)
-        Mail::assertNotSent(\App\Mail\AssetPendingApprovalNotification::class, function ($mail) {
-            return $mail->hasTo($this->uploader->email);
-        });
+        Mail::assertNothingSent();
     }
 
     public function test_notification_excludes_uploader_even_if_they_are_approver(): void
@@ -266,11 +241,7 @@ class SendAssetPendingApprovalNotificationTest extends TestCase
         
         $listener->handle($event);
 
-        // Uploader should NOT receive email even if they have approval permission
-        // (they already know they uploaded the asset)
-        Mail::assertNotSent(\App\Mail\AssetPendingApprovalNotification::class, function ($mail) {
-            return $mail->hasTo($this->uploader->email);
-        });
+        Mail::assertNothingSent();
     }
 
     public function test_listener_does_not_throw_on_failure(): void
@@ -290,18 +261,15 @@ class SendAssetPendingApprovalNotificationTest extends TestCase
         Mail::assertNothingSent();
     }
 
-    public function test_email_contains_correct_content(): void
+    public function test_listener_skips_when_notifications_disabled_on_plan(): void
     {
+        $this->tenant->forceFill(['manual_plan_override' => null])->save();
+
         $event = new AssetPendingApproval($this->asset, $this->uploader, $this->category->name);
         $listener = new SendAssetPendingApprovalNotification();
-        
+
         $listener->handle($event);
 
-        Mail::assertSent(\App\Mail\AssetPendingApprovalNotification::class, function ($mail) {
-            return $mail->hasTo($this->approver->email)
-                && $mail->asset->id === $this->asset->id
-                && $mail->uploader->id === $this->uploader->id
-                && $mail->categoryName === $this->category->name;
-        });
+        Mail::assertNothingSent();
     }
 }

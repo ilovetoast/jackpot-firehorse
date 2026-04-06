@@ -120,6 +120,79 @@ class OrphanAndDeleteFromCompanyTest extends TestCase
     }
 
     /** @test */
+    public function remove_from_brand_with_remove_from_company_detaches_tenant_when_only_brand(): void
+    {
+        $this->orphanUser->tenants()->attach($this->tenant->id, ['role' => 'member']);
+        $this->orphanUser->brands()->attach($this->brand->id, ['role' => 'viewer', 'removed_at' => null]);
+
+        $uri = route('brands.users.remove', ['brand' => $this->brand->id, 'user' => $this->orphanUser->id]);
+        $response = $this->actingAs($this->adminUser)
+            ->withSession(['tenant_id' => $this->tenant->id, 'brand_id' => $this->brand->id])
+            ->call(
+                'DELETE',
+                $uri,
+                [],
+                [],
+                [],
+                ['CONTENT_TYPE' => 'application/json'],
+                json_encode(['remove_from_company' => true])
+            );
+
+        $response->assertRedirect();
+        $this->assertFalse(
+            $this->orphanUser->fresh()->tenants()->where('tenants.id', $this->tenant->id)->exists(),
+            'User should be removed from company when remove_from_company is true and this was their only brand'
+        );
+        $this->assertNotNull(
+            \Illuminate\Support\Facades\DB::table('brand_user')
+                ->where('user_id', $this->orphanUser->id)
+                ->where('brand_id', $this->brand->id)
+                ->value('removed_at'),
+            'Brand membership should be soft-removed'
+        );
+    }
+
+    /** @test */
+    public function remove_from_brand_rejects_remove_from_company_when_user_has_other_brands(): void
+    {
+        $brandB = Brand::create([
+            'tenant_id' => $this->tenant->id,
+            'name' => 'Brand B',
+            'slug' => 'brand-b',
+        ]);
+        $this->orphanUser->tenants()->attach($this->tenant->id, ['role' => 'member']);
+        $this->orphanUser->brands()->attach($this->brand->id, ['role' => 'viewer', 'removed_at' => null]);
+        $this->orphanUser->brands()->attach($brandB->id, ['role' => 'viewer', 'removed_at' => null]);
+
+        $uri = route('brands.users.remove', ['brand' => $this->brand->id, 'user' => $this->orphanUser->id]);
+        $response = $this->actingAs($this->adminUser)
+            ->withSession(['tenant_id' => $this->tenant->id, 'brand_id' => $this->brand->id])
+            ->call(
+                'DELETE',
+                $uri,
+                [],
+                [],
+                [],
+                ['CONTENT_TYPE' => 'application/json'],
+                json_encode(['remove_from_company' => true])
+            );
+
+        $response->assertRedirect();
+        $response->assertSessionHasErrors('brand');
+        $this->assertTrue(
+            $this->orphanUser->fresh()->tenants()->where('tenants.id', $this->tenant->id)->exists(),
+            'User should remain on company when remove_from_company is rejected'
+        );
+        $this->assertNull(
+            \Illuminate\Support\Facades\DB::table('brand_user')
+                ->where('user_id', $this->orphanUser->id)
+                ->where('brand_id', $this->brand->id)
+                ->value('removed_at'),
+            'User should still be an active member of this brand when request is rejected'
+        );
+    }
+
+    /** @test */
     public function delete_from_company_removes_tenant_brand_and_collection_relations(): void
     {
         $this->orphanUser->tenants()->attach($this->tenant->id, ['role' => 'member']);

@@ -106,8 +106,15 @@ class GenerateThumbnailsJob implements ShouldQueue
         $job = (int) config('assets.thumbnail.job_timeout_seconds', 900);
         $large = (int) config('assets.thumbnail.large_asset_timeout_seconds', 1800);
         $this->timeout = max($job, $large);
-        $this->tries = max(1, (int) config('assets.processing.pipeline_job_max_tries', 5));
+        $this->tries = max(1, (int) config('assets.processing.pipeline_job_max_tries', 64));
         $this->configureImagesQueue();
+    }
+
+    public function retryUntil(): \DateTimeInterface
+    {
+        return now()->addMinutes(
+            max(1, (int) config('assets.processing.pipeline_job_retry_until_minutes', 120))
+        );
     }
 
     /**

@@ -1,5 +1,5 @@
 import { useForm, router } from '@inertiajs/react'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Avatar from '../Avatar'
 import ConfirmDialog from '../ConfirmDialog'
 
@@ -7,7 +7,14 @@ import ConfirmDialog from '../ConfirmDialog'
  * Brand member management section — invite, add, roles, remove.
  * Used in Brands/Edit Members tab.
  */
-export default function BrandMembersSection({ brandId, users = [], availableUsers = [], pendingInvitations = [], brandRoles = ['viewer', 'contributor', 'brand_manager', 'admin'] }) {
+export default function BrandMembersSection({
+    brandId,
+    users = [],
+    availableUsers = [],
+    pendingInvitations = [],
+    brandRoles = ['viewer', 'contributor', 'brand_manager', 'admin'],
+    canRemoveUserFromCompany = false,
+}) {
     return (
         <div className="space-y-8">
             {/* Add User Form */}
@@ -56,7 +63,13 @@ export default function BrandMembersSection({ brandId, users = [], availableUser
                 {users && users.length > 0 ? (
                     <ul className="divide-y divide-gray-100 rounded-xl border border-gray-200/80 bg-white overflow-hidden">
                         {users.map((user) => (
-                            <UserManagementCard key={user.id} user={user} brandId={brandId} brandRoles={brandRoles} />
+                            <UserManagementCard
+                                key={user.id}
+                                user={user}
+                                brandId={brandId}
+                                brandRoles={brandRoles}
+                                canRemoveUserFromCompany={canRemoveUserFromCompany}
+                            />
                         ))}
                     </ul>
                 ) : (
@@ -203,13 +216,24 @@ function PendingInvitationCard({ invitation, brandId }) {
         <>
             <div className="p-4 flex items-center justify-between gap-3">
                 <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                         <p className="text-sm font-medium text-gray-900">{invitation.email}</p>
-                        {invitation.role && (
-                            <span className="inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">
-                                {invitation.role}
+                        {invitation.is_creator_invite ? (
+                            <span className="inline-flex rounded-full bg-violet-100 px-2 py-0.5 text-xs font-medium text-violet-900 ring-1 ring-inset ring-violet-200">
+                                Creator
                             </span>
-                        )}
+                        ) : null}
+                        {invitation.role ? (
+                            <span
+                                className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${
+                                    invitation.is_creator_invite
+                                        ? 'bg-gray-100 text-gray-600 ring-1 ring-inset ring-gray-200'
+                                        : 'bg-amber-100 text-amber-800'
+                                }`}
+                            >
+                                {invitation.is_creator_invite ? `Brand role: ${invitation.role}` : invitation.role}
+                            </span>
+                        ) : null}
                     </div>
                     <p className="mt-1 text-xs text-gray-500">
                         {invitation.sent_at ? `Sent: ${formatDate(invitation.sent_at)}` : `Created: ${formatDate(invitation.created_at)}`}
@@ -247,12 +271,21 @@ function PendingInvitationCard({ invitation, brandId }) {
     )
 }
 
-function UserManagementCard({ user, brandId, brandRoles }) {
+function UserManagementCard({ user, brandId, brandRoles, canRemoveUserFromCompany = false }) {
     const { delete: destroy, processing } = useForm()
     const [isEditing, setIsEditing] = useState(false)
     const [role, setRole] = useState(user.role || 'viewer')
     const [updatingRole, setUpdatingRole] = useState(false)
     const [showRemoveConfirm, setShowRemoveConfirm] = useState(false)
+    const [removeAlsoFromCompany, setRemoveAlsoFromCompany] = useState(false)
+
+    useEffect(() => {
+        if (!showRemoveConfirm) {
+            return
+        }
+        const lastBrand = (user.other_brands_count ?? 0) === 0
+        setRemoveAlsoFromCompany(lastBrand && canRemoveUserFromCompany)
+    }, [showRemoveConfirm, user.other_brands_count, canRemoveUserFromCompany])
 
     const handleRoleUpdate = () => {
         setUpdatingRole(true)
@@ -267,7 +300,10 @@ function UserManagementCard({ user, brandId, brandRoles }) {
     }
 
     const confirmRemove = () => {
+        const lastBrand = (user.other_brands_count ?? 0) === 0
+        const removeFromCo = lastBrand && removeAlsoFromCompany && canRemoveUserFromCompany
         destroy(`/app/brands/${brandId}/users/${user.id}`, {
+            data: { remove_from_company: removeFromCo },
             preserveScroll: true,
             onSuccess: () => setShowRemoveConfirm(false),
         })
@@ -361,7 +397,34 @@ function UserManagementCard({ user, brandId, brandRoles }) {
                 onClose={() => setShowRemoveConfirm(false)}
                 onConfirm={confirmRemove}
                 title="Remove member"
-                message={`Remove ${user.name || user.email} from this brand?`}
+                panelClassName="sm:max-w-lg"
+                message={
+                    <div className="space-y-3 text-left">
+                        <p>Remove {user.name || user.email} from this brand?</p>
+                        {(user.other_brands_count ?? 0) === 0 ? (
+                            <>
+                                <p className="text-gray-600">
+                                    This is their only brand in the company. If you remove them only from the brand, they stay on the company with no brand access until someone reassigns them.
+                                </p>
+                                {canRemoveUserFromCompany ? (
+                                    <label className="flex items-start gap-2 cursor-pointer">
+                                        <input
+                                            type="checkbox"
+                                            className="mt-1 rounded border-gray-300 text-amber-600 focus:ring-amber-600"
+                                            checked={removeAlsoFromCompany}
+                                            onChange={(e) => setRemoveAlsoFromCompany(e.target.checked)}
+                                        />
+                                        <span className="text-gray-700">Also remove them from the company (recommended)</span>
+                                    </label>
+                                ) : (
+                                    <p className="text-amber-800 text-xs bg-amber-50 border border-amber-100 rounded-md p-2">
+                                        You don&apos;t have permission to remove company members. Ask a company admin to remove them under Company → Team if they should not stay in the company.
+                                    </p>
+                                )}
+                            </>
+                        ) : null}
+                    </div>
+                }
                 variant="warning"
                 confirmText="Remove"
             />

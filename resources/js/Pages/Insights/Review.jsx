@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import { Link } from '@inertiajs/react'
 import InsightsLayout from '../../layouts/InsightsLayout'
+import UploadApprovalsPanel from '../../Components/insights/UploadApprovalsPanel'
 import {
     SparklesIcon,
     TagIcon,
@@ -12,6 +13,7 @@ import {
     RectangleStackIcon,
     ChevronLeftIcon,
     ChevronRightIcon,
+    CloudArrowUpIcon,
 } from '@heroicons/react/24/outline'
 import { usePermission } from '../../hooks/usePermission'
 
@@ -128,9 +130,21 @@ function SectionBulkBar({
     )
 }
 
-export default function AnalyticsReview({ initialTab = 'tags', canCreateFieldFromSuggestion = false }) {
+export default function AnalyticsReview({
+    initialTab = 'tags',
+    initialWorkspace = 'ai',
+    initialApprovalQueue = 'team',
+    canViewAi = false,
+    canViewUploadApprovals = false,
+    creatorModuleEnabled = false,
+    canCreateFieldFromSuggestion = false,
+}) {
     const [activeTab, setActiveTab] = useState(() =>
         VALID_TABS.includes(initialTab) ? initialTab : 'tags'
+    )
+    const [workspace, setWorkspace] = useState(() => (initialWorkspace === 'uploads' ? 'uploads' : 'ai'))
+    const [approvalQueue, setApprovalQueue] = useState(() =>
+        initialApprovalQueue === 'creator' ? 'creator' : 'team'
     )
     const [page, setPage] = useState(1)
     const [items, setItems] = useState([])
@@ -144,7 +158,6 @@ export default function AnalyticsReview({ initialTab = 'tags', canCreateFieldFro
     const [processing, setProcessing] = useState(new Set())
     const [selected, setSelected] = useState(() => new Set())
     const { can } = usePermission()
-    const canView = can('metadata.suggestions.view') || can('metadata.review_candidates')
     const canAccept = can('metadata.suggestions.apply') || can('metadata.edit_post_upload')
     const canReject = can('metadata.suggestions.dismiss') || can('metadata.edit_post_upload')
     const canCreateField =
@@ -159,6 +172,14 @@ export default function AnalyticsReview({ initialTab = 'tags', canCreateFieldFro
     }, [initialTab])
 
     useEffect(() => {
+        setWorkspace(initialWorkspace === 'uploads' ? 'uploads' : 'ai')
+    }, [initialWorkspace])
+
+    useEffect(() => {
+        setApprovalQueue(initialApprovalQueue === 'creator' ? 'creator' : 'team')
+    }, [initialApprovalQueue])
+
+    useEffect(() => {
         setPage(1)
     }, [activeTab])
 
@@ -167,7 +188,7 @@ export default function AnalyticsReview({ initialTab = 'tags', canCreateFieldFro
     }, [activeTab, page])
 
     useEffect(() => {
-        if (!canView) {
+        if (!canViewAi || workspace !== 'ai') {
             setLoading(false)
             return
         }
@@ -193,14 +214,30 @@ export default function AnalyticsReview({ initialTab = 'tags', canCreateFieldFro
                 setLoading(false)
             })
             .catch(() => setLoading(false))
-    }, [activeTab, page, canView])
+    }, [activeTab, page, canViewAi, workspace])
 
     useEffect(() => {
         if (typeof window === 'undefined') return
         const url = new URL(window.location.href)
-        url.searchParams.set('tab', activeTab)
+        if (workspace === 'uploads') {
+            url.searchParams.set('workspace', 'uploads')
+            url.searchParams.delete('tab')
+            if (creatorModuleEnabled && canViewUploadApprovals) {
+                if (approvalQueue === 'creator') {
+                    url.searchParams.set('approval_queue', 'creator')
+                } else {
+                    url.searchParams.delete('approval_queue')
+                }
+            } else {
+                url.searchParams.delete('approval_queue')
+            }
+        } else {
+            url.searchParams.delete('workspace')
+            url.searchParams.delete('approval_queue')
+            url.searchParams.set('tab', activeTab)
+        }
         window.history.replaceState(null, '', url.pathname + url.search)
-    }, [activeTab])
+    }, [workspace, activeTab, approvalQueue, creatorModuleEnabled, canViewUploadApprovals])
 
     /** Group metadata candidates by field; section_header matches Insights metadata “Type” naming. */
     const categorySections = useMemo(() => {
@@ -467,26 +504,104 @@ export default function AnalyticsReview({ initialTab = 'tags', canCreateFieldFro
         )
     }
 
-    if (!canView) {
+    if (!canViewAi && !canViewUploadApprovals) {
         return (
-            <InsightsLayout title="AI Review" activeSection="review">
+            <InsightsLayout title="Review" activeSection="review">
                 <div className="rounded-lg bg-amber-50 p-4 text-amber-800">
-                    You do not have permission to view AI suggestions.
+                    You do not have permission to view this page.
                 </div>
             </InsightsLayout>
         )
     }
 
+    const showWorkspaceToggle = canViewAi && canViewUploadApprovals
+
     return (
-        <InsightsLayout title="AI Review" activeSection="review">
+        <InsightsLayout title="Review" activeSection="review">
             <div className="space-y-6">
                 <div>
-                    <h1 className="text-2xl font-semibold text-gray-900">AI Review</h1>
+                    <h1 className="text-2xl font-semibold text-gray-900">Review</h1>
                     <p className="mt-1 text-sm text-gray-500">
-                        Review and approve AI tag, category, and metadata suggestions.
+                        Approve AI metadata suggestions and teammate uploads that require brand sign-off.
                     </p>
                 </div>
 
+                {showWorkspaceToggle ? (
+                    <div className="flex flex-wrap gap-2 rounded-lg border border-gray-200 bg-white p-1 shadow-sm">
+                        <button
+                            type="button"
+                            onClick={() => setWorkspace('ai')}
+                            className={`inline-flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium transition-colors ${
+                                workspace === 'ai'
+                                    ? 'bg-indigo-50 text-indigo-700 ring-1 ring-indigo-200'
+                                    : 'text-gray-600 hover:bg-gray-50'
+                            }`}
+                        >
+                            <SparklesIcon className="h-5 w-5" />
+                            AI suggestions
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setWorkspace('uploads')}
+                            className={`inline-flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium transition-colors ${
+                                workspace === 'uploads'
+                                    ? 'bg-indigo-50 text-indigo-700 ring-1 ring-indigo-200'
+                                    : 'text-gray-600 hover:bg-gray-50'
+                            }`}
+                        >
+                            <CloudArrowUpIcon className="h-5 w-5" />
+                            Upload approvals
+                        </button>
+                    </div>
+                ) : null}
+
+                {workspace === 'uploads' && canViewUploadApprovals && creatorModuleEnabled ? (
+                    <div className="flex flex-wrap gap-2 rounded-lg border border-gray-200 bg-white p-1 shadow-sm">
+                        <button
+                            type="button"
+                            onClick={() => setApprovalQueue('team')}
+                            className={`inline-flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium transition-colors ${
+                                approvalQueue === 'team'
+                                    ? 'bg-indigo-50 text-indigo-700 ring-1 ring-indigo-200'
+                                    : 'text-gray-600 hover:bg-gray-50'
+                            }`}
+                        >
+                            <CloudArrowUpIcon className="h-5 w-5" />
+                            Team uploads
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setApprovalQueue('creator')}
+                            className={`inline-flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium transition-colors ${
+                                approvalQueue === 'creator'
+                                    ? 'bg-indigo-50 text-indigo-700 ring-1 ring-indigo-200'
+                                    : 'text-gray-600 hover:bg-gray-50'
+                            }`}
+                        >
+                            <CloudArrowUpIcon className="h-5 w-5" />
+                            Creator uploads
+                        </button>
+                    </div>
+                ) : null}
+
+                {workspace === 'uploads' && canViewUploadApprovals ? (
+                    <div className="space-y-4">
+                        <div>
+                            <h2 className="text-lg font-semibold text-gray-900">Upload approvals</h2>
+                            <p className="mt-1 text-sm text-gray-500">
+                                {creatorModuleEnabled && approvalQueue === 'creator'
+                                    ? 'Deliverables from your creator program pending brand review and publish.'
+                                    : 'Assets from teammates pending approval (requires_approval workflow).'}
+                            </p>
+                        </div>
+                        <UploadApprovalsPanel
+                            queue={creatorModuleEnabled && approvalQueue === 'creator' ? 'creator' : 'team'}
+                        />
+                    </div>
+                ) : null}
+
+                {workspace === 'ai' && canViewAi ? (
+            <>
                 <div className="border-b border-gray-200">
                     <nav className="-mb-px flex flex-wrap gap-4 lg:gap-6">
                         <button
@@ -842,6 +957,8 @@ export default function AnalyticsReview({ initialTab = 'tags', canCreateFieldFro
                         <PaginationBar pagination={pagination} loading={loading} onPageChange={setPage} />
                     </div>
                 )}
+            </>
+                ) : null}
 
             </div>
         </InsightsLayout>

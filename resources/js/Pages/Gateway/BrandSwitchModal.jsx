@@ -75,7 +75,13 @@ export default function BrandSwitchModal({ onClose, context }) {
         }
 
         if (hasMultipleBrands) {
-            return <BrandSelector brands={context.available_brands} tenant={context.tenant} />
+            return (
+                <BrandSelector
+                    brands={context.available_brands}
+                    tenant={context.tenant}
+                    tenantMemberWithoutBrands={Boolean(context.tenant_member_without_brands)}
+                />
+            )
         }
 
         return (

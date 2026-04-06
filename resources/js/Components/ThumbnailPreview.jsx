@@ -260,9 +260,19 @@ export default function ThumbnailPreview({
     const masonryWrapperStyle = isMasonryHeight
         ? { maxHeight: Number(masonryMaxHeight), minHeight: effectiveMasonryMinHeightPx }
         : undefined
-    /** Masonry: icon/placeholder branches must fill the tile (match grid tile height), not collapse to icon size. */
+    /**
+     * Masonry: placeholders must match uniform grid tile height (PSD / aspect-[4/3] | aspect-[5/3]).
+     * `minHeight` alone is not enough: AssetPlaceholder uses `h-full`, and percentage height needs a
+     * definite parent height — so we set explicit `height` to the same pixel target as AssetCard's masonry min.
+     */
     const masonryPlaceholderStyle = isMasonryHeight
-        ? { maxHeight: Number(masonryMaxHeight), minHeight: effectiveMasonryMinHeightPx, width: '100%' }
+        ? {
+              maxHeight: Number(masonryMaxHeight),
+              minHeight: effectiveMasonryMinHeightPx,
+              height: effectiveMasonryMinHeightPx,
+              width: '100%',
+              boxSizing: 'border-box',
+          }
         : undefined
 
     // Check thumbnail status - if FAILED, show icon immediately

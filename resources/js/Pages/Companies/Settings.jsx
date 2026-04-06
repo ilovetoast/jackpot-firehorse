@@ -32,6 +32,8 @@ export default function CompanySettings({
     settings_brands = [],
     linked_agencies = [],
     can_manage_agencies = false,
+    creator_module_enabled = false,
+    creator_module_brands = [],
 }) {
     const page = usePage()
     const { auth, errors: pageErrors = {}, flash = {} } = page.props
@@ -853,6 +855,56 @@ export default function CompanySettings({
                                             <p className="mt-1 text-sm font-semibold text-gray-900">{formatSubscriptionStatus(billing.subscription_status)}</p>
                                         </div>
                                     </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Creator Module */}
+                    <div id="creator-module" className="mb-12 scroll-mt-8">
+                        <div className="overflow-hidden rounded-xl border border-gray-200/80 bg-gradient-to-br from-slate-50 via-white to-violet-50/30 shadow-sm ring-1 ring-violet-100/40 backdrop-blur-sm">
+                            <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+                                <div className="lg:col-span-1 border-b border-gray-200/80 px-6 py-6 lg:border-b-0 lg:border-r lg:border-gray-200/80">
+                                    <h2 className="text-lg font-semibold text-gray-900">Creator Module</h2>
+                                    <p className="mt-1 text-sm text-gray-600">
+                                        Brands using the Creator add-on — open per-brand creator settings.
+                                    </p>
+                                </div>
+                                <div className="lg:col-span-2 px-6 py-6">
+                                    {!creator_module_enabled ? (
+                                        <div className="rounded-lg border border-dashed border-violet-200 bg-white/60 p-5 backdrop-blur-sm">
+                                            <p className="text-sm text-gray-700">
+                                                Enable the Creator module on your plan to manage influencers, track
+                                                performance, and streamline approvals.
+                                            </p>
+                                            <Link
+                                                href="/app/billing"
+                                                className="mt-4 inline-flex rounded-lg bg-gray-900 px-4 py-2 text-sm font-semibold text-white hover:bg-gray-800"
+                                            >
+                                                Enable Creator Module
+                                            </Link>
+                                        </div>
+                                    ) : creator_module_brands.length === 0 ? (
+                                        <p className="text-sm text-gray-600">No brands in this workspace.</p>
+                                    ) : (
+                                        <ul className="divide-y divide-gray-100 rounded-lg border border-gray-200/80 bg-white/80">
+                                            {creator_module_brands.map((b) => (
+                                                <li key={b.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+                                                    <span className="font-medium text-gray-900">{b.name}</span>
+                                                    <Link
+                                                        href={
+                                                            typeof route === 'function'
+                                                                ? `${route('brands.edit', { brand: b.id })}?tab=creators`
+                                                                : `/app/brands/${b.id}/edit?tab=creators`
+                                                        }
+                                                        className="text-sm font-semibold text-indigo-600 hover:text-indigo-800"
+                                                    >
+                                                        Creator settings →
+                                                    </Link>
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    )}
                                 </div>
                             </div>
                         </div>

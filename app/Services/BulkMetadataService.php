@@ -7,6 +7,7 @@ use App\Models\Category;
 use App\Models\Tenant;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use App\Services\TagNormalizationService;
 
 /**
  * Bulk Metadata Service
@@ -27,12 +28,13 @@ class BulkMetadataService
         protected MetadataPermissionResolver $permissionResolver,
         protected MetadataApprovalResolver $approvalResolver,
         protected MetadataPersistenceService $metadataPersistenceService,
+        protected TagNormalizationService $tagNormalizationService,
     ) {}
 
     /**
      * Preview bulk metadata operation.
      *
-     * @param  string  $operationType  'add' | 'replace' | 'clear'
+     * @param  string  $operationType  'add' | 'replace' | 'clear' | 'remove' (remove = tags only; strip listed values)
      * @param  array  $metadataValues  Keyed by field_key
      * @param  string|null  $userRole  Optional user role for permission checks
      * @return array Preview results
@@ -46,7 +48,7 @@ class BulkMetadataService
         ?string $userRole = null
     ): array {
         // Validate operation type
-        if (! in_array($operationType, ['add', 'replace', 'clear'], true)) {
+        if (! in_array($operationType, ['add', 'replace', 'clear', 'remove'], true)) {
             throw new \InvalidArgumentException("Invalid operation type: {$operationType}");
         }
 
@@ -58,6 +60,10 @@ class BulkMetadataService
 
         if ($assets->count() !== count($assetIds)) {
             throw new \InvalidArgumentException('Some assets not found or not accessible');
+        }
+
+        if ($operationType === 'remove') {
+            $this->assertRemoveMetadataPayload($metadataValues, $tenantId);
         }
 
         $preview = [
@@ -202,6 +208,63 @@ class BulkMetadataService
             // Get current value
             $oldValue = $currentMetadata[$fieldKey] ?? null;
 
+            // Remove: strip listed tags only (tags field); payload is tags to remove, not the new field value
+            if ($operationType === 'remove') {
+                if ($fieldKey !== 'tags' || ($fieldDef->type ?? '') !== 'multiselect') {
+                    $result['errors'][] = 'Remove is only supported for the Tags field.';
+
+                    continue;
+                }
+
+                $tenant = Tenant::find($tenantId);
+                if (! $tenant) {
+                    $result['errors'][] = 'Tenant not found';
+
+                    continue;
+                }
+
+                $toRemovePayload = is_array($newValue) ? $newValue : [];
+                $canonicalRemove = [];
+                foreach ($toRemovePayload as $raw) {
+                    $c = $this->tagNormalizationService->normalize((string) $raw, $tenant);
+                    if ($c !== null) {
+                        $canonicalRemove[] = $c;
+                    }
+                }
+                $canonicalRemove = array_values(array_unique($canonicalRemove));
+                if ($canonicalRemove === []) {
+                    $result['errors'][] = 'No valid tags to remove.';
+
+                    continue;
+                }
+
+                $oldArr = is_array($oldValue) ? $oldValue : ($oldValue !== null && $oldValue !== '' ? [$oldValue] : []);
+                $removeSet = array_flip($canonicalRemove);
+                $wouldRemove = false;
+                foreach ($oldArr as $tag) {
+                    $cn = $this->tagNormalizationService->normalize((string) $tag, $tenant);
+                    if ($cn !== null && isset($removeSet[$cn])) {
+                        $wouldRemove = true;
+
+                        break;
+                    }
+                }
+                if (! $wouldRemove) {
+                    $result['warnings'][] = 'None of the selected tags are on this asset.';
+
+                    continue;
+                }
+
+                $newValue = [];
+                foreach ($oldArr as $tag) {
+                    $cn = $this->tagNormalizationService->normalize((string) $tag, $tenant);
+                    if ($cn === null || ! isset($removeSet[$cn])) {
+                        $newValue[] = $tag;
+                    }
+                }
+                $newValue = array_values(array_unique($newValue));
+            }
+
             // Handle operation type
             if ($operationType === 'clear') {
                 $newValue = null;
@@ -257,8 +320,12 @@ class BulkMetadataService
         ?string $userRole = null
     ): array {
         // Validate operation type
-        if (! in_array($operationType, ['add', 'replace', 'clear'], true)) {
+        if (! in_array($operationType, ['add', 'replace', 'clear', 'remove'], true)) {
             throw new \InvalidArgumentException("Invalid operation type: {$operationType}");
+        }
+
+        if ($operationType === 'remove') {
+            $this->assertRemoveMetadataPayload($metadataValues, $tenantId);
         }
 
         // Load assets
@@ -405,6 +472,28 @@ class BulkMetadataService
                 if (! $canEdit) {
                     continue; // Skip fields user cannot edit
                 }
+            }
+
+            // Remove tags: delete from asset_tags + matching asset_metadata rows (no new metadata rows)
+            if ($operationType === 'remove') {
+                if ($fieldKey !== 'tags') {
+                    continue;
+                }
+
+                $tenant = Tenant::find($asset->tenant_id);
+                if (! $tenant) {
+                    throw new \RuntimeException('Tenant not found');
+                }
+
+                $toRemove = is_array($newValue) ? $newValue : [];
+                $this->metadataPersistenceService->removeCanonicalTagsFromAsset(
+                    $asset,
+                    $tenant,
+                    $toRemove,
+                    (int) $field['field_id']
+                );
+
+                continue;
             }
 
             // Handle operation type
@@ -649,5 +738,37 @@ class BulkMetadataService
         }
 
         return $oldValue === $newValue;
+    }
+
+    /**
+     * @param  array<string, mixed>  $metadataValues
+     */
+    protected function assertRemoveMetadataPayload(array $metadataValues, int $tenantId): void
+    {
+        $tenant = Tenant::find($tenantId);
+        if (! $tenant) {
+            throw new \InvalidArgumentException('Tenant not found');
+        }
+
+        if (count($metadataValues) !== 1 || ! array_key_exists('tags', $metadataValues)) {
+            throw new \InvalidArgumentException('Remove applies only to the tags field.');
+        }
+
+        $tags = $metadataValues['tags'];
+        if (! is_array($tags) || $tags === []) {
+            throw new \InvalidArgumentException('Select at least one tag to remove.');
+        }
+
+        $canonical = [];
+        foreach ($tags as $t) {
+            $c = $this->tagNormalizationService->normalize((string) $t, $tenant);
+            if ($c !== null) {
+                $canonical[] = $c;
+            }
+        }
+
+        if ($canonical === []) {
+            throw new \InvalidArgumentException('No valid tags to remove after normalization.');
+        }
     }
 }

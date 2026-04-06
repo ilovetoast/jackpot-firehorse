@@ -1,6 +1,7 @@
 /**
  * @param {{ variant?: 'light' | 'dark' }} props
  * Use variant="dark" on cinematic / full-bleed dark pages (e.g. Creators dashboard).
+ * Light variant uses a transparent background so the page background shows through (no solid white strip).
  */
 export default function AppFooter({ variant = 'light' }) {
     const dark = variant === 'dark'
@@ -8,7 +9,9 @@ export default function AppFooter({ variant = 'light' }) {
     return (
         <footer
             className={
-                dark ? 'bg-transparent' : 'border-t border-gray-200 bg-white'
+                dark
+                    ? 'bg-transparent'
+                    : 'border-t border-gray-200/50 bg-transparent'
             }
         >
             <div className="mx-auto max-w-7xl px-4 py-4 sm:px-6 lg:px-8">

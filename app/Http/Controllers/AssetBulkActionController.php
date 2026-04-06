@@ -101,10 +101,16 @@ class AssetBulkActionController extends Controller
         if ($actionEnum->isMetadataAction()) {
             $opType = $actionEnum->metadataOperationType();
             $metadata = $payload['metadata'] ?? [];
-            if ($opType !== 'clear' && empty($metadata)) {
+            if ($opType !== 'clear' && $opType !== 'remove' && empty($metadata)) {
                 return response()->json([
                     'message' => 'Metadata payload is required for METADATA_ADD and METADATA_REPLACE.',
                     'errors' => ['payload.metadata' => ['The metadata field is required.']],
+                ], 422);
+            }
+            if ($opType === 'remove' && empty($metadata['tags'] ?? null)) {
+                return response()->json([
+                    'message' => 'payload.metadata.tags is required for METADATA_REMOVE_TAGS.',
+                    'errors' => ['payload.metadata.tags' => ['Select at least one tag to remove.']],
                 ], 422);
             }
         }

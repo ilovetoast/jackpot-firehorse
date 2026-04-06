@@ -33,6 +33,11 @@ class EnsureGatewayEntry
             return $next($request);
         }
 
+        // Account + company picker + sign-out must work with no tenant in session (e.g. user removed from all workspaces).
+        if ($this->allowsWithoutTenantContext($request)) {
+            return $next($request);
+        }
+
         if (! Auth::check()) {
             session(['intended_url' => $request->fullUrl()]);
 
@@ -122,6 +127,18 @@ class EnsureGatewayEntry
         }
 
         return $next($request);
+    }
+
+    /**
+     * Routes that must not require tenant/brand session (detached users, company creation, profile edits).
+     */
+    private function allowsWithoutTenantContext(Request $request): bool
+    {
+        return $request->is('app/profile')
+            || $request->is('app/profile/*')
+            || $request->is('app/companies')
+            || $request->is('app/companies/*')
+            || $request->is('app/logout');
     }
 
     /**

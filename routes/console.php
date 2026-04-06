@@ -83,6 +83,12 @@ if ($schedulerEnabled) {
         ->withoutOverlapping()
         ->description('Cleanup expired upload sessions and orphaned multipart uploads');
 
+    // Pending upload approvals: one digest per approver per brand per day (plan-gated notifications)
+    Schedule::command('approvals:send-pending-digests')
+        ->dailyAt('08:00')
+        ->withoutOverlapping()
+        ->description('Batched email to approvers for pending team/creator upload approvals');
+
     // Billing expiration checks (runs daily at 2:00 AM)
     // Checks for expiring trial/comped accounts and processes expiration
     Schedule::command('billing:check-expiring --days=7')

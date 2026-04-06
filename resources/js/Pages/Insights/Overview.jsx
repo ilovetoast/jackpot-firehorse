@@ -3,6 +3,7 @@ import { Link } from '@inertiajs/react'
 import InsightsLayout from '../../layouts/InsightsLayout'
 import { isUnlimitedCount, isUnlimitedStorageMB } from '../../utils/planLimitDisplay'
 import PendingAiSuggestionsModal from '../../Components/PendingAiSuggestionsModal'
+import CreatorInsights from '../../Components/insights/CreatorInsights'
 import {
     FolderIcon,
     ServerIcon,
@@ -54,6 +55,8 @@ export default function AnalyticsOverview({
     ai_monthly_cap_alert = null,
     plan = {},
     brand_guidelines = {},
+    creator_module_enabled = false,
+    creator_insights = null,
 }) {
     const [suggestionsModalOpen, setSuggestionsModalOpen] = useState(false)
     const [lazyMeta, setLazyMeta] = useState(null)
@@ -372,6 +375,10 @@ export default function AnalyticsOverview({
                         )}
                     </div>
                 </section>
+
+                {creator_module_enabled && creator_insights != null && (
+                    <CreatorInsights insights={creator_insights} />
+                )}
 
                 {/* Metadata Health Summary — loaded after first paint */}
                 <section>

@@ -513,7 +513,7 @@ final class BrandLogoVariantAutomationService
 
             $asset->save();
 
-            $actor = auth()->user() ?? User::where('tenant_id', $brand->tenant_id)->orderBy('id')->first();
+            $actor = $this->resolvePublicationActor($brand);
             if (! $asset->isPublished() && $actor) {
                 try {
                     app(AssetPublicationService::class)->publish($asset, $actor);
@@ -525,6 +525,27 @@ final class BrandLogoVariantAutomationService
                 }
             }
         });
+    }
+
+    /**
+     * Publication needs a User for published_by_id and policy checks.
+     * Users belong to tenants via tenant_user — there is no users.tenant_id column.
+     */
+    private function resolvePublicationActor(Brand $brand): ?User
+    {
+        $fromAuth = auth()->user();
+        if ($fromAuth instanceof User) {
+            return $fromAuth;
+        }
+
+        if (! $brand->tenant_id) {
+            return null;
+        }
+
+        return User::query()
+            ->whereHas('tenants', fn ($q) => $q->where('tenants.id', $brand->tenant_id))
+            ->orderBy('id')
+            ->first();
     }
 
     private function dispatchProcessing(Asset $asset): void

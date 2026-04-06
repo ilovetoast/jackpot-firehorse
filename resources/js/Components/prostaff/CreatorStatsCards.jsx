@@ -8,9 +8,13 @@ function shimmerCard() {
 }
 
 /**
- * @param {{ creators: Array<{ completion_percentage?: number, actual_uploads?: number }>, loading: boolean }} props
+ * @param {{
+ *   creators: Array<{ completion_percentage?: number, actual_uploads?: number }>,
+ *   loading: boolean,
+ *   pendingInviteCount?: number,
+ * }} props
  */
-export default function CreatorStatsCards({ creators, loading }) {
+export default function CreatorStatsCards({ creators, loading, pendingInviteCount = 0 }) {
     if (loading) {
         return (
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
@@ -29,9 +33,16 @@ export default function CreatorStatsCards({ creators, loading }) {
     const totalUploads = creators.reduce((s, r) => s + (Number(r.actual_uploads) || 0), 0)
 
     const items = [
-        { label: 'Total Creators', value: String(n) },
-        { label: 'Avg completion', value: `${avgPct.toFixed(1)}%` },
-        { label: 'Total uploads (period)', value: totalUploads.toLocaleString() },
+        {
+            label: 'Total Creators',
+            value: String(n),
+            hint:
+                pendingInviteCount > 0
+                    ? `${pendingInviteCount} pending invite${pendingInviteCount === 1 ? '' : 's'}`
+                    : null,
+        },
+        { label: 'Avg completion', value: `${avgPct.toFixed(1)}%`, hint: null },
+        { label: 'Total uploads (period)', value: totalUploads.toLocaleString(), hint: null },
     ]
 
     return (
@@ -44,6 +55,7 @@ export default function CreatorStatsCards({ creators, loading }) {
                     <div className="pointer-events-none absolute -right-6 -top-6 h-24 w-24 rounded-full bg-white/[0.06] blur-2xl transition group-hover:bg-white/[0.1]" />
                     <p className="text-xs font-medium uppercase tracking-wide text-white/45">{item.label}</p>
                     <p className="mt-2 text-2xl font-semibold tabular-nums text-white">{item.value}</p>
+                    {item.hint ? <p className="mt-1 text-xs text-violet-200/80">{item.hint}</p> : null}
                 </div>
             ))}
         </div>

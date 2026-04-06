@@ -80,12 +80,12 @@ export default function AdvancedSettingsSlideOver({
     return (
         <>
             <div
-                className="fixed inset-0 z-40 bg-black/20 backdrop-blur-sm transition-opacity duration-300"
+                className="fixed inset-0 z-[75] bg-black/20 backdrop-blur-sm transition-opacity duration-300"
                 onClick={onClose}
                 aria-hidden="true"
             />
             <div
-                className={`fixed inset-y-0 right-0 z-50 w-full max-w-md bg-white shadow-xl flex flex-col rounded-l-lg transition-transform duration-300 ease-out ${
+                className={`fixed inset-y-0 right-0 z-[80] w-full max-w-md bg-white shadow-xl flex flex-col rounded-l-lg transition-transform duration-300 ease-out ${
                     slideIn ? 'translate-x-0' : 'translate-x-full'
                 }`}
                 role="dialog"

@@ -76,6 +76,16 @@ class BrandContextResolver
             }
         }
 
+        // Drop tenant/brand that no longer matches membership (e.g. removed from company, stale session).
+        // Skip when resolving an invite URL so pending invites still show the target org before accept.
+        if ($user && $tenant !== null && $inviteToken === null) {
+            $tenantIds = array_column($availableCompanies, 'id');
+            if ($availableCompanies === [] || ! in_array((int) $tenant->id, array_map('intval', $tenantIds), true)) {
+                $tenant = null;
+                $brand = null;
+            }
+        }
+
         if ($tenant && $user) {
             $availableBrands = $this->getAvailableBrands($user, $tenant);
 
@@ -95,6 +105,8 @@ class BrandContextResolver
             'is_multi_company' => count($availableCompanies) > 1,
             'is_multi_brand' => count($availableBrands) > 1,
             'is_authenticated' => $user !== null,
+            /** Logged-in user belongs to the resolved tenant but has zero brand memberships (gateway brand picker empty). */
+            'tenant_member_without_brands' => $user !== null && $tenant !== null && count($availableBrands) === 0,
         ];
     }
 

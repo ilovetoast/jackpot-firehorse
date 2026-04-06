@@ -2,11 +2,16 @@
 
 namespace App\Services;
 
+use App\Enums\ApprovalStatus;
 use App\Enums\AssetStatus;
+use App\Enums\AssetType;
 use App\Enums\EventType;
 use App\Models\ActivityEvent;
+use App\Models\Asset;
 use App\Models\Brand;
+use App\Models\Tenant;
 use App\Models\User;
+use App\Support\Roles\PermissionMap;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 
@@ -61,7 +66,29 @@ class BrandInsightEngine
 
             $canSeeRightsInsightsTab = $user->canViewBrandWorkspaceInsights($tenant, $brand);
 
-            // 1a. AI Tag Suggestions Pending (high)
+            // 1a. Upload approvals first — governance before AI suggestion queues (overview + ActiveSignals banner).
+            if ($this->userCanApproveBrandUploads($user, $brand, $tenant)) {
+                $pendingTotal = $this->getPendingAssetApprovalCountForBrand($brand);
+                if ($pendingTotal > 0) {
+                    $pendingProstaff = $this->getPendingProstaffSubmittedApprovalCountForBrand($brand);
+                    $pendingTeam = max(0, $pendingTotal - $pendingProstaff);
+                    $signals[] = [
+                        'type' => 'action',
+                        'priority' => 'high',
+                        'icon' => 'document',
+                        'label' => $this->formatPendingUploadApprovalSignalLabel($pendingTotal, $pendingProstaff, $pendingTeam),
+                        'href' => $this->resolveUploadApprovalsHref($pendingProstaff, $pendingTeam, $tenant),
+                        'context' => [
+                            'count' => $pendingTotal,
+                            'category' => 'upload_approvals',
+                            'prostaff_pending' => $pendingProstaff,
+                            'team_pending' => $pendingTeam,
+                        ],
+                    ];
+                }
+            }
+
+            // 1b. AI Tag Suggestions Pending (high)
             if ($canSeeAllAiReview || $canSeeOthersAiReview) {
                 $tagCount = $this->getPendingAiTagSuggestionsCount($brand, $user);
                 if ($tagCount > 0) {
@@ -79,7 +106,7 @@ class BrandInsightEngine
                 }
             }
 
-            // 1b. AI Category Suggestions Pending (high)
+            // 1c. AI Category Suggestions Pending (high)
             if ($canSeeAllAiReview || $canSeeOthersAiReview) {
                 $categoryCount = $this->getPendingAiCategorySuggestionsCount($brand, $user);
                 if ($categoryCount > 0) {
@@ -156,9 +183,19 @@ class BrandInsightEngine
                 ];
             }
 
-            // Sort by priority: high → medium → low
+            // Sort by priority: high → medium → low; within the same tier, upload_approvals before everything else.
             $order = ['high' => 0, 'medium' => 1, 'low' => 2];
-            usort($signals, fn ($a, $b) => ($order[$a['priority']] ?? 3) <=> ($order[$b['priority']] ?? 3));
+            usort($signals, function (array $a, array $b) use ($order): int {
+                $pa = $order[$a['priority'] ?? ''] ?? 3;
+                $pb = $order[$b['priority'] ?? ''] ?? 3;
+                if ($pa !== $pb) {
+                    return $pa <=> $pb;
+                }
+                $ca = ($a['context']['category'] ?? '') === 'upload_approvals' ? 0 : 1;
+                $cb = ($b['context']['category'] ?? '') === 'upload_approvals' ? 0 : 1;
+
+                return $ca <=> $cb;
+            });
 
             // Max 4 signals
             return array_slice($signals, 0, 4);
@@ -435,5 +472,86 @@ class BrandInsightEngine
             ->exists();
 
         return ! $hasUpload;
+    }
+
+    /**
+     * Brand / tenant roles that may act on the upload approval queue (not AI metadata review).
+     */
+    protected function userCanApproveBrandUploads(User $user, Brand $brand, Tenant $tenant): bool
+    {
+        if (! app(FeatureGate::class)->approvalsEnabled($tenant)) {
+            return false;
+        }
+
+        $tenantRole = strtolower($user->getRoleForTenant($tenant) ?? '');
+        if (in_array($tenantRole, ['owner', 'admin'], true)) {
+            return true;
+        }
+
+        $brandRole = strtolower($user->getRoleForBrand($brand) ?? '');
+
+        return $brandRole !== '' && PermissionMap::canApproveAssets($brandRole);
+    }
+
+    protected function getPendingAssetApprovalCountForBrand(Brand $brand): int
+    {
+        return (int) Asset::query()
+            ->where('tenant_id', $brand->tenant_id)
+            ->where('brand_id', $brand->id)
+            ->where('type', AssetType::ASSET)
+            ->where('approval_status', ApprovalStatus::PENDING)
+            ->whereNull('deleted_at')
+            ->count();
+    }
+
+    /**
+     * Pending uploads submitted through the creator (prostaff) path — same drawer approve/reject as team uploads.
+     */
+    protected function getPendingProstaffSubmittedApprovalCountForBrand(Brand $brand): int
+    {
+        return (int) Asset::query()
+            ->where('tenant_id', $brand->tenant_id)
+            ->where('brand_id', $brand->id)
+            ->where('type', AssetType::ASSET)
+            ->where('submitted_by_prostaff', true)
+            ->where('approval_status', ApprovalStatus::PENDING)
+            ->whereNull('deleted_at')
+            ->count();
+    }
+
+    protected function formatPendingUploadApprovalSignalLabel(int $total, int $prostaffPending, int $teamPending): string
+    {
+        if ($total === 1) {
+            return '1 upload awaits your approval';
+        }
+
+        if ($prostaffPending > 0 && $teamPending > 0) {
+            return "{$total} uploads await your approval · {$prostaffPending} creator · {$teamPending} team";
+        }
+
+        if ($prostaffPending > 0) {
+            return "{$total} creator uploads await your approval";
+        }
+
+        return "{$total} team uploads await your approval";
+    }
+
+    /**
+     * Deep-link: creator-only queue lives under Insights → Creator; team (and mixed) under Review → Upload approvals.
+     * When both creator and team items are pending, open Review on the creator sub-queue so creator work is not missed.
+     */
+    protected function resolveUploadApprovalsHref(int $prostaffPending, int $teamPending, Tenant $tenant): string
+    {
+        $creatorOn = app(FeatureGate::class)->creatorModuleEnabled($tenant);
+
+        if ($prostaffPending > 0 && $teamPending === 0) {
+            return '/app/insights/creator';
+        }
+
+        if ($prostaffPending > 0 && $teamPending > 0 && $creatorOn) {
+            return '/app/insights/review?workspace=uploads&approval_queue=creator';
+        }
+
+        return '/app/insights/review?workspace=uploads';
     }
 }

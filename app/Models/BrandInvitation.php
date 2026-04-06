@@ -16,6 +16,7 @@ class BrandInvitation extends Model
         'brand_id',
         'email',
         'role',
+        'metadata',
         'token',
         'invited_by',
         'sent_at',
@@ -30,6 +31,7 @@ class BrandInvitation extends Model
     protected function casts(): array
     {
         return [
+            'metadata' => 'array',
             'sent_at' => 'datetime',
             'accepted_at' => 'datetime',
         ];

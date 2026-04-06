@@ -210,18 +210,33 @@ class AssetApprovalController extends Controller
 
         // Phase AF-4: Get pending assets with aging metrics
         $agingService = app(ApprovalAgingService::class);
-        
-        $assets = Asset::where('tenant_id', $tenant->id)
+
+        $queue = (string) $request->query('queue', 'all');
+        if (! in_array($queue, ['all', 'team', 'creator'], true)) {
+            $queue = 'all';
+        }
+
+        $query = Asset::where('tenant_id', $tenant->id)
             ->where('brand_id', $brand->id)
             ->where('type', AssetType::ASSET)
             ->where('approval_status', ApprovalStatus::PENDING)
             ->whereNull('deleted_at')
             ->with(['user'])
-            ->orderBy('created_at', 'desc')
-            ->get()
+            ->orderBy('created_at', 'desc');
+
+        if ($queue === 'team') {
+            $query->where(function ($q) {
+                $q->whereNull('submitted_by_prostaff')
+                    ->orWhere('submitted_by_prostaff', false);
+            });
+        } elseif ($queue === 'creator') {
+            $query->where('submitted_by_prostaff', true);
+        }
+
+        $assets = $query->get()
             ->map(function ($asset) use ($agingService) {
                 $agingMetrics = $agingService->getAgingMetrics($asset);
-                
+
                 return [
                     'id' => $asset->id,
                     'title' => $asset->title,
@@ -239,6 +254,7 @@ class AssetApprovalController extends Controller
                     ] : null,
                     'approval_status' => $asset->approval_status->value,
                     'metadata' => $asset->metadata,
+                    'is_prostaff_asset' => (bool) $asset->submitted_by_prostaff,
                     // Phase AF-4: Aging metrics
                     'pending_since' => $agingMetrics['pending_since'],
                     'pending_days' => $agingMetrics['pending_days'],

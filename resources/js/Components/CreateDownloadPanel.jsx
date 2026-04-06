@@ -62,6 +62,9 @@ export default function CreateDownloadPanel({
     usePage().props
   const isCollectionGuest = auth?.is_collection_guest_experience === true
   const blockPublicLink = collectionOnlySession === true || isCollectionGuest
+  /** No access / advanced UI; company-only create (from auth.downloads.simple_create_modal or client fallback). */
+  const isMinimalDownloadCreate =
+    auth?.downloads?.simple_create_modal === true || blockPublicLink
   const canSharePublic = (auth?.downloads?.can_share_public_link ?? true) && !blockPublicLink
   const brandAccent = auth?.activeBrand?.primary_color || '#6366f1'
   const brandName = auth?.activeBrand?.name || ''
@@ -177,9 +180,10 @@ export default function CreateDownloadPanel({
     setError(null)
     setSubmitting(true)
 
+    const effectiveAccessMode = isMinimalDownloadCreate ? 'company' : accessMode
     const payload = {
       source: createDownloadSource === 'collection' && collectionId != null ? 'collection' : 'grid',
-      access_mode: accessMode,
+      access_mode: effectiveAccessMode,
     }
     if (payload.source === 'collection' && collectionId != null) {
       payload.collection_id = collectionId
@@ -190,7 +194,7 @@ export default function CreateDownloadPanel({
     } else {
       payload.expires_at = expiresAt || defaultExpiresAt()
     }
-    if (accessMode === 'users' && allowedUserIds.length) {
+    if (effectiveAccessMode === 'users' && allowedUserIds.length) {
       payload.allowed_users = allowedUserIds
     }
     if (canPasswordProtect && password.trim()) {
@@ -338,26 +342,29 @@ export default function CreateDownloadPanel({
               )}
             </div>
 
-            {/* Access — summary line */}
-            <div className="mt-4">
-              <label className="block text-sm font-medium text-gray-700">Access</label>
-              <p className="mt-1 text-sm text-gray-600">
-                {accessMode === 'public' && canSharePublic && 'Public (anyone with the link)'}
-                {accessMode === 'brand' && 'Brand members'}
-                {accessMode === 'company' && 'Company members (sign-in required)'}
-                {accessMode === 'users' && showSpecificUsersOption && 'Specific users'}
-                {accessMode === 'users' && !showSpecificUsersOption && 'Company members (sign-in required)'}
-                {accessMode === 'public' && !canSharePublic && 'Company members (sign-in required)'}
-              </p>
-              {!canSharePublic && (
-                <p className="mt-2 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
-                  Public links aren&apos;t available for your account. Recipients must sign in to the workspace (company
-                  members) or match the access scope you choose below.
+            {/* Access summary + chooser — hidden for external guests (always company-only). */}
+            {!isMinimalDownloadCreate && (
+              <div className="mt-4">
+                <label className="block text-sm font-medium text-gray-700">Access</label>
+                <p className="mt-1 text-sm text-gray-600">
+                  {accessMode === 'public' && canSharePublic && 'Public (anyone with the link)'}
+                  {accessMode === 'brand' && 'Brand members'}
+                  {accessMode === 'company' && 'Company members (sign-in required)'}
+                  {accessMode === 'users' && showSpecificUsersOption && 'Specific users'}
+                  {accessMode === 'users' && !showSpecificUsersOption && 'Company members (sign-in required)'}
+                  {accessMode === 'public' && !canSharePublic && 'Company members (sign-in required)'}
                 </p>
-              )}
-            </div>
+                {!canSharePublic && (
+                  <p className="mt-2 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
+                    Public links aren&apos;t available for your account. Recipients must sign in to the workspace (company
+                    members) or match the access scope you choose below.
+                  </p>
+                )}
+              </div>
+            )}
 
-            {/* Advanced options — collapsible */}
+            {/* Advanced options — hidden for external / collection guests */}
+            {!isMinimalDownloadCreate && (
             <div className="mt-4">
               <button
                 type="button"
@@ -374,7 +381,6 @@ export default function CreateDownloadPanel({
               </button>
               {advancedOpen && (
                 <div className="mt-3 space-y-4 rounded-md border border-gray-200 bg-gray-50/50 p-4">
-                  {/* Access scope (all options) */}
                   <div>
                     <label className="block text-sm font-medium text-gray-700">Access</label>
                     <div className="mt-2 space-y-2">
@@ -563,6 +569,7 @@ export default function CreateDownloadPanel({
                 </div>
               )}
             </div>
+            )}
 
             {error && (
               <div className="mt-4 rounded-md bg-red-50 p-3">

@@ -12,6 +12,7 @@ use App\Services\BillingService;
 use App\Services\CompanyCostService;
 use App\Services\DownloadNameResolver;
 use App\Services\EnterpriseDownloadPolicy;
+use App\Services\FeatureGate;
 use App\Services\PlanService;
 use App\Services\TagQualityMetricsService;
 use App\Traits\HandlesFlashMessages;
@@ -364,6 +365,10 @@ class CompanyController extends Controller
 
         $canManageAgencies = $user->hasPermissionForTenant($tenant, 'team.manage');
         $settingsBrands = $tenant->brands()->orderBy('name')->get(['id', 'name']);
+        $creatorModuleEnabled = app(FeatureGate::class)->creatorModuleEnabled($tenant);
+        $creatorModuleBrands = $creatorModuleEnabled
+            ? $settingsBrands->map(fn ($b) => ['id' => $b->id, 'name' => $b->name])->values()->all()
+            : [];
         $linkedAgencies = [];
         if ($canManageAgencies) {
             $linkedAgencies = \App\Models\TenantAgency::query()
@@ -399,6 +404,8 @@ class CompanyController extends Controller
             'settings_brands' => $settingsBrands,
             'linked_agencies' => $linkedAgencies,
             'can_manage_agencies' => $canManageAgencies,
+            'creator_module_enabled' => $creatorModuleEnabled,
+            'creator_module_brands' => $creatorModuleBrands,
         ]);
     }
 

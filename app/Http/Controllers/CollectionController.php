@@ -293,7 +293,15 @@ class CollectionController extends Controller
                     $paginator = $query->paginate($perPage)->withQueryString();
                     $items = $paginator->items();
                     $incidentSeverityByAsset = $this->buildIncidentSeverityByAsset(collect($items)->pluck('id')->all());
-                    $assets = collect($items)->map(fn (Asset $asset) => $this->mapAssetToGridArray($asset, $tenant, $brand, $incidentSeverityByAsset))->values()->all();
+                    $lookups = $this->buildGridLookupsForAssets(collect($items), $tenant, $brand);
+                    $assets = collect($items)->map(fn (Asset $asset) => $this->mapAssetToGridArray(
+                        $asset,
+                        $tenant,
+                        $brand,
+                        $incidentSeverityByAsset,
+                        $lookups['categories_by_id'],
+                        $lookups['uploaders_by_id']
+                    ))->values()->all();
                     $collectionTypeFilter = $collectionType;
                     $categoryFilterIdForProps = ($categoryFilterId !== null && $categoryFilterId > 0) ? $categoryFilterId : null;
                     $groupByCategoryEnabled = $groupByCategory;
@@ -512,7 +520,15 @@ class CollectionController extends Controller
             $paginator = $query->paginate($perPage)->withQueryString();
             $items = $paginator->items();
             $incidentSeverityByAsset = $this->buildIncidentSeverityByAsset(collect($items)->pluck('id')->all());
-            $assets = collect($items)->map(fn (Asset $asset) => $this->mapAssetToGridArray($asset, $tenant, $brand, $incidentSeverityByAsset))->values()->all();
+            $lookups = $this->buildGridLookupsForAssets(collect($items), $tenant, $brand);
+            $assets = collect($items)->map(fn (Asset $asset) => $this->mapAssetToGridArray(
+                $asset,
+                $tenant,
+                $brand,
+                $incidentSeverityByAsset,
+                $lookups['categories_by_id'],
+                $lookups['uploaders_by_id']
+            ))->values()->all();
 
             $filters = $parsedMetadataFilters;
             $filterable_schema = [];
@@ -1200,10 +1216,65 @@ class CollectionController extends Controller
     }
 
     /**
-     * Map a single Asset model to the grid payload (same shape as AssetController/DeliverableController).
+     * One query each for categories and uploaders used by the current page of assets (avoids N+1 in mapAssetToGridArray).
+     *
+     * @return array{categories_by_id: array<int, Category>, uploaders_by_id: array<int, User>}
      */
-    private function mapAssetToGridArray(Asset $asset, Tenant $tenant, Brand $brand, array $incidentSeverityByAsset = []): array
+    private function buildGridLookupsForAssets(\Illuminate\Support\Collection $assets, Tenant $tenant, Brand $brand): array
     {
+        $categoryIds = $assets
+            ->map(function (Asset $a) {
+                $m = $a->metadata;
+
+                return is_array($m) ? ($m['category_id'] ?? null) : null;
+            })
+            ->filter(fn ($id) => $id !== null && $id !== '' && is_numeric($id))
+            ->map(fn ($id) => (int) $id)
+            ->unique()
+            ->values()
+            ->all();
+
+        $categoriesById = [];
+        if ($categoryIds !== []) {
+            $categoriesById = Category::query()
+                ->where('tenant_id', $tenant->id)
+                ->where('brand_id', $brand->id)
+                ->whereIn('id', $categoryIds)
+                ->get()
+                ->keyBy(fn (Category $c) => (int) $c->id)
+                ->all();
+        }
+
+        $userIds = $assets->pluck('user_id')->filter()->map(fn ($id) => (int) $id)->unique()->values()->all();
+        $uploadersById = [];
+        if ($userIds !== []) {
+            $uploadersById = User::query()
+                ->whereIn('id', $userIds)
+                ->get()
+                ->keyBy(fn (User $u) => (int) $u->id)
+                ->all();
+        }
+
+        return [
+            'categories_by_id' => $categoriesById,
+            'uploaders_by_id' => $uploadersById,
+        ];
+    }
+
+    /**
+     * Map a single Asset model to the grid payload (same shape as AssetController/DeliverableController).
+     *
+     * @param  array<int, Category>  $categoriesById
+     * @param  array<int, User>  $uploadersById
+     */
+    private function mapAssetToGridArray(
+        Asset $asset,
+        Tenant $tenant,
+        Brand $brand,
+        array $incidentSeverityByAsset = [],
+        array $categoriesById = [],
+        array $uploadersById = []
+    ): array {
         $fileExtension = null;
         if ($asset->original_filename && $asset->original_filename !== 'unknown') {
             $ext = pathinfo($asset->original_filename, PATHINFO_EXTENSION);
@@ -1231,8 +1302,22 @@ class CollectionController extends Controller
         $categoryName = null;
         $categoryId = null;
         if ($asset->metadata && isset($asset->metadata['category_id'])) {
-            $categoryId = $asset->metadata['category_id'];
-            $category = Category::where('id', $categoryId)->where('tenant_id', $tenant->id)->where('brand_id', $brand->id)->first();
+            $rawCatId = $asset->metadata['category_id'];
+            if (is_numeric($rawCatId)) {
+                $categoryId = (int) $rawCatId;
+            }
+            $category = null;
+            if ($categoryId !== null) {
+                if ($categoriesById !== []) {
+                    $category = $categoriesById[$categoryId] ?? null;
+                } else {
+                    $category = Category::query()
+                        ->where('id', $categoryId)
+                        ->where('tenant_id', $tenant->id)
+                        ->where('brand_id', $brand->id)
+                        ->first();
+                }
+            }
             if ($category) {
                 $categoryName = $category->name;
             }
@@ -1240,7 +1325,13 @@ class CollectionController extends Controller
 
         $uploadedBy = null;
         if ($asset->user_id) {
-            $uploader = \App\Models\User::find($asset->user_id);
+            $uid = (int) $asset->user_id;
+            $uploader = null;
+            if ($uploadersById !== []) {
+                $uploader = $uploadersById[$uid] ?? null;
+            } else {
+                $uploader = User::query()->find($uid);
+            }
             if ($uploader) {
                 $uploadedBy = [
                     'id' => $uploader->id,

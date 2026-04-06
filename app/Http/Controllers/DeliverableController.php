@@ -535,6 +535,42 @@ class DeliverableController extends Controller
                 ->keyBy('id');
         }
 
+        // Brand Intelligence debug thumbnails: batch-load reference assets (avoids N+1 Asset queries in hydrateBrandIntelligenceDebug).
+        $biTopReferenceIds = collect();
+        foreach ($assetModels as $deliverable) {
+            $bisRow = $deliverable->latestBrandIntelligenceScore;
+            if (! $bisRow) {
+                continue;
+            }
+            $bj = $bisRow->breakdown_json ?? [];
+            $debug = $bj['debug'] ?? null;
+            if (! is_array($debug)) {
+                continue;
+            }
+            $refs = $debug['top_references'] ?? null;
+            if (! is_array($refs) || $refs === []) {
+                continue;
+            }
+            foreach ($refs as $refRow) {
+                if (! is_array($refRow)) {
+                    continue;
+                }
+                $rid = $refRow['id'] ?? null;
+                if (is_string($rid) && $rid !== '') {
+                    $biTopReferenceIds->push($rid);
+                }
+            }
+        }
+        $biTopReferenceIds = $biTopReferenceIds->unique()->values()->all();
+        $brandIntelligenceReferenceAssetsById = [];
+        if ($biTopReferenceIds !== []) {
+            $brandIntelligenceReferenceAssetsById = Asset::query()
+                ->whereIn('id', $biTopReferenceIds)
+                ->get()
+                ->keyBy(fn (Asset $a) => (string) $a->id)
+                ->all();
+        }
+
         // Batch-load categories and uploaders for grid mapping (avoids N+1 Category/User queries per asset).
         $metaCategoryIds = $assetModels
             ->map(fn (Asset $asset) => $asset->metadata['category_id'] ?? null)
@@ -565,7 +601,7 @@ class DeliverableController extends Controller
 
         // STARRED CANONICAL: Same as AssetController — assets.metadata.starred (boolean) only.
         $mappedAssets = $assetModels
-            ->map(function ($asset) use ($incidentSeverityByAsset, $publishedByUsers, $categoriesById, $uploadedByUsersMap) {
+            ->map(function ($asset) use ($incidentSeverityByAsset, $publishedByUsers, $categoriesById, $uploadedByUsersMap, $brandIntelligenceReferenceAssetsById) {
                 // Derive file extension from original_filename, with mime_type fallback
                 $fileExtension = null;
                 if ($asset->original_filename && $asset->original_filename !== 'unknown') {
@@ -733,7 +769,7 @@ class DeliverableController extends Controller
                     'url' => null, // Reserved for future download endpoint
                     'analysis_status' => $asset->analysis_status ?? 'uploading',
                     'health_status' => $asset->computeHealthStatus($incidentSeverityByAsset[$asset->id] ?? null),
-                    'brand_intelligence' => $asset->brandIntelligencePayloadForFrontend(),
+                    'brand_intelligence' => $asset->brandIntelligencePayloadForFrontend($brandIntelligenceReferenceAssetsById),
                     'reference_promotion' => $asset->brandReferenceAsset?->toFrontendArray(),
                 ];
                 if ($finalThumbnailUrl && str_contains($finalThumbnailUrl, 'X-Amz-Signature')) {

@@ -10,9 +10,11 @@ use App\Models\Asset;
 use App\Models\Collection;
 use App\Models\Download;
 use App\Services\AiUsageService;
+use App\Services\FeatureGate;
 use App\Services\Insights\BrandActivityFeedService;
 use App\Services\MetadataAnalyticsService;
 use App\Services\PlanService;
+use App\Services\Prostaff\GetProstaffInsightsData;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -40,6 +42,14 @@ class AnalyticsOverviewController extends Controller
         // Fast first paint: skip MetadataAnalyticsService on the document request; the page fetches it via XHR.
         $data = $this->getOverviewData($request, includeMetadataAnalytics: false);
 
+        $tenant = app('tenant');
+        $brand = app('brand');
+        $creatorModuleEnabled = $tenant && app(FeatureGate::class)->creatorModuleEnabled($tenant);
+        $creatorInsights = null;
+        if ($creatorModuleEnabled && $brand) {
+            $creatorInsights = app(GetProstaffInsightsData::class)->forBrand($brand);
+        }
+
         return Inertia::render('Insights/Overview', [
             'stats' => [
                 'total_assets' => $data['total_assets'],
@@ -54,6 +64,8 @@ class AnalyticsOverviewController extends Controller
             'ai_monthly_cap_alert' => $data['ai_monthly_cap_alert'],
             'plan' => $data['plan'],
             'brand_guidelines' => $data['brand_guidelines'],
+            'creator_module_enabled' => (bool) $creatorModuleEnabled,
+            'creator_insights' => $creatorInsights,
         ]);
     }
 

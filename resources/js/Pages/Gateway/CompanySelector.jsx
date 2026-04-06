@@ -25,6 +25,35 @@ export default function CompanySelector({ companies }) {
             </div>
 
             <div className="flex flex-col gap-4">
+                {companies.length === 0 && (
+                    <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-6 text-center">
+                        <p className="text-sm text-white/70 leading-relaxed">
+                            You don&apos;t have access to any workspace right now. You can manage your account, start a
+                            company, or sign out and use a different login.
+                        </p>
+                        <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:justify-center">
+                            <a
+                                href="/app/profile"
+                                className="inline-flex justify-center rounded-lg border border-white/15 bg-white/[0.06] px-4 py-2.5 text-sm font-medium text-white/90 hover:bg-white/10"
+                            >
+                                Account settings
+                            </a>
+                            <a
+                                href="/app/companies"
+                                className="inline-flex justify-center rounded-lg border border-white/15 bg-white/[0.06] px-4 py-2.5 text-sm font-medium text-white/90 hover:bg-white/10"
+                            >
+                                Companies
+                            </a>
+                            <button
+                                type="button"
+                                onClick={() => router.post('/app/logout')}
+                                className="w-full rounded-lg border border-white/10 px-4 py-2.5 text-sm font-medium text-white/50 hover:text-white/80 hover:border-white/20 sm:w-auto"
+                            >
+                                Sign out
+                            </button>
+                        </div>
+                    </div>
+                )}
                 {companies.map((company) => {
                     const color = company.primary_color || theme?.colors?.primary || '#6366f1'
                     return (

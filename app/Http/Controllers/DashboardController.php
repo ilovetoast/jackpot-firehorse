@@ -20,6 +20,7 @@ use App\Services\AssetCompletionService;
 use App\Services\BrandGateway\BrandThemeBuilder;
 use App\Services\BrandInsightEngine;
 use App\Services\Insights\BrandActivityFeedService;
+use App\Services\FeatureGate;
 use App\Services\PlanService;
 use App\Support\AssetVariant;
 use App\Support\DashboardLinks;
@@ -422,6 +423,10 @@ class DashboardController extends Controller
         // Cinematic overview quick links (real permissions — not overridden by ?as= preview)
         $permissions['canViewBrandAssets'] = $user->hasPermissionForBrand($brand, 'asset.view');
         $permissions['canViewBrandExecutions'] = $user->hasPermissionForBrand($brand, 'asset.view');
+
+        $permissions['showCreatorOverviewQuickLinks'] = $user->isProstaffForBrand($brand)
+            && app(FeatureGate::class)->creatorModuleEnabled($tenant)
+            && $user->hasPermissionForBrand($brand, 'asset.view');
 
         // Brand cinematic overview: link to company overview (/app) — you’re already on brand overview (no “here” crumb).
         $dashLabels = DashboardLinks::workspaceDashboardShortLabels($tenant->name, $brand->name);

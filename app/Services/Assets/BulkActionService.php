@@ -66,8 +66,11 @@ class BulkActionService
         if ($actionEnum->isMetadataAction()) {
             $opType = $actionEnum->metadataOperationType();
             $metadata = $payload['metadata'] ?? [];
-            if ($opType !== 'clear' && empty($metadata)) {
+            if ($opType !== 'clear' && $opType !== 'remove' && empty($metadata)) {
                 throw new \InvalidArgumentException('Metadata payload is required for METADATA_ADD and METADATA_REPLACE.');
+            }
+            if ($opType === 'remove' && empty($metadata['tags'] ?? null)) {
+                throw new \InvalidArgumentException('payload.metadata.tags is required for METADATA_REMOVE_TAGS.');
             }
 
             return $this->executeMetadataBulk($assetIds, $actionEnum, $metadata, $user, $tenantId, $brandId);

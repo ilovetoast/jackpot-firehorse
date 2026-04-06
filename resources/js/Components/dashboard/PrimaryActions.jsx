@@ -5,6 +5,8 @@ import {
     ChartBarIcon,
     PhotoIcon,
     RectangleStackIcon,
+    ArrowDownTrayIcon,
+    ArrowTrendingUpIcon,
 } from '@heroicons/react/24/outline'
 import { resolveOverviewIconColor } from '../../utils/colorUtils'
 
@@ -13,6 +15,8 @@ const ICON_MAP = {
     insights: ChartBarIcon,
     assets: PhotoIcon,
     executions: RectangleStackIcon,
+    creator_downloads: ArrowDownTrayIcon,
+    creator_progress: ArrowTrendingUpIcon,
 }
 
 const ALL_ACTIONS = [
@@ -36,17 +40,43 @@ const ALL_ACTIONS = [
 const QUICK_LINKS = [
     {
         key: 'assets',
-        title: 'Brand library',
-        description: 'Browse and open assets',
+        title: 'Asset Library',
+        description: 'Parts and pieces of the brand',
         href: '/app/assets',
         permission: 'canViewBrandAssets',
     },
     {
         key: 'executions',
         title: 'Executions',
-        description: 'Deliverables and execution grid',
+        description: 'Finalized Deliverables',
         href: '/app/executions',
         permission: 'canViewBrandExecutions',
+    },
+]
+
+/** Prostaff creators on cinematic overview — scoped downloads + progress dashboard. */
+const CREATOR_QUICK_LINKS = [
+    {
+        key: 'creator_downloads',
+        title: 'My downloads',
+        description: 'ZIP links you made—preparing, ready, or expired',
+        permission: 'showCreatorOverviewQuickLinks',
+        hrefFn: (brand) => {
+            if (!brand?.id) return null
+            return typeof route === 'function'
+                ? route('downloads.index', { scope: 'mine', brand_id: brand.id })
+                : `/app/downloads?scope=mine&brand_id=${encodeURIComponent(brand.id)}`
+        },
+    },
+    {
+        key: 'creator_progress',
+        title: 'Creator progress',
+        description: 'Upload pipeline, targets, and anonymized peer comparison',
+        permission: 'showCreatorOverviewQuickLinks',
+        hrefFn: () =>
+            typeof route === 'function'
+                ? route('overview.creator-progress')
+                : '/app/overview/creator-progress',
     },
 ]
 
@@ -117,6 +147,7 @@ export default function PrimaryActions({
     brand = null,
     brandColor = '#6366f1',
     iconAccentColor = null,
+    authUserId = null,
 }) {
     const iconFill = iconAccentColor ?? resolveOverviewIconColor(brandColor)
 
@@ -132,9 +163,15 @@ export default function PrimaryActions({
         }))
         .filter((action) => action.href)
 
-    const quickLinks = QUICK_LINKS.filter((link) => permissions[link.permission] === true).map((link) => ({
-        ...link,
-    }))
+    const quickLinks = [
+        ...QUICK_LINKS.filter((link) => permissions[link.permission] === true),
+        ...CREATOR_QUICK_LINKS.filter((link) => permissions[link.permission] === true)
+            .map((link) => ({
+                ...link,
+                href: link.hrefFn ? link.hrefFn(brand, authUserId) : link.href,
+            }))
+            .filter((link) => link.href),
+    ]
 
     if (actions.length === 0) {
         if (quickLinks.length === 0) {

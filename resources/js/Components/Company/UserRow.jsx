@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Link, router } from '@inertiajs/react'
 import Avatar from '../Avatar'
 import {
@@ -43,6 +43,8 @@ export default function UserRow({
     onCompanyRoleChange,
     onBrandRoleChange,
     onRemoveBrand,
+    /** When true, offer "also remove from company" on last-brand removal (Company Team page always passes true). */
+    canRemoveFromCompany = false,
     onDeleteFromCompany,
     updatingKeys = {},
     groupedUnderAgencySection = false,
@@ -56,6 +58,7 @@ export default function UserRow({
     const [addBrandRole, setAddBrandRole] = useState('viewer')
     const [addBrandSubmitting, setAddBrandSubmitting] = useState(false)
     const [removeBrandConfirm, setRemoveBrandConfirm] = useState(null)
+    const [removeAlsoFromCompany, setRemoveAlsoFromCompany] = useState(false)
     const [deleteConfirm, setDeleteConfirm] = useState(false)
 
     const isOwner = user.company_role === 'owner'
@@ -97,9 +100,19 @@ export default function UserRow({
         setRemoveBrandConfirm({ brandId, brandName })
     }
 
+    useEffect(() => {
+        if (!removeBrandConfirm) {
+            return
+        }
+        const otherBrands = (user.brand_roles || []).filter((br) => br.brand_id !== removeBrandConfirm.brandId).length
+        setRemoveAlsoFromCompany(otherBrands === 0 && canRemoveFromCompany)
+    }, [removeBrandConfirm, user.brand_roles, canRemoveFromCompany])
+
     const confirmRemoveBrand = () => {
         if (removeBrandConfirm && onRemoveBrand) {
-            onRemoveBrand(user.id, removeBrandConfirm.brandId, removeBrandConfirm.brandName)
+            const otherBrands = (user.brand_roles || []).filter((br) => br.brand_id !== removeBrandConfirm.brandId).length
+            const removeFromCo = otherBrands === 0 && removeAlsoFromCompany && canRemoveFromCompany
+            onRemoveBrand(user.id, removeBrandConfirm.brandId, removeBrandConfirm.brandName, { removeFromCompany: removeFromCo })
             setRemoveBrandConfirm(null)
         }
     }
@@ -306,7 +319,40 @@ export default function UserRow({
                 onClose={() => setRemoveBrandConfirm(null)}
                 onConfirm={confirmRemoveBrand}
                 title="Remove Brand Access"
-                message={removeBrandConfirm ? `Remove ${user.name || user.email}'s access to "${removeBrandConfirm.brandName}"?` : ''}
+                panelClassName="sm:max-w-lg"
+                message={
+                    removeBrandConfirm ? (
+                        <div className="space-y-3 text-left">
+                            <p>
+                                Remove {user.name || user.email}&apos;s access to &quot;{removeBrandConfirm.brandName}&quot;?
+                            </p>
+                            {(user.brand_roles || []).filter((br) => br.brand_id !== removeBrandConfirm.brandId).length === 0 ? (
+                                <>
+                                    <p className="text-gray-600">
+                                        This is their only brand in the company. If you remove them only from the brand, they remain a company member with no brand access until someone reassigns them.
+                                    </p>
+                                    {canRemoveFromCompany ? (
+                                        <label className="flex items-start gap-2 cursor-pointer">
+                                            <input
+                                                type="checkbox"
+                                                className="mt-1 rounded border-gray-300 text-red-600 focus:ring-red-600"
+                                                checked={removeAlsoFromCompany}
+                                                onChange={(e) => setRemoveAlsoFromCompany(e.target.checked)}
+                                            />
+                                            <span className="text-gray-700">Also remove them from the company (recommended)</span>
+                                        </label>
+                                    ) : (
+                                        <p className="text-amber-800 text-xs bg-amber-50 border border-amber-100 rounded-md p-2">
+                                            You don&apos;t have permission to remove company members. A company admin can remove them under Company → Team if they should not stay in the company.
+                                        </p>
+                                    )}
+                                </>
+                            ) : null}
+                        </div>
+                    ) : (
+                        ''
+                    )
+                }
                 confirmText="Remove"
                 cancelText="Cancel"
                 variant="danger"

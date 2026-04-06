@@ -147,6 +147,56 @@ export function normalizeHexColor(hexColor) {
 }
 
 /**
+ * HSL saturation 0–1 for a #RRGGBB color.
+ * @param {string} hex6
+ * @returns {number}
+ */
+function hexSaturation(hex6) {
+    const h = normalizeHexColor(hex6).slice(1)
+    const r = parseInt(h.slice(0, 2), 16) / 255
+    const g = parseInt(h.slice(2, 4), 16) / 255
+    const b = parseInt(h.slice(4, 6), 16) / 255
+    const mx = Math.max(r, g, b)
+    const mn = Math.min(r, g, b)
+    if (mx === mn) return 0
+    const l = (mx + mn) / 2
+    return (mx - mn) / (l > 0.5 ? 2 - mx - mn : mx + mn)
+}
+
+/**
+ * Pick accent vs primary vs secondary for high-visibility UI on near-black backgrounds.
+ * Prefers the most saturated option; falls back to amber if all are very gray.
+ *
+ * @param {string|null|undefined} primaryHex
+ * @param {string|null|undefined} accentHex
+ * @param {string|null|undefined} secondaryHex
+ * @param {string} [fallbackHex='#f59e0b']
+ * @returns {string} #RRGGBB
+ */
+export function pickProminentAccentColor(primaryHex, accentHex, secondaryHex, fallbackHex = '#f59e0b') {
+    const candidates = [accentHex, secondaryHex, primaryHex]
+        .map((c) => (c && String(c).trim() ? normalizeHexColor(c) : null))
+        .filter((c, i, arr) => c && arr.indexOf(c) === i)
+
+    if (candidates.length === 0) return normalizeHexColor(fallbackHex)
+
+    const score = (hex) => hexSaturation(hex) + Math.min(getLuminance(hex), 0.9) * 0.12
+
+    let best = candidates[0]
+    let bestScore = score(best)
+    for (let i = 1; i < candidates.length; i++) {
+        const sc = score(candidates[i])
+        if (sc > bestScore) {
+            best = candidates[i]
+            bestScore = sc
+        }
+    }
+
+    // Very gray brand kits → keep amber so the alert still reads as “attention”
+    return bestScore >= 0.14 ? best : normalizeHexColor(fallbackHex)
+}
+
+/**
  * WCAG 2.1 contrast ratio between two sRGB hex colors.
  * @param {string} foregroundHex
  * @param {string} backgroundHex

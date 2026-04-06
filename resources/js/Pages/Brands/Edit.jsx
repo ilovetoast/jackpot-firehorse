@@ -26,6 +26,8 @@ import PublicAccess from '../../Components/portal/PublicAccess'
 import SharingLinks from '../../Components/portal/SharingLinks'
 import InviteExperience from '../../Components/portal/InviteExperience'
 import AgencyTemplates from '../../Components/portal/AgencyTemplates'
+import BrandCreatorsSettingsPanel from '../../Components/prostaff/BrandCreatorsSettingsPanel'
+import BrandTagsSettingsSection from '../../Components/brand/BrandTagsSettingsSection'
 
 // Phase 1: Categories and Metadata sections hidden from Brand Identity page (will be re-homed later)
 const SHOW_CATEGORIES_AND_METADATA = false
@@ -1331,15 +1333,18 @@ function VisualReferenceCategoryPicker({ brandId, referenceCategories, onChange,
     )
 }
 
-export default function BrandsEdit({ brand, categories, available_system_templates, category_limits, visible_category_limits, brand_users, brand_roles, available_users, pending_invitations, private_category_limits, tenant_settings, current_plan, model_payload, brand_model, active_version, all_versions = [], research_insights, compliance_aggregate, top_executions, bottom_executions, portal_settings, portal_features, portal_url }) {
+export default function BrandsEdit({ brand, categories, available_system_templates, category_limits, visible_category_limits, brand_users, brand_roles, available_users, pending_invitations, private_category_limits, tenant_settings, current_plan, model_payload, brand_model, active_version, all_versions = [], research_insights, compliance_aggregate, top_executions, bottom_executions, portal_settings, portal_features, portal_url, creator_module = {}, can_remove_user_from_company = false }) {
     const { auth, headlineAppearanceCatalog = [] } = usePage().props
     const effectivePermissions = Array.isArray(auth?.effective_permissions) ? auth.effective_permissions : []
     const isFreePlan = current_plan === 'free'
     const can = (p) => effectivePermissions.includes(p)
+    const canViewCompanySettings = can('company_settings.view')
+    const companyBreadcrumbName = auth?.activeCompany?.name?.trim() || ''
     const canAccessCategoriesAndFields = can('metadata.registry.view') || can('metadata.tenant.visibility.manage')
+    const showBrandTagsTab = can('brand_settings.manage') || can('assets.tags.delete')
     const [activeCategoryTab, setActiveCategoryTab] = useState('asset')
     const DNA_TABS = ['strategy', 'positioning', 'expression', 'standards', 'alignment', 'references', 'presentation', 'research']
-    const ALL_TABS = ['identity', 'workspace', 'public-site', ...DNA_TABS, 'members']
+    const ALL_TABS = ['identity', 'workspace', 'public-site', ...DNA_TABS, 'members', 'creators', 'tags']
     const getInitialTab = () => {
         if (typeof window === 'undefined') return 'identity'
         const params = new URLSearchParams(window.location.search)
@@ -1692,6 +1697,34 @@ export default function BrandsEdit({ brand, categories, available_system_templat
             <main className="flex-1">
                 <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
                 <div className="mb-8">
+                    {companyBreadcrumbName ? (
+                        <nav className="mb-3" aria-label="Breadcrumb">
+                            <ol className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-gray-600">
+                                <li>
+                                    {canViewCompanySettings ? (
+                                        <Link
+                                            href={
+                                                typeof route === 'function'
+                                                    ? route('companies.settings')
+                                                    : '/app/companies/settings'
+                                            }
+                                            className="font-medium text-gray-600 transition hover:text-indigo-600"
+                                        >
+                                            {companyBreadcrumbName}
+                                        </Link>
+                                    ) : (
+                                        <span className="font-medium text-gray-700">{companyBreadcrumbName}</span>
+                                    )}
+                                </li>
+                                <li className="select-none text-gray-400" aria-hidden="true">
+                                    /
+                                </li>
+                                <li className="font-semibold text-gray-900" aria-current="page">
+                                    {brand.name}
+                                </li>
+                            </ol>
+                        </nav>
+                    ) : null}
                     <h1 className="text-2xl font-bold tracking-tight text-gray-900">Brand Settings</h1>
                     <p className="mt-1 text-sm text-gray-600">
                         Manage your brand identity, workspace, public site, and brand DNA.
@@ -1706,6 +1739,8 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                     { id: 'public-site', label: 'Public Site' },
                                     { id: 'brand-dna', label: 'Brand DNA', resolvedTab: 'strategy' },
                                     ...(can('team.manage') ? [{ id: 'members', label: 'Team' }] : []),
+                                    ...(can('brand_settings.manage') ? [{ id: 'creators', label: 'Creators' }] : []),
+                                    ...(showBrandTagsTab ? [{ id: 'tags', label: 'Tags' }] : []),
                                 ].map((tab) => {
                                     const isActive = tab.id === 'brand-dna' ? isDnaTab : activeTab === tab.id
                                     return (
@@ -1997,7 +2032,17 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                     )}
 
 
-                {activeTab === 'members' ? (
+                {activeTab === 'creators' ? (
+                    <BrandCreatorsSettingsPanel
+                        brandId={brand.id}
+                        brandUsers={brand_users || []}
+                        creatorModule={creator_module}
+                        brandColor={brand.primary_color || '#6366f1'}
+                        iconAccentColor={brand.secondary_color || brand.accent_color || brand.primary_color || '#8b5cf6'}
+                    />
+                ) : activeTab === 'tags' ? (
+                    <BrandTagsSettingsSection brandId={brand.id} canPurge={can('assets.tags.delete')} />
+                ) : activeTab === 'members' ? (
                     /* Members tab: outside form to avoid nested <form> (UserInviteForm has its own form) */
                     <div id="members" className="scroll-mt-8 space-y-8">
                         <div className="rounded-xl bg-white shadow-sm ring-1 ring-gray-200/20 overflow-hidden">
@@ -2015,6 +2060,7 @@ export default function BrandsEdit({ brand, categories, available_system_templat
                                         availableUsers={available_users || []}
                                         pendingInvitations={pending_invitations || []}
                                         brandRoles={brand_roles || []}
+                                        canRemoveUserFromCompany={can_remove_user_from_company}
                                     />
                                 </div>
                             </div>

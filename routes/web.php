@@ -526,6 +526,7 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
         // Routes that require user to be within plan limit
         Route::middleware('ensure.user.within.plan.limit')->group(function () {
             Route::get('/overview', [\App\Http\Controllers\DashboardController::class, 'index'])->name('overview');
+            Route::get('/overview/creator-progress', [\App\Http\Controllers\Prostaff\ProstaffDashboardController::class, 'creatorSelfProgress'])->name('overview.creator-progress');
             Route::get('/overview/insights', [\App\Http\Controllers\DashboardController::class, 'insightsJson'])->name('overview.insights');
             Route::get('/overview/assets', [\App\Http\Controllers\DashboardController::class, 'overviewAssetsJson'])->name('overview.assets');
             Route::get('/api/overview/metrics', [\App\Http\Controllers\DashboardController::class, 'overviewMetricsJson'])->name('overview.api.metrics');
@@ -549,6 +550,7 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
             Route::get('/insights/usage', [\App\Http\Controllers\AnalyticsOverviewController::class, 'usage'])->name('insights.usage');
             Route::get('/insights/activity', [\App\Http\Controllers\AnalyticsOverviewController::class, 'activity'])->name('insights.activity');
             Route::get('/insights/review', [\App\Http\Controllers\AiReviewController::class, 'index'])->name('insights.review');
+            Route::get('/insights/creator', [\App\Http\Controllers\InsightsCreatorApprovalsController::class, 'index'])->name('insights.creator');
             // Backward compatibility: redirect /analytics to /insights
             Route::redirect('/analytics', '/insights', 301);
             Route::redirect('/analytics/overview', '/insights/overview', 301);
@@ -879,15 +881,22 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
             Route::post('/brands/{brand}/invitations/{invitation}/resend', [\App\Http\Controllers\BrandController::class, 'resendInvitation'])->name('brands.invitations.resend');
             Route::delete('/brands/{brand}/invitations/{invitation}', [\App\Http\Controllers\BrandController::class, 'revokeInvitation'])->name('brands.invitations.destroy');
 
+            Route::get('/api/brands/{brand}/tags/summary', [\App\Http\Controllers\BrandTagManagementController::class, 'summary'])->name('api.brands.tags.summary');
+            Route::post('/api/brands/{brand}/tags/purge', [\App\Http\Controllers\BrandTagManagementController::class, 'purge'])->name('api.brands.tags.purge');
+
             // Phase AF-1: Asset approval workflow
             Route::get('/brands/{brand}/approvals', [\App\Http\Controllers\BrandController::class, 'approvals'])->name('brands.approvals');
             Route::get('/api/brands/{brand}/approvals', [\App\Http\Controllers\AssetApprovalController::class, 'index'])->name('api.brands.approvals');
             // Phase J.2: Pending assets for review modal
             Route::get('/api/brands/{brand}/pending-assets', [\App\Http\Controllers\AssetApprovalController::class, 'pendingAssets'])->name('api.brands.pending-assets');
             Route::get('/brands/{brand}/creators', [\App\Http\Controllers\Prostaff\ProstaffDashboardController::class, 'page'])->name('brands.creators');
+            Route::get('/brands/{brand}/creators/{user}', [\App\Http\Controllers\Prostaff\ProstaffDashboardController::class, 'creatorPage'])->name('brands.creators.show');
             Route::get('/api/brands/{brand}/prostaff/dashboard', [\App\Http\Controllers\Prostaff\ProstaffDashboardController::class, 'index'])->name('api.brands.prostaff.dashboard');
             Route::get('/api/brands/{brand}/prostaff/options', [\App\Http\Controllers\Prostaff\ProstaffDashboardController::class, 'filterOptions'])->name('api.brands.prostaff.options');
             Route::post('/api/brands/{brand}/prostaff/members', [\App\Http\Controllers\Prostaff\ProstaffMembershipController::class, 'store'])->name('api.brands.prostaff.members.store');
+            Route::put('/api/brands/{brand}/prostaff/members/{user}', [\App\Http\Controllers\Prostaff\ProstaffMembershipController::class, 'update'])->name('api.brands.prostaff.members.update');
+            Route::delete('/api/brands/{brand}/prostaff/members/{user}', [\App\Http\Controllers\Prostaff\ProstaffMembershipController::class, 'destroy'])->name('api.brands.prostaff.members.destroy');
+            Route::put('/api/brands/{brand}/prostaff/approvers', [\App\Http\Controllers\Prostaff\ProstaffBrandSettingsController::class, 'updateApprovers'])->name('api.brands.prostaff.approvers');
             Route::get('/api/prostaff/me', [\App\Http\Controllers\Prostaff\ProstaffDashboardController::class, 'me'])->name('api.prostaff.me');
             Route::post('/brands/{brand}/assets/{asset}/approve', [\App\Http\Controllers\AssetApprovalController::class, 'approve'])->name('brands.assets.approve');
             Route::post('/brands/{brand}/assets/{asset}/reject', [\App\Http\Controllers\AssetApprovalController::class, 'reject'])->name('brands.assets.reject');

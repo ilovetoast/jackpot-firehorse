@@ -18,6 +18,7 @@ use App\Services\CategoryService;
 use App\Services\CategoryVisibilityLimitService;
 use App\Services\FeatureGate;
 use App\Services\PlanService;
+use App\Services\Prostaff\ApplyProstaffAfterBrandInvitationAccept;
 use App\Services\SystemCategoryService;
 use App\Support\Roles\PermissionMap;
 use App\Support\Roles\RoleRegistry;
@@ -68,13 +69,28 @@ class BrandController extends Controller
         $tenantUsers = $tenant->users;
 
         // Order brands: default first, then by name (same as in HandleInertiaRequests)
-        // Phase MI-1: Load users but we'll filter to active memberships in the map
-        $orderedBrands = $brands->load(['categories', 'invitations'])
+        // Phase MI-1: Eager-load active brand members to avoid N+1 and to compute other-brands counts
+        $orderedBrands = $brands->load([
+            'categories',
+            'invitations',
+            'users' => fn ($q) => $q->wherePivotNull('removed_at'),
+        ])
             ->sortBy([['is_default', 'desc'], ['name', 'asc']])
             ->values();
 
+        $userBrandMembershipCount = [];
+        foreach ($orderedBrands as $b) {
+            foreach ($b->users as $u) {
+                $uid = $u->id;
+                $userBrandMembershipCount[$uid] = ($userBrandMembershipCount[$uid] ?? 0) + 1;
+            }
+        }
+
+        $canRemoveUserFromCompany = $user->canForContext('team.manage', $tenant, null);
+
         return Inertia::render('Brands/Index', [
-            'brands' => $orderedBrands->map(function ($brand, $index) use ($tenantUsers, $maxBrands, $brandLimitExceeded) {
+            'can_remove_user_from_company' => $canRemoveUserFromCompany,
+            'brands' => $orderedBrands->map(function ($brand, $index) use ($tenantUsers, $maxBrands, $brandLimitExceeded, $userBrandMembershipCount) {
                 // Mark brands beyond plan limit as disabled
                 // Index is 0-based, so index >= maxBrands means it's beyond the limit
                 $isDisabled = $brandLimitExceeded && ($index >= $maxBrands);
@@ -98,6 +114,7 @@ class BrandController extends Controller
                     'id' => $invitation->id,
                     'email' => $invitation->email,
                     'role' => $invitation->role,
+                    'is_creator_invite' => (bool) (($invitation->metadata ?? [])['assign_prostaff_after_accept'] ?? false),
                     'sent_at' => $invitation->sent_at?->toISOString(),
                     'created_at' => $invitation->created_at->toISOString(),
                 ]);
@@ -127,11 +144,11 @@ class BrandController extends Controller
                         'upgrade_available' => $category->upgrade_available ?? false,
                         'system_version' => $category->system_version,
                     ]),
-                    // Phase MI-1: Filter to only active memberships (removed_at IS NULL)
-                    'users' => $brand->users()
-                        ->wherePivotNull('removed_at')
-                        ->get()
-                        ->map(fn ($user) => [
+                    // Phase MI-1: Active memberships (eager-loaded)
+                    'users' => $brand->users->map(function ($user) use ($brand, $userBrandMembershipCount) {
+                        $totalBrands = $userBrandMembershipCount[$user->id] ?? 1;
+
+                        return [
                             'id' => $user->id,
                             'first_name' => $user->first_name,
                             'last_name' => $user->last_name,
@@ -139,7 +156,9 @@ class BrandController extends Controller
                             'email' => $user->email,
                             'avatar_url' => $user->avatar_url,
                             'role' => $user->pivot->role,
-                        ]),
+                            'other_brands_count' => max(0, $totalBrands - 1),
+                        ];
+                    }),
                     'available_users' => $availableUsers->values(),
                     'pending_invitations' => $pendingInvitations,
                 ];
@@ -449,21 +468,44 @@ class BrandController extends Controller
             true
         );
 
-        $brandUsers = $brand->users()
+        $brandUsersCollection = $brand->users()
             ->wherePivotNull('removed_at')
-            ->get()
-            ->map(function ($user) use ($brand, $activeCreatorUserIdSet) {
-                return [
-                    'id' => $user->id,
-                    'first_name' => $user->first_name,
-                    'last_name' => $user->last_name,
-                    'name' => $user->name,
-                    'email' => $user->email,
-                    'avatar_url' => $user->avatar_url,
-                    'role' => $user->getRoleForBrand($brand) ?? 'viewer',
-                    'is_active_creator' => isset($activeCreatorUserIdSet[$user->id]),
-                ];
-            });
+            ->get();
+
+        $brandUserIds = $brandUsersCollection->pluck('id')->all();
+        $otherBrandsCountByUserId = [];
+        if (! empty($brandUserIds)) {
+            $rows = DB::table('brand_user')
+                ->join('brands', 'brands.id', '=', 'brand_user.brand_id')
+                ->where('brands.tenant_id', $tenant->id)
+                ->whereIn('brand_user.user_id', $brandUserIds)
+                ->whereNull('brand_user.removed_at')
+                ->select('brand_user.user_id', 'brand_user.brand_id')
+                ->get();
+            $distinctBrandsByUser = [];
+            foreach ($rows as $row) {
+                $uid = (int) $row->user_id;
+                $distinctBrandsByUser[$uid][(int) $row->brand_id] = true;
+            }
+            foreach ($brandUserIds as $uid) {
+                $n = isset($distinctBrandsByUser[$uid]) ? count($distinctBrandsByUser[$uid]) : 1;
+                $otherBrandsCountByUserId[$uid] = max(0, $n - 1);
+            }
+        }
+
+        $brandUsers = $brandUsersCollection->map(function ($user) use ($brand, $activeCreatorUserIdSet, $otherBrandsCountByUserId) {
+            return [
+                'id' => $user->id,
+                'first_name' => $user->first_name,
+                'last_name' => $user->last_name,
+                'name' => $user->name,
+                'email' => $user->email,
+                'avatar_url' => $user->avatar_url,
+                'role' => $user->getRoleForBrand($brand) ?? 'viewer',
+                'is_active_creator' => isset($activeCreatorUserIdSet[$user->id]),
+                'other_brands_count' => $otherBrandsCountByUserId[$user->id] ?? 0,
+            ];
+        });
 
         // Available users (tenant users not yet on this brand) and pending invitations for Members tab
         $tenantUsers = $tenant->users;
@@ -483,6 +525,7 @@ class BrandController extends Controller
             'id' => $inv->id,
             'email' => $inv->email,
             'role' => $inv->role,
+            'is_creator_invite' => (bool) (($inv->metadata ?? [])['assign_prostaff_after_accept'] ?? false),
             'sent_at' => $inv->sent_at?->toISOString(),
             'created_at' => $inv->created_at->toISOString(),
         ]);
@@ -639,6 +682,7 @@ class BrandController extends Controller
                 'visible_by_asset_type' => $visibleCategoryLimits,
             ],
             'brand_users' => $brandUsers,
+            'can_remove_user_from_company' => Auth::user()->canForContext('team.manage', $tenant, null),
             'brand_roles' => $brandRoles,
             'available_users' => $availableUsers,
             'pending_invitations' => $pendingInvitations,
@@ -676,6 +720,11 @@ class BrandController extends Controller
             'portal_settings' => $brand->portal_settings ?? [],
             'portal_features' => $this->resolvePortalFeatures($tenant),
             'portal_url' => \App\Http\Controllers\PublicBrandPortalController::portalUrl($brand),
+            'creator_module' => [
+                'enabled' => app(FeatureGate::class)->creatorModuleEnabled($tenant),
+                'approver_user_ids' => $brand->creatorModuleApproverUserIds(),
+                'has_approvers' => $brand->hasConfiguredCreatorApprovers(),
+            ],
         ]);
     }
 
@@ -1166,11 +1215,16 @@ class BrandController extends Controller
         $brandRole = $validated['role'] ?? 'viewer';
         $user->setRoleForBrand($brand, $brandRole);
 
-        // Mark any pending invitations as accepted
-        $brand->invitations()
-            ->where('email', $user->email)
+        // Mark pending invitations as accepted and apply creator (prostaff) flags from metadata when present.
+        $pendingInvites = $brand->invitations()
+            ->whereRaw('LOWER(email) = ?', [strtolower((string) $user->email)])
             ->whereNull('accepted_at')
-            ->update(['accepted_at' => now()]);
+            ->get();
+
+        foreach ($pendingInvites as $invitation) {
+            $invitation->update(['accepted_at' => now()]);
+            app(ApplyProstaffAfterBrandInvitationAccept::class)->apply($user, $invitation, $brand);
+        }
 
         // Log activity
         ActivityRecorder::record(
@@ -1253,8 +1307,12 @@ class BrandController extends Controller
 
     /**
      * Remove a user from the brand.
+     *
+     * Optional `remove_from_company` (boolean): when true, also detaches the user from the tenant.
+     * Allowed only if the requester has team.manage and the user has no other active brand memberships
+     * in this company (avoids orphans and accidental company removal while still on other brands).
      */
-    public function removeUser(Brand $brand, User $user)
+    public function removeUser(Request $request, Brand $brand, User $user)
     {
         $tenant = app('tenant');
         $authUser = Auth::user();
@@ -1279,6 +1337,41 @@ class BrandController extends Controller
             return back()->withErrors([
                 'brand' => 'This user is managed by an agency link. Change access in Company Settings → Agencies.',
             ]);
+        }
+
+        $validated = $request->validate([
+            'remove_from_company' => 'sometimes|boolean',
+        ]);
+        $removeFromCompany = (bool) ($validated['remove_from_company'] ?? false);
+
+        $otherActiveBrandsInTenant = DB::table('brand_user')
+            ->join('brands', 'brands.id', '=', 'brand_user.brand_id')
+            ->where('brand_user.user_id', $user->id)
+            ->where('brands.tenant_id', $tenant->id)
+            ->where('brands.id', '!=', $brand->id)
+            ->whereNull('brand_user.removed_at')
+            ->count();
+
+        if ($removeFromCompany) {
+            if (! $authUser->canForContext('team.manage', $tenant, null)) {
+                abort(403, 'You do not have permission to remove members from the company.');
+            }
+            if ($otherActiveBrandsInTenant > 0) {
+                return back()->withErrors([
+                    'brand' => 'This user is still assigned to other brands. Remove those assignments first, or uncheck removing them from the company.',
+                ]);
+            }
+            if ($user->id === $authUser->id) {
+                return back()->withErrors([
+                    'brand' => 'You cannot remove yourself from the company.',
+                ]);
+            }
+            $owner = $tenant->users()->orderBy('created_at')->first();
+            if ($owner && $user->id === $owner->id) {
+                return back()->withErrors([
+                    'brand' => 'You cannot remove the company owner.',
+                ]);
+            }
         }
 
         // Phase MI-1: Soft delete - set removed_at instead of deleting pivot
@@ -1306,8 +1399,32 @@ class BrandController extends Controller
             subject: $user,
             actor: $authUser,
             brand: $brand,
-            metadata: []
+            metadata: [
+                'also_removed_from_company' => $removeFromCompany,
+            ]
         );
+
+        if ($removeFromCompany) {
+            $tenantUser = $user->tenants()->where('tenants.id', $tenant->id)->first();
+            $userRole = $tenantUser?->pivot->role ?? null;
+            $tenant->users()->detach($user->id);
+
+            ActivityRecorder::record(
+                tenant: $tenant,
+                eventType: EventType::USER_REMOVED_FROM_COMPANY,
+                subject: $user,
+                actor: $authUser,
+                brand: null,
+                metadata: [
+                    'removed_by' => $authUser->name,
+                    'removed_by_email' => $authUser->email,
+                    'user_role' => $userRole,
+                    'via' => 'brand_member_remove',
+                ]
+            );
+
+            return back()->with('success', 'User removed from this brand and from the company.');
+        }
 
         return back()->with('success', 'User removed from brand successfully.');
     }
@@ -1415,12 +1532,7 @@ class BrandController extends Controller
             abort(403, 'You do not have permission to view the approval queue.');
         }
 
-        return Inertia::render('Brands/Approvals', [
-            'brand' => [
-                'id' => $brand->id,
-                'name' => $brand->name,
-            ],
-        ]);
+        return redirect()->route('insights.review', ['workspace' => 'uploads']);
     }
 
     /**

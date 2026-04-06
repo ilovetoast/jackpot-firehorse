@@ -307,10 +307,18 @@ return [
         'heavy_queue_min_bytes' => (int) env('ASSET_PIPELINE_HEAVY_MIN_BYTES', 200 * 1024 * 1024),
 
         /*
-         * Max attempts for ProcessAssetJob / GenerateThumbnailsJob (after throttle releases each counts).
-         * Keeps reliability timeline from growing without bound when a job will never succeed.
+         * Max attempts for ProcessAssetJob / GenerateThumbnailsJob.
+         * ProcessAssetJob: each Redis throttle hit calls release() — Laravel counts that as an attempt, so a low
+         * number exhausts quickly during upload bursts (MaxAttemptsExceededException). Default 64; raise for very
+         * large backlogs or lower throttle_max.
          */
-        'pipeline_job_max_tries' => (int) env('ASSET_PIPELINE_JOB_MAX_TRIES', 5),
+        'pipeline_job_max_tries' => (int) env('ASSET_PIPELINE_JOB_MAX_TRIES', 64),
+
+        /*
+         * Stop retrying after this wall-clock window from first dispatch (works with tries; whichever limit hits first).
+         * Prevents jobs from sitting in release() loops indefinitely if tries is very high.
+         */
+        'pipeline_job_retry_until_minutes' => (int) env('ASSET_PIPELINE_JOB_RETRY_UNTIL_MINUTES', 120),
 
         /*
          * Objects larger than this skip a full S3 download + Imagick probe in FileInspectionService.

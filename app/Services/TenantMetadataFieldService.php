@@ -110,18 +110,17 @@ class TenantMetadataFieldService
             ]);
         }
 
-        // Check plan limit
+        // Check plan limit (active fields only; recycling an archived row still adds one active field)
         $this->checkPlanLimit($tenant);
 
-        // Check if key already exists for this tenant (exclude archived - archived keys can be reused)
-        $existing = DB::table('metadata_fields')
+        // One row per (tenant, key) including archived — unique index blocks a second INSERT.
+        $existingRow = DB::table('metadata_fields')
             ->where('tenant_id', $tenant->id)
             ->where('key', $data['key'])
             ->where('scope', 'tenant')
-            ->whereNull('archived_at')
             ->first();
 
-        if ($existing) {
+        if ($existingRow && ! $existingRow->archived_at) {
             throw ValidationException::withMessages([
                 'key' => ['A field with this key already exists for this tenant.'],
             ]);
@@ -210,11 +209,73 @@ class TenantMetadataFieldService
             'updated_at' => now(),
         ];
 
+        if ($existingRow) {
+            return $this->recycleArchivedTenantField($tenant, $existingRow, $fieldData, $data);
+        }
+
         // Create field
         $fieldId = DB::table('metadata_fields')->insertGetId($fieldData);
 
-        // Create options if provided
-        if (!empty($data['options']) && in_array($data['type'], ['select', 'multiselect'], true)) {
+        $this->syncTenantFieldOptionsAndVisibility($tenant, $fieldId, $data);
+
+        // Audit log
+        Log::info('Tenant metadata field created', [
+            'tenant_id' => $tenant->id,
+            'field_id' => $fieldId,
+            'field_key' => $data['key'],
+            'field_type' => $data['type'],
+            'categories' => $data['selectedCategories'] ?? [],
+        ]);
+
+        return $fieldId;
+    }
+
+    /**
+     * Un-archive and apply a new definition to a tenant field that shares the same key (unique index allows only one row).
+     */
+    protected function recycleArchivedTenantField(Tenant $tenant, object $archivedField, array $fieldData, array $data): int
+    {
+        $fieldId = (int) $archivedField->id;
+
+        $hasValues = DB::table('asset_metadata')
+            ->where('metadata_field_id', $fieldId)
+            ->exists();
+
+        if ($hasValues && ($fieldData['type'] ?? '') !== ($archivedField->type ?? '')) {
+            throw ValidationException::withMessages([
+                'type' => ['This field key still has data on assets; the type cannot change. Remove values or restore the field from the archive before changing the type.'],
+            ]);
+        }
+
+        $updateData = collect($fieldData)->except(['created_at'])->all();
+        $updateData['archived_at'] = null;
+        $updateData['updated_at'] = now();
+
+        DB::table('metadata_fields')->where('id', $fieldId)->update($updateData);
+
+        $this->syncTenantFieldOptionsAndVisibility($tenant, $fieldId, $data);
+
+        Log::info('Tenant metadata field recycled from archive', [
+            'tenant_id' => $tenant->id,
+            'field_id' => $fieldId,
+            'field_key' => $data['key'],
+            'field_type' => $data['type'],
+            'categories' => $data['selectedCategories'] ?? [],
+        ]);
+
+        return $fieldId;
+    }
+
+    /**
+     * Replace options (select types) and apply category visibility for a tenant metadata field.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    protected function syncTenantFieldOptionsAndVisibility(Tenant $tenant, int $fieldId, array $data): void
+    {
+        DB::table('metadata_options')->where('metadata_field_id', $fieldId)->delete();
+
+        if (! empty($data['options']) && in_array($data['type'], ['select', 'multiselect'], true)) {
             foreach ($data['options'] as $option) {
                 $systemLabel = $option['system_label'] ?? $option['label'] ?? '';
                 DB::table('metadata_options')->insert([
@@ -223,14 +284,13 @@ class TenantMetadataFieldService
                     'system_label' => $systemLabel,
                     'color' => $this->normalizeOptionColor($option['color'] ?? null),
                     'icon' => $this->normalizeOptionIcon($option['icon'] ?? null),
-                    'is_system' => false, // Tenant-created options
+                    'is_system' => false,
                     'created_at' => now(),
                     'updated_at' => now(),
                 ]);
             }
         }
 
-        // Enable field for selected categories; suppress for all others
         $visibilityService = app(\App\Services\TenantMetadataVisibilityService::class);
         $selectedIds = array_map('intval', $data['selectedCategories'] ?? []);
         $allCategories = \App\Models\Category::where('tenant_id', $tenant->id)->get();
@@ -249,17 +309,6 @@ class TenantMetadataFieldService
                 ]);
             }
         }
-
-        // Audit log
-        Log::info('Tenant metadata field created', [
-            'tenant_id' => $tenant->id,
-            'field_id' => $fieldId,
-            'field_key' => $data['key'],
-            'field_type' => $data['type'],
-            'categories' => $data['selectedCategories'] ?? [],
-        ]);
-
-        return $fieldId;
     }
 
     /**

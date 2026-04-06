@@ -3,14 +3,17 @@
 namespace Tests\Feature;
 
 use App\Models\Brand;
+use App\Models\BrandInvitation;
 use App\Models\ProstaffMembership;
 use App\Models\Tenant;
 use App\Models\User;
+use App\Services\Prostaff\ApplyProstaffAfterBrandInvitationAccept;
 use App\Services\Prostaff\AssignProstaffMember;
 use App\Services\Prostaff\RemoveProstaffMember;
 use DomainException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Tests\TestCase;
 
 class ProstaffAssignmentTest extends TestCase
@@ -272,5 +275,86 @@ class ProstaffAssignmentTest extends TestCase
         $this->assertSame(10, $second->target_uploads);
         $this->assertSame('month', $second->period_type);
         $this->assertTrue($startedAt?->equalTo($second->started_at));
+    }
+
+    public function test_apply_after_brand_invite_uses_prostaff_metadata_and_logs_path(): void
+    {
+        $user = User::create([
+            'email' => 'invited-creator@example.com',
+            'password' => bcrypt('password'),
+            'first_name' => 'I',
+            'last_name' => 'C',
+        ]);
+        $user->tenants()->attach($this->tenant->id, ['role' => 'member']);
+        $user->brands()->attach($this->brand->id, [
+            'role' => 'contributor',
+            'requires_approval' => false,
+            'removed_at' => null,
+        ]);
+
+        $invitation = BrandInvitation::create([
+            'brand_id' => $this->brand->id,
+            'email' => $user->email,
+            'role' => 'contributor',
+            'metadata' => [
+                'assign_prostaff_after_accept' => true,
+                'prostaff_target_uploads' => 12,
+                'prostaff_period_type' => 'quarter',
+            ],
+            'token' => Str::random(64),
+            'invited_by' => $this->actor->id,
+            'sent_at' => now(),
+        ]);
+
+        app(ApplyProstaffAfterBrandInvitationAccept::class)->apply($user, $invitation, $this->brand);
+
+        $m = ProstaffMembership::query()
+            ->where('user_id', $user->id)
+            ->where('brand_id', $this->brand->id)
+            ->first();
+        $this->assertNotNull($m);
+        $this->assertSame(12, $m->target_uploads);
+        $this->assertSame('quarter', $m->period_type);
+        $this->assertSame($this->actor->id, $m->assigned_by_user_id);
+    }
+
+    public function test_apply_after_brand_invite_accepts_plain_target_uploads_and_period_type_keys(): void
+    {
+        $user = User::create([
+            'email' => 'alt-keys@example.com',
+            'password' => bcrypt('password'),
+            'first_name' => 'A',
+            'last_name' => 'K',
+        ]);
+        $user->tenants()->attach($this->tenant->id, ['role' => 'member']);
+        $user->brands()->attach($this->brand->id, [
+            'role' => 'contributor',
+            'requires_approval' => false,
+            'removed_at' => null,
+        ]);
+
+        $invitation = BrandInvitation::create([
+            'brand_id' => $this->brand->id,
+            'email' => $user->email,
+            'role' => 'contributor',
+            'metadata' => [
+                'assign_prostaff_after_accept' => true,
+                'target_uploads' => 8,
+                'period_type' => 'year',
+            ],
+            'token' => Str::random(64),
+            'invited_by' => $this->actor->id,
+            'sent_at' => now(),
+        ]);
+
+        app(ApplyProstaffAfterBrandInvitationAccept::class)->apply($user, $invitation, $this->brand);
+
+        $m = ProstaffMembership::query()
+            ->where('user_id', $user->id)
+            ->where('brand_id', $this->brand->id)
+            ->first();
+        $this->assertNotNull($m);
+        $this->assertSame(8, $m->target_uploads);
+        $this->assertSame('year', $m->period_type);
     }
 }

@@ -808,7 +808,7 @@ export default function CollectionsIndex({
 
                     {/* Asset Drawer - Desktop */}
                     {activeAssetId && (
-                        <div className="hidden md:block absolute right-0 top-0 bottom-0 z-50">
+                        <div className="hidden md:block absolute right-0 top-0 bottom-0 z-[130]">
                             <AssetDrawer
                                 key={activeAssetId}
                                 asset={activeAsset}
@@ -844,7 +844,7 @@ export default function CollectionsIndex({
 
             {/* Asset Drawer - Mobile */}
             {activeAssetId && (
-                <div className="md:hidden fixed inset-0 z-50">
+                <div className="md:hidden fixed inset-0 z-[130]">
                     <div className="absolute inset-0 bg-black/50" onClick={() => { setActiveAssetId(null); setOpenDrawerWithZoom(false) }} aria-hidden="true" />
                     <AssetDrawer
                         key={activeAssetId}

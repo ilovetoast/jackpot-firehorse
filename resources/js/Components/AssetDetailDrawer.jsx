@@ -174,15 +174,15 @@ export default function AssetDetailDrawer({ asset, onClose }) {
         <>
             {/* Backdrop overlay */}
             <div
-                className="fixed inset-0 bg-black/50 z-40 transition-opacity"
+                className="fixed inset-0 z-[75] bg-black/50 transition-opacity"
                 onClick={onClose}
                 aria-hidden="true"
             />
 
-            {/* Drawer panel - slides in from right */}
+            {/* Drawer panel - slides in from right (z above AppNav agency strip z-[60] and main nav z-50) */}
             <div
                 ref={drawerRef}
-                className={`fixed inset-y-0 right-0 z-50 w-full max-w-md bg-white shadow-xl transform transition-transform duration-300 ease-in-out overflow-y-auto ${
+                className={`fixed inset-y-0 right-0 z-[80] w-full max-w-md bg-white shadow-xl transform transition-transform duration-300 ease-in-out overflow-y-auto ${
                     isOpen ? 'translate-x-0' : 'translate-x-full'
                 }`}
                 style={{

@@ -2694,7 +2694,7 @@ class AssetMetadataController extends Controller
         $validated = $request->validate([
             'asset_ids' => 'required|array|min:1',
             'asset_ids.*' => 'required|uuid|exists:assets,id',
-            'operation_type' => 'required|string|in:add,replace,clear',
+            'operation_type' => 'required|string|in:add,replace,clear,remove',
             'metadata' => 'required|array',
         ]);
 

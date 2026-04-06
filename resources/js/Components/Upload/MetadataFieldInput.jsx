@@ -27,7 +27,7 @@ import { usePage } from '@inertiajs/react'
  * @param {boolean} [props.showError] - Whether to show validation error
  */
 const MetadataFieldInput = forwardRef(function MetadataFieldInput(
-    { field, value, onChange, disabled = false, showError = false, isUploadContext = true, collectionProps = null },
+    { field, value, onChange, disabled = false, showError = false, isUploadContext = true, collectionProps = null, tagsPlaceholder = null },
     ref
 ) {
     const { auth, currentWorkspace } = usePage().props
@@ -89,7 +89,7 @@ const MetadataFieldInput = forwardRef(function MetadataFieldInput(
                         value={Array.isArray(value) ? value : []}
                         onChange={handleChange}
                         tenantId={tenantId}
-                        placeholder="Add tags..."
+                        placeholder={tagsPlaceholder || 'Add tags...'}
                         showTitle={false}
                         title={field.display_label}
                         showCounter={true}

@@ -1815,7 +1815,7 @@ export default function AssetDrawer({
     return (
         <div
             ref={drawerRef}
-            className="fixed inset-y-0 right-0 z-50 w-full overflow-y-auto bg-white shadow-xl md:w-auto pb-[calc(env(safe-area-inset-bottom)+5rem)] md:pb-6"
+            className="fixed inset-y-0 right-0 z-[130] w-full overflow-y-auto bg-white shadow-xl md:w-auto pb-[calc(env(safe-area-inset-bottom)+5rem)] md:pb-6" /* above AppNav dropdowns z-[100] / agency z-[60] / nav z-50 */
             style={{
                 maxWidth: '480px',
             }}

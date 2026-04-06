@@ -25,11 +25,13 @@ function BrandLogo({ brand, disabled }) {
     )
 }
 
-export default function BrandSelector({ brands, tenant }) {
+export default function BrandSelector({ brands, tenant, tenantMemberWithoutBrands = false }) {
     const { theme } = usePage().props
     const [processing, setProcessing] = useState(false)
 
-    const hasDisabledBrands = brands.some(b => b.is_disabled)
+    const list = Array.isArray(brands) ? brands : []
+    const isEmpty = list.length === 0
+    const hasDisabledBrands = list.some((b) => b.is_disabled)
 
     const handleSelect = (brand) => {
         if (processing || brand.is_disabled) return
@@ -46,9 +48,35 @@ export default function BrandSelector({ brands, tenant }) {
                     {tenant?.name || theme?.name || 'Select Brand'}
                 </h1>
                 <p className="text-sm text-white/60 mt-2 max-w-md mx-auto">
-                    Choose a brand to enter
+                    {isEmpty && tenantMemberWithoutBrands
+                        ? 'You need access to at least one brand to open the workspace.'
+                        : 'Choose a brand to enter'}
                 </p>
             </div>
+
+            {isEmpty && tenantMemberWithoutBrands && (
+                <div className="mb-10 max-w-lg mx-auto rounded-xl border border-white/10 bg-white/[0.04] px-5 py-5 text-left text-sm leading-relaxed">
+                    <p className="text-white/90 font-medium">
+                        You&apos;re a member of <span className="text-white">{tenant?.name || 'this company'}</span>, but{' '}
+                        <span className="text-white">no brands are assigned</span> to your account yet.
+                    </p>
+                    <p className="mt-3 text-white/65">
+                        Being invited to the company doesn&apos;t always include brand access. A company owner, admin, or brand manager
+                        still has to add you to each brand you should work in.
+                    </p>
+                    <p className="mt-3 text-white/65">
+                        <span className="font-medium text-white/80">What to do:</span> ask whoever manages your team to open{' '}
+                        <strong className="text-white/85">Company → Team</strong> and assign you to the right brand(s). There isn&apos;t a
+                        self‑service request button in the app today—someone with the right permissions has to grant access.
+                    </p>
+                </div>
+            )}
+
+            {isEmpty && !tenantMemberWithoutBrands && (
+                <p className="mb-8 text-center text-sm text-white/50 max-w-md mx-auto">
+                    No brands are available to select right now.
+                </p>
+            )}
 
             {hasDisabledBrands && (
                 <div className="mb-6 px-4 py-3 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-200 text-sm text-center">
@@ -56,8 +84,9 @@ export default function BrandSelector({ brands, tenant }) {
                 </div>
             )}
 
+            {!isEmpty && (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {brands.map((brand) => {
+                {list.map((brand) => {
                     const color = brand.primary_color || theme?.colors?.primary || '#6366f1'
                     const hasLogo = !!(brand.logo_path || brand.logo_dark_path)
                     const isDisabled = brand.is_disabled
@@ -114,6 +143,7 @@ export default function BrandSelector({ brands, tenant }) {
                     )
                 })}
             </div>
+            )}
         </div>
     )
 }

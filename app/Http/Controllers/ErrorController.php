@@ -2,6 +2,8 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\BrandInvitation;
+use App\Models\TenantInvitation;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -86,12 +88,54 @@ class ErrorController extends Controller
     {
         $user = auth()->user();
 
+        $pendingWorkspaceInvites = [];
+        if ($user) {
+            $email = $user->email;
+
+            $tenantRows = TenantInvitation::query()
+                ->whereNull('accepted_at')
+                ->whereRaw('LOWER(email) = LOWER(?)', [$email])
+                ->with('tenant:id,name')
+                ->orderByDesc('sent_at')
+                ->get()
+                ->unique('tenant_id')
+                ->values()
+                ->map(fn (TenantInvitation $inv) => [
+                    'company_name' => $inv->tenant?->name ?? 'Workspace',
+                    'brand_name' => null,
+                    'is_creator_invite' => false,
+                ])
+                ->all();
+
+            $brandRows = BrandInvitation::query()
+                ->whereNull('accepted_at')
+                ->whereRaw('LOWER(email) = LOWER(?)', [$email])
+                ->with('brand:id,name')
+                ->orderByDesc('sent_at')
+                ->get()
+                ->unique('brand_id')
+                ->values()
+                ->map(function (BrandInvitation $inv) {
+                    $meta = is_array($inv->metadata) ? $inv->metadata : [];
+
+                    return [
+                        'company_name' => null,
+                        'brand_name' => $inv->brand?->name ?? 'Brand',
+                        'is_creator_invite' => (bool) ($meta['assign_prostaff_after_accept'] ?? false),
+                    ];
+                })
+                ->all();
+
+            $pendingWorkspaceInvites = array_values(array_merge($tenantRows, $brandRows));
+        }
+
         return Inertia::render('Errors/NoCompanies', [
             'user' => $user ? [
                 'id' => $user->id,
                 'name' => $user->name,
                 'email' => $user->email,
             ] : null,
+            'pending_workspace_invites' => $pendingWorkspaceInvites,
         ]);
     }
 

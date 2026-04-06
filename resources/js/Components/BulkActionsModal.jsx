@@ -98,11 +98,12 @@ const BULK_ACTION_GROUPS = [
     },
     {
         label: 'Metadata',
-        sectionDescription: 'Add, replace, or clear metadata fields.',
+        sectionDescription: 'Add, replace, clear, or remove specific tags.',
         actions: [
             { id: 'METADATA_ADD', label: 'Add Metadata', helper: 'Add or merge field values', icon: PencilSquareIcon },
             { id: 'METADATA_REPLACE', label: 'Replace Metadata', helper: 'Overwrite field values', icon: PencilSquareIcon },
             { id: 'METADATA_CLEAR', label: 'Clear Metadata', helper: 'Remove field values', icon: PencilSquareIcon },
+            { id: 'METADATA_REMOVE_TAGS', label: 'Remove Tags', helper: 'Strip chosen tag(s) only; other tags stay', icon: PencilSquareIcon },
         ],
     },
     {
@@ -131,7 +132,7 @@ const BULK_ACTION_GROUPS = [
 const LIFECYCLE_ACTIONS = new Set([
     'PUBLISH', 'UNPUBLISH', 'ARCHIVE', 'RESTORE_ARCHIVE', 'APPROVE', 'MARK_PENDING', 'SOFT_DELETE', 'RESTORE_TRASH', 'FORCE_DELETE',
 ])
-const METADATA_ACTIONS = new Set(['METADATA_ADD', 'METADATA_REPLACE', 'METADATA_CLEAR'])
+const METADATA_ACTIONS = new Set(['METADATA_ADD', 'METADATA_REPLACE', 'METADATA_CLEAR', 'METADATA_REMOVE_TAGS'])
 const ASSIGN_CATEGORY_ACTION = 'ASSIGN_CATEGORY'
 
 /** Keys aligned with App\Enums\AssetType for bulk assign */
@@ -210,6 +211,7 @@ function computeValidActionIds(selectionSummary, { isTrashMode = false, canForce
     valid.add('METADATA_ADD')
     valid.add('METADATA_REPLACE')
     valid.add('METADATA_CLEAR')
+    valid.add('METADATA_REMOVE_TAGS')
     if (deletedCount === 0) valid.add('SOFT_DELETE')
     if (deletedCount > 0) valid.add('RESTORE_TRASH')
     if (isTrashMode && deletedCount > 0 && canForceDelete) valid.add('FORCE_DELETE')
@@ -300,6 +302,7 @@ export default function BulkActionsModal({
     const { auth } = usePage().props
     const { can } = usePermission()
     const canBulkRename = can('metadata.edit_post_upload')
+    const canBulkRemoveTags = can('assets.tags.delete')
     const brandPrimary = auth?.activeBrand?.primary_color || null
     const canSitePipeline = useMemo(() => {
         const roles = auth?.user?.site_roles
@@ -337,8 +340,16 @@ export default function BulkActionsModal({
                 }))
                 .filter((gr) => gr.validActions.length > 0)
         }
+        if (!canBulkRemoveTags) {
+            g = g
+                .map((gr) => ({
+                    ...gr,
+                    validActions: gr.validActions.filter((a) => a.id !== 'METADATA_REMOVE_TAGS'),
+                }))
+                .filter((gr) => gr.validActions.length > 0)
+        }
         return g
-    }, [validIds, categories, bulkCategoriesByAssetType, n, canBulkRename])
+    }, [validIds, categories, bulkCategoriesByAssetType, n, canBulkRename, canBulkRemoveTags])
 
     const renamePreview = useMemo(() => {
         if (!bulkRenameBase.trim() || n < 2) return []
@@ -396,7 +407,14 @@ export default function BulkActionsModal({
 
     const handleSelectAction = useCallback((actionId) => {
         if (METADATA_ACTIONS.has(actionId) && onOpenMetadataEdit) {
-            const op = actionId === 'METADATA_ADD' ? 'add' : actionId === 'METADATA_REPLACE' ? 'replace' : 'clear'
+            const op =
+                actionId === 'METADATA_ADD'
+                    ? 'add'
+                    : actionId === 'METADATA_REPLACE'
+                      ? 'replace'
+                      : actionId === 'METADATA_REMOVE_TAGS'
+                        ? 'remove'
+                        : 'clear'
             onClose()
             onOpenMetadataEdit(assetIds, op)
             return

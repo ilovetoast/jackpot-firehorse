@@ -8,8 +8,9 @@ import {
     ChevronRightIcon,
     LightBulbIcon,
     ArrowRightIcon,
+    ExclamationTriangleIcon,
 } from '@heroicons/react/24/outline'
-import { resolveOverviewIconColor } from '../../utils/colorUtils'
+import { hexToRgba, pickProminentAccentColor, resolveOverviewIconColor } from '../../utils/colorUtils'
 
 const ICON_MAP = {
     sparkles: SparklesIcon,
@@ -22,6 +23,7 @@ const ICON_MAP = {
 function signalCategoryToInsightType(signal) {
     const cat = signal?.context?.category
     if (cat === 'ai_suggestions') return 'suggestions'
+    if (cat === 'upload_approvals') return 'upload_approvals'
     if (['ai_tags', 'ai_categories', 'metadata', 'activity', 'rights'].includes(cat)) return cat
     return null
 }
@@ -51,12 +53,23 @@ export default function ActiveSignals({
     signals = [],
     insights = [],
     brandColor = '#6366f1',
+    /** Brand accent (e.g. workspace accent); used with primary/secondary to pick a vivid “action required” frame. */
+    accentBrandColor = null,
+    secondaryBrandColor = null,
     /** Resolved readable icon color on dark cards; when omitted, derived from brandColor only. */
     iconAccentColor = null,
     permissions = {},
     insightsUpdatedAt = null,
+    /** When true and managers see the Creators teaser, creator-only pending uploads are shown there — not duplicated here. */
+    creatorModuleEnabled = false,
+    canManageCreatorsDashboard = false,
 }) {
     const iconFill = iconAccentColor ?? resolveOverviewIconColor(brandColor)
+    const actionHighlightHex = pickProminentAccentColor(brandColor, accentBrandColor, secondaryBrandColor)
+    const actionIconTint = resolveOverviewIconColor(actionHighlightHex, {
+        secondary: secondaryBrandColor,
+        accent: accentBrandColor,
+    })
 
     const visible = signals.filter((s) => {
         if (!s.permission) return true
@@ -65,15 +78,199 @@ export default function ActiveSignals({
 
     if (visible.length === 0) return null
 
-    const primaryHref = visible[0]?.href
+    const pendingApprovalSignals = visible.filter((s) => s.context?.category === 'upload_approvals')
+    const otherSignals = visible.filter((s) => s.context?.category !== 'upload_approvals')
+    const primaryApproval = pendingApprovalSignals[0]
+    const listPrimaryHref = otherSignals[0]?.href
     const updatedLabel = formatInsightsUpdatedLabel(insightsUpdatedAt)
+
+    const ctx = primaryApproval?.context
+    const prostaffPending = Number(ctx?.prostaff_pending ?? 0)
+    const teamPending = Number(ctx?.team_pending ?? 0)
+    const creatorHandledInTeaser =
+        prostaffPending > 0 &&
+        teamPending === 0 &&
+        creatorModuleEnabled &&
+        canManageCreatorsDashboard
+
+    const teamUploadHref = '/app/insights/review?workspace=uploads'
+    const teamUploadLabel =
+        teamPending === 1 ? '1 team upload awaits your approval' : `${teamPending} team uploads await your approval`
+    const uploadBannerTitle =
+        prostaffPending > 0 && teamPending > 0
+            ? 'Action required — team upload approvals'
+            : 'Action required — upload approvals'
+    const uploadBannerLinkLabel =
+        prostaffPending > 0 && teamPending > 0 ? 'Open team approval queue' : 'Open approval queue'
+
+    const showTeamFocusedUploadBanner =
+        Boolean(primaryApproval?.href) && !creatorHandledInTeaser && teamPending > 0
+    const showCreatorOnlyLegacyBanner =
+        Boolean(primaryApproval?.href) && !creatorHandledInTeaser && teamPending === 0 && prostaffPending > 0
+    /** Context missing split counts (e.g. stale cache) — keep full banner + backend href/label. */
+    const showUnsplitUploadBanner =
+        Boolean(primaryApproval?.href) &&
+        !creatorHandledInTeaser &&
+        teamPending === 0 &&
+        prostaffPending === 0
 
     return (
         <motion.div
             initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.4 }}
+            className="space-y-3"
         >
+            {showTeamFocusedUploadBanner ? (
+                <motion.div
+                    initial={{ opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.35 }}
+                >
+                    <Link
+                        href={teamUploadHref}
+                        className="block overflow-hidden rounded-xl border px-4 py-3.5 backdrop-blur-md transition duration-200 hover:brightness-[1.04]"
+                        style={{
+                            borderColor: hexToRgba(actionHighlightHex, 0.48),
+                            background: `linear-gradient(to bottom right, ${hexToRgba(actionHighlightHex, 0.2)}, rgba(12, 12, 14, 0.42))`,
+                            boxShadow: `0 0 32px ${hexToRgba(actionHighlightHex, 0.14)}, inset 0 1px 0 ${hexToRgba(actionHighlightHex, 0.22)}`,
+                        }}
+                    >
+                        <div className="flex items-start gap-3">
+                            <div
+                                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl"
+                                style={{
+                                    backgroundColor: hexToRgba(actionHighlightHex, 0.22),
+                                    color: actionIconTint,
+                                }}
+                            >
+                                <ExclamationTriangleIcon className="h-5 w-5" aria-hidden />
+                            </div>
+                            <div className="min-w-0 flex-1">
+                                <p
+                                    className="text-[11px] font-bold uppercase tracking-wider"
+                                    style={{ color: hexToRgba(actionHighlightHex, 0.92) }}
+                                >
+                                    {uploadBannerTitle}
+                                </p>
+                                <p className="mt-1.5 text-[15px] font-semibold leading-snug text-white">
+                                    {teamUploadLabel}
+                                </p>
+                                {prostaffPending > 0 && teamPending > 0 ? (
+                                    <p className="mt-1.5 text-xs leading-snug text-white/50">
+                                        Creator program uploads are called out in the Creators card above.
+                                    </p>
+                                ) : null}
+                                <p
+                                    className="mt-2 inline-flex items-center gap-1 text-sm font-semibold"
+                                    style={{ color: hexToRgba(actionHighlightHex, 0.96) }}
+                                >
+                                    {uploadBannerLinkLabel}
+                                    <ChevronRightIcon className="h-4 w-4" />
+                                </p>
+                            </div>
+                        </div>
+                    </Link>
+                </motion.div>
+            ) : null}
+
+            {showCreatorOnlyLegacyBanner ? (
+                <motion.div
+                    initial={{ opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.35 }}
+                >
+                    <Link
+                        href={primaryApproval.href}
+                        className="block overflow-hidden rounded-xl border px-4 py-3.5 backdrop-blur-md transition duration-200 hover:brightness-[1.04]"
+                        style={{
+                            borderColor: hexToRgba(actionHighlightHex, 0.48),
+                            background: `linear-gradient(to bottom right, ${hexToRgba(actionHighlightHex, 0.2)}, rgba(12, 12, 14, 0.42))`,
+                            boxShadow: `0 0 32px ${hexToRgba(actionHighlightHex, 0.14)}, inset 0 1px 0 ${hexToRgba(actionHighlightHex, 0.22)}`,
+                        }}
+                    >
+                        <div className="flex items-start gap-3">
+                            <div
+                                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl"
+                                style={{
+                                    backgroundColor: hexToRgba(actionHighlightHex, 0.22),
+                                    color: actionIconTint,
+                                }}
+                            >
+                                <ExclamationTriangleIcon className="h-5 w-5" aria-hidden />
+                            </div>
+                            <div className="min-w-0 flex-1">
+                                <p
+                                    className="text-[11px] font-bold uppercase tracking-wider"
+                                    style={{ color: hexToRgba(actionHighlightHex, 0.92) }}
+                                >
+                                    Action required — upload approvals
+                                </p>
+                                <p className="mt-1.5 text-[15px] font-semibold leading-snug text-white">
+                                    {primaryApproval.label}
+                                </p>
+                                <p
+                                    className="mt-2 inline-flex items-center gap-1 text-sm font-semibold"
+                                    style={{ color: hexToRgba(actionHighlightHex, 0.96) }}
+                                >
+                                    Open approval queue
+                                    <ChevronRightIcon className="h-4 w-4" />
+                                </p>
+                            </div>
+                        </div>
+                    </Link>
+                </motion.div>
+            ) : null}
+
+            {showUnsplitUploadBanner ? (
+                <motion.div
+                    initial={{ opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.35 }}
+                >
+                    <Link
+                        href={primaryApproval.href}
+                        className="block overflow-hidden rounded-xl border px-4 py-3.5 backdrop-blur-md transition duration-200 hover:brightness-[1.04]"
+                        style={{
+                            borderColor: hexToRgba(actionHighlightHex, 0.48),
+                            background: `linear-gradient(to bottom right, ${hexToRgba(actionHighlightHex, 0.2)}, rgba(12, 12, 14, 0.42))`,
+                            boxShadow: `0 0 32px ${hexToRgba(actionHighlightHex, 0.14)}, inset 0 1px 0 ${hexToRgba(actionHighlightHex, 0.22)}`,
+                        }}
+                    >
+                        <div className="flex items-start gap-3">
+                            <div
+                                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl"
+                                style={{
+                                    backgroundColor: hexToRgba(actionHighlightHex, 0.22),
+                                    color: actionIconTint,
+                                }}
+                            >
+                                <ExclamationTriangleIcon className="h-5 w-5" aria-hidden />
+                            </div>
+                            <div className="min-w-0 flex-1">
+                                <p
+                                    className="text-[11px] font-bold uppercase tracking-wider"
+                                    style={{ color: hexToRgba(actionHighlightHex, 0.92) }}
+                                >
+                                    Action required — upload approvals
+                                </p>
+                                <p className="mt-1.5 text-[15px] font-semibold leading-snug text-white">
+                                    {primaryApproval.label}
+                                </p>
+                                <p
+                                    className="mt-2 inline-flex items-center gap-1 text-sm font-semibold"
+                                    style={{ color: hexToRgba(actionHighlightHex, 0.96) }}
+                                >
+                                    Open approval queue
+                                    <ChevronRightIcon className="h-4 w-4" />
+                                </p>
+                            </div>
+                        </div>
+                    </Link>
+                </motion.div>
+            ) : null}
+
+            {otherSignals.length > 0 ? (
             <div
                 className="
                     rounded-xl overflow-hidden
@@ -103,7 +300,7 @@ export default function ActiveSignals({
                         )}
                     </div>
                     <ul className="divide-y divide-white/[0.06]">
-                        {visible.map((signal, i) => {
+                        {otherSignals.map((signal, i) => {
                             const Icon = ICON_MAP[signal.icon] || SparklesIcon
                             const isHigh = signal.priority === 'high'
                             const insightType = signalCategoryToInsightType(signal)
@@ -128,7 +325,7 @@ export default function ActiveSignals({
                             )
                             return (
                                 <motion.li
-                                    key={i}
+                                    key={`${signal.label}-${i}`}
                                     initial={{ opacity: 0, y: 8 }}
                                     animate={{ opacity: 1, y: 0 }}
                                     transition={{ delay: i * 0.05, duration: 0.3 }}
@@ -175,9 +372,9 @@ export default function ActiveSignals({
                             )
                         })}
                     </ul>
-                    {primaryHref && (
+                    {listPrimaryHref ? (
                         <Link
-                            href={primaryHref}
+                            href={listPrimaryHref}
                             className="
                                 mt-4 inline-flex items-center gap-1.5 text-sm font-medium
                                 text-white/90 hover:text-white
@@ -187,9 +384,10 @@ export default function ActiveSignals({
                             Review Now
                             <ChevronRightIcon className="w-4 h-4" />
                         </Link>
-                    )}
+                    ) : null}
                 </div>
             </div>
+            ) : null}
         </motion.div>
     )
 }

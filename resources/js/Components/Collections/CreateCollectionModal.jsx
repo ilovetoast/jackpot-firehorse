@@ -20,7 +20,7 @@ const ACCESS_PRESETS = [
     {
         value: 'role_limited',
         title: 'By role',
-        description: 'Start with all brand roles allowed—you can narrow roles after creating.',
+        description: 'Choose which brand roles can open this collection (you can change this anytime).',
         icon: AdjustmentsHorizontalIcon,
     },
     {
@@ -33,6 +33,13 @@ const ACCESS_PRESETS = [
 
 /** Sensible default so a new “by role” collection is usable before first edit. */
 const DEFAULT_ROLE_LIMITED_ROLES = ['admin', 'brand_manager', 'contributor', 'viewer']
+
+const BRAND_ROLE_OPTIONS = [
+    { id: 'admin', label: 'Brand admin' },
+    { id: 'brand_manager', label: 'Brand manager' },
+    { id: 'contributor', label: 'Contributor' },
+    { id: 'viewer', label: 'Viewer' },
+]
 
 function SectionDivider({ children }) {
     return (
@@ -53,17 +60,28 @@ export default function CreateCollectionModal({ open, onClose, onCreated }) {
     const [name, setName] = useState('')
     const [description, setDescription] = useState('')
     const [accessPreset, setAccessPreset] = useState('all_brand')
+    const [allowedBrandRoles, setAllowedBrandRoles] = useState(() => [...DEFAULT_ROLE_LIMITED_ROLES])
     const [allowExternalGuests, setAllowExternalGuests] = useState(false)
     const [submitting, setSubmitting] = useState(false)
     const [error, setError] = useState(null)
 
     const showExternalChoice = accessPreset !== 'all_brand'
 
+    const toggleRole = (roleId) => {
+        setAllowedBrandRoles((prev) =>
+            prev.includes(roleId) ? prev.filter((r) => r !== roleId) : [...prev, roleId]
+        )
+    }
+
     const handleSubmit = async (e) => {
         e.preventDefault()
         setError(null)
         if (!name.trim()) {
             setError('Name is required.')
+            return
+        }
+        if (accessPreset === 'role_limited' && allowedBrandRoles.length === 0) {
+            setError('Select at least one brand role, or pick a different access option.')
             return
         }
         setSubmitting(true)
@@ -73,7 +91,7 @@ export default function CreateCollectionModal({ open, onClose, onCreated }) {
                 description: description.trim() || null,
                 access_mode: accessPreset,
                 allowed_brand_roles:
-                    accessPreset === 'role_limited' ? [...DEFAULT_ROLE_LIMITED_ROLES] : [],
+                    accessPreset === 'role_limited' ? [...allowedBrandRoles] : [],
                 allows_external_guests: showExternalChoice && allowExternalGuests,
             }
             const response = await window.axios.post('/app/collections', payload, {
@@ -85,6 +103,7 @@ export default function CreateCollectionModal({ open, onClose, onCreated }) {
                 setName('')
                 setDescription('')
                 setAccessPreset('all_brand')
+                setAllowedBrandRoles([...DEFAULT_ROLE_LIMITED_ROLES])
                 setAllowExternalGuests(false)
                 onClose()
             }
@@ -105,6 +124,7 @@ export default function CreateCollectionModal({ open, onClose, onCreated }) {
             setName('')
             setDescription('')
             setAccessPreset('all_brand')
+            setAllowedBrandRoles([...DEFAULT_ROLE_LIMITED_ROLES])
             setAllowExternalGuests(false)
             onClose()
         }
@@ -170,7 +190,7 @@ export default function CreateCollectionModal({ open, onClose, onCreated }) {
                                 <div>
                                     <span className="block text-sm font-medium text-gray-900">Who can view</span>
                                     <p className="mt-0.5 text-xs text-gray-500">
-                                        You can refine roles and invites after the collection exists.
+                                        For &quot;By role&quot;, pick allowed roles below. You can still refine access after creating.
                                     </p>
                                     <fieldset className="mt-3 space-y-2" disabled={submitting}>
                                         <legend className="sr-only">Access preset</legend>
@@ -195,6 +215,9 @@ export default function CreateCollectionModal({ open, onClose, onCreated }) {
                                                             if (value === 'all_brand') {
                                                                 setAllowExternalGuests(false)
                                                             }
+                                                            if (value === 'role_limited') {
+                                                                setAllowedBrandRoles([...DEFAULT_ROLE_LIMITED_ROLES])
+                                                            }
                                                         }}
                                                         className="mt-1 h-4 w-4 shrink-0 border-gray-300 text-indigo-600 focus:ring-indigo-500"
                                                     />
@@ -210,6 +233,29 @@ export default function CreateCollectionModal({ open, onClose, onCreated }) {
                                         })}
                                     </fieldset>
                                 </div>
+
+                                {accessPreset === 'role_limited' && (
+                                    <div className="rounded-lg border border-indigo-100 bg-indigo-50/40 p-4">
+                                        <p className="text-xs font-semibold text-indigo-900">Brand roles allowed</p>
+                                        <p className="mt-1 text-xs text-indigo-800/80">
+                                            Teammates with any checked role can view this collection.
+                                        </p>
+                                        <div className="mt-3 space-y-2">
+                                            {BRAND_ROLE_OPTIONS.map(({ id, label }) => (
+                                                <label key={id} className="flex cursor-pointer items-center gap-2">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={allowedBrandRoles.includes(id)}
+                                                        onChange={() => toggleRole(id)}
+                                                        disabled={submitting}
+                                                        className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                                    />
+                                                    <span className="text-sm text-gray-800">{label}</span>
+                                                </label>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
 
                                 {showExternalChoice && (
                                     <>

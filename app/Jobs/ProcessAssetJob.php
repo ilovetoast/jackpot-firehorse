@@ -29,11 +29,11 @@ class ProcessAssetJob implements ShouldQueue
     use Dispatchable, InteractsWithQueue, Queueable, QueuesOnImagesChannel, SerializesModels;
 
     /**
-     * High enough for Redis throttle + queue safe-mode release() cycles (each pickup counts as an attempt).
+     * Overridden in constructor from config (default 64). Must cover many throttle release() cycles.
      *
      * @var int
      */
-    public $tries = 32;
+    public $tries = 64;
 
     /** Stop uncaught-exception retry loops; releases do not count as exceptions. */
     public int $maxExceptions = 1;
@@ -57,7 +57,7 @@ class ProcessAssetJob implements ShouldQueue
     public function __construct(
         public readonly string $assetId
     ) {
-        $this->tries = max(1, (int) config('assets.processing.pipeline_job_max_tries', 5));
+        $this->tries = max(1, (int) config('assets.processing.pipeline_job_max_tries', 64));
 
         $version = AssetVersion::query()->find($this->assetId);
         $asset = $version?->asset ?? Asset::query()->find($this->assetId);
@@ -82,6 +82,16 @@ class ProcessAssetJob implements ShouldQueue
             $this->configureImagesQueue();
             $this->timeout = (int) config('assets.processing.process_asset_job_timeout_seconds', 290);
         }
+    }
+
+    /**
+     * Cap how long throttle + backoff may defer this job (in addition to {@see $tries}).
+     */
+    public function retryUntil(): \DateTimeInterface
+    {
+        return now()->addMinutes(
+            max(1, (int) config('assets.processing.pipeline_job_retry_until_minutes', 120))
+        );
     }
 
     /**

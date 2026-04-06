@@ -4,7 +4,7 @@
  * Phase 2 – Step 7: Multi-step modal for bulk metadata operations.
  *
  * Steps:
- * 1. Select operation type (Add / Replace / Clear)
+ * 1. Select operation type (Add / Replace / Clear / Remove tags)
  * 2. Select metadata field(s)
  * 3. Enter value(s)
  * 4. Preview changes
@@ -13,6 +13,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { usePage } from '@inertiajs/react'
+import { usePermission } from '../hooks/usePermission'
 import { XMarkIcon, CheckIcon, ExclamationTriangleIcon } from '@heroicons/react/24/outline'
 import MetadataFieldInput from './Upload/MetadataFieldInput'
 import CollectionSelector from './Collections/CollectionSelector'
@@ -27,8 +28,9 @@ export default function BulkMetadataEditModal({
     initialOperation = null,
 }) {
     const { auth } = usePage().props
+    const { can } = usePermission()
     const [step, setStep] = useState(initialOperation ? 2 : 1) // 1: operation, 2: field, 3: value, 4: preview, 5: execute
-    const [operationType, setOperationType] = useState(initialOperation || 'add') // 'add' | 'replace' | 'clear'
+    const [operationType, setOperationType] = useState(initialOperation || 'add') // 'add' | 'replace' | 'clear' | 'remove'
     const [selectedField, setSelectedField] = useState(null)
     const [value, setValue] = useState(null)
     const [preview, setPreview] = useState(null)
@@ -192,6 +194,8 @@ export default function BulkMetadataEditModal({
         // C9.2: For collections, initialize with empty array
         if (field === 'collections') {
             setValue([])
+        } else if (field && typeof field === 'object' && operationType === 'remove' && field.field_key === 'tags') {
+            setValue([])
         } else if (field && typeof field === 'object') {
             setValue(field.current_value ?? null)
         }
@@ -214,6 +218,12 @@ export default function BulkMetadataEditModal({
         if (selectedField === 'collections') {
             if (operationType !== 'clear' && selectedCollectionIds.length === 0 && value === null) {
                 setError('Please select at least one collection or use Clear operation')
+                return
+            }
+        } else if (operationType === 'remove') {
+            const arr = Array.isArray(valueForPreview) ? valueForPreview : []
+            if (!selectedField || arr.length === 0) {
+                setError('Enter at least one tag to remove (other tags on each asset stay).')
                 return
             }
         } else if (!selectedField || (operationType !== 'clear' && valueForPreview === null)) {
@@ -299,7 +309,8 @@ export default function BulkMetadataEditModal({
                         asset_ids: assetIds,
                         operation_type: operationType,
                         metadata: {
-                            [selectedField.field_key]: operationType === 'clear' ? null : valueForPreview,
+                            [selectedField.field_key]:
+                                operationType === 'clear' ? null : valueForPreview,
                         },
                     }),
                 })
@@ -506,6 +517,18 @@ export default function BulkMetadataEditModal({
                                         <div className="font-medium text-gray-900">Clear</div>
                                         <div className="text-sm text-gray-500">Clear metadata values (old values remain for audit)</div>
                                     </button>
+                                    {can('assets.tags.delete') && (
+                                        <button
+                                            type="button"
+                                            onClick={() => handleOperationSelect('remove')}
+                                            className="w-full text-left px-4 py-3 border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                        >
+                                            <div className="font-medium text-gray-900">Remove tags</div>
+                                            <div className="text-sm text-gray-500">
+                                                Remove only the tag(s) you choose from each selected asset (other tags stay)
+                                            </div>
+                                        </button>
+                                    )}
                                 </div>
                             </div>
                         )}
@@ -534,7 +557,10 @@ export default function BulkMetadataEditModal({
                                             Assign assets to collections (add/remove)
                                         </div>
                                     </button>
-                                    {editableFields.map((field) => (
+                                    {(operationType === 'remove'
+                                        ? editableFields.filter((f) => f.field_key === 'tags')
+                                        : editableFields
+                                    ).map((field) => (
                                         <button
                                             key={field.metadata_field_id}
                                             type="button"
@@ -547,6 +573,12 @@ export default function BulkMetadataEditModal({
                                             </div>
                                         </button>
                                     ))}
+                                    {operationType === 'remove' &&
+                                        editableFields.filter((f) => f.field_key === 'tags').length === 0 && (
+                                            <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
+                                                Tags are not available on the first asset’s category, or you don’t have an editable Tags field here.
+                                            </p>
+                                        )}
                                 </div>
                             </div>
                         )}
@@ -564,7 +596,32 @@ export default function BulkMetadataEditModal({
                                         Back
                                     </button>
                                 </div>
-                                {operationType === 'clear' ? (
+                                {operationType === 'remove' ? (
+                                    <div className="space-y-3">
+                                        <div className="p-4 bg-amber-50 border border-amber-200 rounded-md">
+                                            <div className="text-sm font-medium text-amber-900">Remove selected tags only</div>
+                                            <p className="text-sm text-amber-800 mt-1">
+                                                Add the tag name(s) you want stripped from each selected asset. Tags you don’t list are left unchanged.
+                                                This updates the live tag list and matching tag metadata rows (same as removing a tag in the asset drawer).
+                                            </p>
+                                        </div>
+                                        <MetadataFieldInput
+                                            ref={selectedField?.field_key === 'tags' ? tagFieldInputRef : undefined}
+                                            field={{
+                                                ...selectedField,
+                                                key: 'tags',
+                                                type: 'multiselect',
+                                                is_required: false,
+                                            }}
+                                            value={Array.isArray(value) ? value : []}
+                                            onChange={setValue}
+                                            disabled={false}
+                                            showError={false}
+                                            isUploadContext={false}
+                                            tagsPlaceholder="Type or pick tags to remove…"
+                                        />
+                                    </div>
+                                ) : operationType === 'clear' ? (
                                     <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-md">
                                         <div className="flex items-start gap-2">
                                             <ExclamationTriangleIcon className="h-5 w-5 text-yellow-600 mt-0.5" />
@@ -616,7 +673,15 @@ export default function BulkMetadataEditModal({
                                 <button
                                     type="button"
                                     onClick={handlePreview}
-                                    disabled={loading || (operationType !== 'clear' && selectedField === 'collections' ? selectedCollectionIds.length === 0 : value === null)}
+                                    disabled={loading || (
+                                        selectedField === 'collections' && operationType !== 'clear'
+                                            ? selectedCollectionIds.length === 0 && value === null
+                                            : operationType === 'clear'
+                                                ? false
+                                                : operationType === 'remove'
+                                                    ? !Array.isArray(value) || value.length === 0
+                                                    : value === null
+                                    )}
                                     className="w-full px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
                                 >
                                     {loading ? 'Generating Preview...' : 'Preview Changes'}

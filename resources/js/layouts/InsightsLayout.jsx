@@ -1,4 +1,5 @@
 import { Link, usePage } from '@inertiajs/react'
+import { useMemo } from 'react'
 import AppHead from '../Components/AppHead'
 import AppNav from '../Components/AppNav'
 import AppFooter from '../Components/AppFooter'
@@ -8,9 +9,10 @@ import {
     ArrowTrendingUpIcon,
     ClockIcon,
     SparklesIcon,
+    UserGroupIcon,
 } from '@heroicons/react/24/outline'
 
-const SIDEBAR_ITEMS = [
+const BASE_SIDEBAR_ITEMS = [
     { id: 'overview', label: 'Overview', href: '/app/insights/overview', icon: ChartBarIcon },
     { id: 'review', label: 'Review', href: '/app/insights/review', icon: SparklesIcon },
     { id: 'metadata', label: 'Metadata', href: '/app/insights/metadata', icon: TableCellsIcon },
@@ -19,7 +21,24 @@ const SIDEBAR_ITEMS = [
 ]
 
 export default function InsightsLayout({ children, title = 'Insights', activeSection = 'overview' }) {
-    const { auth, tenant } = usePage().props
+    const { auth, tenant, creator_module_status } = usePage().props
+
+    const sidebarItems = useMemo(() => {
+        const creatorOn = creator_module_status?.enabled === true
+        if (!creatorOn) {
+            return BASE_SIDEBAR_ITEMS
+        }
+        const items = [...BASE_SIDEBAR_ITEMS]
+        const reviewIdx = items.findIndex((i) => i.id === 'review')
+        const insertAt = reviewIdx >= 0 ? reviewIdx + 1 : items.length
+        items.splice(insertAt, 0, {
+            id: 'creator',
+            label: 'Creator',
+            href: '/app/insights/creator',
+            icon: UserGroupIcon,
+        })
+        return items
+    }, [creator_module_status?.enabled])
 
     return (
         <div className="min-h-screen flex flex-col bg-gray-50">
@@ -40,7 +59,7 @@ export default function InsightsLayout({ children, title = 'Insights', activeSec
                         {/* Left sidebar */}
                         <aside className="lg:w-56 flex-shrink-0">
                         <nav className="sticky top-8 space-y-1" aria-label="Insights sections">
-                            {SIDEBAR_ITEMS.map((item) => {
+                            {sidebarItems.map((item) => {
                                 const Icon = item.icon
                                 const isActive = activeSection === item.id
                                 const content = (

@@ -9,6 +9,8 @@ use App\Services\FeatureGate;
 
 /**
  * Who may open the Creators dashboard vs. manage prostaff assignments.
+ *
+ * {@see self::canView()} — brand-level Creators list + manager dashboard API (not individual creator profiles).
  */
 final class ResolveCreatorsDashboardAccess
 {
@@ -16,20 +18,12 @@ final class ResolveCreatorsDashboardAccess
         private FeatureGate $featureGate
     ) {}
 
+    /**
+     * Creators list page and GET .../prostaff/dashboard JSON — managers / tenant admins / brand managers only.
+     * Active prostaff contributors use {@see ProstaffDashboardController::me} and their own profile route instead.
+     */
     public function canView(User $user, Tenant $tenant, Brand $brand): bool
     {
-        if ($brand->tenant_id !== $tenant->id) {
-            return false;
-        }
-
-        if (! $this->featureGate->creatorModuleEnabled($tenant)) {
-            return false;
-        }
-
-        if ($user->isProstaffForBrand($brand)) {
-            return true;
-        }
-
         return $this->canManage($user, $tenant, $brand);
     }
 

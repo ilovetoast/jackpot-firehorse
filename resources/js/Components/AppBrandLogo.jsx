@@ -102,6 +102,8 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilte
     }
 
     const brandName = activeBrand.name || 'Brand'
+    /** Transparent / cinematic nav passes white text — avoid light gray hover (unreadable). */
+    const isDarkNavChrome = textColor === '#ffffff'
     /** Match GET /app (company portal), not Ziggy during Inertia — avoids logo ↔ text flash on nav. */
     const navPath = inertiaPathname(page.url)
     const isOnCompanyOverview = navPath === '/app' || navPath === '/app/'
@@ -119,7 +121,11 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilte
                     onClick={() => setBrandMenuOpen(!brandMenuOpen)}
                     aria-expanded={brandMenuOpen}
                     aria-haspopup="true"
-                    className="flex min-w-0 max-w-full items-center gap-2 rounded-md px-2 py-2 text-sm font-medium hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 sm:px-3"
+                    className={`flex min-w-0 max-w-full items-center gap-2 rounded-md px-2 py-2 text-sm font-medium transition-colors focus:outline-none sm:px-3 ${
+                        isDarkNavChrome
+                            ? 'hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-white/35 focus-visible:ring-offset-0'
+                            : 'hover:bg-gray-50 focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2'
+                    }`}
                     style={{ color: textColor }}
                     title="Open menu"
                 >

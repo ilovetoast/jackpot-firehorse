@@ -22,6 +22,8 @@ enum AssetBulkAction: string
     case METADATA_ADD = 'METADATA_ADD';
     case METADATA_REPLACE = 'METADATA_REPLACE';
     case METADATA_CLEAR = 'METADATA_CLEAR';
+    /** Remove specific tag strings from Tags (BulkMetadataService operation remove). */
+    case METADATA_REMOVE_TAGS = 'METADATA_REMOVE_TAGS';
     case ASSIGN_CATEGORY = 'ASSIGN_CATEGORY'; // Staged intake: set category_id + intake_state=normal
     case RENAME_ASSETS = 'RENAME_ASSETS'; // Batch rename title + original_filename (base name + index of total)
 
@@ -46,6 +48,7 @@ enum AssetBulkAction: string
             self::METADATA_ADD,
             self::METADATA_REPLACE,
             self::METADATA_CLEAR,
+            self::METADATA_REMOVE_TAGS,
         ], true);
     }
 
@@ -57,13 +60,14 @@ enum AssetBulkAction: string
         ], true);
     }
 
-    /** Operation type for BulkMetadataService: add, replace, clear */
+    /** Operation type for BulkMetadataService: add, replace, clear, remove */
     public function metadataOperationType(): ?string
     {
         return match ($this) {
             self::METADATA_ADD => 'add',
             self::METADATA_REPLACE => 'replace',
             self::METADATA_CLEAR => 'clear',
+            self::METADATA_REMOVE_TAGS => 'remove',
             default => null,
         };
     }

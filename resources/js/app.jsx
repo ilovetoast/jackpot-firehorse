@@ -83,19 +83,41 @@ if (typeof window !== 'undefined' && import.meta.env.PROD && !window.__jackpotPw
 
 const pages = import.meta.glob('./Pages/**/*.{jsx,tsx}', { eager: false })
 
-createInertiaApp({
-    resolve: async name => {
-        const pathJsx = `./Pages/${name}.jsx`
-        const pathTsx = `./Pages/${name}.tsx`
-        const component = pages[pathJsx] ?? pages[pathTsx]
-        if (!component) {
-            throw new Error(`Page not found: ${name}`)
+/**
+ * Load default export for an Inertia page. In dev, Vite's glob map is fixed at dev-server start — new files
+ * under Pages/ are missing until restart; dynamic import fallback avoids "Page not found" for those pages.
+ */
+async function loadPageDefaultExport(name) {
+    if (name.includes('..') || name.startsWith('/') || name.startsWith('.')) {
+        throw new Error(`Invalid page name: ${name}`)
+    }
+    const pathJsx = `./Pages/${name}.jsx`
+    const pathTsx = `./Pages/${name}.tsx`
+    const fromGlob = pages[pathJsx] ?? pages[pathTsx]
+    if (fromGlob) {
+        const mod = await fromGlob()
+        return mod.default || mod
+    }
+    if (import.meta.env.DEV) {
+        try {
+            const mod = await import(/* @vite-ignore */ pathJsx)
+            return mod.default || mod
+        } catch {
+            try {
+                const mod = await import(/* @vite-ignore */ pathTsx)
+                return mod.default || mod
+            } catch {
+                // fall through
+            }
         }
-        
-        // Load the page component
-        const pageModule = await component()
-        const PageComponent = pageModule.default || pageModule
-        
+    }
+    throw new Error(`Page not found: ${name}`)
+}
+
+createInertiaApp({
+    resolve: async (name) => {
+        const PageComponent = await loadPageDefaultExport(name)
+
         // Standalone cinematic pages: no global UI (FlashMessage, tray, download bar)
         const isExperience =
             name.startsWith('Experience/') ||
@@ -110,9 +132,9 @@ createInertiaApp({
                 </>
             )
         }
-        
+
         // Wrap the page component with FlashMessage, AssetProcessingTray, and app-level download bucket bar.
-        // DownloadBucketBarGlobal uses BucketContext so state is shared; rendering it here keeps it in the
+        // DownloadBucketBarGlobal uses BucketContext so state is shared; rendering this here keeps it in the
         // same DOM tree as the page so it's visible (fixed bottom bar). Bucket state lives in BucketProvider
         // so the bar shows the correct count without refetch on category change.
         return (props) => (

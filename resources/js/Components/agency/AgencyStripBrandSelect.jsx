@@ -3,7 +3,18 @@ import { ChevronDownIcon } from '@heroicons/react/24/outline'
 import { switchCompanyWorkspace } from '../../utils/workspaceCompanySwitch'
 
 /**
- * Compact brand-only switcher for the agency workspace strip (agency tenant + linked client brands).
+ * Compact brand-only switcher rendered INSIDE the agency nav (top strip above main nav).
+ *
+ * LOCK — PARENTAGE:
+ *   - Must only be mounted from `AppNav` when `agencyStripVisible` is true (see `AppNav.jsx` AGENCY NAV contract).
+ *   - Do not import this into basic-company layouts or generic headers — those users are not agency-context.
+ *
+ * LOCK — DATA:
+ *   - `brands` is `auth.agency_flat_brands` (agency portfolio). Backend should only populate for agency workflows.
+ *
+ * LOCK — SEMANTICS:
+ *   - Switching tenant/brand here is agency portfolio navigation (agency tenant + clients tied to the agency).
+ *   - Agency-managed client companies are part of that portfolio; this is not a “basic company” switcher.
  */
 export default function AgencyStripBrandSelect({
     brands = [],

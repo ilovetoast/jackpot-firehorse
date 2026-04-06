@@ -7,75 +7,49 @@ const PERIOD_TYPES = [
     { value: 'year', label: 'Year' },
 ]
 
-function tabBtn(active, onClick, children) {
-    return (
-        <button
-            type="button"
-            onClick={onClick}
-            className={`flex-1 rounded-lg px-3 py-2 text-sm font-medium transition ${
-                active
-                    ? 'bg-white/15 text-white shadow-inner ring-1 ring-white/20'
-                    : 'text-white/55 hover:bg-white/5 hover:text-white/80'
-            }`}
-        >
-            {children}
-        </button>
-    )
-}
-
 /**
+ * Email-first flow: match workspace members or invite new user; assigns prostaff on accept when inviting.
+ *
  * @param {{
  *   open: boolean,
  *   onClose: () => void,
  *   brandId: number,
- *   existingCreatorUserIds: number[],
+ *   existingCreatorEmails?: string[],
  *   onSuccess: () => void,
  * }} props
  */
-export default function AddCreatorModal({ open, onClose, brandId, existingCreatorUserIds, onSuccess }) {
-    const [tab, setTab] = useState('existing')
-    const [search, setSearch] = useState('')
-    const [searchResults, setSearchResults] = useState([])
+export default function AddCreatorModal({ open, onClose, brandId, existingCreatorEmails = [], onSuccess }) {
+    const [email, setEmail] = useState('')
+    const [matches, setMatches] = useState([])
     const [searchLoading, setSearchLoading] = useState(false)
     const [searchForbidden, setSearchForbidden] = useState(false)
-    const [selectedUser, setSelectedUser] = useState(null)
     const [targetUploads, setTargetUploads] = useState('')
     const [periodType, setPeriodType] = useState('month')
-    const [manualUserId, setManualUserId] = useState('')
-    const [inviteFirst, setInviteFirst] = useState('')
-    const [inviteLast, setInviteLast] = useState('')
-    const [inviteEmail, setInviteEmail] = useState('')
     const [busy, setBusy] = useState(false)
     const [error, setError] = useState(null)
     const searchTimer = useRef(null)
 
+    const normalizedExisting = (existingCreatorEmails || []).map((e) => String(e || '').toLowerCase())
+
     const resetForms = useCallback(() => {
-        setSearch('')
-        setSearchResults([])
-        setSelectedUser(null)
+        setEmail('')
+        setMatches([])
         setTargetUploads('')
         setPeriodType('month')
-        setManualUserId('')
-        setInviteFirst('')
-        setInviteLast('')
-        setInviteEmail('')
         setError(null)
         setSearchForbidden(false)
     }, [])
 
     useEffect(() => {
-        if (!open) {
-            resetForms()
-            setTab('existing')
-        }
+        if (!open) resetForms()
     }, [open, resetForms])
 
     useEffect(() => {
-        if (!open || tab !== 'existing') return undefined
+        if (!open) return undefined
         if (searchTimer.current) clearTimeout(searchTimer.current)
-        const q = search.trim()
+        const q = email.trim()
         if (q.length < 2) {
-            setSearchResults([])
+            setMatches([])
             setSearchLoading(false)
             return undefined
         }
@@ -92,19 +66,20 @@ export default function AddCreatorModal({ open, onClose, brandId, existingCreato
                 })
                 if (res.status === 403) {
                     setSearchForbidden(true)
-                    setSearchResults([])
+                    setMatches([])
                     return
                 }
                 setSearchForbidden(false)
                 if (!res.ok) {
-                    setSearchResults([])
+                    setMatches([])
                     return
                 }
                 const json = await res.json()
                 const rows = Array.isArray(json.data) ? json.data : []
-                setSearchResults(rows)
+                const em = q.toLowerCase()
+                setMatches(rows.filter((u) => (u.email && String(u.email).toLowerCase().includes(em)) || (u.name && String(u.name).toLowerCase().includes(em))))
             } catch {
-                setSearchResults([])
+                setMatches([])
             } finally {
                 setSearchLoading(false)
             }
@@ -112,20 +87,30 @@ export default function AddCreatorModal({ open, onClose, brandId, existingCreato
         return () => {
             if (searchTimer.current) clearTimeout(searchTimer.current)
         }
-    }, [search, open, tab])
+    }, [email, open])
 
     const csrf = () => document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || ''
 
-    const submitExisting = async (e) => {
+    const emailLooksValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())
+
+    const pickMatch = (row) => {
+        if (row?.email) setEmail(row.email)
+    }
+
+    const submit = async (e) => {
         e.preventDefault()
         setError(null)
-        const uid = selectedUser?.id ?? (manualUserId.trim() ? parseInt(manualUserId, 10) : NaN)
-        if (!Number.isFinite(uid) || uid < 1) {
-            setError('Select a user or enter a valid user ID.')
+        const em = email.trim()
+        if (!emailLooksValid) {
+            setError('Enter a valid email address.')
+            return
+        }
+        if (normalizedExisting.includes(em.toLowerCase())) {
+            setError('This person is already a creator for this brand.')
             return
         }
         const body = {
-            user_id: uid,
+            email: em,
             period_type: periodType,
         }
         if (targetUploads.trim() !== '') {
@@ -172,55 +157,9 @@ export default function AddCreatorModal({ open, onClose, brandId, existingCreato
         }
     }
 
-    const submitInvite = async (e) => {
-        e.preventDefault()
-        setError(null)
-        if (!inviteEmail.trim()) {
-            setError('Email is required.')
-            return
-        }
-        setBusy(true)
-        try {
-            const fd = new FormData()
-            fd.append('_token', csrf())
-            fd.append('email', inviteEmail.trim())
-            fd.append('role', 'contributor')
-            const res = await fetch(`/app/brands/${brandId}/users/invite`, {
-                method: 'POST',
-                credentials: 'same-origin',
-                headers: {
-                    Accept: 'application/json',
-                    'X-Requested-With': 'XMLHttpRequest',
-                },
-                body: fd,
-            })
-            if (res.status === 403) {
-                setError('You may not have permission to invite users to this brand. Try Company → Team, or ask an admin.')
-                return
-            }
-            if (res.status === 422) {
-                const data = await res.json().catch(() => ({}))
-                const msg =
-                    data?.message ||
-                    (data?.errors && Object.values(data.errors).flat().join(' ')) ||
-                    'Invitation could not be sent.'
-                setError(typeof msg === 'string' ? msg : 'Invitation could not be sent.')
-                return
-            }
-            if (!res.ok && res.status !== 302) {
-                setError('Invitation could not be sent.')
-                return
-            }
-            onSuccess()
-            onClose()
-        } catch {
-            setError('Network error.')
-        } finally {
-            setBusy(false)
-        }
-    }
-
     if (!open) return null
+
+    const showInviteHint = emailLooksValid && matches.length === 0 && !searchLoading && email.trim().length >= 3
 
     return (
         <div className="fixed inset-0 z-[200] flex items-end justify-center p-4 sm:items-center">
@@ -252,10 +191,10 @@ export default function AddCreatorModal({ open, onClose, brandId, existingCreato
                     </button>
                 </div>
 
-                <div className="mt-4 flex gap-1 rounded-xl bg-black/30 p-1 ring-1 ring-white/10">
-                    {tabBtn(tab === 'existing', () => setTab('existing'), 'Existing user')}
-                    {tabBtn(tab === 'invite', () => setTab('invite'), 'Invite new user')}
-                </div>
+                <p className="mt-2 text-xs text-white/45">
+                    Enter an email. We&apos;ll match workspace members or send an invite. New users become creators when they
+                    accept.
+                </p>
 
                 {error ? (
                     <p className="mt-4 rounded-lg border border-rose-400/30 bg-rose-500/10 px-3 py-2 text-sm text-rose-100">
@@ -263,186 +202,108 @@ export default function AddCreatorModal({ open, onClose, brandId, existingCreato
                     </p>
                 ) : null}
 
-                {tab === 'existing' ? (
-                    <form onSubmit={submitExisting} className="mt-5 space-y-4">
+                <form onSubmit={submit} className="mt-5 space-y-4">
+                    <div>
+                        <label className="block text-xs font-medium uppercase tracking-wide text-white/50">Email</label>
+                        <input
+                            type="email"
+                            autoComplete="off"
+                            value={email}
+                            onChange={(e) => setEmail(e.target.value)}
+                            placeholder="name@company.com"
+                            className="mt-1 w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-white placeholder:text-white/35 focus:border-white/25 focus:outline-none focus:ring-1 focus:ring-white/20"
+                        />
+                        {searchForbidden ? (
+                            <p className="mt-2 text-xs text-amber-200/90">
+                                Directory search needs team access. You can still submit the email to send an invite if
+                                they&apos;re new.{' '}
+                                <Link href={route('companies.team')} className="underline hover:text-white">
+                                    Team
+                                </Link>
+                            </p>
+                        ) : null}
+                        {searchLoading ? <p className="mt-2 text-xs text-white/45">Looking up workspace…</p> : null}
+                        {matches.length > 0 ? (
+                            <ul className="mt-2 max-h-36 overflow-auto rounded-xl border border-white/10 bg-black/25 ring-1 ring-white/5">
+                                {matches.map((u) => {
+                                    const taken = normalizedExisting.includes(String(u.email || '').toLowerCase())
+                                    return (
+                                        <li key={u.id}>
+                                            <button
+                                                type="button"
+                                                disabled={taken}
+                                                onClick={() => pickMatch(u)}
+                                                className={`flex w-full flex-col items-start px-3 py-2 text-left text-sm transition hover:bg-white/10 ${
+                                                    taken ? 'cursor-not-allowed opacity-45' : ''
+                                                }`}
+                                            >
+                                                <span className="font-medium text-white">{u.name}</span>
+                                                <span className="text-xs text-white/50">{u.email}</span>
+                                                {taken ? (
+                                                    <span className="text-xs text-amber-200/80">Already a creator</span>
+                                                ) : null}
+                                            </button>
+                                        </li>
+                                    )
+                                })}
+                            </ul>
+                        ) : null}
+                        {showInviteHint ? (
+                            <div className="mt-3 rounded-xl border border-violet-400/25 bg-violet-500/10 px-3 py-2 text-xs text-violet-100/90">
+                                <span className="font-semibold text-violet-100">Invite new user</span>
+                                <span className="block text-white/55">
+                                    No workspace match — we&apos;ll email an invitation and add them as a creator when they
+                                    join.
+                                </span>
+                            </div>
+                        ) : null}
+                    </div>
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                         <div>
                             <label className="block text-xs font-medium uppercase tracking-wide text-white/50">
-                                Search workspace members
-                            </label>
-                            <input
-                                type="search"
-                                value={search}
-                                onChange={(e) => setSearch(e.target.value)}
-                                placeholder="Name or email…"
-                                className="mt-1 w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-white placeholder:text-white/35 focus:border-white/25 focus:outline-none focus:ring-1 focus:ring-white/20"
-                            />
-                            {searchForbidden ? (
-                                <p className="mt-2 text-xs text-amber-200/90">
-                                    Directory search needs team management access. Enter a user ID below, or add them from{' '}
-                                    <Link href={route('companies.team')} className="underline hover:text-white">
-                                        Team
-                                    </Link>
-                                    .
-                                </p>
-                            ) : null}
-                            {searchLoading ? (
-                                <p className="mt-2 text-xs text-white/45">Searching…</p>
-                            ) : null}
-                            {searchResults.length > 0 ? (
-                                <ul className="mt-2 max-h-40 overflow-auto rounded-xl border border-white/10 bg-black/20">
-                                    {searchResults.map((u) => {
-                                        const isCreator = existingCreatorUserIds.includes(u.id)
-                                        return (
-                                            <li key={u.id}>
-                                                <button
-                                                    type="button"
-                                                    disabled={isCreator}
-                                                    onClick={() => {
-                                                        setSelectedUser(u)
-                                                        setManualUserId(String(u.id))
-                                                    }}
-                                                    className={`flex w-full flex-col items-start px-3 py-2 text-left text-sm transition hover:bg-white/10 ${
-                                                        selectedUser?.id === u.id ? 'bg-white/10' : ''
-                                                    } ${isCreator ? 'cursor-not-allowed opacity-45' : ''}`}
-                                                >
-                                                    <span className="font-medium text-white">{u.name}</span>
-                                                    <span className="text-xs text-white/50">{u.email}</span>
-                                                    {isCreator ? (
-                                                        <span className="text-xs text-amber-200/80">Already a creator</span>
-                                                    ) : null}
-                                                </button>
-                                            </li>
-                                        )
-                                    })}
-                                </ul>
-                            ) : null}
-                        </div>
-                        <div>
-                            <label className="block text-xs font-medium uppercase tracking-wide text-white/50">
-                                User ID (fallback)
+                                Target uploads
                             </label>
                             <input
                                 type="number"
-                                min={1}
-                                value={manualUserId}
-                                onChange={(e) => {
-                                    setManualUserId(e.target.value)
-                                    setSelectedUser(null)
-                                }}
-                                className="mt-1 w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-white placeholder:text-white/35 focus:border-white/25 focus:outline-none focus:ring-1 focus:ring-white/20"
-                                placeholder="Numeric ID"
+                                min={0}
+                                value={targetUploads}
+                                onChange={(e) => setTargetUploads(e.target.value)}
+                                className="mt-1 w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-white focus:border-white/25 focus:outline-none focus:ring-1 focus:ring-white/20"
+                                placeholder="Optional"
                             />
-                        </div>
-                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                            <div>
-                                <label className="block text-xs font-medium uppercase tracking-wide text-white/50">
-                                    Target uploads
-                                </label>
-                                <input
-                                    type="number"
-                                    min={0}
-                                    value={targetUploads}
-                                    onChange={(e) => setTargetUploads(e.target.value)}
-                                    className="mt-1 w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-white focus:border-white/25 focus:outline-none focus:ring-1 focus:ring-white/20"
-                                    placeholder="Optional"
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-xs font-medium uppercase tracking-wide text-white/50">
-                                    Period
-                                </label>
-                                <select
-                                    value={periodType}
-                                    onChange={(e) => setPeriodType(e.target.value)}
-                                    className="mt-1 w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-white focus:border-white/25 focus:outline-none focus:ring-1 focus:ring-white/20"
-                                >
-                                    {PERIOD_TYPES.map((p) => (
-                                        <option key={p.value} value={p.value} className="bg-gray-900">
-                                            {p.label}
-                                        </option>
-                                    ))}
-                                </select>
-                            </div>
-                        </div>
-                        <p className="text-xs text-white/40">
-                            Optional tier field is reserved for a future API update; membership tier is not sent yet.
-                        </p>
-                        <div className="flex justify-end gap-2 pt-2">
-                            <button
-                                type="button"
-                                onClick={onClose}
-                                className="rounded-xl border border-white/15 px-4 py-2.5 text-sm font-medium text-white/80 transition hover:bg-white/5"
-                            >
-                                Cancel
-                            </button>
-                            <button
-                                type="submit"
-                                disabled={busy}
-                                className="rounded-xl bg-white/90 px-4 py-2.5 text-sm font-semibold text-gray-900 transition hover:bg-white disabled:opacity-50"
-                            >
-                                {busy ? 'Saving…' : 'Add creator'}
-                            </button>
-                        </div>
-                    </form>
-                ) : (
-                    <form onSubmit={submitInvite} className="mt-5 space-y-4">
-                        <p className="text-xs text-white/50">
-                            Sends a brand invitation as <span className="text-white/70">contributor</span>. After they
-                            join, add them as a creator from the &quot;Existing user&quot; tab. Name fields are for your
-                            notes only (not stored server-side yet).
-                        </p>
-                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                            <div>
-                                <label className="block text-xs font-medium uppercase tracking-wide text-white/50">
-                                    First name
-                                </label>
-                                <input
-                                    value={inviteFirst}
-                                    onChange={(e) => setInviteFirst(e.target.value)}
-                                    className="mt-1 w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-white focus:border-white/25 focus:outline-none focus:ring-1 focus:ring-white/20"
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-xs font-medium uppercase tracking-wide text-white/50">
-                                    Last name
-                                </label>
-                                <input
-                                    value={inviteLast}
-                                    onChange={(e) => setInviteLast(e.target.value)}
-                                    className="mt-1 w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-white focus:border-white/25 focus:outline-none focus:ring-1 focus:ring-white/20"
-                                />
-                            </div>
                         </div>
                         <div>
-                            <label className="block text-xs font-medium uppercase tracking-wide text-white/50">
-                                Email
-                            </label>
-                            <input
-                                type="email"
-                                required
-                                value={inviteEmail}
-                                onChange={(e) => setInviteEmail(e.target.value)}
+                            <label className="block text-xs font-medium uppercase tracking-wide text-white/50">Period</label>
+                            <select
+                                value={periodType}
+                                onChange={(e) => setPeriodType(e.target.value)}
                                 className="mt-1 w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-white focus:border-white/25 focus:outline-none focus:ring-1 focus:ring-white/20"
-                            />
-                        </div>
-                        <div className="flex justify-end gap-2 pt-2">
-                            <button
-                                type="button"
-                                onClick={onClose}
-                                className="rounded-xl border border-white/15 px-4 py-2.5 text-sm font-medium text-white/80 transition hover:bg-white/5"
                             >
-                                Cancel
-                            </button>
-                            <button
-                                type="submit"
-                                disabled={busy}
-                                className="rounded-xl bg-white/90 px-4 py-2.5 text-sm font-semibold text-gray-900 transition hover:bg-white disabled:opacity-50"
-                            >
-                                {busy ? 'Sending…' : 'Send invite'}
-                            </button>
+                                {PERIOD_TYPES.map((p) => (
+                                    <option key={p.value} value={p.value} className="bg-gray-900">
+                                        {p.label}
+                                    </option>
+                                ))}
+                            </select>
                         </div>
-                    </form>
-                )}
+                    </div>
+                    <div className="flex justify-end gap-2 pt-2">
+                        <button
+                            type="button"
+                            onClick={onClose}
+                            className="rounded-xl border border-white/15 px-4 py-2.5 text-sm font-medium text-white/80 transition hover:bg-white/5"
+                        >
+                            Cancel
+                        </button>
+                        <button
+                            type="submit"
+                            disabled={busy}
+                            className="rounded-xl bg-white/90 px-4 py-2.5 text-sm font-semibold text-gray-900 transition hover:bg-white disabled:opacity-50"
+                        >
+                            {busy ? 'Working…' : 'Continue'}
+                        </button>
+                    </div>
+                </form>
             </div>
         </div>
     )

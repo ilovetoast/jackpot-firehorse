@@ -331,6 +331,60 @@ class MetadataPersistenceService
     }
 
     /**
+     * Remove canonical tag strings from an asset: denormalized asset_tags and matching approved user asset_metadata rows for the tags field.
+     *
+     * @param  list<string>  $rawTagsToRemove
+     */
+    public function removeCanonicalTagsFromAsset(Asset $asset, Tenant $tenant, array $rawTagsToRemove, int $tagsMetadataFieldId): void
+    {
+        $canonicalRemove = [];
+        foreach ($rawTagsToRemove as $raw) {
+            if ($raw === null || $raw === '') {
+                continue;
+            }
+            $c = $this->tagNormalizationService->normalize((string) $raw, $tenant);
+            if ($c !== null) {
+                $canonicalRemove[] = $c;
+            }
+        }
+        $canonicalRemove = array_values(array_unique($canonicalRemove));
+        if ($canonicalRemove === []) {
+            return;
+        }
+
+        $removedAny = false;
+
+        $deletedTags = DB::table('asset_tags')
+            ->where('asset_id', $asset->id)
+            ->whereIn('tag', $canonicalRemove)
+            ->delete();
+        if ($deletedTags > 0) {
+            $removedAny = true;
+        }
+
+        $rows = DB::table('asset_metadata')
+            ->where('asset_id', $asset->id)
+            ->where('metadata_field_id', $tagsMetadataFieldId)
+            ->where('source', 'user')
+            ->whereNotNull('approved_at')
+            ->get(['id', 'value_json']);
+
+        foreach ($rows as $row) {
+            $decoded = json_decode($row->value_json, true);
+            $flat = self::flattenDecodedTagsForSync($decoded);
+            $intersect = array_intersect($flat, $canonicalRemove);
+            if ($intersect !== []) {
+                DB::table('asset_metadata')->where('id', $row->id)->delete();
+                $removedAny = true;
+            }
+        }
+
+        if ($removedAny) {
+            $this->brandIntelligenceScheduleService->scheduleDebouncedRescoreAfterUserEdit($asset);
+        }
+    }
+
+    /**
      * Check if a value is considered empty.
      *
      * @param mixed $value

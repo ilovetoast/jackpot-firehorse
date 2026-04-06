@@ -129,8 +129,9 @@ export default function Team({ tenant, brands = [], tenant_roles = [], current_u
         })
     }
 
-    const handleRemoveBrand = (userId, brandId, brandName) => {
+    const handleRemoveBrand = (userId, brandId, _brandName, options = {}) => {
         router.delete(`/app/brands/${brandId}/users/${userId}`, {
+            data: { remove_from_company: Boolean(options.removeFromCompany) },
             preserveScroll: true,
             onSuccess: () => fetchUsers(),
         })
@@ -416,6 +417,7 @@ export default function Team({ tenant, brands = [], tenant_roles = [], current_u
                                             onCompanyRoleChange={handleCompanyRoleChange}
                                             onBrandRoleChange={handleBrandRoleChange}
                                             onRemoveBrand={handleRemoveBrand}
+                                            canRemoveFromCompany
                                             onDeleteFromCompany={handleDeleteFromCompany}
                                             updatingKeys={updatingKeys}
                                             linkedAgencies={linkedAgencies}
@@ -463,6 +465,7 @@ export default function Team({ tenant, brands = [], tenant_roles = [], current_u
                                                 onCompanyRoleChange={handleCompanyRoleChange}
                                                 onBrandRoleChange={handleBrandRoleChange}
                                                 onRemoveBrand={handleRemoveBrand}
+                                                canRemoveFromCompany
                                                 onDeleteFromCompany={handleDeleteFromCompany}
                                                 updatingKeys={updatingKeys}
                                                 groupedUnderAgencySection

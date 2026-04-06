@@ -360,4 +360,35 @@ class Brand extends Model
 
         return (bool) ($settings['contributor_upload_requires_approval'] ?? false);
     }
+
+    /**
+     * Creator module: users who may approve prostaff submissions (configured in Brand Settings → Creators).
+     *
+     * @return list<int>
+     */
+    public function creatorModuleApproverUserIds(): array
+    {
+        $raw = ($this->settings ?? [])['creator_module_approver_user_ids'] ?? [];
+        if (! is_array($raw)) {
+            return [];
+        }
+
+        $ids = [];
+        foreach ($raw as $v) {
+            if ($v === null || $v === '') {
+                continue;
+            }
+            $id = (int) $v;
+            if ($id > 0) {
+                $ids[] = $id;
+            }
+        }
+
+        return array_values(array_unique($ids));
+    }
+
+    public function hasConfiguredCreatorApprovers(): bool
+    {
+        return $this->creatorModuleApproverUserIds() !== [];
+    }
 }

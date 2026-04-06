@@ -866,9 +866,10 @@ class Asset extends Model
     /**
      * Brand Intelligence fields for the asset drawer / grid (excludes raw numeric overall score).
      *
+     * @param  array<string, self>|null  $referenceAssetsById  null = legacy: resolve each top_reference via a query. Non-null (incl. []) = use only this id → Asset map (batch from controller; avoids N+1).
      * @return array{level: string|null, confidence: float|null, breakdown_json: array, alignment_state: ?string, signal_count: ?int, signal_breakdown: ?array, reference_tier_usage: ?array, debug: ?array}|null
      */
-    public function brandIntelligencePayloadForFrontend(): ?array
+    public function brandIntelligencePayloadForFrontend(?array $referenceAssetsById = null): ?array
     {
         $row = $this->latestBrandIntelligenceScore;
         if (! $row) {
@@ -885,7 +886,10 @@ class Asset extends Model
             'signal_count' => $bj['signal_count'] ?? null,
             'signal_breakdown' => $bj['signal_breakdown'] ?? null,
             'reference_tier_usage' => $bj['reference_tier_usage'] ?? null,
-            'debug' => $this->hydrateBrandIntelligenceDebug(is_array($bj['debug'] ?? null) ? $bj['debug'] : null),
+            'debug' => $this->hydrateBrandIntelligenceDebug(
+                is_array($bj['debug'] ?? null) ? $bj['debug'] : null,
+                $referenceAssetsById
+            ),
         ];
     }
 
@@ -893,9 +897,10 @@ class Asset extends Model
      * Add signed thumbnail URLs to debug top references for the app UI.
      *
      * @param  array<string, mixed>|null  $debug
+     * @param  array<string, self>|null  $referenceAssetsById  see {@see brandIntelligencePayloadForFrontend()}
      * @return array<string, mixed>|null
      */
-    protected function hydrateBrandIntelligenceDebug(?array $debug): ?array
+    protected function hydrateBrandIntelligenceDebug(?array $debug, ?array $referenceAssetsById = null): ?array
     {
         if ($debug === null) {
             return null;
@@ -914,7 +919,12 @@ class Asset extends Model
             $id = $row['id'] ?? null;
             $thumbnail = null;
             if (is_string($id) && $id !== '') {
-                $refAsset = static::query()->whereKey($id)->first();
+                $refAsset = null;
+                if ($referenceAssetsById !== null) {
+                    $refAsset = $referenceAssetsById[$id] ?? null;
+                } else {
+                    $refAsset = static::query()->whereKey($id)->first();
+                }
                 if ($refAsset !== null) {
                     $url = $refAsset->deliveryUrl(AssetVariant::THUMB_MEDIUM, DeliveryContext::AUTHENTICATED);
                     $thumbnail = $url !== '' ? $url : null;

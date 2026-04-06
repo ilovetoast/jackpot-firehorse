@@ -254,6 +254,8 @@ class EventType
     public const GATEWAY_AUTO_ENTER = 'gateway.auto_enter';
     public const GATEWAY_SWITCH_USED = 'gateway.switch_used';
     public const GATEWAY_INVITE_ACCEPTED = 'gateway.invite_accepted';
+    /** Authenticated tenant member opened gateway brand picker with no brand assignments (ops / support signal). */
+    public const GATEWAY_BRAND_LIST_EMPTY = 'gateway.brand_list_empty';
 
     // Public portal events (external brand portal analytics)
     public const PORTAL_VIEWED = 'portal.viewed';
@@ -414,6 +416,7 @@ class EventType
             self::GATEWAY_AUTO_ENTER,
             self::GATEWAY_SWITCH_USED,
             self::GATEWAY_INVITE_ACCEPTED,
+            self::GATEWAY_BRAND_LIST_EMPTY,
             self::PORTAL_VIEWED,
             self::PORTAL_COLLECTION_VIEWED,
             self::PORTAL_ASSET_CLICKED,

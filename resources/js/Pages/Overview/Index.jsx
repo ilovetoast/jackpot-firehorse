@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { usePage } from '@inertiajs/react'
 import { motion } from 'framer-motion'
 import { SparklesIcon } from '@heroicons/react/24/outline'
@@ -15,6 +15,7 @@ import OverviewCollageSkeleton from '../../Components/Overview/OverviewCollageSk
 import InsightsLoading from '../../Components/Overview/InsightsLoading'
 import { SkeletonMetricPills, SkeletonPlanBadge } from '../../Components/Overview/OverviewSkeletons'
 import CreatorProgressCard from '../../Components/prostaff/CreatorProgressCard'
+import OverviewCreatorInsights from '../../Components/prostaff/OverviewCreatorInsights'
 import { summarizeMomentum } from '../../utils/summarizeMomentum'
 import { resolveOverviewIconColor } from '../../utils/colorUtils'
 
@@ -155,6 +156,10 @@ export default function Overview() {
 
     const collageAssets = Array.isArray(hero?.collage_assets) ? hero.collage_assets : []
 
+    /** No main-column scrollbar until shell + insights are in (loading stack is taller than the viewport). */
+    const overviewScrollUnlocked =
+        hero != null && stats != null && insights !== null
+
     const totalAssets =
         statsBlock?.total_assets?.value ?? hero?.headline?.total_assets ?? 0
     const storageMB = statsBlock?.storage_mb?.value ?? 0
@@ -171,6 +176,16 @@ export default function Overview() {
         (brandSignalsState?.length > 0) ||
         (aiInsightsState?.length > 0) ||
         momentumItems.length > 0
+
+    const uploadApprovalSignal = useMemo(
+        () => brandSignalsState?.find((s) => s?.context?.category === 'upload_approvals'),
+        [brandSignalsState]
+    )
+    const uploadApprovalCtx = uploadApprovalSignal?.context
+    const prostaffPendingApprovals = Number(uploadApprovalCtx?.prostaff_pending ?? 0)
+    const teamPendingApprovals = Number(uploadApprovalCtx?.team_pending ?? 0)
+    const creatorModuleOn = page.props?.creator_module_status?.enabled === true
+    const canManageCreatorsDashboard = authFromPage?.permissions?.can_manage_creators_dashboard === true
 
     const metrics = []
     if (totalAssets > 0) metrics.push({ label: 'assets', value: totalAssets.toLocaleString() })
@@ -299,8 +314,10 @@ export default function Overview() {
         }
     }, [brandId])
 
+    const isProstaffForBrand = authFromPage?.is_prostaff_for_active_brand === true
+
     useEffect(() => {
-        if (brandId == null) {
+        if (brandId == null || !creatorModuleOn || !isProstaffForBrand) {
             setProstaffMe(null)
             setProstaffMeLoading(false)
             return undefined
@@ -332,6 +349,10 @@ export default function Overview() {
                     setProstaffMe(null)
                     return
                 }
+                if (json.eligible === false || json.prostaff === false) {
+                    setProstaffMe(null)
+                    return
+                }
                 setProstaffMe(json)
             })
             .catch(() => {
@@ -344,7 +365,45 @@ export default function Overview() {
         return () => {
             cancelled = true
         }
-    }, [brandId])
+    }, [brandId, creatorModuleOn, isProstaffForBrand])
+
+    const overviewScrollRef = useRef(null)
+    const overviewContentRef = useRef(null)
+    /** lg only: vertically center when the column fits the viewport; top-align when content overflows (scroll). */
+    const [lgCenterColumnVertically, setLgCenterColumnVertically] = useState(true)
+
+    useLayoutEffect(() => {
+        const scrollEl = overviewScrollRef.current
+        const contentEl = overviewContentRef.current
+        if (!scrollEl || !contentEl) return undefined
+
+        const mq = window.matchMedia('(min-width: 1024px)')
+
+        const measure = () => {
+            if (!mq.matches) {
+                setLgCenterColumnVertically(false)
+                return
+            }
+            const viewportH = scrollEl.clientHeight
+            const contentH = contentEl.scrollHeight
+            setLgCenterColumnVertically(contentH <= viewportH + 2)
+        }
+
+        const ro = new ResizeObserver(() => {
+            window.requestAnimationFrame(measure)
+        })
+        ro.observe(scrollEl)
+        ro.observe(contentEl)
+        mq.addEventListener('change', measure)
+        window.addEventListener('resize', measure)
+        measure()
+
+        return () => {
+            ro.disconnect()
+            mq.removeEventListener('change', measure)
+            window.removeEventListener('resize', measure)
+        }
+    }, [overviewScrollUnlocked])
 
     return (
         <div className="relative h-[100dvh] max-h-[100dvh] overflow-hidden overscroll-none bg-[#0B0B0D]">
@@ -386,14 +445,29 @@ export default function Overview() {
 
                 <div className="relative z-10 flex min-h-0 flex-1 flex-col">
                     <div className="relative mx-auto flex h-full min-h-0 w-full max-w-7xl flex-1 flex-col px-4 sm:px-6 lg:px-12">
-                        <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-y-contain [-webkit-overflow-scrolling:touch] max-lg:[scrollbar-width:none] max-lg:[-ms-overflow-style:none] max-lg:[&::-webkit-scrollbar]:hidden lg:overflow-visible lg:overscroll-auto">
+                        <div
+                            ref={overviewScrollRef}
+                            className={`min-h-0 flex-1 overflow-x-hidden overscroll-y-contain [-webkit-overflow-scrolling:touch] [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden ${
+                                overviewScrollUnlocked
+                                    ? 'overflow-y-auto'
+                                    : 'overflow-y-hidden'
+                            }`}
+                        >
+                            <div
+                                className={`flex w-full min-h-0 flex-col ${
+                                    lgCenterColumnVertically
+                                        ? 'lg:min-h-full lg:justify-center'
+                                        : 'lg:justify-start'
+                                }`}
+                            >
                             <motion.div
-                                className={`flex w-full min-w-0 max-w-full flex-col justify-start space-y-4 pb-28 ${mobileTopPaddingClass} sm:space-y-6 sm:pb-24 lg:mx-0 lg:max-w-[50%] lg:min-h-full lg:justify-center lg:space-y-6 lg:pb-16`}
+                                ref={overviewContentRef}
+                                className={`flex w-full min-w-0 max-w-full flex-col justify-start space-y-3 pb-28 ${mobileTopPaddingClass} sm:space-y-5 sm:pb-24 lg:mx-0 lg:max-w-[50%] lg:space-y-5 lg:pb-16 lg:min-h-0`}
                                 initial={{ opacity: 0, y: 10 }}
                                 animate={{ opacity: 1, y: 0 }}
                                 transition={{ duration: 0.4 }}
                             >
-                                <div className="animate-fadeInUp space-y-3 sm:space-y-4">
+                                <div className="animate-fadeInUp space-y-2 sm:space-y-3">
                                     <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
                                         <div className="min-w-0">
                                             {!stats ? (
@@ -421,6 +495,10 @@ export default function Overview() {
                                         )}
                                     </div>
 
+                                    <h1 className="animate-fadeInUp-d2 break-words text-3xl font-semibold leading-tight tracking-tight text-white md:text-4xl">
+                                        {theme.name || activeBrand?.name || 'Overview'}
+                                    </h1>
+
                                     {(prostaffMeLoading || prostaffMe) && (
                                         <div className="mt-1">
                                             <CreatorProgressCard
@@ -430,10 +508,6 @@ export default function Overview() {
                                             />
                                         </div>
                                     )}
-
-                                    <h1 className="animate-fadeInUp-d2 break-words text-3xl font-semibold leading-tight tracking-tight text-white md:text-4xl">
-                                        {theme.name || activeBrand?.name || 'Overview'}
-                                    </h1>
                                 </div>
 
                                 {theme.tagline && (
@@ -446,7 +520,7 @@ export default function Overview() {
                                     <SkeletonMetricPills />
                                 ) : (
                                     metrics.length > 0 && (
-                                        <div className="animate-fadeInUp-d3 flex flex-wrap items-center gap-x-5 gap-y-2 mt-6 text-xs">
+                                        <div className="animate-fadeInUp-d3 flex flex-wrap items-center gap-x-5 gap-y-2 mt-4 text-xs">
                                             {metrics.map((m, i) => (
                                                 <span key={m.label} className="flex items-center gap-1 text-white/40">
                                                     <span className="text-white/80 font-medium">{m.value}</span>
@@ -461,6 +535,19 @@ export default function Overview() {
                                         </div>
                                     )
                                 )}
+
+                                {brandId != null ? (
+                                    <div className="mt-3 sm:mt-4">
+                                        <OverviewCreatorInsights
+                                            brandId={brandId}
+                                            brandColor={brandColor}
+                                            iconAccentColor={overviewIconColor}
+                                            prostaffPendingUploads={prostaffPendingApprovals}
+                                            teamPendingUploads={teamPendingApprovals}
+                                            creatorModuleEnabled={creatorModuleOn}
+                                        />
+                                    </div>
+                                ) : null}
 
                                 {insights === null && (
                                     <div aria-busy="true" aria-label="Loading brand insights">
@@ -497,9 +584,13 @@ export default function Overview() {
                                         signals={brandSignalsState}
                                         insights={aiInsightsState}
                                         brandColor={brandColor}
+                                        accentBrandColor={theme.colors?.accent || activeBrand?.accent_color || null}
+                                        secondaryBrandColor={theme.colors?.secondary || activeBrand?.secondary_color || null}
                                         iconAccentColor={overviewIconColor}
                                         permissions={permissions}
                                         insightsUpdatedAt={insightsUpdatedAt}
+                                        creatorModuleEnabled={creatorModuleOn}
+                                        canManageCreatorsDashboard={canManageCreatorsDashboard}
                                     />
                                 )}
 
@@ -557,8 +648,10 @@ export default function Overview() {
                                     brand={activeBrand}
                                     brandColor={brandColor}
                                     iconAccentColor={overviewIconColor}
+                                    authUserId={authFromPage?.user?.id ?? null}
                                 />
                             </motion.div>
+                            </div>
 
                             {theme.mode === 'default' && (
                                 <div className="pointer-events-none shrink-0 px-1 pb-4 pt-2 text-xs text-white/20 lg:absolute lg:bottom-6 lg:left-6 lg:px-0 lg:pb-0 lg:pt-0">

@@ -466,12 +466,18 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
         handleCategorySelect(targetTab.category)
     }, [mobileCategoryTabs, activeMobileCategoryTabIndex, handleCategorySelect])
 
-    // Framer Motion swipe: Instagram-style full-frame drag with velocity-aware control
+    // Framer Motion swipe: category change via horizontal drag — mobile/tablet only (matches `lg:hidden` tab bar).
     const SWIPE_THRESHOLD = 80
     const SWIPE_VELOCITY_THRESHOLD = 250
+    const LG_BREAKPOINT_PX = 1024
     const [viewportWidth, setViewportWidth] = useState(400)
+    const [allowCategorySwipeDrag, setAllowCategorySwipeDrag] = useState(false)
     useEffect(() => {
-        const update = () => setViewportWidth(window.innerWidth)
+        const update = () => {
+            const w = window.innerWidth
+            setViewportWidth(w)
+            setAllowCategorySwipeDrag(w < LG_BREAKPOINT_PX)
+        }
         update()
         window.addEventListener('resize', update)
         return () => window.removeEventListener('resize', update)
@@ -499,6 +505,12 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
             ro.disconnect()
         }
     }, [updateTabsScrollState, mobileCategoryTabs.length])
+
+    useEffect(() => {
+        if (!allowCategorySwipeDrag) {
+            setDragOffsetX(0)
+        }
+    }, [allowCategorySwipeDrag])
 
     const handleSwipeDragEnd = useCallback((_, info) => {
         setDragOffsetX(0)
@@ -766,7 +778,7 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
                     <motion.div
                         className={`flex-1 min-h-0 overflow-y-auto overflow-x-hidden relative pb-0 touch-pan-y ${activeAssetId ? 'md:pr-[480px]' : ''}`}
                         style={{ touchAction: 'pan-y' }}
-                        drag={mobileCategoryTabs.length > 1 ? 'x' : false}
+                        drag={mobileCategoryTabs.length > 1 && allowCategorySwipeDrag ? 'x' : false}
                         dragConstraints={{ left: -dragConstraint, right: dragConstraint }}
                         dragElastic={0.12}
                         onDrag={(_, info) => setDragOffsetX(info.offset.x)}
@@ -965,7 +977,7 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
 
                     {/* Asset Drawer - Desktop (pushes grid) */}
                     {activeAsset && (
-                        <div className="hidden md:block absolute right-0 top-0 bottom-0 z-50">
+                        <div className="hidden md:block absolute right-0 top-0 bottom-0 z-[130]">
                             <AssetDrawer
                                 asset={activeAsset}
                                 onClose={() => {
@@ -994,7 +1006,7 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
                 {/* Drawer must tolerate temporary undefined asset object during async updates */}
                 {/* Only render drawer if activeAssetId is set - asset object may be temporarily undefined */}
                 {activeAssetId && (
-                    <div className="md:hidden fixed inset-0 z-50">
+                    <div className="md:hidden fixed inset-0 z-[130]">
                         <div className="absolute inset-0 bg-black/50" onClick={() => { userClosedDrawerRef.current = true; setActiveAssetId(null); setOpenDrawerWithZoom(false) }} aria-hidden="true" />
                         <AssetDrawer
                             key={activeAssetId} // Key by ID only - prevents remount on asset object changes

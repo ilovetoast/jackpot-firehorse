@@ -10,6 +10,7 @@ use App\Enums\UploadStatus;
 use App\Enums\UploadType;
 use App\Models\Asset;
 use App\Models\Brand;
+use App\Models\BrandInvitation;
 use App\Models\Category;
 use App\Models\ProstaffPeriodStat;
 use App\Models\StorageBucket;
@@ -19,6 +20,7 @@ use App\Models\User;
 use App\Services\Prostaff\AssignProstaffMember;
 use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Str;
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
 use Tests\TestCase;
@@ -152,10 +154,81 @@ class ProstaffDashboardTest extends TestCase
             ->getJson("/app/api/brands/{$this->brand->id}/prostaff/dashboard");
 
         $response->assertOk();
-        $rows = $response->json();
+        $rows = $response->json('active');
+        $this->assertIsArray($rows);
+        $this->assertSame([], $response->json('pending_invitations'));
         $this->assertCount(2, $rows);
         $ids = collect($rows)->pluck('user_id')->sort()->values()->all();
         $this->assertSame([(int) $this->prostaffA->id, (int) $this->prostaffB->id], $ids);
+    }
+
+    public function test_manager_dashboard_lists_pending_creator_invites(): void
+    {
+        BrandInvitation::create([
+            'brand_id' => $this->brand->id,
+            'email' => 'pending-creator@example.com',
+            'role' => 'contributor',
+            'metadata' => [
+                'assign_prostaff_after_accept' => true,
+                'prostaff_target_uploads' => 12,
+                'prostaff_period_type' => 'quarter',
+            ],
+            'token' => Str::random(64),
+            'invited_by' => $this->manager->id,
+            'sent_at' => now(),
+        ]);
+
+        $response = $this->actingAs($this->manager)
+            ->withSession($this->sessionFor($this->manager))
+            ->getJson("/app/api/brands/{$this->brand->id}/prostaff/dashboard");
+
+        $response->assertOk();
+        $pending = $response->json('pending_invitations');
+        $this->assertCount(1, $pending);
+        $this->assertSame('pending-creator@example.com', $pending[0]['email']);
+        $this->assertSame(12, $pending[0]['target_uploads']);
+        $this->assertSame('quarter', $pending[0]['period_type']);
+        $this->assertSame('pending_invite', $pending[0]['status']);
+    }
+
+    public function test_manager_dashboard_includes_last_upload_at_from_prostaff_assets(): void
+    {
+        $upload = $this->createUploadSession();
+        $ts = Carbon::parse('2026-04-01 15:30:00', 'UTC');
+
+        Asset::create([
+            'tenant_id' => $this->tenant->id,
+            'brand_id' => $this->brand->id,
+            'user_id' => $this->prostaffA->id,
+            'upload_session_id' => $upload->id,
+            'storage_bucket_id' => $this->bucket->id,
+            'status' => AssetStatus::VISIBLE,
+            'type' => AssetType::ASSET,
+            'title' => 'Creator upload',
+            'original_filename' => 'c.jpg',
+            'mime_type' => 'image/jpeg',
+            'storage_root_path' => 'assets/c.jpg',
+            'size_bytes' => 1024,
+            'metadata' => ['category_id' => $this->category->id],
+            'published_at' => $ts,
+            'approval_status' => ApprovalStatus::PENDING,
+            'submitted_by_prostaff' => true,
+            'prostaff_user_id' => $this->prostaffA->id,
+            'created_at' => $ts,
+            'updated_at' => $ts,
+        ]);
+
+        $response = $this->actingAs($this->manager)
+            ->withSession($this->sessionFor($this->manager))
+            ->getJson("/app/api/brands/{$this->brand->id}/prostaff/dashboard");
+
+        $response->assertOk();
+        $rowA = collect($response->json('active'))->firstWhere('user_id', (int) $this->prostaffA->id);
+        $rowB = collect($response->json('active'))->firstWhere('user_id', (int) $this->prostaffB->id);
+        $this->assertNotNull($rowA);
+        $this->assertNotNull($rowB);
+        $this->assertNotNull($rowA['last_upload_at']);
+        $this->assertNull($rowB['last_upload_at']);
     }
 
     public function test_manager_dashboard_stats_match_period_stat_row(): void
@@ -185,7 +258,7 @@ class ProstaffDashboardTest extends TestCase
             ->getJson("/app/api/brands/{$this->brand->id}/prostaff/dashboard");
 
         $response->assertOk();
-        $row = collect($response->json())->firstWhere('user_id', (int) $this->prostaffA->id);
+        $row = collect($response->json('active'))->firstWhere('user_id', (int) $this->prostaffA->id);
         $this->assertNotNull($row);
         $this->assertSame(10, $row['target_uploads']);
         $this->assertSame(3, $row['actual_uploads']);
@@ -206,10 +279,11 @@ class ProstaffDashboardTest extends TestCase
             ->getJson("/app/api/brands/{$this->brand->id}/prostaff/dashboard");
 
         $response->assertOk();
-        foreach ($response->json() as $row) {
+        foreach ($response->json('active') as $row) {
             $this->assertArrayHasKey('actual_uploads', $row);
             $this->assertArrayHasKey('completion_percentage', $row);
             $this->assertArrayHasKey('is_on_track', $row);
+            $this->assertArrayHasKey('last_upload_at', $row);
             $this->assertSame(0, $row['actual_uploads']);
             $this->assertEqualsWithDelta(0.0, (float) $row['completion_percentage'], 0.001);
             $this->assertFalse($row['is_on_track']);
@@ -260,7 +334,7 @@ class ProstaffDashboardTest extends TestCase
             ->getJson("/app/api/brands/{$this->brand->id}/prostaff/dashboard");
 
         $response->assertOk();
-        $rows = $response->json();
+        $rows = $response->json('active');
         $this->assertCount(2, $rows);
         $this->assertSame((int) $this->prostaffB->id, $rows[0]['user_id']);
         $this->assertSame(1, $rows[0]['rank']);
@@ -268,24 +342,94 @@ class ProstaffDashboardTest extends TestCase
         $this->assertSame(2, $rows[1]['rank']);
     }
 
-    public function test_prostaff_contributor_dashboard_json_returns_only_own_row(): void
+    public function test_prostaff_contributor_cannot_access_manager_creators_dashboard_json(): void
     {
         $response = $this->actingAs($this->prostaffA)
             ->withSession($this->sessionFor($this->prostaffA))
             ->getJson("/app/api/brands/{$this->brand->id}/prostaff/dashboard");
 
-        $response->assertOk();
-        $rows = $response->json();
-        $this->assertCount(1, $rows);
-        $this->assertSame((int) $this->prostaffA->id, (int) $rows[0]['user_id']);
+        $response->assertForbidden();
+        $response->assertJsonFragment(['error' => 'You do not have permission to view the prostaff dashboard.']);
     }
 
-    public function test_prostaff_contributor_can_open_creators_inertia_page(): void
+    public function test_prostaff_contributor_cannot_open_creators_list_inertia_page(): void
     {
         $this->actingAs($this->prostaffA)
             ->withSession($this->sessionFor($this->prostaffA))
             ->get("/app/brands/{$this->brand->id}/creators")
-            ->assertOk();
+            ->assertForbidden();
+    }
+
+    public function test_manager_can_view_creator_profile_inertia(): void
+    {
+        $this->actingAs($this->manager)
+            ->withSession($this->sessionFor($this->manager))
+            ->get("/app/brands/{$this->brand->id}/creators/{$this->prostaffA->id}")
+            ->assertOk()
+            ->assertInertia(fn ($page) => $page
+                ->component('Prostaff/CreatorProfile')
+                ->has('creator')
+                ->has('performance')
+                ->has('rejections')
+                ->has('membership')
+                ->where('creator.id', (int) $this->prostaffA->id)
+                ->where('canManageCreators', true));
+    }
+
+    public function test_manager_can_view_creator_profile_when_user_no_longer_on_tenant_but_still_prostaff(): void
+    {
+        $this->prostaffA->tenants()->detach();
+
+        $this->assertFalse($this->prostaffA->fresh()->belongsToTenant($this->tenant->id));
+
+        $this->actingAs($this->manager)
+            ->withSession($this->sessionFor($this->manager))
+            ->get("/app/brands/{$this->brand->id}/creators/{$this->prostaffA->id}")
+            ->assertOk()
+            ->assertInertia(fn ($page) => $page
+                ->component('Prostaff/CreatorProfile')
+                ->where('creator.id', (int) $this->prostaffA->id));
+    }
+
+    public function test_prostaff_can_view_own_creator_profile(): void
+    {
+        $this->actingAs($this->prostaffA)
+            ->withSession($this->sessionFor($this->prostaffA))
+            ->get("/app/brands/{$this->brand->id}/creators/{$this->prostaffA->id}")
+            ->assertOk()
+            ->assertInertia(fn ($page) => $page
+                ->component('Prostaff/CreatorProfile')
+                ->where('canManageCreators', false));
+    }
+
+    public function test_prostaff_can_open_cinematic_creator_progress_overview(): void
+    {
+        $this->actingAs($this->prostaffA)
+            ->withSession($this->sessionFor($this->prostaffA))
+            ->get('/app/overview/creator-progress')
+            ->assertOk()
+            ->assertInertia(fn ($page) => $page
+                ->component('Overview/CreatorProgress')
+                ->has('peer_comparison')
+                ->has('pipeline')
+                ->where('creator.id', (int) $this->prostaffA->id)
+                ->where('canManageCreators', false));
+    }
+
+    public function test_non_prostaff_redirected_from_creator_progress(): void
+    {
+        $this->actingAs($this->manager)
+            ->withSession($this->sessionFor($this->manager))
+            ->get('/app/overview/creator-progress')
+            ->assertRedirect(route('overview'));
+    }
+
+    public function test_prostaff_cannot_view_peer_creator_profile(): void
+    {
+        $this->actingAs($this->prostaffA)
+            ->withSession($this->sessionFor($this->prostaffA))
+            ->get("/app/brands/{$this->brand->id}/creators/{$this->prostaffB->id}")
+            ->assertForbidden();
     }
 
     public function test_asset_grid_filters_submitted_by_prostaff_and_prostaff_user_id(): void
@@ -435,12 +579,13 @@ class ProstaffDashboardTest extends TestCase
         $this->assertSame('Mine', Asset::find((int) $uploads[0]['asset_id'])->title);
     }
 
-    public function test_non_prostaff_cannot_call_prostaff_me(): void
+    public function test_non_prostaff_prostaff_me_returns_eligible_false(): void
     {
         $response = $this->actingAs($this->manager)
             ->withSession($this->sessionFor($this->manager))
             ->getJson('/app/api/prostaff/me?brand_id='.$this->brand->id);
 
-        $response->assertForbidden();
+        $response->assertOk();
+        $response->assertJson(['eligible' => false, 'prostaff' => false]);
     }
 }

@@ -452,6 +452,8 @@ class HandleInertiaRequests extends Middleware
                 // C9.2: Roles for upload AI controls (Admin/Brand Manager) — used by UploadAssetDialog, AssetDrawer
                 'brand_role' => ($user && $activeBrand) ? ($user->getRoleForBrand($activeBrand) ?? null) : null,
                 'tenant_role' => ($user && $tenant) ? ($user->getRoleForTenant($tenant) ?? null) : null,
+                /** Creator / prostaff — active membership on the workspace brand (overview + /api/prostaff/me). */
+                'is_prostaff_for_active_brand' => $user && $activeBrand ? $user->isProstaffForBrand($activeBrand) : false,
                 'user' => $user ? [
                     'id' => $user->id,
                     'first_name' => $user->first_name,
@@ -522,6 +524,9 @@ class HandleInertiaRequests extends Middleware
                     'can_share_public_link' => $tenant && $user
                         ? $user->mayCreatePublicDownloadLinkForTenant($tenant)
                         : true,
+                    /** Hide access + advanced create UI; company-only + default expiration (collection / no-brand + session grant). */
+                    'simple_create_modal' => $tenant && $user
+                        && $this->userShouldSeeSimpleDownloadCreateModal($user, $tenant, $brands),
                 ],
                 'brand_plan_limit_info' => $planLimitInfo ?? null, // Plan limit info for alerts
                 'effective_permissions' => $effectivePermissions, // Always array; [] when no tenant
@@ -536,7 +541,7 @@ class HandleInertiaRequests extends Middleware
                     // /app/insights/* — same rule as AnalyticsOverviewController (User::canViewBrandWorkspaceInsights)
                     'can_view_workspace_insights' => $tenant && $activeBrand && $user
                         && $user->canViewBrandWorkspaceInsights($tenant, $activeBrand),
-                    // Creators / prostaff dashboard — managers see all rows; active prostaff see self only
+                    // Creators list dashboard — managers / tenant admins / brand managers only (not individual creators)
                     'can_view_creators_dashboard' => $tenant && $activeBrand && $user
                         && app(ResolveCreatorsDashboardAccess::class)->canView($user, $tenant, $activeBrand),
                     'can_manage_creators_dashboard' => $tenant && $activeBrand && $user
@@ -695,6 +700,37 @@ class HandleInertiaRequests extends Middleware
     private function userIsCollectionOnlyForTenant(?User $user, Tenant $tenant): bool
     {
         return (bool) ($user && $user->isExternalCollectionAccessOnlyForTenant($tenant));
+    }
+
+    /**
+     * Create Download dialog: no access chooser, no advanced section — matches enforced company-only guest create.
+     *
+     * $brands is usually a Collection from brand picker building; [] on error paths — never assume array-only.
+     */
+    private function userShouldSeeSimpleDownloadCreateModal(User $user, Tenant $tenant, array|\Illuminate\Support\Collection $brands): bool
+    {
+        if (app()->bound('collection_only') && app('collection_only')) {
+            return true;
+        }
+        if ($user->isExternalCollectionAccessOnlyForTenant($tenant)) {
+            return true;
+        }
+        $brandCount = $brands instanceof \Illuminate\Support\Collection
+            ? $brands->count()
+            : count($brands);
+        if ($brandCount !== 0) {
+            return false;
+        }
+        $cid = session('collection_id');
+        if (! $cid) {
+            return false;
+        }
+
+        return $user->collectionAccessGrants()
+            ->where('collection_id', (int) $cid)
+            ->whereNotNull('accepted_at')
+            ->whereHas('collection', static fn ($q) => $q->where('tenant_id', $tenant->id))
+            ->exists();
     }
 
     /**
