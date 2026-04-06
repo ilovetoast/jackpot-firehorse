@@ -10,13 +10,50 @@ use App\Exceptions\CreatorModuleInactiveException;
 use App\Services\Prostaff\EnsureCreatorModuleEnabled;
 use App\Services\Prostaff\GetProstaffDamFilterOptions;
 use App\Services\Prostaff\GetProstaffDashboardData;
+use App\Services\Prostaff\ResolveCreatorsDashboardAccess;
 use DomainException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Inertia\Inertia;
+use Inertia\Response;
 
 class ProstaffDashboardController extends Controller
 {
+    /**
+     * GET /app/brands/{brand}/creators — Inertia shell; dashboard rows load client-side from JSON API.
+     */
+    public function page(Request $request, Brand $brand): Response
+    {
+        /** @var User $user */
+        $user = Auth::user();
+        $tenant = app('tenant');
+
+        if ($brand->tenant_id !== $tenant->id) {
+            abort(403, 'Brand does not belong to this workspace.');
+        }
+
+        $this->authorize('view', $brand);
+
+        $access = app(ResolveCreatorsDashboardAccess::class);
+        if (! $access->canView($user, $tenant, $brand)) {
+            abort(403, 'You do not have permission to view the Creators dashboard.');
+        }
+
+        return Inertia::render('Prostaff/CreatorsDashboard', [
+            'brand' => [
+                'id' => $brand->id,
+                'name' => $brand->name,
+                'slug' => $brand->slug,
+                'logo_path' => $brand->logo_path,
+                'primary_color' => $brand->primary_color,
+                'secondary_color' => $brand->secondary_color,
+                'accent_color' => $brand->accent_color,
+            ],
+            'canManageCreators' => $access->canManage($user, $tenant, $brand),
+        ]);
+    }
+
     /**
      * GET /app/api/brands/{brand}/prostaff/dashboard
      */
@@ -36,11 +73,18 @@ class ProstaffDashboardController extends Controller
             return $blocked;
         }
 
-        if (! $this->userCanViewManagerProstaffDashboard($user, $tenant, $brand)) {
+        $access = app(ResolveCreatorsDashboardAccess::class);
+        if (! $access->canView($user, $tenant, $brand)) {
             return response()->json(['error' => 'You do not have permission to view the prostaff dashboard.'], 403);
         }
 
         $rows = app(GetProstaffDashboardData::class)->managerDashboardRows($brand);
+        if (! $access->canManage($user, $tenant, $brand)) {
+            $rows = array_values(array_filter(
+                $rows,
+                static fn (array $row): bool => (int) ($row['user_id'] ?? 0) === (int) $user->id
+            ));
+        }
 
         return response()->json($rows);
     }
@@ -98,6 +142,12 @@ class ProstaffDashboardController extends Controller
             return $empty;
         }
 
+        /** @var User $user */
+        $user = Auth::user();
+        if (! app(ResolveCreatorsDashboardAccess::class)->canManage($user, $tenant, $brand)) {
+            return response()->json(['error' => 'You do not have permission to load prostaff filter options.'], 403);
+        }
+
         $options = app(GetProstaffDamFilterOptions::class)->activeMemberOptionsForBrand($brand);
 
         return response()->json($options);
@@ -130,23 +180,4 @@ class ProstaffDashboardController extends Controller
         return null;
     }
 
-    private function userCanViewManagerProstaffDashboard(User $user, Tenant $tenant, Brand $brand): bool
-    {
-        $membership = $user->activeBrandMembership($brand);
-        if ($membership === null) {
-            return false;
-        }
-
-        $brandRole = $membership['role'];
-        $tenantRole = $user->getRoleForTenant($tenant);
-        $isTenantOwnerOrAdmin = in_array($tenantRole, ['owner', 'admin'], true);
-        $isBrandManager = $brandRole === 'brand_manager';
-        $isContributor = $brandRole === 'contributor';
-
-        if ($isContributor && ! $isTenantOwnerOrAdmin && ! $isBrandManager) {
-            return false;
-        }
-
-        return true;
-    }
 }

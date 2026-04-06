@@ -44,6 +44,7 @@ export default function AgencyDashboard({
     dashboard_links = {},
     can_create_incubated_client = false,
     agency_team = [],
+    agency_team_external = [],
     agency_brands_summary = [],
 }) {
     const [dashTab, setDashTab] = useState('overview')
@@ -574,71 +575,133 @@ export default function AgencyDashboard({
                                 <div className={`${glassPanel} p-6 sm:p-8`}>
                                     <h2 className="text-lg font-semibold text-white">Team</h2>
                                     <p className={`mt-2 ${bodyMuted}`}>
-                                        People in your agency company, company roles, and brand-level roles. Rows marked “synced” were added
-                                        via client workspace access from another agency tenant.
+                                        Agency workspace members (company + brand roles) are listed first. External guests—invited with
+                                        collection-only access and no brand membership—are not agency staff; they appear separately with the
+                                        collections they can open. Rows marked “synced” were added via client workspace access from another
+                                        agency tenant.
                                     </p>
-                                    {agency_team.length > 0 ? (
-                                        <div className="mt-6 overflow-x-auto rounded-md border border-white/10">
-                                            <table className="min-w-full text-left text-sm">
-                                                <thead>
-                                                    <tr className="border-b border-white/10 text-[10px] font-semibold uppercase tracking-wider text-white/40">
-                                                        <th className="px-4 py-3 font-semibold">Member</th>
-                                                        <th className="hidden px-4 py-3 font-semibold sm:table-cell">Company role</th>
-                                                        <th className="px-4 py-3 font-semibold">Brand access</th>
-                                                    </tr>
-                                                </thead>
-                                                <tbody className="divide-y divide-white/10">
-                                                    {agency_team.map((m) => (
-                                                        <tr key={m.id} className="transition-colors hover:bg-white/[0.04]">
-                                                            <td className="px-4 py-3 align-top">
-                                                                <div className="font-medium text-white/90">{m.name}</div>
-                                                                <div className="text-xs text-white/45">{m.email}</div>
-                                                                {m.is_agency_managed && m.agency_tenant_name ? (
-                                                                    <div className="mt-1 text-[11px] text-sky-200/80">
-                                                                        Synced · {m.agency_tenant_name}
-                                                                    </div>
-                                                                ) : null}
-                                                                <div className="mt-1 text-xs text-white/40 sm:hidden">
-                                                                    {formatCompanyRole(m.company_role)}
-                                                                </div>
-                                                            </td>
-                                                            <td className="hidden px-4 py-3 align-top text-white/70 sm:table-cell">
-                                                                {formatCompanyRole(m.company_role)}
-                                                            </td>
-                                                            <td className="px-4 py-3 align-top">
-                                                                {m.brand_roles?.length ? (
-                                                                    <div className="flex flex-wrap gap-1.5">
-                                                                        {m.brand_roles.map((br) => (
-                                                                            <span
-                                                                                key={`${m.id}-${br.brand_id}`}
-                                                                                className="inline-flex max-w-full items-center gap-1 rounded-sm border border-white/10 bg-white/[0.05] px-2 py-0.5 text-xs text-white/75 transition-colors hover:border-white/20 hover:[border-left-width:3px] hover:[border-left-style:solid] hover:[border-left-color:var(--agency-team-accent)]"
-                                                                                style={
-                                                                                    {
-                                                                                        '--agency-team-accent': brandColor,
-                                                                                    }
-                                                                                }
-                                                                            >
-                                                                                <span className="max-w-[140px] truncate">{br.brand_name}</span>
-                                                                                <span className="text-white/40">·</span>
-                                                                                <span className="shrink-0 capitalize text-white/50">
-                                                                                    {br.role}
-                                                                                </span>
-                                                                            </span>
-                                                                        ))}
-                                                                    </div>
-                                                                ) : (
-                                                                    <span className="text-xs text-white/35">No brand access</span>
-                                                                )}
-                                                            </td>
-                                                        </tr>
-                                                    ))}
-                                                </tbody>
-                                            </table>
-                                        </div>
-                                    ) : (
+                                    {agency_team.length === 0 && agency_team_external.length === 0 ? (
                                         <p className={`mt-6 ${bodyMuted}`}>No team members loaded.</p>
+                                    ) : (
+                                        <>
+                                            <h3 className="mt-6 text-sm font-semibold text-white/85">Agency team</h3>
+                                            {agency_team.length > 0 ? (
+                                                <div className="mt-3 overflow-x-auto rounded-md border border-white/10">
+                                                    <table className="min-w-full text-left text-sm">
+                                                        <thead>
+                                                            <tr className="border-b border-white/10 text-[10px] font-semibold uppercase tracking-wider text-white/40">
+                                                                <th className="px-4 py-3 font-semibold">Member</th>
+                                                                <th className="hidden px-4 py-3 font-semibold sm:table-cell">Company role</th>
+                                                                <th className="px-4 py-3 font-semibold">Brand access</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody className="divide-y divide-white/10">
+                                                            {agency_team.map((m) => (
+                                                                <tr key={m.id} className="transition-colors hover:bg-white/[0.04]">
+                                                                    <td className="px-4 py-3 align-top">
+                                                                        <div className="font-medium text-white/90">{m.name}</div>
+                                                                        <div className="text-xs text-white/45">{m.email}</div>
+                                                                        {m.is_agency_managed && m.agency_tenant_name ? (
+                                                                            <div className="mt-1 text-[11px] text-sky-200/80">
+                                                                                Synced · {m.agency_tenant_name}
+                                                                            </div>
+                                                                        ) : null}
+                                                                        <div className="mt-1 text-xs text-white/40 sm:hidden">
+                                                                            {formatCompanyRole(m.company_role)}
+                                                                        </div>
+                                                                    </td>
+                                                                    <td className="hidden px-4 py-3 align-top text-white/70 sm:table-cell">
+                                                                        {formatCompanyRole(m.company_role)}
+                                                                    </td>
+                                                                    <td className="px-4 py-3 align-top">
+                                                                        {m.brand_roles?.length ? (
+                                                                            <div className="flex flex-wrap gap-1.5">
+                                                                                {m.brand_roles.map((br) => (
+                                                                                    <span
+                                                                                        key={`${m.id}-${br.brand_id}`}
+                                                                                        className="inline-flex max-w-full items-center gap-1 rounded-sm border border-white/10 bg-white/[0.05] px-2 py-0.5 text-xs text-white/75 transition-colors hover:border-white/20 hover:[border-left-width:3px] hover:[border-left-style:solid] hover:[border-left-color:var(--agency-team-accent)]"
+                                                                                        style={
+                                                                                            {
+                                                                                                '--agency-team-accent': brandColor,
+                                                                                            }
+                                                                                        }
+                                                                                    >
+                                                                                        <span className="max-w-[140px] truncate">{br.brand_name}</span>
+                                                                                        <span className="text-white/40">·</span>
+                                                                                        <span className="shrink-0 capitalize text-white/50">
+                                                                                            {br.role}
+                                                                                        </span>
+                                                                                    </span>
+                                                                                ))}
+                                                                            </div>
+                                                                        ) : (
+                                                                            <span className="text-xs text-white/35">No brand access</span>
+                                                                        )}
+                                                                    </td>
+                                                                </tr>
+                                                            ))}
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            ) : (
+                                                <p className={`mt-3 ${bodyMuted}`}>No agency team members in this list.</p>
+                                            )}
+
+                                            {agency_team_external.length > 0 ? (
+                                                <>
+                                                    <h3 className="mt-8 text-sm font-semibold text-amber-200/90">External access</h3>
+                                                    <p className={`mt-2 max-w-2xl ${bodySmall}`}>
+                                                        Collection-only guests: they have a company login for this workspace but no brand
+                                                        membership. They are not part of your agency team.
+                                                    </p>
+                                                    <div className="mt-3 overflow-x-auto rounded-md border border-amber-500/20 bg-amber-500/[0.04]">
+                                                        <table className="min-w-full text-left text-sm">
+                                                            <thead>
+                                                                <tr className="border-b border-white/10 text-[10px] font-semibold uppercase tracking-wider text-white/40">
+                                                                    <th className="px-4 py-3 font-semibold">Member</th>
+                                                                    <th className="hidden px-4 py-3 font-semibold sm:table-cell">Company role</th>
+                                                                    <th className="px-4 py-3 font-semibold">Collections</th>
+                                                                </tr>
+                                                            </thead>
+                                                            <tbody className="divide-y divide-white/10">
+                                                                {agency_team_external.map((m) => (
+                                                                    <tr key={m.id} className="transition-colors hover:bg-white/[0.04]">
+                                                                        <td className="px-4 py-3 align-top">
+                                                                            <div className="font-medium text-white/90">{m.name}</div>
+                                                                            <div className="text-xs text-white/45">{m.email}</div>
+                                                                            <div className="mt-1 text-xs text-white/40 sm:hidden">
+                                                                                {formatCompanyRole(m.company_role)}
+                                                                            </div>
+                                                                        </td>
+                                                                        <td className="hidden px-4 py-3 align-top text-white/70 sm:table-cell">
+                                                                            {formatCompanyRole(m.company_role)}
+                                                                        </td>
+                                                                        <td className="px-4 py-3 align-top">
+                                                                            {m.collections?.length ? (
+                                                                                <div className="flex flex-wrap gap-1.5">
+                                                                                    {m.collections.map((c) => (
+                                                                                        <span
+                                                                                            key={`${m.id}-col-${c.id}`}
+                                                                                            className="inline-flex max-w-full items-center rounded-sm border border-amber-500/25 bg-amber-500/10 px-2 py-0.5 text-xs text-amber-100/90"
+                                                                                        >
+                                                                                            <span className="max-w-[200px] truncate">{c.name}</span>
+                                                                                        </span>
+                                                                                    ))}
+                                                                                </div>
+                                                                            ) : (
+                                                                                <span className="text-xs text-white/35">Collection access</span>
+                                                                            )}
+                                                                        </td>
+                                                                    </tr>
+                                                                ))}
+                                                            </tbody>
+                                                        </table>
+                                                    </div>
+                                                </>
+                                            ) : null}
+                                        </>
                                     )}
-                                    {!canManageAgencyTeam && agency_team.length > 0 ? (
+                                    {!canManageAgencyTeam && (agency_team.length > 0 || agency_team_external.length > 0) ? (
                                         <p className={`mt-4 ${bodySmall}`}>
                                             Ask an owner or admin to change roles or invites in Company settings → Team.
                                         </p>

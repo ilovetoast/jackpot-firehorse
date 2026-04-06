@@ -27,7 +27,10 @@ function formatAnalyticsDate(iso) {
 const SETTINGS_ERROR_KEYS = ['message', 'password', 'access_mode', 'user_ids', 'landing_copy']
 
 export default function EditDownloadSettingsModal({ open, download, onClose, onSaved }) {
-  const { download_features: features = {} } = usePage().props
+  const { download_features: features = {}, auth = {}, collection_only: collectionOnlySession = false } = usePage().props
+  const isCollectionGuest = auth?.is_collection_guest_experience === true
+  const blockPublicLink = collectionOnlySession === true || isCollectionGuest
+  const canSharePublic = (auth?.downloads?.can_share_public_link ?? true) && !blockPublicLink
   const { bannerMessage: pageBannerError, getFieldError } = useDownloadErrors(SETTINGS_ERROR_KEYS)
   const canBrand = !!features.restrict_access_brand
   // Multi-brand safety: brand-based access only when all assets are from a single brand (hard constraint)
@@ -37,6 +40,9 @@ export default function EditDownloadSettingsModal({ open, download, onClose, onS
   const isMultiBrand = canBrand && !canRestrictToBrand
   const canCompany = !!features.restrict_access_company
   const canUsers = !!features.restrict_access_users
+  const showSpecificUsersOption = canUsers && !blockPublicLink
+  const showCompanyOption = canCompany || !canSharePublic
+  const showBrandOption = canBrand && !isCollectionGuest
   const canPasswordProtect = !!features.password_protection
 
   const [activeTab, setActiveTab] = useState('settings')
@@ -56,15 +62,18 @@ export default function EditDownloadSettingsModal({ open, download, onClose, onS
     if (!open || !download) return
     setActiveTab('settings')
     const canRestrict = download.can_restrict_to_brand ?? !(download.brands && download.brands.length > 1)
-    const mode = download.access_mode || 'public'
-    setAccessMode(mode === 'brand' && !canRestrict ? 'public' : mode)
+    let mode = download.access_mode || 'public'
+    if (mode === 'brand' && !canRestrict) mode = 'public'
+    if (mode === 'public' && !canSharePublic) mode = 'company'
+    if ((mode === 'users' || mode === 'restricted') && !showSpecificUsersOption) mode = 'company'
+    setAccessMode(mode)
     setAllowedUserIds(Array.isArray(download.allowed_user_ids) ? [...download.allowed_user_ids] : [])
     setPassword('')
     setShowCurrentPassword(false)
     setError(null)
     setAnalytics({ loading: false, error: null, data: null })
     analyticsFetchedRef.current = false
-  }, [open, download])
+  }, [open, download, canSharePublic, showSpecificUsersOption])
 
   useEffect(() => {
     if (!open || !download || activeTab !== 'analytics') return
@@ -85,7 +94,7 @@ export default function EditDownloadSettingsModal({ open, download, onClose, onS
   }, [open, download, activeTab, analytics.loading, analytics.data])
 
   useEffect(() => {
-    if (!open || accessMode !== 'users' || !canUsers) return
+    if (!open || accessMode !== 'users' || !showSpecificUsersOption) return
     setLoadingUsers(true)
     fetch(route('downloads.company-users'), {
       method: 'GET',
@@ -96,7 +105,7 @@ export default function EditDownloadSettingsModal({ open, download, onClose, onS
       .then((data) => setCompanyUsers(data.users || []))
       .catch(() => setCompanyUsers([]))
       .finally(() => setLoadingUsers(false))
-  }, [open, accessMode, canUsers])
+  }, [open, accessMode, showSpecificUsersOption])
 
   const toggleUser = (userId) => {
     setAllowedUserIds((prev) =>
@@ -133,7 +142,7 @@ export default function EditDownloadSettingsModal({ open, download, onClose, onS
 
   if (!open) return null
 
-  const hasAccessOptions = canBrand || canCompany || canUsers
+  const hasAccessOptions = showBrandOption || showCompanyOption || showSpecificUsersOption || canSharePublic
   const showPassword = canPasswordProtect
 
   return (
@@ -238,18 +247,20 @@ export default function EditDownloadSettingsModal({ open, download, onClose, onS
               <div className="mb-4">
                 <label className="block text-sm font-medium text-gray-700">Access</label>
                 <div className="mt-2 space-y-2">
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="radio"
-                      name="edit_access_mode"
-                      value="public"
-                      checked={accessMode === 'public'}
-                      onChange={() => setAccessMode('public')}
-                      className="h-4 w-4 border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                    />
-                    <span className="text-sm text-gray-700">Public (anyone with the link)</span>
-                  </label>
-                  {canBrand && (
+                  {canSharePublic && (
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="radio"
+                        name="edit_access_mode"
+                        value="public"
+                        checked={accessMode === 'public'}
+                        onChange={() => setAccessMode('public')}
+                        className="h-4 w-4 border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                      />
+                      <span className="text-sm text-gray-700">Public (anyone with the link)</span>
+                    </label>
+                  )}
+                  {showBrandOption && (
                     <>
                       <label className={`flex items-center gap-2 ${isMultiBrand ? 'cursor-not-allowed opacity-75' : ''}`}>
                         <input
@@ -270,7 +281,7 @@ export default function EditDownloadSettingsModal({ open, download, onClose, onS
                       )}
                     </>
                   )}
-                  {canCompany && (
+                  {showCompanyOption && (
                     <label className="flex items-center gap-2">
                       <input
                         type="radio"
@@ -280,10 +291,10 @@ export default function EditDownloadSettingsModal({ open, download, onClose, onS
                         onChange={() => setAccessMode('company')}
                         className="h-4 w-4 border-gray-300 text-indigo-600 focus:ring-indigo-500"
                       />
-                      <span className="text-sm text-gray-700">Company members</span>
+                      <span className="text-sm text-gray-700">Company members (sign-in required)</span>
                     </label>
                   )}
-                  {canUsers && (
+                  {showSpecificUsersOption && (
                     <label className="flex items-center gap-2">
                       <input
                         type="radio"
@@ -297,7 +308,7 @@ export default function EditDownloadSettingsModal({ open, download, onClose, onS
                     </label>
                   )}
                 </div>
-                {accessMode === 'users' && canUsers && (
+                {accessMode === 'users' && showSpecificUsersOption && (
                   <div className="mt-3 max-h-40 overflow-y-auto rounded border border-gray-200 bg-gray-50 p-2">
                     {loadingUsers ? (
                       <p className="text-sm text-gray-500">Loading users…</p>

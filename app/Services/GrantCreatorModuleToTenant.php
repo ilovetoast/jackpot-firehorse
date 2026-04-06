@@ -7,6 +7,7 @@ use App\Models\Tenant;
 use App\Models\TenantModule;
 use App\Models\User;
 use DateTimeInterface;
+use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 
 /**
@@ -31,31 +32,38 @@ final class GrantCreatorModuleToTenant
             throw new InvalidArgumentException('Grant status must be active or trial.');
         }
 
-        /** @var TenantModule $module */
-        $module = TenantModule::query()->updateOrCreate(
-            [
-                'tenant_id' => $tenant->id,
-                'module_key' => TenantModule::KEY_CREATOR,
-            ],
-            [
-                'status' => $status,
-                'expires_at' => $expiresAt,
-                'granted_by_admin' => true,
-            ]
-        );
+        return DB::transaction(function () use ($tenant, $expiresAt, $grantedBy, $status): TenantModule {
+            $module = TenantModule::query()
+                ->where('tenant_id', $tenant->id)
+                ->where('module_key', TenantModule::KEY_CREATOR)
+                ->lockForUpdate()
+                ->first();
 
-        ActivityRecorder::record(
-            tenant: $tenant,
-            eventType: EventType::CREATOR_MODULE_ADMIN_GRANTED,
-            subject: $module,
-            actor: $grantedBy,
-            brand: null,
-            metadata: [
-                'expires_at' => $expiresAt->format(DATE_ATOM),
-                'status' => $status,
-            ]
-        );
+            if (! $module) {
+                $module = new TenantModule([
+                    'tenant_id' => $tenant->id,
+                    'module_key' => TenantModule::KEY_CREATOR,
+                ]);
+            }
 
-        return $module->fresh() ?? $module;
+            $module->status = $status;
+            $module->expires_at = $expiresAt;
+            $module->granted_by_admin = true;
+            $module->save();
+
+            ActivityRecorder::record(
+                tenant: $tenant,
+                eventType: EventType::CREATOR_MODULE_ADMIN_GRANTED,
+                subject: $module,
+                actor: $grantedBy,
+                brand: null,
+                metadata: [
+                    'expires_at' => $expiresAt->format(DATE_ATOM),
+                    'status' => $status,
+                ]
+            );
+
+            return $module->fresh() ?? $module;
+        });
     }
 }

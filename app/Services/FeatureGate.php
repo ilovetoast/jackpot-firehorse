@@ -8,10 +8,10 @@ use App\Models\TenantModule;
 
 /**
  * Phase AF-5: Feature Gate Service
- * 
+ *
  * Gates access to approval workflow features based on tenant plan.
  * Non-destructive: preserves data on downgrade, only gates access.
- * 
+ *
  * Phase M-2: Extended with metadata approval gating (company + brand level).
  */
 class FeatureGate
@@ -25,27 +25,22 @@ class FeatureGate
 
     /**
      * Check if tenant has access to a feature.
-     * 
-     * @param Tenant $tenant
-     * @param string $feature Feature key (e.g., 'approvals.enabled', 'notifications.enabled')
-     * @return bool
+     *
+     * @param  string  $feature  Feature key (e.g., 'approvals.enabled', 'notifications.enabled')
      */
     public function allows(Tenant $tenant, string $feature): bool
     {
         $planName = $this->planService->getCurrentPlan($tenant);
         $plan = config("plans.{$planName}", config('plans.free'));
-        
+
         // Check approval_features array
         $approvalFeatures = $plan['approval_features'] ?? [];
-        
+
         return $approvalFeatures[$feature] ?? false;
     }
 
     /**
      * Check if approvals are enabled for tenant.
-     * 
-     * @param Tenant $tenant
-     * @return bool
      */
     public function approvalsEnabled(Tenant $tenant): bool
     {
@@ -54,9 +49,6 @@ class FeatureGate
 
     /**
      * Check if approval notifications are enabled for tenant.
-     * 
-     * @param Tenant $tenant
-     * @return bool
      */
     public function notificationsEnabled(Tenant $tenant): bool
     {
@@ -65,9 +57,6 @@ class FeatureGate
 
     /**
      * Check if approval summaries are enabled for tenant.
-     * 
-     * @param Tenant $tenant
-     * @return bool
      */
     public function approvalSummariesEnabled(Tenant $tenant): bool
     {
@@ -76,9 +65,6 @@ class FeatureGate
 
     /**
      * Get human-readable plan name for feature gating messages.
-     * 
-     * @param Tenant $tenant
-     * @return string
      */
     public function getRequiredPlanName(Tenant $tenant): string
     {
@@ -89,21 +75,19 @@ class FeatureGate
                 return ucfirst($planName);
             }
         }
-        
+
         return 'Pro';
     }
 
     /**
      * C10: Check if tenant has Public Collections feature (plan-gated; e.g. Enterprise).
      * When false: public toggle is hidden/disabled; public routes return 404.
-     *
-     * @param Tenant $tenant
-     * @return bool
      */
     public function publicCollectionsEnabled(Tenant $tenant): bool
     {
         $planName = $this->planService->getCurrentPlan($tenant);
         $plan = config("plans.{$planName}", config('plans.free'));
+
         return (bool) ($plan['public_collections_enabled'] ?? false);
     }
 
@@ -114,6 +98,7 @@ class FeatureGate
     {
         $planName = $this->planService->getCurrentPlan($tenant);
         $plan = config("plans.{$planName}", config('plans.free'));
+
         return (bool) ($plan['public_collection_downloads_enabled'] ?? false);
     }
 
@@ -185,10 +170,6 @@ class FeatureGate
      *
      * Optional per-brand opt-out: `brand.settings.metadata_approval_enabled === false` (must be explicitly false).
      * Missing key = follow company (workflow on when company enabled).
-     *
-     * @param Tenant $company
-     * @param Brand $brand
-     * @return bool
      */
     public function metadataApprovalEnabled(Tenant $company, Brand $brand): bool
     {
@@ -213,28 +194,26 @@ class FeatureGate
     /**
      * Creator (Prostaff) module: tenant add-on row in {@see tenant_modules}.
      *
-     * True when status is active or trial, optional expiry is still in the future (or null),
-     * and admin grants include a required {@see TenantModule::$expires_at}.
+     * Single-query entitlement: active/trial, unexpired window, and admin grants must carry a future {@see TenantModule::$expires_at}.
      */
     public function creatorModuleEnabled(Tenant $tenant): bool
     {
-        $row = TenantModule::query()
-            ->where('tenant_id', $tenant->id)
-            ->where('module_key', TenantModule::KEY_CREATOR)
-            ->first();
-
-        if ($row === null) {
-            return false;
-        }
-
-        if ($row->granted_by_admin && $row->expires_at === null) {
-            return false;
-        }
-
         return TenantModule::query()
             ->where('tenant_id', $tenant->id)
             ->where('module_key', TenantModule::KEY_CREATOR)
-            ->active()
+            ->whereIn('status', ['active', 'trial'])
+            ->where(function ($q): void {
+                $q->whereNull('expires_at')
+                    ->orWhere('expires_at', '>', now());
+            })
+            ->where(function ($q): void {
+                $q->where('granted_by_admin', false)
+                    ->orWhere(function ($q2): void {
+                        $q2->where('granted_by_admin', true)
+                            ->whereNotNull('expires_at')
+                            ->where('expires_at', '>', now());
+                    });
+            })
             ->exists();
     }
 }

@@ -268,13 +268,24 @@ class ProstaffDashboardTest extends TestCase
         $this->assertSame(2, $rows[1]['rank']);
     }
 
-    public function test_prostaff_contributor_cannot_access_manager_dashboard(): void
+    public function test_prostaff_contributor_dashboard_json_returns_only_own_row(): void
     {
         $response = $this->actingAs($this->prostaffA)
             ->withSession($this->sessionFor($this->prostaffA))
             ->getJson("/app/api/brands/{$this->brand->id}/prostaff/dashboard");
 
-        $response->assertForbidden();
+        $response->assertOk();
+        $rows = $response->json();
+        $this->assertCount(1, $rows);
+        $this->assertSame((int) $this->prostaffA->id, (int) $rows[0]['user_id']);
+    }
+
+    public function test_prostaff_contributor_can_open_creators_inertia_page(): void
+    {
+        $this->actingAs($this->prostaffA)
+            ->withSession($this->sessionFor($this->prostaffA))
+            ->get("/app/brands/{$this->brand->id}/creators")
+            ->assertOk();
     }
 
     public function test_asset_grid_filters_submitted_by_prostaff_and_prostaff_user_id(): void

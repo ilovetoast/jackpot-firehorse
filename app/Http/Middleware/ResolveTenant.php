@@ -74,6 +74,23 @@ class ResolveTenant
 
         // Resolve active brand ($user already set above when verifying tenant membership)
         $user = $user ?? $request->user();
+
+        // C12: Match session to the URL collection before reading brand_id (avoids wrong collection_only + 403 chains).
+        if ($user && $request->routeIs(['collection-invite.landing', 'collection-invite.view'])) {
+            $routeCollection = $request->route('collection');
+            if ($routeCollection instanceof Collection && (int) $routeCollection->tenant_id === (int) $tenant->id) {
+                $hasGrant = $user->collectionAccessGrants()
+                    ->where('collection_id', $routeCollection->id)
+                    ->whereNotNull('accepted_at')
+                    ->exists();
+                $noBrandInTenant = ! $user->brands()->where('tenant_id', $tenant->id)->whereNull('brand_user.removed_at')->exists();
+                if ($hasGrant && $noBrandInTenant) {
+                    session(['collection_id' => $routeCollection->id]);
+                    session()->forget('brand_id');
+                }
+            }
+        }
+
         $brandId = session('brand_id');
 
         // Get user's tenant role to determine access

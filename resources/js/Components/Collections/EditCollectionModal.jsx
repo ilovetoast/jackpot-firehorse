@@ -1,6 +1,6 @@
 /**
- * Collection edit: name, description, access (downloads-style paths + clear internal vs external UX).
- * Stats tab: composition + download links created from this collection (see download `collection_id` tagging).
+ * Collection edit: Settings (name, description), Access & team (visibility, roles, teammates, guests),
+ * Stats (composition + download links from this collection).
  */
 import { useState, useEffect, useCallback, useRef } from 'react'
 import {
@@ -14,6 +14,7 @@ import {
     GlobeAltIcon,
     ChartBarIcon,
     Cog6ToothIcon,
+    UserGroupIcon,
 } from '@heroicons/react/24/outline'
 import Avatar from '../Avatar'
 
@@ -108,6 +109,7 @@ export default function EditCollectionModal({
     const [activeTab, setActiveTab] = useState('settings')
     const [stats, setStats] = useState({ loading: false, error: null, data: null })
     const statsFetchedRef = useRef(false)
+    const [externalAccessCountsHydrated, setExternalAccessCountsHydrated] = useState(false)
 
     const showRolePickers = accessMode === 'role_limited' || accessMode === 'invite_only'
     const showInternalSection = accessMode === 'role_limited' || accessMode === 'invite_only'
@@ -150,7 +152,10 @@ export default function EditCollectionModal({
                 setAccessGrants([])
                 setAccessPending([])
             })
-            .finally(() => setAccessLoading(false))
+            .finally(() => {
+                setAccessLoading(false)
+                setExternalAccessCountsHydrated(true)
+            })
     }, [collection?.id, allowsExternalGuests, showRolePickers])
 
     useEffect(() => {
@@ -171,6 +176,7 @@ export default function EditCollectionModal({
             setActiveTab('settings')
             setStats({ loading: false, error: null, data: null })
             statsFetchedRef.current = false
+            setExternalAccessCountsHydrated(false)
         }
     }, [open, collection])
 
@@ -192,20 +198,21 @@ export default function EditCollectionModal({
     }, [open, collection?.id, activeTab, stats.loading, stats.data])
 
     useEffect(() => {
-        if (!open || !collection?.id || !showInternalSection) return
+        if (!open || !collection?.id || activeTab !== 'access' || !showInternalSection) return
         loadInternalData()
-    }, [open, collection?.id, showInternalSection, loadInternalData])
+    }, [open, collection?.id, activeTab, showInternalSection, loadInternalData])
 
     useEffect(() => {
-        if (!open || !collection?.id || !showExternalSection) {
+        if (!open || !collection?.id || activeTab !== 'access' || !showExternalSection) {
             if (!showExternalSection) {
                 setAccessGrants([])
                 setAccessPending([])
+                setExternalAccessCountsHydrated(false)
             }
             return
         }
         loadExternalAccess()
-    }, [open, collection?.id, showExternalSection, loadExternalAccess])
+    }, [open, collection?.id, activeTab, showExternalSection, loadExternalAccess])
 
     const toggleRole = (roleId) => {
         setAllowedBrandRoles((prev) =>
@@ -369,6 +376,12 @@ export default function EditCollectionModal({
     const memberUserIds = new Set(internalMembers.map((m) => m.user_id).filter(Boolean))
     const addableUsers = brandUsers.filter((u) => !memberUserIds.has(u.id))
 
+    const serverExternalTotal =
+        (collection?.external_guest_grants_count ?? 0) + (collection?.external_guest_invites_count ?? 0)
+    const liveExternalTotal = accessGrants.length + accessPending.length
+    const showAccessTabExternalBadge =
+        externalAccessCountsHydrated && showExternalSection ? liveExternalTotal > 0 : serverExternalTotal > 0
+
     if (!open) return null
 
     return (
@@ -405,6 +418,28 @@ export default function EditCollectionModal({
                             </button>
                             <button
                                 type="button"
+                                onClick={() => setActiveTab('access')}
+                                aria-label={
+                                    showAccessTabExternalBadge
+                                        ? 'Access and team, external guests have access or pending invites'
+                                        : 'Access and team'
+                                }
+                                className={`border-b-2 py-2.5 pl-3 pr-4 text-sm font-medium sm:pl-4 sm:pr-5 ${
+                                    activeTab === 'access'
+                                        ? 'border-indigo-600 text-indigo-600'
+                                        : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
+                                }`}
+                            >
+                                <span className="relative inline-flex items-center gap-2">
+                                    <UserGroupIcon className="h-4 w-4 shrink-0" />
+                                    Access & team
+                                    {showAccessTabExternalBadge ? (
+                                        <span className="absolute -right-2 -top-1 flex h-2.5 w-2.5 rounded-full bg-amber-500 ring-2 ring-white" />
+                                    ) : null}
+                                </span>
+                            </button>
+                            <button
+                                type="button"
                                 onClick={() => setActiveTab('stats')}
                                 className={`border-b-2 py-2.5 px-3 text-sm font-medium sm:px-4 ${
                                     activeTab === 'stats'
@@ -418,13 +453,13 @@ export default function EditCollectionModal({
                                 </span>
                             </button>
                         </nav>
-                        {activeTab === 'settings' && (
                         <form onSubmit={handleSubmit}>
-                            {error && (
+                            {error && (activeTab === 'settings' || activeTab === 'access') && (
                                 <div className="mb-4 rounded-md bg-red-50 p-3 text-sm text-red-700">
                                     {error}
                                 </div>
                             )}
+                            {activeTab === 'settings' && (
                             <div className="space-y-5">
                                 <div>
                                     <label htmlFor="edit-collection-name" className="block text-sm font-medium text-gray-700">
@@ -455,11 +490,14 @@ export default function EditCollectionModal({
                                         disabled={submitting}
                                     />
                                 </div>
-
+                            </div>
+                            )}
+                            {activeTab === 'access' && (
+                            <div className="space-y-5">
                                 <div>
                                     <span className="block text-sm font-medium text-gray-900">Who can view this collection</span>
                                     <p className="mt-0.5 text-xs text-gray-500">
-                                        Pick a baseline. You can add named teammates and optional isolated guests in the sections below.
+                                        Pick a baseline, then add teammates or isolated guests below. Save when you are done.
                                     </p>
                                     <fieldset className="mt-3 space-y-2" disabled={submitting}>
                                         <legend className="sr-only">Access mode</legend>
@@ -790,6 +828,8 @@ export default function EditCollectionModal({
                                     </>
                                 )}
                             </div>
+                            )}
+                            {(activeTab === 'settings' || activeTab === 'access') && (
                             <div className="mt-6 flex justify-end gap-3 pt-4 border-t border-gray-100">
                                 <button
                                     type="button"
@@ -807,8 +847,8 @@ export default function EditCollectionModal({
                                     {submitting ? 'Saving…' : 'Save'}
                                 </button>
                             </div>
+                            )}
                         </form>
-                        )}
                         {activeTab === 'stats' && (
                             <div className="space-y-4 pb-1">
                                 {stats.loading && <p className="text-sm text-gray-500">Loading stats…</p>}

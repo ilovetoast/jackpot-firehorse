@@ -114,6 +114,18 @@ class UploadCompletionService
         // Refresh to get latest state
         $uploadSession->refresh();
 
+        // Creator module: fail before any upload-side mutation (parity with downstream check + replace paths).
+        $brandIdForCreatorGate = app()->bound('brand')
+            ? (int) app('brand')->id
+            : (int) $uploadSession->brand_id;
+        if ($this->isProstaffUploader($userId, $brandIdForCreatorGate)) {
+            $tenantForGate = Tenant::query()->find($uploadSession->tenant_id);
+            if ($tenantForGate === null) {
+                throw new \RuntimeException('Tenant context is missing for this upload.');
+            }
+            app(EnsureCreatorModuleEnabled::class)->assertEnabled($tenantForGate);
+        }
+
         // Phase J.3.1 / Phase 6.5: Handle replace mode (plan-aware: version vs in-place)
         if ($uploadSession->mode === 'replace' && $uploadSession->asset_id) {
             // For replace mode, comment is passed via metadata array (hacky but works with existing finalize flow)
@@ -362,14 +374,6 @@ class UploadCompletionService
         }
 
         $isProstaffUpload = $this->isProstaffUploader($userId, $targetBrandId);
-
-        if ($isProstaffUpload) {
-            $tenantForGate = Tenant::query()->find($uploadSession->tenant_id);
-            if ($tenantForGate === null) {
-                throw new \RuntimeException('Tenant context is missing for this upload.');
-            }
-            app(EnsureCreatorModuleEnabled::class)->assertEnabled($tenantForGate);
-        }
 
         // Wrap asset creation and status update in transaction for atomicity
         // This ensures that if asset creation fails, status doesn't change

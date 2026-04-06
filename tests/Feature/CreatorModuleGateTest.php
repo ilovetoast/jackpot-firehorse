@@ -6,6 +6,7 @@ use App\Enums\AssetType;
 use App\Enums\StorageBucketStatus;
 use App\Enums\UploadStatus;
 use App\Enums\UploadType;
+use App\Exceptions\CreatorModuleInactiveException;
 use App\Models\Brand;
 use App\Models\Category;
 use App\Models\ProstaffMembership;
@@ -20,7 +21,6 @@ use App\Services\UploadCompletionService;
 use Aws\Result;
 use Aws\S3\S3Client;
 use Carbon\Carbon;
-use DomainException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
@@ -221,8 +221,8 @@ class CreatorModuleGateTest extends TestCase
 
     public function test_assign_prostaff_throws_when_module_disabled(): void
     {
-        $this->expectException(DomainException::class);
-        $this->expectExceptionMessage('Creator module is not active for this tenant.');
+        $this->expectException(CreatorModuleInactiveException::class);
+        $this->expectExceptionMessage('Creator Module is no longer active. Reactivate to continue managing your creators.');
 
         app(AssignProstaffMember::class)->assign($this->contributor, $this->brand, []);
     }
@@ -242,6 +242,10 @@ class CreatorModuleGateTest extends TestCase
             ->getJson("/app/api/brands/{$this->brand->id}/prostaff/dashboard");
 
         $response->assertForbidden();
+        $response->assertJson([
+            'error' => 'creator_module_inactive',
+            'action' => 'upgrade',
+        ]);
     }
 
     public function test_prostaff_options_empty_when_module_disabled(): void
@@ -278,8 +282,8 @@ class CreatorModuleGateTest extends TestCase
             'uploaded_size' => 1024,
         ]);
 
-        $this->expectException(DomainException::class);
-        $this->expectExceptionMessage('Creator module is not active for this tenant.');
+        $this->expectException(CreatorModuleInactiveException::class);
+        $this->expectExceptionMessage('Creator Module is no longer active. Reactivate to continue managing your creators.');
 
         $this->completionService->complete(
             $uploadSession,

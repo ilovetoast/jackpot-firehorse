@@ -18,11 +18,17 @@ import {
     RectangleGroupIcon,
     SparklesIcon,
     Squares2X2Icon,
+    UserGroupIcon,
 } from '@heroicons/react/24/outline'
 
 export default function AppNav({ brand, tenant, variant, hideWorkspaceAppNav = false, hideAgencyStrip = false }) {
     const page = usePage()
-    const { auth, collection_only: collectionOnly, collection_only_collection: collectionOnlyCollection, collection_only_collections: collectionOnlyCollections = [] } = page.props
+    const {
+        auth,
+        collection_only: collectionOnly,
+        collection_only_collection: collectionOnlyCollection,
+        collection_only_collections: collectionOnlyCollections = [],
+    } = page.props
     const showBrandGuidelinesNav = auth?.permissions?.show_brand_guidelines_nav === true
     const [showPlanAlert, setShowPlanAlert] = useState(false)
     const [collectionsDropdownOpen, setCollectionsDropdownOpen] = useState(false)
@@ -125,6 +131,9 @@ export default function AppNav({ brand, tenant, variant, hideWorkspaceAppNav = f
         collectionOnlyCollection ||
         (collectionOnlyCollections && collectionOnlyCollections.length > 0)
     )
+    /** Backend: collection grants but no brand membership (nav + asset view may omit `collection_only` container). */
+    const isCollectionGuestExperience = Boolean(auth?.is_collection_guest_experience)
+    const isExternalCollectionChrome = Boolean(isCollectionOnlyNav || isCollectionGuestExperience)
     // When on collection-access URL, parse current collection id for Collections link (fallback when backend didn't send collection_only_collection)
     const collectionIdFromUrl = (() => {
         const m = currentUrl.match(/\/collection-access\/([^/]+)/)
@@ -134,7 +143,17 @@ export default function AppNav({ brand, tenant, variant, hideWorkspaceAppNav = f
     const effectiveCollectionsList = (collectionOnlyCollections && collectionOnlyCollections.length > 0)
         ? collectionOnlyCollections
         : (effectiveCollection ? [effectiveCollection] : [])
-    
+    /** Brand for logo/accent when URL fallback omitted `brand` (match row from collection_only_collections). */
+    const collectionBrandForLogo =
+        effectiveCollection?.brand
+        ?? (effectiveCollection?.id && Array.isArray(collectionOnlyCollections) && collectionOnlyCollections.length > 0
+            ? collectionOnlyCollections.find((c) => String(c.id) === String(effectiveCollection.id))?.brand
+            : null)
+        ?? (collectionOnlyCollections?.length === 1 ? collectionOnlyCollections[0].brand : null)
+    const collectionNavAccent = collectionBrandForLogo?.primary_color || '#6366f1'
+    /** Main nav tab always reads "Collections" like internal users (not the current collection name). */
+    const collectionMainNavTabLabel = 'Collections'
+
     // Admin/owner: have team.manage (backend effective_permissions) — plan limit banner
     const hasAdminOrOwnerRole = can('team.manage')
 
@@ -156,12 +175,24 @@ export default function AppNav({ brand, tenant, variant, hideWorkspaceAppNav = f
           }
         : page.props.currentWorkspace ?? null
 
-    const isTransparentVariant = variant === 'transparent' && !navHovered
-    const navColor = isTransparentVariant ? 'transparent' : '#ffffff'
+    /** Cinematic app shell (Overview, etc.): keep dark translucent chrome on hover — avoid flipping to solid white. */
+    const isCinematicNav = variant === 'transparent'
     /** Same easing/duration as nav + agency strip so cinematic header surfaces stay in sync */
     const cinematicSurfaceTransition = 'background-color 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease, backdrop-filter 0.3s ease'
+    const cinematicNavSurfaceStyle = isCinematicNav
+        ? {
+              backgroundColor: navHovered ? 'rgba(11, 11, 13, 0.88)' : 'rgba(0, 0, 0, 0.22)',
+              backdropFilter: 'blur(14px)',
+              WebkitBackdropFilter: 'blur(14px)',
+              borderBottomWidth: 1,
+              borderBottomStyle: 'solid',
+              borderBottomColor: navHovered ? 'rgba(255, 255, 255, 0.12)' : 'rgba(255, 255, 255, 0.06)',
+              transition: cinematicSurfaceTransition,
+          }
+        : null
+    const navColor = isCinematicNav ? undefined : '#ffffff'
     const logoFilter = activeBrand?.logo_filter || 'none'
-    const textColor = isTransparentVariant ? '#ffffff' : '#000000'
+    const textColor = isCinematicNav ? '#ffffff' : '#000000'
     const computeLogoFilterStyle = (filter, primaryColor) => {
         if (filter === 'white') return { filter: 'brightness(0) invert(1)' }
         if (filter === 'black') return { filter: 'brightness(0)' }
@@ -190,16 +221,30 @@ export default function AppNav({ brand, tenant, variant, hideWorkspaceAppNav = f
     // Check if we're on any /app page (full width nav for all app pages)
     const isAppPage = currentUrl.startsWith('/app')
     /** Agency dashboard (etc.): hide brand workspace links — keep logo, agency strip, notifications, user menu */
-    const suppressWorkspaceChrome = Boolean(hideWorkspaceAppNav && isAppPage && !isCollectionOnlyNav)
-    /** Agency strip visible (brand quick-switch lives here); otherwise show workspace bar above main nav */
-    const agencyStripVisible = Boolean(isAppPage && showAgencyQuickLink && agencyHomeCompany && !hideAgencyStrip)
+    const suppressWorkspaceChrome = Boolean(hideWorkspaceAppNav && isAppPage && !isExternalCollectionChrome)
+    const activeWorkspaceIsAgency = activeCompany?.is_agency === true
+    /** Incubated / agency-provisioned client tenant (pivot `is_agency_managed`) — top bar stays agency context (Velvet Hammer), never “client as Company”. */
+    const activeWorkspaceIsAgencyManagedClient = activeCompany?.is_agency_managed === true
     /**
-     * Company/workspace row above the logo: only for users who belong to an agency tenant.
-     * Non-agency (single-company) users should not see the extra "Company" header — the main nav + brand logo are enough.
-     * When the agency strip is hidden but the user is still an agency member, keep the workspace switcher as a fallback.
+     * Agency strip: show while working under the agency OR an agency-managed client workspace.
+     * If we only showed it when `activeWorkspaceIsAgency`, switching into St Croix would hide the strip and
+     * `WorkspaceSwitcher` would show the client name + “Company” — wrong; this row is agency chrome only.
+     * Collection / external guests never see it.
+     */
+    const agencyStripVisible = Boolean(
+        isAppPage &&
+        showAgencyQuickLink &&
+        agencyHomeCompany &&
+        !hideAgencyStrip &&
+        !isExternalCollectionChrome &&
+        (activeWorkspaceIsAgency || activeWorkspaceIsAgencyManagedClient)
+    )
+    /**
+     * Thin workspace row above the logo: fallback when the user has an agency home tenant but is not on the agency
+     * strip (e.g. direct-only company membership). Agency + agency-managed client sessions use `agencyStripVisible` instead.
      */
     const showWorkspaceContextBar =
-        isAppPage && !isCollectionOnlyNav && !agencyStripVisible && Boolean(agencyHomeCompany)
+        isAppPage && !isExternalCollectionChrome && !agencyStripVisible && Boolean(agencyHomeCompany)
     // Check if we're in admin area - never show plan limit banner in admin
     const isAdminPage = currentUrl.startsWith('/app/admin')
     
@@ -207,7 +252,11 @@ export default function AppNav({ brand, tenant, variant, hideWorkspaceAppNav = f
     const planLimitInfo = auth.brand_plan_limit_info
     const hasPlanLimitIssue = planLimitInfo && planLimitInfo.brand_limit_exceeded && isAppPage && !isAdminPage
     // User is in company but has no brand access (e.g. removed from all brands)
-    const showNoBrandAccessAlert = Boolean(auth?.no_brand_access ?? (auth?.activeCompany && !collectionOnly && (!auth?.brands || auth.brands.length === 0)))
+    const showNoBrandAccessAlert = Boolean(
+        !isExternalCollectionChrome &&
+            (auth?.no_brand_access ??
+                (auth?.activeCompany && !collectionOnly && (!auth?.brands || auth.brands.length === 0)))
+    )
     
     // Track last shown brand ID to detect brand switches
     const [lastShownBrandId, setLastShownBrandId] = useState(() => {
@@ -288,7 +337,7 @@ export default function AppNav({ brand, tenant, variant, hideWorkspaceAppNav = f
             return
         }
 
-        if (isAppPage && !isCollectionOnlyNav && !isAdminPage && !hideWorkspaceAppNav) {
+        if (isAppPage && !isExternalCollectionChrome && !isAdminPage && !hideWorkspaceAppNav) {
             document.body.classList.add('has-mobile-tabbar')
         } else {
             document.body.classList.remove('has-mobile-tabbar')
@@ -297,7 +346,7 @@ export default function AppNav({ brand, tenant, variant, hideWorkspaceAppNav = f
         return () => {
             document.body.classList.remove('has-mobile-tabbar')
         }
-    }, [isAppPage, isCollectionOnlyNav, isAdminPage, hideWorkspaceAppNav])
+    }, [isAppPage, isExternalCollectionChrome, isAdminPage, hideWorkspaceAppNav])
 
     useEffect(
         () => () => {
@@ -335,9 +384,14 @@ export default function AppNav({ brand, tenant, variant, hideWorkspaceAppNav = f
         const overviewPathActive =
             currentUrl === '/app/overview' || currentUrl.startsWith('/app/overview')
         const insightsPathActive = currentUrl.startsWith('/app/insights')
+        const creatorsPathActive =
+            Boolean(activeBrand?.id) && currentUrl.startsWith(`/app/brands/${activeBrand.id}/creators`)
         const brandSettingsPathActive =
-            Boolean(activeBrand?.id) && currentUrl.startsWith(`/app/brands/${activeBrand.id}`)
-        const overviewGroupActive = overviewPathActive || insightsPathActive || brandSettingsPathActive
+            Boolean(activeBrand?.id) &&
+            currentUrl.startsWith(`/app/brands/${activeBrand.id}`) &&
+            !creatorsPathActive
+        const overviewGroupActive =
+            overviewPathActive || insightsPathActive || brandSettingsPathActive || creatorsPathActive
 
         const inactiveNavColor = textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)'
         const accent = activeBrand?.primary_color || '#6366f1'
@@ -359,7 +413,9 @@ export default function AppNav({ brand, tenant, variant, hideWorkspaceAppNav = f
 
         const showBrandSettings = can('brand_settings.manage')
         const showInsightsNav = canViewWorkspaceInsights
-        const showOverviewDropdown = showInsightsNav || showBrandSettings
+        const canViewCreatorsDashboard = Boolean(auth?.permissions?.can_view_creators_dashboard)
+        const showCreatorsNav = Boolean(activeBrand?.id) && canViewCreatorsDashboard
+        const showOverviewDropdown = showInsightsNav || showBrandSettings || showCreatorsNav
 
         if (!showOverviewDropdown) {
             return (
@@ -373,8 +429,11 @@ export default function AppNav({ brand, tenant, variant, hideWorkspaceAppNav = f
         const subLinkBase =
             'block border-l-[3px] px-3 py-2 text-sm font-medium leading-snug transition-[border-color,background-color,color] duration-150 ease-out'
         const subLinkInactive =
-            'border-transparent text-gray-600 hover:bg-slate-50 hover:text-gray-900 hover:[border-left-color:var(--overview-dd-accent)]'
-        const subLinkActive = 'bg-slate-50 text-gray-900'
+            variant === 'transparent'
+                ? 'border-transparent text-white/70 hover:bg-white/[0.08] hover:text-white hover:[border-left-color:var(--overview-dd-accent)]'
+                : 'border-transparent text-gray-600 hover:bg-slate-50 hover:text-gray-900 hover:[border-left-color:var(--overview-dd-accent)]'
+        const subLinkActive =
+            variant === 'transparent' ? 'bg-white/[0.1] text-white' : 'bg-slate-50 text-gray-900'
 
         return (
             <div
@@ -406,16 +465,13 @@ export default function AppNav({ brand, tenant, variant, hideWorkspaceAppNav = f
                     }`}
                 >
                     <div
-                        className="rounded-md bg-white py-0.5 text-sm shadow-sm ring-1 ring-slate-200/90 backdrop-blur-sm dark:bg-gray-900 dark:ring-white/10"
+                        className={
+                            variant === 'transparent'
+                                ? 'rounded-md bg-[#0f1115]/95 py-0.5 text-sm shadow-xl ring-1 ring-white/10 backdrop-blur-xl'
+                                : 'rounded-md bg-white py-0.5 text-sm shadow-sm ring-1 ring-slate-200/90 backdrop-blur-sm dark:bg-gray-900 dark:ring-white/10'
+                        }
                         style={{ '--overview-dd-accent': accent }}
                     >
-                        <Link
-                            href="/app/overview"
-                            className={`${subLinkBase} ${overviewPathActive ? subLinkActive : subLinkInactive}`}
-                            style={overviewPathActive ? { borderLeftColor: accent } : undefined}
-                        >
-                            Overview
-                        </Link>
                         {showInsightsNav ? (
                             <Link
                                 href={route('insights.overview')}
@@ -435,6 +491,18 @@ export default function AppNav({ brand, tenant, variant, hideWorkspaceAppNav = f
                                 Settings
                             </Link>
                         ) : null}
+                        {showCreatorsNav ? (
+                            <Link
+                                href={route('brands.creators', { brand: activeBrand.id })}
+                                className={`${subLinkBase} ${creatorsPathActive ? subLinkActive : subLinkInactive}`}
+                                style={creatorsPathActive ? { borderLeftColor: accent } : undefined}
+                            >
+                                <span className="inline-flex items-center gap-2">
+                                    <UserGroupIcon className="h-4 w-4 shrink-0 opacity-70" aria-hidden="true" />
+                                    Creators
+                                </span>
+                            </Link>
+                        ) : null}
                     </div>
                 </div>
             </div>
@@ -450,16 +518,16 @@ export default function AppNav({ brand, tenant, variant, hideWorkspaceAppNav = f
         { href: '/app/collections', label: 'Collections', shortLabel: 'Coll', icon: FolderIcon, isActive: (url) => url.startsWith('/app/collections') },
     ]
 
-    /** When the Velvet Hammer agency strip is visible, park notifications + user menu there. */
-    const relocateUserChromeToAgencyStrip = Boolean(isAppPage && agencyHomeCompany && !hideAgencyStrip)
+    /** When the agency strip is visible, park notifications + user menu there. */
+    const relocateUserChromeToAgencyStrip = agencyStripVisible
 
     const globalUserControls = (
         <GlobalUserControls
             textColor={textColor}
-            isTransparentVariant={isTransparentVariant}
+            isTransparentVariant={isCinematicNav}
             activeBrand={activeBrand}
             effectiveCollection={effectiveCollection}
-            collectionOnly={collectionOnly}
+            collectionOnly={collectionOnly || isCollectionGuestExperience}
             workspaceBrandColor={workspaceBrandColor}
             companySettingsLabel={companySettingsLabel}
             brandSettingsLabel={brandSettingsLabel}
@@ -571,8 +639,10 @@ export default function AppNav({ brand, tenant, variant, hideWorkspaceAppNav = f
             {/* Workspace context row when no agency strip (direct company switcher) */}
             {showWorkspaceContextBar && (
                 <div
-                    className={`flex min-h-[48px] items-center border-b border-slate-200/90 ${
-                        isTransparentVariant ? 'bg-black/25 text-white backdrop-blur-md' : 'bg-slate-50/95'
+                    className={`flex min-h-[48px] items-center ${
+                        variant === 'transparent'
+                            ? 'border-b border-white/10 bg-black/30 text-white backdrop-blur-md'
+                            : 'border-b border-slate-200/90 bg-slate-50/95'
                     }`}
                     role="region"
                     aria-label="Workspace context"
@@ -583,17 +653,17 @@ export default function AppNav({ brand, tenant, variant, hideWorkspaceAppNav = f
                             availableWorkspaces={directWorkspaceCompanies}
                             accentColor={workspaceBrandColor}
                             variant="bar"
-                            isTransparentVariant={isTransparentVariant}
+                            isTransparentVariant={isCinematicNav}
                         />
                     </div>
                 </div>
             )}
 
             {/* Agency strip — workspace label + name + dashboard; agency primary color as left accent (light + cinematic) */}
-            {isAppPage && showAgencyQuickLink && agencyHomeCompany && !hideAgencyStrip && (
+            {agencyStripVisible && (
                 <div
-                    className={`flex items-center transition-colors duration-300 ${
-                        isTransparentVariant ? 'text-white/90' : 'text-slate-800'
+                    className={`relative z-[60] flex items-center transition-colors duration-300 ${
+                        isCinematicNav ? 'text-white/90' : 'text-slate-800'
                     }`}
                     style={{
                         borderLeftWidth: 3,
@@ -601,13 +671,13 @@ export default function AppNav({ brand, tenant, variant, hideWorkspaceAppNav = f
                         borderLeftColor: agencyBrandColor,
                         ...(variant === 'transparent'
                             ? {
-                                  backgroundColor: navHovered ? '#ffffff' : 'rgba(0, 0, 0, 0.35)',
+                                  backgroundColor: navHovered ? 'rgba(11, 11, 13, 0.88)' : 'rgba(0, 0, 0, 0.35)',
                                   borderBottomWidth: 1,
                                   borderBottomStyle: 'solid',
-                                  borderBottomColor: navHovered ? 'rgb(226 232 240)' : 'rgba(255, 255, 255, 0.08)',
+                                  borderBottomColor: navHovered ? 'rgba(255, 255, 255, 0.12)' : 'rgba(255, 255, 255, 0.08)',
                                   transition: cinematicSurfaceTransition,
-                                  backdropFilter: navHovered ? 'none' : 'blur(12px)',
-                                  WebkitBackdropFilter: navHovered ? 'none' : 'blur(12px)',
+                                  backdropFilter: 'blur(12px)',
+                                  WebkitBackdropFilter: 'blur(12px)',
                               }
                             : {
                                   backgroundColor: '#ffffff',
@@ -625,7 +695,7 @@ export default function AppNav({ brand, tenant, variant, hideWorkspaceAppNav = f
                             <div className="min-w-0 flex-1">
                                 <p
                                     className={`hidden text-[10px] font-semibold uppercase tracking-wider sm:block ${
-                                        isTransparentVariant ? 'text-white/45' : 'text-slate-500'
+                                        isCinematicNav ? 'text-white/45' : 'text-slate-500'
                                     }`}
                                 >
                                     Agency workspace
@@ -646,7 +716,7 @@ export default function AppNav({ brand, tenant, variant, hideWorkspaceAppNav = f
                             <AgencyStripBrandSelect
                                 brands={agencyFlatBrands}
                                 brandColor={agencyBrandColor}
-                                isTransparentVariant={isTransparentVariant}
+                                isTransparentVariant={isCinematicNav}
                                 currentTenantId={activeCompany?.id}
                                 currentBrandId={auth.activeBrand?.id}
                             />
@@ -654,11 +724,11 @@ export default function AppNav({ brand, tenant, variant, hideWorkspaceAppNav = f
                                 type="button"
                                 onClick={goAgencyDashboardFromMenu}
                                 className={`inline-flex shrink-0 items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 sm:text-sm ${
-                                    isTransparentVariant
+                                    isCinematicNav
                                         ? 'bg-white/10 text-white hover:bg-white/15 focus-visible:ring-white/40 focus-visible:ring-offset-transparent'
                                         : 'bg-white shadow-sm ring-1 ring-slate-200/80 hover:bg-slate-50 focus-visible:ring-indigo-500 focus-visible:ring-offset-white'
                                 }`}
-                                style={!isTransparentVariant ? { color: agencyBrandColor } : undefined}
+                                style={!isCinematicNav ? { color: agencyBrandColor } : undefined}
                                 title="Agency dashboard"
                             >
                                 <span className="hidden sm:inline">Agency dashboard</span>
@@ -672,20 +742,19 @@ export default function AppNav({ brand, tenant, variant, hideWorkspaceAppNav = f
             )}
 
             <nav
-                className={`relative z-50 overflow-visible app-nav ${isCollectionOnlyNav ? 'is-collection-only' : ''} ${variant === 'transparent' && !navHovered ? '' : 'shadow-sm'}`}
+                className={`relative z-50 overflow-visible app-nav ${isExternalCollectionChrome ? 'is-collection-only' : ''} ${variant === 'transparent' ? '' : 'shadow-sm'}`}
                 style={{
-                    backgroundColor: navColor,
-                    transition: cinematicSurfaceTransition,
-                    ...(isCollectionOnlyNav ? { '--collection-only-user': '1' } : {}),
+                    ...(isCinematicNav && cinematicNavSurfaceStyle ? cinematicNavSurfaceStyle : { backgroundColor: navColor, transition: cinematicSurfaceTransition }),
+                    ...(isExternalCollectionChrome ? { '--collection-only-user': '1' } : {}),
                 }}
-                data-collection-only={isCollectionOnlyNav ? 'true' : undefined}
-                aria-label={isCollectionOnlyNav ? 'Collection-only access — some links disabled' : undefined}
+                data-collection-only={isExternalCollectionChrome ? 'true' : undefined}
+                aria-label={isExternalCollectionChrome ? 'Collection-only access — some links disabled' : undefined}
             >
                 <div className={isAppPage ? "px-4 sm:px-6 lg:px-8" : "mx-auto max-w-7xl px-4 sm:px-6 lg:px-8"}>
                 <div className="flex h-20 min-w-0 justify-between gap-2 overflow-visible">
                     <div className="flex min-w-0 flex-1 items-center gap-2 overflow-visible sm:gap-3">
                         {/* Mobile: hamburger to open main nav drawer (main nav links hidden below sm) */}
-                        {isAppPage && isCollectionOnlyNav && (
+                        {isAppPage && isExternalCollectionChrome && (
                             <div className="flex flex-shrink-0 mr-2 sm:mr-0 sm:hidden">
                                 <button
                                     type="button"
@@ -702,19 +771,19 @@ export default function AppNav({ brand, tenant, variant, hideWorkspaceAppNav = f
                         )}
                         {/* Brand Logo Component — max width keeps main nav from overlapping wide wordmarks */}
                         <div className="flex min-h-12 min-w-0 max-w-[200px] sm:max-w-[220px] md:max-w-[240px] shrink-0 items-center">
-                            {isAppPage ? (isCollectionOnlyNav && effectiveCollection?.brand ? (
+                            {isAppPage ? (isExternalCollectionChrome && collectionBrandForLogo && effectiveCollection?.id ? (
                                 <AppBrandLogo
-                                    activeBrand={effectiveCollection.brand}
-                                    brands={effectiveCollectionsList.length > 1 ? [...new Map(effectiveCollectionsList.filter(c => c.brand).map(c => [c.brand.id, { ...c.brand, is_active: c.brand.id === effectiveCollection?.brand?.id }])).values()] : []}
+                                    activeBrand={collectionBrandForLogo}
+                                    brands={effectiveCollectionsList.length > 1 ? [...new Map(effectiveCollectionsList.filter(c => c.brand).map(c => [c.brand.id, { ...c.brand, is_active: c.brand.id === collectionBrandForLogo?.id }])).values()] : []}
                                     textColor={textColor}
-                                    logoFilterStyle={computeLogoFilterStyle(effectiveCollection.brand?.logo_filter, effectiveCollection.brand?.primary_color)}
+                                    logoFilterStyle={computeLogoFilterStyle(collectionBrandForLogo?.logo_filter, collectionBrandForLogo?.primary_color)}
                                     onSwitchBrand={(brandId) => {
                                         const col = effectiveCollectionsList.find(c => c.brand?.id === brandId)
                                         if (col) router.post(route('collection-invite.switch', { collection: col.id }))
                                     }}
                                     rootLinkHref={route('collection-invite.landing', { collection: effectiveCollection.id })}
                                 />
-                            ) : isCollectionOnlyNav && effectiveCollection ? (
+                            ) : isExternalCollectionChrome && effectiveCollection ? (
                                 <span className="text-base font-semibold text-gray-900" title="Collection-only access">
                                     {effectiveCollection.name}
                                 </span>
@@ -734,83 +803,145 @@ export default function AppNav({ brand, tenant, variant, hideWorkspaceAppNav = f
                         </div>
 
                         {/* Main menu: Overview, Assets, Executions, Collections, Generative (C12: flag + .app-nav-main-links for CSS) */}
-                        {isAppPage ? (isCollectionOnlyNav ? (
-                            <div className="app-nav-main-links hidden min-w-0 flex-1 sm:flex sm:items-center sm:space-x-6 lg:space-x-8 sm:pl-4 lg:pl-6 overflow-x-auto" data-collection-only="true">
-                                {['Overview', 'Assets', DELIVERABLES_PAGE_LABEL].map((label) => (
-                                    <span
-                                        key={label}
-                                        className="nav-link-disabled inline-flex items-center border-b-2 border-transparent px-1 py-2 text-sm font-medium text-gray-400 opacity-50 cursor-not-allowed pointer-events-none select-none"
-                                        title="Collection-only access — not available"
-                                        aria-disabled="true"
-                                    >
-                                        {label}
-                                    </span>
-                                ))}
-                                {collectionOnlyCollection?.id && collectionOnlyCollections?.length > 0 ? (
-                                    collectionOnlyCollections.length > 1 ? (
-                                        <div className="relative">
-                                            <button
-                                                type="button"
-                                                onClick={() => setCollectionsDropdownOpen(open => !open)}
-                                                onBlur={() => setTimeout(() => setCollectionsDropdownOpen(false), 150)}
-                                                className="inline-flex items-center border-b-2 px-1 py-2 text-sm font-medium border-transparent text-gray-900 hover:text-gray-700 focus:outline-none focus:ring-0"
-                                                style={{
-                                                    borderBottomColor: currentUrl.includes('/collection-access/') ? '#4f46e5' : 'transparent',
-                                                    color: currentUrl.includes('/collection-access/') ? '#111827' : 'rgba(0, 0, 0, 0.85)',
-                                                }}
-                                            >
-                                                Collections
-                                                <svg className="ml-1 h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor">
-                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
-                                                </svg>
-                                            </button>
-                                            {collectionsDropdownOpen && (
-                                                <div className="absolute left-0 top-full mt-1 w-56 rounded-md bg-white py-1 shadow-lg ring-1 ring-black ring-opacity-5 z-50">
-                                                    {collectionOnlyCollections.map((c) => (
-                                                        <button
-                                                            key={c.id}
-                                                            type="button"
-                                                            onClick={() => {
-                                                                setCollectionsDropdownOpen(false)
-                                                                router.post(route('collection-invite.switch', { collection: c.id }))
+                        {isAppPage ? (isExternalCollectionChrome ? (
+                            <div className="hidden min-w-0 flex-1 sm:flex sm:min-w-0 sm:items-center sm:gap-6 lg:gap-8 sm:pl-4 lg:pl-6 overflow-x-auto" data-collection-only="true">
+                                {(() => {
+                                    const colOnlyMuted = textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)'
+                                    const colOnlyDisabledClass =
+                                        'inline-flex items-center gap-1.5 border-b-2 border-transparent px-1 py-2 text-sm font-medium cursor-not-allowed select-none pointer-events-none'
+                                    const colOnlyDisabledTitle = 'Not available with collection-only access'
+                                    return (
+                                        <>
+                                            <div className="shrink-0">
+                                                <span
+                                                    className={colOnlyDisabledClass}
+                                                    style={{ color: colOnlyMuted, borderBottomColor: 'transparent' }}
+                                                    title={colOnlyDisabledTitle}
+                                                    aria-disabled="true"
+                                                >
+                                                    <HomeIcon className="h-4 w-4 shrink-0" aria-hidden="true" />
+                                                    Overview
+                                                </span>
+                                            </div>
+                                            <div className="app-nav-main-links flex min-w-0 flex-1 items-center gap-6 overflow-x-auto lg:gap-8">
+                                                <span
+                                                    className={colOnlyDisabledClass}
+                                                    style={{ color: colOnlyMuted, borderBottomColor: 'transparent' }}
+                                                    title={colOnlyDisabledTitle}
+                                                    aria-disabled="true"
+                                                >
+                                                    <PhotoIcon className="h-4 w-4 shrink-0" aria-hidden="true" />
+                                                    Assets
+                                                </span>
+                                                <span
+                                                    className={colOnlyDisabledClass}
+                                                    style={{ color: colOnlyMuted, borderBottomColor: 'transparent' }}
+                                                    title={colOnlyDisabledTitle}
+                                                    aria-disabled="true"
+                                                >
+                                                    <Squares2X2Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
+                                                    {DELIVERABLES_PAGE_LABEL}
+                                                </span>
+                                                {collectionOnlyCollection?.id && collectionOnlyCollections?.length > 0 ? (
+                                                    collectionOnlyCollections.length > 1 ? (
+                                                        <div className="relative">
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setCollectionsDropdownOpen(open => !open)}
+                                                                onBlur={() => setTimeout(() => setCollectionsDropdownOpen(false), 150)}
+                                                                className="inline-flex items-center gap-1.5 border-b-2 px-1 py-2 text-sm font-medium border-transparent focus:outline-none focus:ring-0"
+                                                                style={{
+                                                                    color: currentUrl.includes('/collection-access/') ? textColor : colOnlyMuted,
+                                                                    borderBottomColor: currentUrl.includes('/collection-access/')
+                                                                        ? collectionNavAccent
+                                                                        : 'transparent',
+                                                                }}
+                                                            >
+                                                                <RectangleGroupIcon className="h-4 w-4 shrink-0" aria-hidden="true" />
+                                                                {collectionMainNavTabLabel}
+                                                                <ChevronDownIcon className="h-3.5 w-3.5 shrink-0 opacity-60" aria-hidden="true" />
+                                                            </button>
+                                                            {collectionsDropdownOpen && (
+                                                                <div className="absolute left-0 top-full z-50 mt-1 w-56 rounded-md bg-white py-1 shadow-lg ring-1 ring-black ring-opacity-5">
+                                                                    {collectionOnlyCollections.map((c) => (
+                                                                        <button
+                                                                            key={c.id}
+                                                                            type="button"
+                                                                            onClick={() => {
+                                                                                setCollectionsDropdownOpen(false)
+                                                                                router.post(route('collection-invite.switch', { collection: c.id }))
+                                                                            }}
+                                                                            className={`block w-full text-left px-4 py-2 text-sm ${
+                                                                                c.id === collectionOnlyCollection?.id
+                                                                                    ? 'font-medium'
+                                                                                    : 'text-gray-700 hover:bg-gray-50'
+                                                                            }`}
+                                                                            style={
+                                                                                c.id === collectionOnlyCollection?.id
+                                                                                    ? { color: collectionNavAccent, backgroundColor: `${collectionNavAccent}14` }
+                                                                                    : undefined
+                                                                            }
+                                                                        >
+                                                                            {c.name}
+                                                                            {c.id === collectionOnlyCollection?.id && ' (current)'}
+                                                                        </button>
+                                                                    ))}
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    ) : (
+                                                        <Link
+                                                            href={route('collection-invite.landing', { collection: effectiveCollection.id })}
+                                                            className="inline-flex items-center gap-1.5 border-b-2 px-1 py-2 text-sm font-medium border-transparent"
+                                                            style={{
+                                                                color: currentUrl.includes('/collection-access/') ? textColor : colOnlyMuted,
+                                                                borderBottomColor: currentUrl.includes('/collection-access/')
+                                                                    ? collectionNavAccent
+                                                                    : 'transparent',
                                                             }}
-                                                            className={`block w-full text-left px-4 py-2 text-sm ${c.id === collectionOnlyCollection?.id ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-gray-700 hover:bg-gray-50'}`}
                                                         >
-                                                            {c.name}
-                                                            {c.id === collectionOnlyCollection?.id && ' (current)'}
-                                                        </button>
-                                                    ))}
-                                                </div>
-                                            )}
-                                        </div>
-                                    ) : (
-                                        <Link
-                                            href={route('collection-invite.landing', { collection: effectiveCollection.id })}
-                                            className="inline-flex items-center border-b-2 px-1 py-2 text-sm font-medium border-transparent text-gray-900 hover:text-gray-700"
-                                            style={{
-                                                borderBottomColor: currentUrl.includes('/collection-access/') ? '#4f46e5' : 'transparent',
-                                                color: currentUrl.includes('/collection-access/') ? '#111827' : 'rgba(0, 0, 0, 0.85)',
-                                            }}
-                                        >
-                                            Collections
-                                        </Link>
+                                                            <RectangleGroupIcon className="h-4 w-4 shrink-0" aria-hidden="true" />
+                                                            {collectionMainNavTabLabel}
+                                                        </Link>
+                                                    )
+                                                ) : effectiveCollection?.id ? (
+                                                    <Link
+                                                        href={route('collection-invite.landing', { collection: effectiveCollection.id })}
+                                                        className="inline-flex items-center gap-1.5 border-b-2 px-1 py-2 text-sm font-medium border-transparent"
+                                                        style={{
+                                                            color: currentUrl.includes('/collection-access/') ? textColor : colOnlyMuted,
+                                                            borderBottomColor: currentUrl.includes('/collection-access/')
+                                                                ? collectionNavAccent
+                                                                : 'transparent',
+                                                        }}
+                                                    >
+                                                        <RectangleGroupIcon className="h-4 w-4 shrink-0" aria-hidden="true" />
+                                                        {collectionMainNavTabLabel}
+                                                    </Link>
+                                                ) : (
+                                                    <span
+                                                        className={colOnlyDisabledClass}
+                                                        style={{ color: colOnlyMuted, borderBottomColor: 'transparent' }}
+                                                        title={colOnlyDisabledTitle}
+                                                        aria-disabled="true"
+                                                    >
+                                                        <RectangleGroupIcon className="h-4 w-4 shrink-0" aria-hidden="true" />
+                                                        {collectionMainNavTabLabel}
+                                                    </span>
+                                                )}
+                                                <span
+                                                    className={colOnlyDisabledClass}
+                                                    style={{ color: colOnlyMuted, borderBottomColor: 'transparent' }}
+                                                    title={colOnlyDisabledTitle}
+                                                    aria-disabled="true"
+                                                >
+                                                    <SparklesIcon className="h-4 w-4 shrink-0" aria-hidden="true" />
+                                                    Generative
+                                                </span>
+                                            </div>
+                                        </>
                                     )
-                                ) : (
-                                    <span
-                                        className="nav-link-disabled inline-flex items-center border-b-2 border-transparent px-1 py-2 text-sm font-medium text-gray-400 opacity-50 cursor-not-allowed pointer-events-none select-none"
-                                        title="Collection-only access"
-                                        aria-disabled="true"
-                                    >
-                                        Collections
-                                    </span>
-                                )}
-                                <span
-                                    className="nav-link-disabled inline-flex items-center border-b-2 border-transparent px-1 py-2 text-sm font-medium text-gray-400 opacity-50 cursor-not-allowed pointer-events-none select-none"
-                                    title="Collection-only access — not available"
-                                    aria-disabled="true"
-                                >
-                                    Generative
-                                </span>
+                                })()}
                             </div>
                         ) : suppressWorkspaceChrome ? (
                             <div className="hidden min-w-0 flex-1 sm:block" aria-hidden="true" />
@@ -949,24 +1080,12 @@ export default function AppNav({ brand, tenant, variant, hideWorkspaceAppNav = f
                         )}
                     </div>
                     <div className="flex shrink-0 items-center gap-2 lg:gap-4">
-                        {/* C12: Collection access link on the right when in collection-only mode */}
-                        {isCollectionOnlyNav && effectiveCollection?.id && (
-                            <Link
-                                href={route('collection-invite.landing', { collection: effectiveCollection.id })}
-                                className="inline-flex items-center border-b-2 border-transparent px-1 py-2 text-sm font-medium text-gray-700 hover:text-gray-900"
-                                style={{
-                                    borderBottomColor: currentUrl.includes('/collection-access/') ? '#4f46e5' : 'transparent',
-                                }}
-                            >
-                                Collection access
-                            </Link>
-                        )}
                         {/* Right-side nav: Brand Guidelines (only when published, or user can set up DNA), Downloads */}
                         {isAppPage && showBrandGuidelinesNav && !suppressWorkspaceChrome && (
                             <Link
                                 href="/app/brand-guidelines"
                                 title={brandGuidelinesNavTitle}
-                                className={`hidden lg:inline-flex items-center gap-1.5 px-2 py-1.5 text-sm font-medium rounded-md border border-transparent ${isTransparentVariant ? 'hover:bg-white/10' : 'hover:bg-gray-100'} focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2`}
+                                className={`hidden lg:inline-flex items-center gap-1.5 px-2 py-1.5 text-sm font-medium rounded-md border border-transparent ${isCinematicNav ? 'hover:bg-white/10' : 'hover:bg-gray-100'} focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2`}
                                 style={{
                                     color: textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.9)' : 'rgba(0, 0, 0, 0.85)',
                                 }}
@@ -974,11 +1093,11 @@ export default function AppNav({ brand, tenant, variant, hideWorkspaceAppNav = f
                                 <span>Brand Guidelines</span>
                             </Link>
                         )}
-                        {isAppPage && !isCollectionOnlyNav && !suppressWorkspaceChrome && (
+                        {isAppPage && !suppressWorkspaceChrome && (
                             <>
                                 <Link
                                     href="/app/downloads"
-                                    className={`inline-flex items-center gap-1.5 px-2 py-1.5 text-sm font-medium rounded-md border border-transparent ${isTransparentVariant ? 'hover:bg-white/10' : 'hover:bg-gray-100'} focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2`}
+                                    className={`inline-flex items-center gap-1.5 px-2 py-1.5 text-sm font-medium rounded-md border border-transparent ${isCinematicNav ? 'hover:bg-white/10' : 'hover:bg-gray-100'} focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2`}
                                     style={{
                                         color: currentUrl.startsWith('/app/downloads')
                                             ? (activeBrand?.primary_color || '#4f46e5')
@@ -993,7 +1112,7 @@ export default function AppNav({ brand, tenant, variant, hideWorkspaceAppNav = f
                                 {showBrandGuidelinesNav && (
                                     <Link
                                         href="/app/brand-guidelines"
-                                        className={`lg:hidden inline-flex items-center p-2 text-sm font-medium rounded-md border border-transparent ${isTransparentVariant ? 'hover:bg-white/10' : 'hover:bg-gray-100'} focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2`}
+                                        className={`lg:hidden inline-flex items-center p-2 text-sm font-medium rounded-md border border-transparent ${isCinematicNav ? 'hover:bg-white/10' : 'hover:bg-gray-100'} focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2`}
                                         style={{
                                             color: currentUrl.startsWith('/app/brand-guidelines') || currentUrl.includes('/guidelines')
                                                 ? (activeBrand?.primary_color || '#4f46e5')
@@ -1015,7 +1134,7 @@ export default function AppNav({ brand, tenant, variant, hideWorkspaceAppNav = f
             </div>
 
             {/* Mobile main nav drawer: slide-in from left (below sm breakpoint) */}
-            {isAppPage && isCollectionOnlyNav && mobileNavOpen && (
+            {isAppPage && isExternalCollectionChrome && mobileNavOpen && (
                 <>
                     <div
                         className="fixed inset-0 z-40 bg-gray-900/50 backdrop-blur-sm sm:hidden"
@@ -1043,29 +1162,72 @@ export default function AppNav({ brand, tenant, variant, hideWorkspaceAppNav = f
                         </div>
                         <nav className="flex-1 overflow-y-auto py-4 px-3" aria-label="Primary">
                             <div className="space-y-0.5">
-                                {[
-                                    { href: '/app/overview', label: 'Overview' },
-                                    { href: '/app/assets', label: 'Assets' },
-                                    { href: '/app/executions', label: DELIVERABLES_PAGE_LABEL },
-                                    { href: '/app/collections', label: 'Collections' },
-                                    { href: '/app/generative', label: 'Generative' },
-                                ].map(({ href, label }) => {
-                                    const isActive = (href === '/app/overview') ? (currentUrl === '/app/overview' || currentUrl.startsWith('/app/overview')) : currentUrl.startsWith(href) && (href !== '/app/assets' || !currentUrl.startsWith('/app/executions'))
-                                    return (
+                                {['Overview', 'Assets', DELIVERABLES_PAGE_LABEL].map((label) => (
+                                    <div
+                                        key={label}
+                                        className="flex items-center px-3 py-3 rounded-lg text-sm font-medium text-gray-400 opacity-60 cursor-not-allowed select-none"
+                                        title="Collection-only access — not available"
+                                        aria-disabled="true"
+                                    >
+                                        {label}
+                                    </div>
+                                ))}
+                                {collectionOnlyCollection?.id && collectionOnlyCollections?.length > 0 ? (
+                                    collectionOnlyCollections.length > 1 ? (
+                                        collectionOnlyCollections.map((c) => {
+                                            const isCurrent = c.id === collectionOnlyCollection?.id
+                                            return (
+                                                <button
+                                                    key={c.id}
+                                                    type="button"
+                                                    onClick={() => {
+                                                        setMobileNavOpen(false)
+                                                        router.post(route('collection-invite.switch', { collection: c.id }))
+                                                    }}
+                                                    className={`flex w-full items-center px-3 py-3 rounded-lg text-sm font-medium text-left transition-colors ${
+                                                        isCurrent ? 'bg-gray-100 text-gray-900' : 'text-gray-700 hover:bg-gray-50'
+                                                    }`}
+                                                    style={isCurrent ? { color: collectionNavAccent } : undefined}
+                                                >
+                                                    {c.name}
+                                                    {isCurrent && ' (current)'}
+                                                </button>
+                                            )
+                                        })
+                                    ) : (
                                         <Link
-                                            key={href}
-                                            href={href}
+                                            href={route('collection-invite.landing', { collection: effectiveCollection.id })}
                                             onClick={() => setMobileNavOpen(false)}
-                                            className={`flex items-center px-3 py-3 rounded-lg text-sm font-medium transition-colors ${
-                                                isActive
-                                                    ? 'bg-indigo-50 text-indigo-700'
-                                                    : 'text-gray-700 hover:bg-gray-50'
-                                            }`}
+                                            className="flex items-center px-3 py-3 rounded-lg text-sm font-medium bg-gray-100"
+                                            style={{ color: collectionNavAccent }}
                                         >
-                                            {label}
+                                            {collectionMainNavTabLabel}
                                         </Link>
                                     )
-                                })}
+                                ) : effectiveCollection?.id ? (
+                                    <Link
+                                        href={route('collection-invite.landing', { collection: effectiveCollection.id })}
+                                        onClick={() => setMobileNavOpen(false)}
+                                        className="flex items-center px-3 py-3 rounded-lg text-sm font-medium bg-gray-100"
+                                        style={{ color: collectionNavAccent }}
+                                    >
+                                        {collectionMainNavTabLabel}
+                                    </Link>
+                                ) : (
+                                    <div
+                                        className="flex items-center px-3 py-3 rounded-lg text-sm font-medium text-gray-400 opacity-60 cursor-not-allowed select-none"
+                                        aria-disabled="true"
+                                    >
+                                        {collectionMainNavTabLabel}
+                                    </div>
+                                )}
+                                <div
+                                    className="flex items-center px-3 py-3 rounded-lg text-sm font-medium text-gray-400 opacity-60 cursor-not-allowed select-none"
+                                    title="Collection-only access — not available"
+                                    aria-disabled="true"
+                                >
+                                    Generative
+                                </div>
                             </div>
                         </nav>
                     </div>
@@ -1073,9 +1235,11 @@ export default function AppNav({ brand, tenant, variant, hideWorkspaceAppNav = f
             )}
 
             {/* Mobile PWA bottom app navigation */}
-            {isAppPage && !isCollectionOnlyNav && !isAdminPage && !hideWorkspaceAppNav && (() => {
+            {isAppPage && !isExternalCollectionChrome && !isAdminPage && !hideWorkspaceAppNav && (() => {
                 const isOnOverview = currentUrl === '/app/overview' || currentUrl.startsWith('/app/overview')
-                const isDarkNav = isOnOverview
+                const isOnCreators =
+                    activeBrand?.id && currentUrl.startsWith(`/app/brands/${activeBrand.id}/creators`)
+                const isDarkNav = isOnOverview || Boolean(isOnCreators)
                 return (
                     <div className={`fixed inset-x-0 bottom-0 z-[95] sm:hidden safe-area-pb ${
                         isDarkNav

@@ -322,11 +322,21 @@ function UserManagementCard({ user, brandId, brandRoles }) {
                         </>
                     ) : (
                         <>
+                            <div className="flex flex-wrap items-center justify-end gap-1.5">
                             {user.role && (
                                 <span className="inline-flex rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-800">
                                     {user.role.replace('_', ' ')}
                                 </span>
                             )}
+                            {user.is_active_creator ? (
+                                <span
+                                    className="inline-flex rounded-full bg-violet-50 px-2.5 py-0.5 text-xs font-semibold text-violet-800 ring-1 ring-inset ring-violet-200/80"
+                                    title="Active creator (prostaff) membership for this brand"
+                                >
+                                    Creator
+                                </span>
+                            ) : null}
+                            </div>
                             <button
                                 type="button"
                                 onClick={() => setIsEditing(true)}

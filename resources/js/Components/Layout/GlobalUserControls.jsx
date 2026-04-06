@@ -48,6 +48,13 @@ export default function GlobalUserControls({
     const hasAnyCompanyAccess = hasCompanies && (hasMultipleCompanies || hasCompanySettingsAccess)
 
     const activeCompany = auth?.companies?.find((c) => c.is_active)
+    /** Pill in user menu: never label an incubated client tenant as generic “Company”. */
+    const activeWorkspaceKindPill =
+        activeCompany?.is_agency_managed === true
+            ? 'Client'
+            : activeCompany?.is_agency === true
+              ? 'Agency'
+              : 'Company'
     const directWorkspaceCompanies = Array.isArray(auth?.companies)
         ? auth.companies.filter((c) => !c.is_agency_managed)
         : []
@@ -195,7 +202,7 @@ export default function GlobalUserControls({
                                                             {activeCompany.name}
                                                         </span>
                                                         <span className="shrink-0 rounded border border-gray-200 bg-white px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-gray-500">
-                                                            Company
+                                                            {activeWorkspaceKindPill}
                                                         </span>
                                                         <svg className={`h-4 w-4 flex-shrink-0 text-gray-500 transition-transform ${companyDropdownOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor" aria-hidden>
                                                             <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />

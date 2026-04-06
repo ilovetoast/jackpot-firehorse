@@ -5,10 +5,12 @@ namespace App\Services\Prostaff;
 use App\Models\Brand;
 use App\Models\ProstaffMembership;
 use App\Models\Tenant;
+use App\Models\TenantModule;
 use App\Models\User;
 use App\Support\Roles\RoleRegistry;
 use DomainException;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 class AssignProstaffMember
 {
@@ -22,6 +24,10 @@ class AssignProstaffMember
      */
     public function assign(User $user, Brand $brand, array $data = []): ProstaffMembership
     {
+        $tenant = Tenant::query()->findOrFail($brand->tenant_id);
+
+        $this->ensureCreatorModuleEnabled->assertEnabled($tenant);
+
         $existing = ProstaffMembership::query()
             ->where('brand_id', $brand->id)
             ->where('user_id', $user->id)
@@ -31,11 +37,9 @@ class AssignProstaffMember
             return $existing->fresh() ?? $existing;
         }
 
-        $tenant = Tenant::query()->findOrFail($brand->tenant_id);
-
         $this->assertAssignableAsProstaff($user, $tenant, $brand);
 
-        $this->ensureCreatorModuleEnabled->assertEnabled($tenant);
+        $this->assertWithinCreatorSeatsIfApplicable($tenant, $user);
 
         if (! $user->belongsToTenant($tenant->id)) {
             $user->tenants()->attach($tenant->id, ['role' => 'member']);
@@ -70,6 +74,46 @@ class AssignProstaffMember
         $user->forgetActiveBrandMembershipForBrand($brand);
 
         return $membership->fresh() ?? $membership;
+    }
+
+    /**
+     * Soft enforcement: optional {@see TenantModule::$seats_limit} counts distinct active prostaff users per tenant.
+     */
+    private function assertWithinCreatorSeatsIfApplicable(Tenant $tenant, User $user): void
+    {
+        $limit = TenantModule::query()
+            ->where('tenant_id', $tenant->id)
+            ->where('module_key', TenantModule::KEY_CREATOR)
+            ->value('seats_limit');
+
+        if ($limit === null || (int) $limit <= 0) {
+            return;
+        }
+
+        if (ProstaffMembership::query()
+            ->where('tenant_id', $tenant->id)
+            ->where('user_id', $user->id)
+            ->where('status', 'active')
+            ->exists()) {
+            return;
+        }
+
+        $used = (int) ProstaffMembership::query()
+            ->where('tenant_id', $tenant->id)
+            ->where('status', 'active')
+            ->selectRaw('count(distinct user_id) as aggregate')
+            ->value('aggregate');
+
+        if ($used >= (int) $limit) {
+            Log::warning('Creator seats limit reached; prostaff assign blocked', [
+                'tenant_id' => $tenant->id,
+                'user_id' => $user->id,
+                'seats_limit' => (int) $limit,
+                'distinct_active_users' => $used,
+            ]);
+
+            throw new DomainException('Creator seats limit reached.');
+        }
     }
 
     private function assertAssignableAsProstaff(User $user, Tenant $tenant, Brand $brand): void

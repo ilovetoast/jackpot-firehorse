@@ -22,7 +22,7 @@ use Tests\TestCase;
  * - Brand admin sees all downloads on their brand (scope=all)
  * - Tenant admin / agency_admin sees all brands' downloads
  * - Contributor sees only own downloads; scope=all does not expand to others
- * - Collection-only user cannot access downloads index
+ * - Collection-only user can open downloads index but only sees own downloads (scope=all does not broaden)
  */
 class DownloadVisibilityByBrandTest extends TestCase
 {
@@ -262,7 +262,7 @@ class DownloadVisibilityByBrandTest extends TestCase
         $this->assertFalse($response->inertiaPage()['props']['can_view_all_brand_downloads'] ?? true);
     }
 
-    public function test_collection_only_user_cannot_access_downloads_index(): void
+    public function test_collection_only_user_can_access_downloads_index_mine_only(): void
     {
         $collectionOnlyUser = User::create([
             'email' => 'collection@example.com',
@@ -290,23 +290,30 @@ class DownloadVisibilityByBrandTest extends TestCase
             'accepted_at' => now(),
         ]);
 
-        Session::put('tenant_id', $this->tenant->id);
-        Session::put('collection_id', $collection->id);
+        $otherUser = User::create([
+            'email' => 'othercol@example.com',
+            'password' => bcrypt('password'),
+            'first_name' => 'Other',
+            'last_name' => 'Col',
+        ]);
+        $otherUser->tenants()->attach($this->tenant->id, ['role' => 'member']);
+        $otherUser->brands()->attach($this->brandA->id, ['role' => 'contributor', 'removed_at' => null]);
+
+        $ownDownload = $this->createDownload($this->tenant->id, $this->brandA->id, $collectionOnlyUser->id);
+        $otherDownload = $this->createDownload($this->tenant->id, $this->brandA->id, $otherUser->id);
+
         // No brand_id — triggers collection-only in ResolveTenant
-        $this->actingAs($collectionOnlyUser);
+        $response = $this->actingAs($collectionOnlyUser)
+            ->withSession([
+                'tenant_id' => $this->tenant->id,
+                'collection_id' => $collection->id,
+            ])
+            ->get(route('downloads.index', ['scope' => 'all']));
 
-        $response = $this->get(route('downloads.index'));
-
-        $this->assertTrue(
-            $response->isRedirect() || $response->getStatusCode() === 403,
-            'Collection-only user must get redirect or 403'
-        );
-        if ($response->isRedirect()) {
-            $this->assertStringContainsString(
-                (string) $collection->id,
-                $response->headers->get('Location'),
-                'Redirect should target collection landing'
-            );
-        }
+        $response->assertOk();
+        $this->assertFalse($response->inertiaPage()['props']['can_view_all_brand_downloads'] ?? true);
+        $ids = array_column($response->inertiaPage()['props']['downloads'] ?? [], 'id');
+        $this->assertContains($ownDownload->id, $ids);
+        $this->assertNotContains($otherDownload->id, $ids);
     }
 }

@@ -14,6 +14,8 @@ The Jackpot DAM uses a **canonical role system** with three completely separate 
 
 These layers **MUST NOT leak into each other**. All role lists come from a single registry (`RoleRegistry`).
 
+**Download links:** The permission `downloads.share_public_link` controls who may set a download to **public** (unauthenticated) access. It is included for standard tenant roles (owner, admin, member, agency roles) and for brand roles admin / brand_manager / contributor—not for brand **viewer**. External collection guests are always blocked from public links in code regardless of role. See [SECURITY_DOWNLOADS_AND_EXTERNAL_ACCESS.md](./SECURITY_DOWNLOADS_AND_EXTERNAL_ACCESS.md).
+
 ---
 
 ## Tenant/Company Roles

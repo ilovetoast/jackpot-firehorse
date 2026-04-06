@@ -176,6 +176,8 @@ export default function AssetDrawer({
     /** When true (e.g. grid double-click), open the fullscreen zoom modal once the drawer mounts */
     initialZoomOpen = false,
     onInitialZoomConsumed = null,
+    /** Collection invite / external guest: skip internal-only fetches (activity, incidents, metrics, collections admin APIs). */
+    externalCollectionGuest = false,
 }) {
     const pageProps = usePage().props
     const { auth, download_policy_disable_single_asset: policyDisableSingleAsset = false } = pageProps
@@ -348,6 +350,10 @@ export default function AssetDrawer({
     const trackedDrawerViewsRef = useRef(new Set())
     
     useEffect(() => {
+        if (externalCollectionGuest) {
+            trackedDrawerViewsRef.current.clear()
+            return
+        }
         if (asset?.id && !asset?.is_virtual_google_font) {
             // Check if we've already tracked this asset in this session
             const trackingKey = `${asset.id}_drawer`
@@ -366,13 +372,17 @@ export default function AssetDrawer({
             // Reset tracking when drawer closes (asset becomes null)
             trackedDrawerViewsRef.current.clear()
         }
-    }, [asset?.id, trackView])
+    }, [asset?.id, trackView, externalCollectionGuest])
 
     // Track large view when zoom modal opens
     // Use ref to track if we've already tracked this asset's large view
     const trackedLargeViewsRef = useRef(new Set())
     
     useEffect(() => {
+        if (externalCollectionGuest) {
+            trackedLargeViewsRef.current.clear()
+            return
+        }
         if (showZoomModal && asset?.id && !asset?.is_virtual_google_font) {
             // Check if we've already tracked this asset's large view
             const trackingKey = `${asset.id}_large_view`
@@ -387,13 +397,14 @@ export default function AssetDrawer({
             const trackingKey = `${asset.id}_large_view`
             trackedLargeViewsRef.current.delete(trackingKey)
         }
-    }, [showZoomModal, asset?.id, trackView])
+    }, [showZoomModal, asset?.id, trackView, externalCollectionGuest])
 
     // Fetch analytics/metrics when asset changes
     useEffect(() => {
-        if (!asset?.id || asset?.is_virtual_google_font) {
+        if (externalCollectionGuest || !asset?.id || asset?.is_virtual_google_font) {
             setViewCount(null)
             setDownloadCount(null)
+            setMetricsLoading(false)
             return
         }
 
@@ -410,7 +421,7 @@ export default function AssetDrawer({
         }).catch(() => {
             setMetricsLoading(false)
         })
-    }, [asset?.id, getViewCount, getDownloadCount])
+    }, [asset?.id, getViewCount, getDownloadCount, externalCollectionGuest])
 
     // Briefly hide preview until after layout (grid reserves drawer width in one frame; no animated padding)
     useEffect(() => {
@@ -429,7 +440,7 @@ export default function AssetDrawer({
 
     // Fetch activity events when asset is set
     useEffect(() => {
-        if (!asset || !asset.id || asset.is_virtual_google_font) {
+        if (externalCollectionGuest || !asset || !asset.id || asset.is_virtual_google_font) {
             setActivityEvents([])
             setActivityLoading(false)
             return
@@ -450,13 +461,14 @@ export default function AssetDrawer({
                 setActivityEvents([])
                 setActivityLoading(false)
             })
-    }, [asset?.id])
+    }, [asset?.id, externalCollectionGuest])
 
     // C5: Fetch collections this asset is in (for "In X collections")
     // C9.1: Always fetch collections if asset exists (not dependent on collectionContext)
     useEffect(() => {
-        if (!asset?.id || asset?.is_virtual_google_font) {
+        if (externalCollectionGuest || !asset?.id || asset?.is_virtual_google_font) {
             setAssetCollections([])
+            setAssetCollectionsLoading(false)
             return
         }
         setAssetCollectionsLoading(true)
@@ -475,13 +487,14 @@ export default function AssetDrawer({
                 setAssetCollections([])
             })
             .finally(() => setAssetCollectionsLoading(false))
-    }, [asset?.id])
+    }, [asset?.id, externalCollectionGuest])
 
     // C5: Fetch collections list for "Add to Collection" dropdown
     // C9.1: Always fetch collections list (not dependent on collectionContext) for inline modal
     useEffect(() => {
-        if (!asset?.id || asset?.is_virtual_google_font) {
+        if (externalCollectionGuest || !asset?.id || asset?.is_virtual_google_font) {
             setDropdownCollections([])
+            setDropdownCollectionsLoading(false)
             return
         }
         setDropdownCollectionsLoading(true)
@@ -491,14 +504,14 @@ export default function AssetDrawer({
             })
             .catch(() => setDropdownCollections([]))
             .finally(() => setDropdownCollectionsLoading(false))
-    }, [asset?.id])
+    }, [asset?.id, externalCollectionGuest])
 
     // C9.2: Category ID for edit schema (drawer respects Metadata Management Quick View)
     const assetCategoryId = getAssetCategoryId(asset)
 
     // C9.2: Collection field visibility from edit schema (Quick View checkbox in Metadata Management)
     useEffect(() => {
-        if (!assetCategoryId || asset?.is_virtual_google_font) {
+        if (externalCollectionGuest || !assetCategoryId || asset?.is_virtual_google_font) {
             setCollectionFieldVisible(false)
             return
         }
@@ -535,7 +548,7 @@ export default function AssetDrawer({
                 setCollectionFieldVisible(hasCollectionField)
             })
             .catch(() => setCollectionFieldVisible(false))
-    }, [asset?.id, assetCategoryId, asset?.mime_type, asset?.category, asset?.metadata])
+    }, [asset?.id, assetCategoryId, asset?.mime_type, asset?.category, asset?.metadata, externalCollectionGuest])
 
     // Phase J.3: Fetch approval comments for rejected assets (to get rejecting user role)
     useEffect(() => {
@@ -614,6 +627,7 @@ export default function AssetDrawer({
     // When grid updates asset (via handleThumbnailUpdate/handleLifecycleUpdate), prop changes and drawerAsset syncs
     const { drawerAsset } = useDrawerThumbnailPoll({
         asset,
+        pollEnabled: !externalCollectionGuest,
         onAssetUpdate: (updatedAsset) => {
             // Polling callback - drawerAsset is updated internally by hook
             // Grid state updates come via asset prop changes, not through this callback
@@ -727,8 +741,9 @@ export default function AssetDrawer({
 
     // Fetch unresolved incidents when display asset changes (Unified Operations)
     useEffect(() => {
-        if (!displayAsset?.id || displayAsset.is_virtual_google_font) {
+        if (externalCollectionGuest || !displayAsset?.id || displayAsset.is_virtual_google_font) {
             setAssetIncidents([])
+            setIncidentsLoading(false)
             return
         }
         setIncidentsLoading(true)
@@ -738,7 +753,7 @@ export default function AssetDrawer({
             })
             .catch(() => setAssetIncidents([]))
             .finally(() => setIncidentsLoading(false))
-    }, [displayAsset?.id])
+    }, [displayAsset?.id, externalCollectionGuest])
 
     useEffect(() => {
         setBrandIntelActivityBanner(null)
@@ -750,7 +765,7 @@ export default function AssetDrawer({
 
     // Reliability Timeline: fetch full incident history (resolved + unresolved) to decide if section is shown
     useEffect(() => {
-        if (!displayAsset?.id || displayAsset.is_virtual_google_font) {
+        if (externalCollectionGuest || !displayAsset?.id || displayAsset.is_virtual_google_font) {
             setReliabilityTimeline([])
             setReliabilityTimelineLoading(false)
             return
@@ -762,7 +777,7 @@ export default function AssetDrawer({
             })
             .catch(() => setReliabilityTimeline([]))
             .finally(() => setReliabilityTimelineLoading(false))
-    }, [displayAsset?.id])
+    }, [displayAsset?.id, externalCollectionGuest])
 
     // Phase V-1: Detect if asset is a video
     const isVideo = useMemo(() => {

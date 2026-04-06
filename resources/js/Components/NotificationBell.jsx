@@ -275,10 +275,11 @@ export default function NotificationBell({ textColor = '#000000' }) {
             {isOpen && (
                 <>
                     <div
-                        className="fixed inset-0 z-10"
+                        className="fixed inset-0 z-[190]"
+                        aria-hidden="true"
                         onClick={() => setIsOpen(false)}
                     />
-                    <div className="absolute right-0 z-20 w-80 origin-top-right rounded-md bg-white shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none max-h-[calc(100vh-8rem)] overflow-y-auto" style={{ top: '25px' }}>
+                    <div className="absolute right-0 z-[200] w-80 origin-top-right rounded-md bg-white shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none max-h-[calc(100vh-8rem)] overflow-y-auto" style={{ top: '25px' }}>
                         <div className="px-4 py-3 border-b border-gray-200">
                             <h3 className="text-sm font-semibold text-gray-900">Notifications</h3>
                         </div>

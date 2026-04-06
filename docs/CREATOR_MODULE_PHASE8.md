@@ -44,7 +44,7 @@ When access ends:
 
 ### Centralized throw helper
 
-`App\Services\Prostaff\EnsureCreatorModuleEnabled::assertEnabled(Tenant $tenant)` throws `DomainException` with message `Creator module is not active for this tenant.` when the gate is false. Use this in services and HTTP layers that should fail closed (assign, upload/replace, dashboard JSON). Read-only branches (e.g. asset grid filter params) still use `creatorModuleEnabled()` for a boolean.
+`App\Services\Prostaff\EnsureCreatorModuleEnabled::assertEnabled(Tenant $tenant)` throws {@see \App\Exceptions\CreatorModuleInactiveException} (extends `DomainException`) with UX copy from {@see \App\Services\CreatorModuleMessageService::getExpiredMessage()} when the gate is false. HTTP assign / upload / dashboard layers return a structured JSON body (Phase 9). Read-only branches (e.g. asset grid filter params) still use `creatorModuleEnabled()` for a boolean.
 
 ## Enforcement points
 

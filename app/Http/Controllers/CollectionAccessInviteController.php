@@ -432,9 +432,9 @@ class CollectionAccessInviteController extends Controller
     }
 
     /**
-     * C12: View collection and its assets (collection-only users). Read-only.
+     * C12: View collection and its assets (collection-only users). Same grid/filters/pagination as internal collections.
      */
-    public function viewCollection(Request $request, Collection $collection): Response|RedirectResponse
+    public function viewCollection(Request $request, Collection $collection): Response|RedirectResponse|JsonResponse
     {
         if (! Auth::check()) {
             return redirect()->route('login');
@@ -442,8 +442,20 @@ class CollectionAccessInviteController extends Controller
 
         Gate::forUser($request->user())->authorize('view', $collection);
 
-        $collectionController = app(\App\Http\Controllers\CollectionController::class);
-        $assets = $collectionController->getCollectionAssetsGridData($collection, $request->user());
+        $collectionController = app(CollectionController::class);
+        $payload = $collectionController->buildCollectionGridPayloadForRequest($request, $collection, $request->user());
+
+        if ($request->boolean('load_more')) {
+            $paginator = $payload['paginator'];
+            if ($paginator) {
+                return response()->json([
+                    'data' => $payload['assets'],
+                    'next_page_url' => $paginator->nextPageUrl(),
+                ]);
+            }
+
+            return response()->json(['data' => [], 'next_page_url' => null]);
+        }
 
         return Inertia::render('Collections/CollectionOnlyView', [
             'collection' => [
@@ -451,7 +463,20 @@ class CollectionAccessInviteController extends Controller
                 'name' => $collection->name,
                 'slug' => $collection->slug,
             ],
-            'assets' => $assets,
+            'assets' => $payload['assets'],
+            'next_page_url' => $payload['paginator']?->nextPageUrl(),
+            'filtered_grid_total' => $payload['paginator'] ? (int) $payload['paginator']->total() : 0,
+            'grid_folder_total' => $payload['grid_folder_total'],
+            'sort' => $payload['sort'],
+            'sort_direction' => $payload['sort_direction'],
+            'q' => $request->input('q', ''),
+            'collection_type' => $payload['collection_type'],
+            'category_id' => $payload['category_id'],
+            'group_by_category' => $payload['group_by_category'],
+            'filter_categories' => $payload['filter_categories'],
+            'filterable_schema' => $payload['filterable_schema'],
+            'available_values' => $payload['available_values'],
+            'filters' => $payload['filters'],
         ]);
     }
 }

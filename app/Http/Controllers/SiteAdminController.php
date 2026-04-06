@@ -15,12 +15,15 @@ use App\Models\Brand;
 use App\Models\Download;
 use App\Models\Tenant;
 use App\Models\TenantAgency;
+use App\Models\TenantModule;
 use App\Models\Ticket;
 use App\Models\UploadSession;
 use App\Models\User;
 use App\Services\ActivityRecorder;
 use App\Services\DocumentationService;
+use App\Services\GrantCreatorModuleToTenant;
 use App\Services\TenantAgencyService;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -1640,6 +1643,51 @@ class SiteAdminController extends Controller
         $tenant->update(['infrastructure_tier' => $validated['infrastructure_tier']]);
 
         return back()->with('success', "Infrastructure tier set to {$validated['infrastructure_tier']}.");
+    }
+
+    /**
+     * Grant or extend Creator (Prostaff) module (admin grant with required expiry), update optional seats cap, or revoke.
+     */
+    public function upsertCreatorModule(Request $request, Tenant $tenant)
+    {
+        $this->authorizeSiteAdmin('Only site owners and site admins can manage Creator module.');
+
+        if ($request->input('action') === 'revoke') {
+            $module = TenantModule::query()
+                ->where('tenant_id', $tenant->id)
+                ->where('module_key', TenantModule::KEY_CREATOR)
+                ->first();
+
+            if ($module !== null) {
+                $module->update(['status' => 'cancelled']);
+            }
+
+            return back()->with('success', 'Creator module access revoked for this company. Prostaff memberships and stats are retained.');
+        }
+
+        $validated = $request->validate([
+            'expires_at' => ['required', 'date', 'after:now'],
+            'status' => ['required', 'string', 'in:active,trial'],
+            'seats_limit' => ['sometimes', 'nullable', 'integer', 'min:1', 'max:50000'],
+        ]);
+
+        $expiresAt = Carbon::parse($validated['expires_at']);
+
+        $module = app(GrantCreatorModuleToTenant::class)->grant(
+            $tenant,
+            $expiresAt,
+            Auth::user(),
+            $validated['status']
+        );
+
+        if ($request->exists('seats_limit')) {
+            $module->seats_limit = $validated['seats_limit'] ?? null;
+            $module->save();
+        }
+
+        $statusLabel = $validated['status'] === 'trial' ? 'trial' : 'active';
+
+        return back()->with('success', "Creator (Prostaff) module set to {$statusLabel}; access ends {$expiresAt->toDayDateTimeString()} (UTC).");
     }
 
     /**

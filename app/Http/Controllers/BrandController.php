@@ -7,6 +7,7 @@ use App\Mail\InviteMember;
 use App\Models\Brand;
 use App\Models\BrandInvitation;
 use App\Models\Category;
+use App\Models\ProstaffMembership;
 use App\Models\CollectionUser;
 use App\Models\User;
 use App\Services\ActivityRecorder;
@@ -439,10 +440,19 @@ class BrandController extends Controller
         $currentCategoryCount = $brand->categories()->custom()->count();
 
         // Phase MI-1: Get brand users with active membership only
+        $activeCreatorUserIdSet = array_fill_keys(
+            ProstaffMembership::query()
+                ->where('brand_id', $brand->id)
+                ->where('status', 'active')
+                ->pluck('user_id')
+                ->all(),
+            true
+        );
+
         $brandUsers = $brand->users()
             ->wherePivotNull('removed_at')
             ->get()
-            ->map(function ($user) use ($brand) {
+            ->map(function ($user) use ($brand, $activeCreatorUserIdSet) {
                 return [
                     'id' => $user->id,
                     'first_name' => $user->first_name,
@@ -451,6 +461,7 @@ class BrandController extends Controller
                     'email' => $user->email,
                     'avatar_url' => $user->avatar_url,
                     'role' => $user->getRoleForBrand($brand) ?? 'viewer',
+                    'is_active_creator' => isset($activeCreatorUserIdSet[$user->id]),
                 ];
             });
 

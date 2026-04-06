@@ -38,6 +38,10 @@ class TenantModuleObserver
             return;
         }
 
+        if (! $tenantModule->wasChanged(['status', 'expires_at'])) {
+            return;
+        }
+
         if (! $tenantModule->wasChanged('status')) {
             return;
         }

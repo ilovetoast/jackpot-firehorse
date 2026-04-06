@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Link, router, useForm } from '@inertiajs/react'
+import { Link, router, useForm, usePage } from '@inertiajs/react'
 import AppNav from '../../Components/AppNav'
 import AppFooter from '../../Components/AppFooter'
 import BrandRoleSelector from '../../Components/BrandRoleSelector'
@@ -19,7 +19,17 @@ import {
     CpuChipIcon,
     InformationCircleIcon,
     TrashIcon,
+    RectangleStackIcon,
+    CubeIcon,
 } from '@heroicons/react/24/outline'
+
+function defaultCreatorExpiresLocal() {
+    const d = new Date()
+    d.setMonth(d.getMonth() + 6)
+    d.setSeconds(0, 0)
+    d.setMinutes(d.getMinutes() - d.getTimezoneOffset())
+    return d.toISOString().slice(0, 16)
+}
 
 export default function AdminCompanyView({ 
     company, 
@@ -35,6 +45,8 @@ export default function AdminCompanyView({
     aiUsage = null,
     linked_agencies = [],
 }) {
+    const { flash, errors: pageErrors } = usePage().props
+
     const [showAddUserForm, setShowAddUserForm] = useState(false)
     const [availableUsers, setAvailableUsers] = useState([])
     const [loadingUsers, setLoadingUsers] = useState(false)
@@ -62,6 +74,68 @@ export default function AdminCompanyView({
     const [extendReason, setExtendReason] = useState('')
     const [extendStatus, setExtendStatus] = useState(null)
     const [extendSubmitting, setExtendSubmitting] = useState(false)
+
+    const [creatorExpires, setCreatorExpires] = useState('')
+    const [creatorStatus, setCreatorStatus] = useState('active')
+    const [creatorSeats, setCreatorSeats] = useState('')
+    const [creatorBusy, setCreatorBusy] = useState(false)
+    /** Add-on modules: pick (Creator, Space, …) then module-specific step */
+    const [addonsModal, setAddonsModal] = useState({ open: false, step: 'pick' })
+
+    const closeAddonsModal = () => setAddonsModal({ open: false, step: 'pick' })
+
+    useEffect(() => {
+        const cm = company.creator_module
+        if (cm?.expires_at) {
+            const d = new Date(cm.expires_at)
+            if (!Number.isNaN(d.getTime())) {
+                d.setMinutes(d.getMinutes() - d.getTimezoneOffset())
+                setCreatorExpires(d.toISOString().slice(0, 16))
+            } else {
+                setCreatorExpires(defaultCreatorExpiresLocal())
+            }
+        } else {
+            setCreatorExpires(defaultCreatorExpiresLocal())
+        }
+        setCreatorStatus(cm?.status === 'trial' ? 'trial' : 'active')
+        setCreatorSeats(cm?.seats_limit != null ? String(cm.seats_limit) : '')
+    }, [company.id, company.creator_module?.expires_at, company.creator_module?.seats_limit, company.creator_module?.status])
+
+    const submitCreatorModule = (e) => {
+        e.preventDefault()
+        if (!company?.id) return
+        const seatsTrim = creatorSeats.trim()
+        let seats_limit = null
+        if (seatsTrim !== '') {
+            const n = parseInt(seatsTrim, 10)
+            if (!Number.isFinite(n) || n < 1) {
+                return
+            }
+            seats_limit = n
+        }
+        setCreatorBusy(true)
+        const payload = {
+            expires_at: creatorExpires,
+            status: creatorStatus,
+            seats_limit,
+        }
+        router.put(route('admin.companies.creator-module', company.id), payload, {
+            preserveScroll: true,
+            onFinish: () => setCreatorBusy(false),
+            onSuccess: () => closeAddonsModal(),
+        })
+    }
+
+    const revokeCreatorModule = () => {
+        if (!company?.id) return
+        if (!window.confirm('Revoke Creator module access? Memberships and stats stay; uploads and management are blocked until re-granted.')) return
+        setCreatorBusy(true)
+        router.put(route('admin.companies.creator-module', company.id), { action: 'revoke' }, {
+            preserveScroll: true,
+            onFinish: () => setCreatorBusy(false),
+            onSuccess: () => closeAddonsModal(),
+        })
+    }
 
     const submitIncubationExtend = (e) => {
         e.preventDefault()
@@ -303,6 +377,17 @@ export default function AdminCompanyView({
                             )}
                         </div>
                     </div>
+
+                    {flash?.success && (
+                        <div className="mb-4 rounded-md bg-green-50 border border-green-200 px-4 py-3 text-sm text-green-800">
+                            {flash.success}
+                        </div>
+                    )}
+                    {flash?.error && (
+                        <div className="mb-4 rounded-md bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-800">
+                            {flash.error}
+                        </div>
+                    )}
 
                     {/* Company Details Card */}
                     <div className="mb-8">
@@ -603,27 +688,39 @@ export default function AdminCompanyView({
                         <div className="mb-8">
                             <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
                                 <div className="p-6">
-                                    <div className="flex items-center justify-between mb-4">
+                                    <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
                                         <h2 className="text-lg font-semibold text-gray-900">Plan Management</h2>
-                                        {company.can_manage_plan && !company.plan_management.is_externally_managed && (
-                                            <button
-                                                type="button"
-                                                onClick={() => {
-                                                    setPlanChangeConfirm({
-                                                        open: true,
-                                                        oldPlan: company.plan_name || 'free',
-                                                        newPlan: company.plan_name || 'free',
-                                                        billingStatus: company.billing_status || 'comped',
-                                                        expirationMonths: company.billing_status_expires_at ? Math.ceil((new Date(company.billing_status_expires_at) - new Date()) / (1000 * 60 * 60 * 24 * 30)) : 6,
-                                                        equivalentPlanValue: null,
-                                                    })
-                                                }}
-                                                className="inline-flex items-center px-3 py-2 text-sm font-medium text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-md"
-                                            >
-                                                <PencilIcon className="h-4 w-4 mr-2" />
-                                                Change Plan
-                                            </button>
-                                        )}
+                                        <div className="flex flex-wrap items-center gap-2">
+                                            {company.creator_module && (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setAddonsModal({ open: true, step: 'pick' })}
+                                                    className="inline-flex items-center px-3 py-2 text-sm font-medium text-violet-700 bg-violet-50 hover:bg-violet-100 rounded-md ring-1 ring-violet-200/80"
+                                                >
+                                                    <RectangleStackIcon className="h-4 w-4 mr-2" />
+                                                    Add-on modules
+                                                </button>
+                                            )}
+                                            {company.can_manage_plan && !company.plan_management.is_externally_managed && (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                        setPlanChangeConfirm({
+                                                            open: true,
+                                                            oldPlan: company.plan_name || 'free',
+                                                            newPlan: company.plan_name || 'free',
+                                                            billingStatus: company.billing_status || 'comped',
+                                                            expirationMonths: company.billing_status_expires_at ? Math.ceil((new Date(company.billing_status_expires_at) - new Date()) / (1000 * 60 * 60 * 24 * 30)) : 6,
+                                                            equivalentPlanValue: null,
+                                                        })
+                                                    }}
+                                                    className="inline-flex items-center px-3 py-2 text-sm font-medium text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-md"
+                                                >
+                                                    <PencilIcon className="h-4 w-4 mr-2" />
+                                                    Change Plan
+                                                </button>
+                                            )}
+                                        </div>
                                     </div>
                                     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
                                         <div>
@@ -753,6 +850,52 @@ export default function AdminCompanyView({
                                                         </span>
                                                     </form>
                                                 </dd>
+                                            </div>
+                                        )}
+                                        {company.creator_module && (
+                                            <div className="col-span-full border-t border-gray-200 pt-5 mt-2">
+                                                <h3 className="text-sm font-semibold text-gray-900">
+                                                    Add-on modules (summary)
+                                                </h3>
+                                                <p className="text-xs text-gray-500 mt-1 mb-4 max-w-2xl">
+                                                    Grant or extend modules via the &quot;Add-on modules&quot; button above. Creator covers prostaff uploads and dashboards; Space is planned for storage add-ons.
+                                                </p>
+                                                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4 text-sm">
+                                                    <div>
+                                                        <dt className="text-gray-500">Entitled now</dt>
+                                                        <dd className="mt-0.5 font-medium text-gray-900">
+                                                            {company.creator_module.enabled ? (
+                                                                <span className="text-green-700">Yes</span>
+                                                            ) : (
+                                                                <span className="text-gray-600">No</span>
+                                                            )}
+                                                        </dd>
+                                                    </div>
+                                                    <div>
+                                                        <dt className="text-gray-500">Row status</dt>
+                                                        <dd className="mt-0.5 font-medium text-gray-900">
+                                                            {company.creator_module.status
+                                                                ? company.creator_module.status
+                                                                : '—'}
+                                                        </dd>
+                                                    </div>
+                                                    <div>
+                                                        <dt className="text-gray-500">Module expires</dt>
+                                                        <dd className="mt-0.5 font-medium text-gray-900">
+                                                            {company.creator_module.expires_at
+                                                                ? formatDate(company.creator_module.expires_at)
+                                                                : '—'}
+                                                        </dd>
+                                                    </div>
+                                                    <div>
+                                                        <dt className="text-gray-500">Seats limit</dt>
+                                                        <dd className="mt-0.5 font-medium text-gray-900">
+                                                            {company.creator_module.seats_limit != null
+                                                                ? company.creator_module.seats_limit
+                                                                : '—'}
+                                                        </dd>
+                                                    </div>
+                                                </div>
                                             </div>
                                         )}
                                         {company.plan_management.is_externally_managed && (
@@ -1324,6 +1467,178 @@ export default function AdminCompanyView({
                 </div>
             </main>
             <AppFooter />
+
+            {/* Add-on modules: pick module, then configure (Creator today; Space placeholder) */}
+            {addonsModal.open && company.creator_module && (
+                <div className="fixed inset-0 z-50 overflow-y-auto">
+                    <div className="flex min-h-full items-end justify-center p-4 text-center sm:items-center sm:p-0">
+                        <div
+                            className="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity"
+                            onClick={closeAddonsModal}
+                            aria-hidden="true"
+                        />
+                        <div
+                            className={`relative transform overflow-hidden rounded-lg bg-white px-4 pb-4 pt-5 text-left shadow-xl transition-all sm:my-8 sm:w-full sm:p-6 ${
+                                addonsModal.step === 'creator' ? 'sm:max-w-xl' : 'sm:max-w-lg'
+                            }`}
+                            role="dialog"
+                            aria-modal="true"
+                            aria-labelledby="addons-modal-title"
+                        >
+                            <div className="absolute right-0 top-0 pr-4 pt-4">
+                                <button
+                                    type="button"
+                                    onClick={closeAddonsModal}
+                                    className="rounded-md bg-white text-gray-400 hover:text-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                >
+                                    <span className="sr-only">Close</span>
+                                    <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                                    </svg>
+                                </button>
+                            </div>
+
+                            {addonsModal.step === 'pick' ? (
+                                <>
+                                    <div className="sm:flex sm:items-start">
+                                        <div className="mx-auto flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-violet-100 sm:mx-0 sm:h-10 sm:w-10">
+                                            <RectangleStackIcon className="h-6 w-6 text-violet-600" aria-hidden="true" />
+                                        </div>
+                                        <div className="mt-3 text-center sm:ml-4 sm:mt-0 sm:text-left flex-1 pr-8">
+                                            <h3 id="addons-modal-title" className="text-lg font-semibold text-gray-900">
+                                                Add-on modules
+                                            </h3>
+                                            <p className="mt-2 text-sm text-gray-500">
+                                                Choose a module to configure for {company.name}.
+                                            </p>
+                                        </div>
+                                    </div>
+                                    <ul className="mt-6 space-y-3">
+                                        <li>
+                                            <button
+                                                type="button"
+                                                onClick={() => setAddonsModal({ open: true, step: 'creator' })}
+                                                className="flex w-full items-start gap-4 rounded-lg border border-gray-200 p-4 text-left transition hover:border-violet-300 hover:bg-violet-50/50"
+                                            >
+                                                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-indigo-100">
+                                                    <SparklesIcon className="h-5 w-5 text-indigo-600" />
+                                                </span>
+                                                <span className="min-w-0 flex-1">
+                                                    <span className="block text-sm font-semibold text-gray-900">Creator (Prostaff)</span>
+                                                    <span className="mt-0.5 block text-xs text-gray-500">
+                                                        Prostaff uploads, assignments, and dashboards. Set expiry, trial/active, and optional seats cap.
+                                                    </span>
+                                                </span>
+                                                <span className="shrink-0 text-sm font-medium text-violet-700">Configure</span>
+                                            </button>
+                                        </li>
+                                        <li>
+                                            <div className="flex w-full items-start gap-4 rounded-lg border border-dashed border-gray-200 bg-gray-50/80 p-4 text-left opacity-80">
+                                                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-gray-200">
+                                                    <CubeIcon className="h-5 w-5 text-gray-600" />
+                                                </span>
+                                                <span className="min-w-0 flex-1">
+                                                    <span className="block text-sm font-semibold text-gray-700">Space</span>
+                                                    <span className="mt-0.5 block text-xs text-gray-500">
+                                                        Storage and asset add-ons (planned). Not available yet.
+                                                    </span>
+                                                </span>
+                                                <span className="shrink-0 text-sm font-medium text-gray-400">Coming soon</span>
+                                            </div>
+                                        </li>
+                                    </ul>
+                                </>
+                            ) : (
+                                <>
+                                    <button
+                                        type="button"
+                                        onClick={() => setAddonsModal({ open: true, step: 'pick' })}
+                                        className="mb-4 inline-flex items-center text-sm font-medium text-gray-600 hover:text-gray-900"
+                                    >
+                                        <ArrowLeftIcon className="mr-1.5 h-4 w-4" />
+                                        Back to modules
+                                    </button>
+                                    <h3 id="addons-modal-title" className="text-lg font-semibold text-gray-900 pr-8">
+                                        Creator (Prostaff) module
+                                    </h3>
+                                    <p className="mt-2 text-xs text-gray-500">
+                                        Grants prostaff uploads, assignments, and dashboards until the expiry date. Revoking keeps memberships and stats; uploads and management are blocked until re-granted.
+                                    </p>
+                                    <form onSubmit={submitCreatorModule} className="mt-5 space-y-4">
+                                        <div>
+                                            <label htmlFor="creator-expires" className="block text-sm font-medium text-gray-700">
+                                                Access until (local)
+                                            </label>
+                                            <input
+                                                id="creator-expires"
+                                                type="datetime-local"
+                                                value={creatorExpires}
+                                                onChange={(e) => setCreatorExpires(e.target.value)}
+                                                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                                            />
+                                            {pageErrors?.expires_at && (
+                                                <p className="mt-1 text-sm text-red-600">{pageErrors.expires_at}</p>
+                                            )}
+                                        </div>
+                                        <div>
+                                            <label htmlFor="creator-status" className="block text-sm font-medium text-gray-700">
+                                                Module status
+                                            </label>
+                                            <select
+                                                id="creator-status"
+                                                value={creatorStatus}
+                                                onChange={(e) => setCreatorStatus(e.target.value)}
+                                                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                                            >
+                                                <option value="active">Active</option>
+                                                <option value="trial">Trial</option>
+                                            </select>
+                                            {pageErrors?.status && (
+                                                <p className="mt-1 text-sm text-red-600">{pageErrors.status}</p>
+                                            )}
+                                        </div>
+                                        <div>
+                                            <label htmlFor="creator-seats" className="block text-sm font-medium text-gray-700">
+                                                Seats cap (optional)
+                                            </label>
+                                            <input
+                                                id="creator-seats"
+                                                type="number"
+                                                min={1}
+                                                max={50000}
+                                                placeholder="Unlimited if empty"
+                                                value={creatorSeats}
+                                                onChange={(e) => setCreatorSeats(e.target.value)}
+                                                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                                            />
+                                            {pageErrors?.seats_limit && (
+                                                <p className="mt-1 text-sm text-red-600">{pageErrors.seats_limit}</p>
+                                            )}
+                                        </div>
+                                        <div className="flex flex-wrap gap-2 pt-2">
+                                            <button
+                                                type="submit"
+                                                disabled={creatorBusy}
+                                                className="inline-flex justify-center rounded-md border border-transparent bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:opacity-50"
+                                            >
+                                                {creatorBusy ? 'Saving…' : 'Save / extend module'}
+                                            </button>
+                                            <button
+                                                type="button"
+                                                disabled={creatorBusy}
+                                                onClick={revokeCreatorModule}
+                                                className="inline-flex justify-center rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:opacity-50"
+                                            >
+                                                Revoke access
+                                            </button>
+                                        </div>
+                                    </form>
+                                </>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
             
             {/* Plan Change Dialog */}
             {planChangeConfirm.open && (

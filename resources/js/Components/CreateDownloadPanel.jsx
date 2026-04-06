@@ -58,7 +58,11 @@ export default function CreateDownloadPanel({
   createDownloadSource = 'grid',
   collectionId = null,
 }) {
-  const { auth, download_features: features = {}, errors: pageErrors = {} } = usePage().props
+  const { auth, collection_only: collectionOnlySession = false, download_features: features = {}, errors: pageErrors = {} } =
+    usePage().props
+  const isCollectionGuest = auth?.is_collection_guest_experience === true
+  const blockPublicLink = collectionOnlySession === true || isCollectionGuest
+  const canSharePublic = (auth?.downloads?.can_share_public_link ?? true) && !blockPublicLink
   const brandAccent = auth?.activeBrand?.primary_color || '#6366f1'
   const brandName = auth?.activeBrand?.name || ''
   const companyName = auth?.activeCompany?.name || ''
@@ -103,6 +107,11 @@ export default function CreateDownloadPanel({
   const canBrand = !!features.restrict_access_brand
   const canCompany = !!features.restrict_access_company
   const canUsers = !!features.restrict_access_users
+  /** Collection guests: company-wide sign-in only (no public, no per-user allowlist). */
+  const showSpecificUsersOption = canUsers && !blockPublicLink
+  /** Guests must use sign-in–required links; company option shown even on plans that normally hide it */
+  const showCompanyOption = canCompany || !canSharePublic
+  const showBrandOption = canBrand && !isCollectionGuest
   const canPasswordProtect = !!features.password_protection // D7: Enterprise only
   const canBrandDownload = !!features.branding // D7: Pro + Enterprise (landing page branding)
 
@@ -127,17 +136,24 @@ export default function CreateDownloadPanel({
     setName(fromTemplate ?? defaultDownloadName(brandName))
     setExpiresAt(defaultExpiresAt())
     setNeverExpires(false)
-    setAccessMode('public')
+    setAccessMode(canSharePublic ? 'public' : 'company')
     setAllowedUserIds([])
     setError(null)
     setPassword('')
     setLandingHeadline('')
     setLandingSubtext('')
     setAdvancedOpen(false)
-  }, [open, brandName, companyName, downloadNameTemplate])
+  }, [open, brandName, companyName, downloadNameTemplate, canSharePublic])
 
   useEffect(() => {
-    if (!open || accessMode !== 'users' || !canUsers) return
+    if (!open || accessMode !== 'users' || !showSpecificUsersOption) {
+      return
+    }
+    setAccessMode('company')
+  }, [open, accessMode, showSpecificUsersOption])
+
+  useEffect(() => {
+    if (!open || accessMode !== 'users' || !showSpecificUsersOption) return
     setLoadingUsers(true)
     fetch(route('downloads.company-users'), {
       method: 'GET',
@@ -148,7 +164,7 @@ export default function CreateDownloadPanel({
       .then((data) => setCompanyUsers(data.users || []))
       .catch(() => setCompanyUsers([]))
       .finally(() => setLoadingUsers(false))
-  }, [open, accessMode, canUsers])
+  }, [open, accessMode, showSpecificUsersOption])
 
   const maxDate = useCallback(() => {
     const d = new Date()
@@ -322,15 +338,23 @@ export default function CreateDownloadPanel({
               )}
             </div>
 
-            {/* Access — default visible: Public only */}
+            {/* Access — summary line */}
             <div className="mt-4">
               <label className="block text-sm font-medium text-gray-700">Access</label>
               <p className="mt-1 text-sm text-gray-600">
-                {accessMode === 'public' && 'Public (anyone with the link)'}
+                {accessMode === 'public' && canSharePublic && 'Public (anyone with the link)'}
                 {accessMode === 'brand' && 'Brand members'}
-                {accessMode === 'company' && 'Company members'}
-                {accessMode === 'users' && 'Specific users'}
+                {accessMode === 'company' && 'Company members (sign-in required)'}
+                {accessMode === 'users' && showSpecificUsersOption && 'Specific users'}
+                {accessMode === 'users' && !showSpecificUsersOption && 'Company members (sign-in required)'}
+                {accessMode === 'public' && !canSharePublic && 'Company members (sign-in required)'}
               </p>
+              {!canSharePublic && (
+                <p className="mt-2 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
+                  Public links aren&apos;t available for your account. Recipients must sign in to the workspace (company
+                  members) or match the access scope you choose below.
+                </p>
+              )}
             </div>
 
             {/* Advanced options — collapsible */}
@@ -354,18 +378,20 @@ export default function CreateDownloadPanel({
                   <div>
                     <label className="block text-sm font-medium text-gray-700">Access</label>
                     <div className="mt-2 space-y-2">
-                      <label className="flex items-center gap-2">
-                        <input
-                          type="radio"
-                          name="access_mode"
-                          value="public"
-                          checked={accessMode === 'public'}
-                          onChange={() => setAccessMode('public')}
-                          className="h-4 w-4 border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                        />
-                        <span className="text-sm text-gray-700">Public (anyone with the link)</span>
-                      </label>
-                      {canBrand && (
+                      {canSharePublic && (
+                        <label className="flex items-center gap-2">
+                          <input
+                            type="radio"
+                            name="access_mode"
+                            value="public"
+                            checked={accessMode === 'public'}
+                            onChange={() => setAccessMode('public')}
+                            className="h-4 w-4 border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                          />
+                          <span className="text-sm text-gray-700">Public (anyone with the link)</span>
+                        </label>
+                      )}
+                      {showBrandOption && (
                         <label className="flex items-center gap-2">
                           <input
                             type="radio"
@@ -378,7 +404,7 @@ export default function CreateDownloadPanel({
                           <span className="text-sm text-gray-700">Brand members</span>
                         </label>
                       )}
-                      {canCompany && (
+                      {showCompanyOption && (
                         <label className="flex items-center gap-2">
                           <input
                             type="radio"
@@ -388,10 +414,10 @@ export default function CreateDownloadPanel({
                             onChange={() => setAccessMode('company')}
                             className="h-4 w-4 border-gray-300 text-indigo-600 focus:ring-indigo-500"
                           />
-                          <span className="text-sm text-gray-700">Company members</span>
+                          <span className="text-sm text-gray-700">Company members (sign-in required)</span>
                         </label>
                       )}
-                      {canUsers && (
+                      {showSpecificUsersOption && (
                         <label className="flex items-center gap-2">
                           <input
                             type="radio"
@@ -404,11 +430,11 @@ export default function CreateDownloadPanel({
                           <span className="text-sm text-gray-700">Specific users</span>
                         </label>
                       )}
-                      {!canBrand && !canCompany && !canUsers && (
+                      {canSharePublic && !showBrandOption && !showCompanyOption && !showSpecificUsersOption && (
                         <p className="text-xs text-gray-500">Upgrade to restrict access</p>
                       )}
                     </div>
-                    {accessMode === 'users' && canUsers && (
+                    {accessMode === 'users' && showSpecificUsersOption && (
                       <div className="mt-3 max-h-40 overflow-y-auto rounded border border-gray-200 bg-white p-2">
                         {loadingUsers ? (
                           <p className="text-sm text-gray-500">Loading users…</p>

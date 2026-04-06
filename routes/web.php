@@ -399,6 +399,7 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
     Route::post('/admin/users/{user}/suspend', [\App\Http\Controllers\SiteAdminController::class, 'suspendAccount'])->name('admin.users.suspend');
     Route::post('/admin/users/{user}/unsuspend', [\App\Http\Controllers\SiteAdminController::class, 'unsuspendAccount'])->name('admin.users.unsuspend');
     Route::put('/admin/companies/{tenant}/plan', [\App\Http\Controllers\SiteAdminController::class, 'updatePlan'])->name('admin.companies.update-plan');
+    Route::put('/admin/companies/{tenant}/creator-module', [\App\Http\Controllers\SiteAdminController::class, 'upsertCreatorModule'])->name('admin.companies.creator-module');
     Route::put('/admin/companies/{tenant}/infrastructure-tier', [\App\Http\Controllers\SiteAdminController::class, 'updateInfrastructureTier'])->name('admin.companies.update-infrastructure-tier');
     Route::post('/admin/api/companies/{tenant}/incubation/extend', [\App\Http\Controllers\Admin\AdminIncubationController::class, 'extendDeadline'])
         ->name('admin.api.companies.incubation.extend');
@@ -883,6 +884,7 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
             Route::get('/api/brands/{brand}/approvals', [\App\Http\Controllers\AssetApprovalController::class, 'index'])->name('api.brands.approvals');
             // Phase J.2: Pending assets for review modal
             Route::get('/api/brands/{brand}/pending-assets', [\App\Http\Controllers\AssetApprovalController::class, 'pendingAssets'])->name('api.brands.pending-assets');
+            Route::get('/brands/{brand}/creators', [\App\Http\Controllers\Prostaff\ProstaffDashboardController::class, 'page'])->name('brands.creators');
             Route::get('/api/brands/{brand}/prostaff/dashboard', [\App\Http\Controllers\Prostaff\ProstaffDashboardController::class, 'index'])->name('api.brands.prostaff.dashboard');
             Route::get('/api/brands/{brand}/prostaff/options', [\App\Http\Controllers\Prostaff\ProstaffDashboardController::class, 'filterOptions'])->name('api.brands.prostaff.options');
             Route::post('/api/brands/{brand}/prostaff/members', [\App\Http\Controllers\Prostaff\ProstaffMembershipController::class, 'store'])->name('api.brands.prostaff.members.store');

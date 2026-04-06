@@ -130,6 +130,9 @@ class PermissionMap
             'tickets.view_any',
         ];
 
+        /** Anyone with this permission may set download links to public (unauthenticated). Not granted to collection-only guests / viewer roles. */
+        $downloadPublicLinkPermission = ['downloads.share_public_link'];
+
         return [
             // Owner: ALL permissions (full access) including owner-only; can delete any asset
             'owner' => array_merge(
@@ -141,6 +144,7 @@ class PermissionMap
                 $tagPermissions,
                 $governancePermissions,
                 $ticketPermissions,
+                $downloadPublicLinkPermission,
                 [
                     'ai.usage.view',
                     'assets.ai_metadata.regenerate',
@@ -156,6 +160,7 @@ class PermissionMap
                 $tagPermissions,
                 $governancePermissions,
                 $ticketPermissions,
+                $downloadPublicLinkPermission,
                 [
                     'ai.usage.view',
                     'assets.ai_metadata.regenerate',
@@ -177,7 +182,8 @@ class PermissionMap
                     'metadata.suggestions.apply',
                     'metadata.suggestions.dismiss',
                 ],
-                $ticketPermissions
+                $ticketPermissions,
+                $downloadPublicLinkPermission
             ),
 
             // Agency Partner: Retained access after company transfer
@@ -195,7 +201,8 @@ class PermissionMap
                     'metadata.suggestions.apply',
                     'metadata.suggestions.dismiss',
                 ],
-                $ticketPermissions
+                $ticketPermissions,
+                $downloadPublicLinkPermission
             ),
 
             // Agency admin: explicit client-granted access for linked agency tenants (same capability as admin)
@@ -207,6 +214,7 @@ class PermissionMap
                 $tagPermissions,
                 $governancePermissions,
                 $ticketPermissions,
+                $downloadPublicLinkPermission,
                 [
                     'ai.usage.view',
                     'assets.ai_metadata.regenerate',
@@ -266,6 +274,8 @@ class PermissionMap
             'assets.retry_thumbnails',
         ];
 
+        $downloadPublicLinkPermission = ['downloads.share_public_link'];
+
         return [
             // Admin: Manage brand config (full brand control); can delete any asset
             'admin' => array_merge(
@@ -274,6 +284,7 @@ class PermissionMap
                 ['assets.delete'],
                 $metadataPermissions,
                 $tagPermissions,
+                $downloadPublicLinkPermission,
                 [
                     'tickets.create',
                     'tickets.reply',
@@ -287,6 +298,7 @@ class PermissionMap
                 $brandManagementPermissions,
                 $assetPermissions,
                 ['assets.delete'],
+                $downloadPublicLinkPermission,
                 [
                     'metadata.bypass_approval', // Phase M-1: Brand Manager edits bypass approval
                     'embedded_metadata.view_raw',
@@ -305,6 +317,7 @@ class PermissionMap
                 ['view brand'],
                 $assetPermissions,
                 $tagPermissions,
+                $downloadPublicLinkPermission,
                 [
                     'metadata.set_on_upload',
                     'embedded_metadata.view_raw',

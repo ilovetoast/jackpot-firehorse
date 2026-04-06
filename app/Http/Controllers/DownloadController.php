@@ -572,12 +572,16 @@ class DownloadController extends Controller
 
         $collectionIdForOptions = null;
         if ($sourceInput === 'collection') {
+            $cid = (int) $request->integer('collection_id');
+            $collection = Collection::query()->where('id', $cid)->firstOrFail();
             $brand = app('brand');
+            if (! $brand) {
+                $collection->loadMissing('brand');
+                $brand = $collection->brand;
+            }
             if (! $brand) {
                 throw ValidationException::withMessages(['message' => ['Brand context required.']]);
             }
-            $cid = (int) $request->integer('collection_id');
-            $collection = Collection::query()->where('id', $cid)->firstOrFail();
             if ($collection->tenant_id !== $tenant->id || $collection->brand_id !== $brand->id) {
                 throw ValidationException::withMessages(['collection_id' => ['Collection not found.']]);
             }
@@ -598,6 +602,8 @@ class DownloadController extends Controller
 
         $accessModeInput = $request->input('access_mode', 'public');
         $accessMode = $this->normalizeAccessMode($accessModeInput);
+        $this->assertUserMayUsePublicDownloadAccess($user, $tenant, $accessMode);
+        $this->assertUserMayUseSpecificUsersDownloadAccess($user, $tenant, $accessMode);
         if ($accessMode === DownloadAccessMode::BRAND) {
             $bucketService->assertCanRestrictToBrand();
         }
@@ -892,7 +898,10 @@ class DownloadController extends Controller
 
         $updates = [];
         if ($request->has('access_mode')) {
-            $updates['access_mode'] = $this->normalizeAccessMode($request->input('access_mode'))->value;
+            $normalized = $this->normalizeAccessMode((string) $request->input('access_mode'));
+            $this->assertUserMayUsePublicDownloadAccess($user, $tenant, $normalized);
+            $this->assertUserMayUseSpecificUsersDownloadAccess($user, $tenant, $normalized);
+            $updates['access_mode'] = $normalized->value;
         }
         if ($request->has('user_ids')) {
             $updates['user_ids'] = $request->input('user_ids');
@@ -945,7 +954,10 @@ class DownloadController extends Controller
             'user_ids.*' => 'uuid',
         ]);
 
-        $accessMode = $this->normalizeAccessMode($request->input('access_mode'))->value;
+        $normalizedAccess = $this->normalizeAccessMode((string) $request->input('access_mode'));
+        $this->assertUserMayUsePublicDownloadAccess($user, $tenant, $normalizedAccess);
+        $this->assertUserMayUseSpecificUsersDownloadAccess($user, $tenant, $normalizedAccess);
+        $accessMode = $normalizedAccess->value;
         $userIds = $request->input('user_ids');
 
         try {
@@ -1019,6 +1031,10 @@ class DownloadController extends Controller
         $user = Auth::user();
         $tenant = app('tenant');
         if (! $user || ! $tenant) {
+            return response()->json(['users' => []], 200);
+        }
+
+        if ((app()->bound('collection_only') && app('collection_only')) || $user->isExternalCollectionAccessOnlyForTenant($tenant)) {
             return response()->json(['users' => []], 200);
         }
 
@@ -1164,6 +1180,41 @@ class DownloadController extends Controller
             'users', 'restricted' => DownloadAccessMode::USERS,
             default => DownloadAccessMode::PUBLIC,
         };
+    }
+
+    /**
+     * D12: Collection guests and roles without downloads.share_public_link cannot create or switch to public links.
+     */
+    protected function assertUserMayUsePublicDownloadAccess(User $user, Tenant $tenant, DownloadAccessMode $mode): void
+    {
+        if ($mode !== DownloadAccessMode::PUBLIC) {
+            return;
+        }
+        if (! $user->mayCreatePublicDownloadLinkForTenant($tenant)) {
+            throw ValidationException::withMessages([
+                'access_mode' => ['Public download links are not available for your account. Use an option that requires signing in.'],
+            ]);
+        }
+    }
+
+    /**
+     * Collection guests may only use company-wide (sign-in) access, not per-user allowlists.
+     */
+    protected function assertUserMayUseSpecificUsersDownloadAccess(User $user, Tenant $tenant, DownloadAccessMode $mode): void
+    {
+        if ($mode !== DownloadAccessMode::USERS) {
+            return;
+        }
+        if (app()->bound('collection_only') && app('collection_only')) {
+            throw ValidationException::withMessages([
+                'access_mode' => ['Specific people are not available for collection access. Use company members (sign-in required).'],
+            ]);
+        }
+        if ($user->isExternalCollectionAccessOnlyForTenant($tenant)) {
+            throw ValidationException::withMessages([
+                'access_mode' => ['Specific people are not available for your account. Use company members (sign-in required).'],
+            ]);
+        }
     }
 
     /**

@@ -3,6 +3,7 @@
 namespace App\Http\Middleware;
 
 use App\Models\Brand;
+use App\Models\Collection;
 use App\Models\Tenant;
 use App\Models\User;
 use App\Services\AgencyBrandAccessService;
@@ -11,6 +12,7 @@ use App\Services\CreatorModuleStatusService;
 use App\Services\FeatureGate;
 use App\Services\FileTypeService;
 use App\Services\PlanService;
+use App\Services\Prostaff\ResolveCreatorsDashboardAccess;
 use App\Support\BrandDNA\HeadlineAppearanceCatalog;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -128,6 +130,9 @@ class HandleInertiaRequests extends Middleware
                             if ($userBrand) {
                                 $activeBrand = $userBrand;
                                 session(['brand_id' => $activeBrand->id]);
+                            } elseif ($this->userIsCollectionOnlyForTenant($user, $tenant)) {
+                                // C12: Never persist default brand_id for collection-only users — EnsureGatewayEntry rejects it → redirect loop with /gateway.
+                                $activeBrand = $this->resolveBrandForCollectionOnlyInertia($request, $tenant);
                             } else {
                                 // No accessible brand - use default (policies will restrict access)
                                 $activeBrand = $tenant->defaultBrand;
@@ -159,9 +164,13 @@ class HandleInertiaRequests extends Middleware
 
                 // Fallback to default brand
                 if (! $activeBrand) {
-                    $activeBrand = $tenant->defaultBrand;
-                    if ($activeBrand) {
-                        session(['brand_id' => $activeBrand->id]);
+                    if ($this->userIsCollectionOnlyForTenant($user, $tenant)) {
+                        $activeBrand = $this->resolveBrandForCollectionOnlyInertia($request, $tenant);
+                    } else {
+                        $activeBrand = $tenant->defaultBrand;
+                        if ($activeBrand) {
+                            session(['brand_id' => $activeBrand->id]);
+                        }
                     }
                 }
             }
@@ -319,6 +328,12 @@ class HandleInertiaRequests extends Middleware
             $showBrandGuidelinesNav = $hasPublishedGuidelines || $canSetupBrandGuidelines;
         }
 
+        // C12: Collection guests (grants only, no brand membership) — same chrome as collection_only; used when container flag is unset (e.g. some /app/assets/* routes).
+        $isCollectionGuestExperience = $tenant && $user && $this->userIsCollectionOnlyForTenant($user, $tenant);
+        if ($isCollectionGuestExperience) {
+            $showBrandGuidelinesNav = false;
+        }
+
         $parentShared = parent::share($request);
 
         // Manually ensure 'old' input is included if it exists in session but not in parent shared
@@ -358,6 +373,11 @@ class HandleInertiaRequests extends Middleware
         // Clear flash after consumption so it does not persist to subsequent requests
         if (! $isCategorySelection) {
             $request->session()->forget(['success', 'error', 'warning', 'info', 'status', 'download_policy_saved']);
+        }
+
+        $collectionModelForGuestNav = app()->bound('collection') ? app('collection') : null;
+        if (! $collectionModelForGuestNav && $isCollectionGuestExperience && $tenant) {
+            $collectionModelForGuestNav = $this->resolveCollectionForCollectionGuestInertia($request, $tenant);
         }
 
         $shared = [
@@ -400,26 +420,12 @@ class HandleInertiaRequests extends Middleware
             })(),
             // Phase C12.0: Collection-only mode (no brand; user has only collection access)
             'collection_only' => app()->bound('collection_only') && app('collection_only'),
-            'collection_only_collection' => app()->bound('collection') ? (function () {
-                $collection = app('collection');
-                $brand = $collection->brand;
-
-                return [
-                    'id' => $collection->id,
-                    'name' => $collection->name,
-                    'slug' => $collection->slug,
-                    'brand' => $brand ? [
-                        'id' => $brand->id,
-                        'name' => $brand->name,
-                        'slug' => $brand->slug,
-                        'logo_path' => $brand->logo_path,
-                        'logo_filter' => $brand->logo_filter ?? 'none',
-                        'primary_color' => $brand->primary_color,
-                    ] : null,
-                ];
-            })() : null,
-            // C12: All collections this user has access to (when collection-only), for switching / dropdown
-            'collection_only_collections' => (app()->bound('collection_only') && app('collection_only') && $user && $tenant)
+            'collection_only_collection' => $this->collectionToSharedCollectionOnlyPayload($collectionModelForGuestNav),
+            // C12: All collections this user has access to (collection-only or collection-guest), for switching / dropdown
+            'collection_only_collections' => ($user && $tenant && (
+                (app()->bound('collection_only') && app('collection_only'))
+                || $isCollectionGuestExperience
+            ))
                 ? $user->collectionAccessGrants()
                     ->whereNotNull('accepted_at')
                     ->whereHas('collection', fn ($q) => $q->where('tenant_id', $tenant->id))
@@ -473,6 +479,8 @@ class HandleInertiaRequests extends Middleware
                     'slug' => $tenant->slug,
                     'settings' => $tenant->settings ?? [], // Phase J.3.1: Include tenant settings for approval checks
                     'is_agency' => (bool) $tenant->is_agency,
+                    /** Mirrors `auth.companies[]` pivot — nav uses this to keep agency strip on incubated client workspaces. */
+                    'is_agency_managed' => (bool) ($user && $user->tenants->firstWhere('id', $tenant->id)?->pivot?->is_agency_managed ?? false),
                     'agency_tier' => $tenant->agencyTier?->name, // Phase AG-7.1: Agency nav link
                     'primary_color' => $defaultBrandPrimaryByTenantId[$tenant->id] ?? null,
                 ] : null,
@@ -502,8 +510,19 @@ class HandleInertiaRequests extends Middleware
                     ];
                 })() : null,
                 'brands' => $brands, // All brands for the active tenant (filtered by access)
-                // User is in company but has no brand access (removed from all brands)
-                'no_brand_access' => $tenant && $user && ! (app()->bound('collection_only') && app('collection_only')) && count($brands) === 0,
+                // User is in company but has no brand access (removed from all brands) — not collection guests
+                'no_brand_access' => $tenant && $user
+                    && ! (app()->bound('collection_only') && app('collection_only'))
+                    && ! $isCollectionGuestExperience
+                    && count($brands) === 0,
+                /** C12: Accepted collection grants, no brand_user in tenant — hide agency strip, no-brand banner, full-app nav extras */
+                'is_collection_guest_experience' => (bool) $isCollectionGuestExperience,
+                /** D12: UI + server block unauthenticated download links for guests / roles without permission */
+                'downloads' => [
+                    'can_share_public_link' => $tenant && $user
+                        ? $user->mayCreatePublicDownloadLinkForTenant($tenant)
+                        : true,
+                ],
                 'brand_plan_limit_info' => $planLimitInfo ?? null, // Plan limit info for alerts
                 'effective_permissions' => $effectivePermissions, // Always array; [] when no tenant
                 // Computed permission flags for UI (derived from effective_permissions)
@@ -517,6 +536,11 @@ class HandleInertiaRequests extends Middleware
                     // /app/insights/* — same rule as AnalyticsOverviewController (User::canViewBrandWorkspaceInsights)
                     'can_view_workspace_insights' => $tenant && $activeBrand && $user
                         && $user->canViewBrandWorkspaceInsights($tenant, $activeBrand),
+                    // Creators / prostaff dashboard — managers see all rows; active prostaff see self only
+                    'can_view_creators_dashboard' => $tenant && $activeBrand && $user
+                        && app(ResolveCreatorsDashboardAccess::class)->canView($user, $tenant, $activeBrand),
+                    'can_manage_creators_dashboard' => $tenant && $activeBrand && $user
+                        && app(ResolveCreatorsDashboardAccess::class)->canManage($user, $tenant, $activeBrand),
                 ],
                 // Phase AF-5: Approval feature flags (plan-gated)
                 'approval_features' => $tenant ? (function () use ($tenant) {
@@ -663,5 +687,69 @@ class HandleInertiaRequests extends Middleware
         ]);
 
         return $shared;
+    }
+
+    /**
+     * C12: Tenant members with collection_user grants only (no brand_user in this tenant).
+     */
+    private function userIsCollectionOnlyForTenant(?User $user, Tenant $tenant): bool
+    {
+        return (bool) ($user && $user->isExternalCollectionAccessOnlyForTenant($tenant));
+    }
+
+    /**
+     * C12: Resolve collection for nav/theming (session or collection-access routes).
+     */
+    private function resolveCollectionForCollectionGuestInertia(Request $request, Tenant $tenant): ?Collection
+    {
+        if ($request->routeIs(['collection-invite.landing', 'collection-invite.view'])) {
+            $routeCollection = $request->route('collection');
+            if ($routeCollection instanceof Collection && (int) $routeCollection->tenant_id === (int) $tenant->id) {
+                return $routeCollection;
+            }
+        }
+        $cid = session('collection_id');
+        if ($cid) {
+            return Collection::query()
+                ->where('id', $cid)
+                ->where('tenant_id', $tenant->id)
+                ->first();
+        }
+
+        return null;
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function collectionToSharedCollectionOnlyPayload(?Collection $collection): ?array
+    {
+        if (! $collection) {
+            return null;
+        }
+        $collection->loadMissing('brand');
+        $brand = $collection->brand;
+
+        return [
+            'id' => $collection->id,
+            'name' => $collection->name,
+            'slug' => $collection->slug,
+            'brand' => $brand ? [
+                'id' => $brand->id,
+                'name' => $brand->name,
+                'slug' => $brand->slug,
+                'logo_path' => $brand->logo_path,
+                'logo_filter' => $brand->logo_filter ?? 'none',
+                'primary_color' => $brand->primary_color,
+            ] : null,
+        ];
+    }
+
+    /**
+     * Theme/nav context for collection-only users without persisting session brand_id.
+     */
+    private function resolveBrandForCollectionOnlyInertia(Request $request, Tenant $tenant): ?Brand
+    {
+        return $this->resolveCollectionForCollectionGuestInertia($request, $tenant)?->brand;
     }
 }

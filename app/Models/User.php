@@ -4,6 +4,7 @@ namespace App\Models;
 
 // use Illuminate\Contracts\Auth\MustVerifyEmail;
 use App\Enums\EventType;
+use App\Services\AuthPermissionService;
 use App\Services\Prostaff\ResolveProstaffPeriod;
 use App\Traits\RecordsActivity;
 use Illuminate\Database\Eloquent\Casts\Attribute;
@@ -13,6 +14,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Illuminate\Support\Facades\DB;
+use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Traits\HasRoles;
 
 class User extends Authenticatable
@@ -286,6 +288,51 @@ class User extends Authenticatable
     public function collectionAccessGrants(): HasMany
     {
         return $this->hasMany(CollectionUser::class, 'user_id');
+    }
+
+    /**
+     * C12 / agency dashboard: tenant members who only have accepted collection grants in this tenant—no active brand_user rows.
+     */
+    public function isExternalCollectionAccessOnlyForTenant(Tenant $tenant): bool
+    {
+        if ($this->brands()->where('tenant_id', $tenant->id)->whereNull('brand_user.removed_at')->exists()) {
+            return false;
+        }
+
+        return $this->collectionAccessGrants()
+            ->whereNotNull('accepted_at')
+            ->whereHas('collection', fn ($q) => $q->where('tenant_id', $tenant->id))
+            ->exists();
+    }
+
+    /**
+     * D12: Whether this user may create or switch a download link to "public" (unauthenticated) access.
+     * External collection guests never may. Other users need downloads.share_public_link once seeded; until then, allowed.
+     */
+    public function mayCreatePublicDownloadLinkForTenant(Tenant $tenant): bool
+    {
+        // C12: Session-scoped collection-only access — must not allow public links even if DB still has brand_user rows.
+        if (app()->bound('collection_only') && app('collection_only')) {
+            return false;
+        }
+
+        if ($this->isExternalCollectionAccessOnlyForTenant($tenant)) {
+            return false;
+        }
+
+        if (! Permission::query()->where('name', 'downloads.share_public_link')->exists()) {
+            return true;
+        }
+
+        $auth = app(AuthPermissionService::class);
+        $brand = app()->bound('brand') ? app('brand') : null;
+        if ($brand && (int) $brand->tenant_id === (int) $tenant->id) {
+            if ($auth->can($this, 'downloads.share_public_link', $tenant, $brand)) {
+                return true;
+            }
+        }
+
+        return $auth->can($this, 'downloads.share_public_link', $tenant, null);
     }
 
     /**

@@ -8,10 +8,12 @@ use App\Models\ActivityEvent;
 use App\Models\Asset;
 use App\Models\Tenant;
 use App\Models\TenantAgency;
+use App\Models\TenantModule;
 use App\Services\AICostReportingService;
 use App\Services\AiUsageService;
 use App\Services\CompanyCostService;
 use App\Services\CompanyDataService;
+use App\Services\FeatureGate;
 use App\Services\IncubationWorkspaceService;
 use App\Services\PlanService;
 use Illuminate\Support\Facades\Auth;
@@ -322,6 +324,11 @@ class CompanyViewController extends Controller
 
         $linkedAgencies = $this->buildLinkedAgenciesPayload($tenant);
 
+        $creatorModuleRow = TenantModule::query()
+            ->where('tenant_id', $tenant->id)
+            ->where('module_key', TenantModule::KEY_CREATOR)
+            ->first();
+
         return Inertia::render('Admin/CompanyView', [
             'linked_agencies' => $linkedAgencies,
             'company' => [
@@ -343,6 +350,14 @@ class CompanyViewController extends Controller
                 'infrastructure_tier' => $tenant->infrastructure_tier ?? 'shared',
                 'can_manage_plan' => ! $stripeConnected, // Allow non-Stripe plans to be managed
                 'plan_change_info' => $planChangeInfo,
+                'creator_module' => [
+                    'has_row' => $creatorModuleRow !== null,
+                    'enabled' => app(FeatureGate::class)->creatorModuleEnabled($tenant),
+                    'status' => $creatorModuleRow?->status,
+                    'expires_at' => $creatorModuleRow?->expires_at?->toIso8601String(),
+                    'granted_by_admin' => (bool) ($creatorModuleRow?->granted_by_admin),
+                    'seats_limit' => $creatorModuleRow?->seats_limit,
+                ],
                 'owner' => $owner ? [
                     'id' => $owner->id,
                     'name' => trim(($owner->first_name ?? '').' '.($owner->last_name ?? '')),

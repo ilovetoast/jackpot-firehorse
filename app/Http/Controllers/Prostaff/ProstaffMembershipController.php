@@ -5,9 +5,9 @@ namespace App\Http\Controllers\Prostaff;
 use App\Exceptions\CreatorModuleInactiveException;
 use App\Http\Controllers\Controller;
 use App\Models\Brand;
-use App\Models\Tenant;
 use App\Models\User;
 use App\Services\Prostaff\AssignProstaffMember;
+use App\Services\Prostaff\ResolveCreatorsDashboardAccess;
 use DomainException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -34,7 +34,7 @@ class ProstaffMembershipController extends Controller
 
         $this->authorize('view', $brand);
 
-        if (! $this->userCanManageProstaffAssignments($user, $tenant, $brand)) {
+        if (! app(ResolveCreatorsDashboardAccess::class)->canManage($user, $tenant, $brand)) {
             return response()->json(['error' => 'You do not have permission to manage prostaff assignments.'], 403);
         }
 
@@ -76,23 +76,4 @@ class ProstaffMembershipController extends Controller
         ], 201);
     }
 
-    private function userCanManageProstaffAssignments(User $user, Tenant $tenant, Brand $brand): bool
-    {
-        $membership = $user->activeBrandMembership($brand);
-        if ($membership === null) {
-            return false;
-        }
-
-        $brandRole = $membership['role'];
-        $tenantRole = $user->getRoleForTenant($tenant);
-        $isTenantOwnerOrAdmin = in_array($tenantRole, ['owner', 'admin'], true);
-        $isBrandManager = $brandRole === 'brand_manager';
-        $isContributor = $brandRole === 'contributor';
-
-        if ($isContributor && ! $isTenantOwnerOrAdmin && ! $isBrandManager) {
-            return false;
-        }
-
-        return true;
-    }
 }

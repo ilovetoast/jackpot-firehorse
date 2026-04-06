@@ -14,6 +14,7 @@ import RecentMomentum from '../../Components/Brand/RecentMomentum'
 import OverviewCollageSkeleton from '../../Components/Overview/OverviewCollageSkeleton'
 import InsightsLoading from '../../Components/Overview/InsightsLoading'
 import { SkeletonMetricPills, SkeletonPlanBadge } from '../../Components/Overview/OverviewSkeletons'
+import CreatorProgressCard from '../../Components/prostaff/CreatorProgressCard'
 import { summarizeMomentum } from '../../utils/summarizeMomentum'
 import { resolveOverviewIconColor } from '../../utils/colorUtils'
 
@@ -45,6 +46,8 @@ const STATS_URL =
     typeof route === 'function' ? route('overview.api.stats') : '/app/api/overview/stats'
 const INSIGHTS_URL =
     typeof route === 'function' ? route('overview.api.insights') : '/app/api/overview/insights'
+const PROSTAFF_ME_URL =
+    typeof route === 'function' ? route('api.prostaff.me') : '/app/api/prostaff/me'
 
 /** Dedupe concurrent hero/stats fetches (e.g. React Strict Mode double-mount). */
 const overviewHeroInflight = new Map()
@@ -91,6 +94,9 @@ export default function Overview() {
     const [stats, setStats] = useState(null)
     /** null = heavy tier not finished (show placeholder); object = loaded (possibly empty). */
     const [insights, setInsights] = useState(null)
+    /** Prostaff self dashboard for active brand; null if not prostaff or error. */
+    const [prostaffMe, setProstaffMe] = useState(null)
+    const [prostaffMeLoading, setProstaffMeLoading] = useState(false)
 
     const activeBrand = authFromPage?.activeBrand ?? auth?.activeBrand
     const brandId = activeBrand?.id
@@ -293,6 +299,53 @@ export default function Overview() {
         }
     }, [brandId])
 
+    useEffect(() => {
+        if (brandId == null) {
+            setProstaffMe(null)
+            setProstaffMeLoading(false)
+            return undefined
+        }
+
+        let cancelled = false
+        setProstaffMe(null)
+        setProstaffMeLoading(true)
+
+        const url = `${PROSTAFF_ME_URL}?brand_id=${encodeURIComponent(brandId)}`
+        fetch(url, {
+            credentials: 'same-origin',
+            headers: {
+                Accept: 'application/json',
+                'X-Requested-With': 'XMLHttpRequest',
+            },
+        })
+            .then((res) => {
+                if (cancelled) return null
+                if (!res.ok) {
+                    setProstaffMe(null)
+                    return null
+                }
+                return res.json()
+            })
+            .then((json) => {
+                if (cancelled || json == null || typeof json !== 'object') return
+                if (json.error) {
+                    setProstaffMe(null)
+                    return
+                }
+                setProstaffMe(json)
+            })
+            .catch(() => {
+                if (!cancelled) setProstaffMe(null)
+            })
+            .finally(() => {
+                if (!cancelled) setProstaffMeLoading(false)
+            })
+
+        return () => {
+            cancelled = true
+        }
+    }, [brandId])
+
     return (
         <div className="relative h-[100dvh] max-h-[100dvh] overflow-hidden overscroll-none bg-[#0B0B0D]">
             <AppHead title="Overview" />
@@ -367,6 +420,16 @@ export default function Overview() {
                                             />
                                         )}
                                     </div>
+
+                                    {(prostaffMeLoading || prostaffMe) && (
+                                        <div className="mt-1">
+                                            <CreatorProgressCard
+                                                loading={prostaffMeLoading}
+                                                data={prostaffMe}
+                                                brandColor={brandColor}
+                                            />
+                                        </div>
+                                    )}
 
                                     <h1 className="animate-fadeInUp-d2 break-words text-3xl font-semibold leading-tight tracking-tight text-white md:text-4xl">
                                         {theme.name || activeBrand?.name || 'Overview'}

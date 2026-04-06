@@ -35,6 +35,7 @@ class PermissionSeeder extends Seeder
             'brand_categories.manage',
             'view.restricted.categories',
             'assets.retry_thumbnails',
+            'downloads.share_public_link',
         ];
 
         // Owner-only (Ownership Transfer, Delete Company)
@@ -202,6 +203,7 @@ class PermissionSeeder extends Seeder
                 'metadata.suggestions.view',
                 'metadata.suggestions.apply',
                 'metadata.suggestions.dismiss',
+                'downloads.share_public_link',
             ]
         ));
 

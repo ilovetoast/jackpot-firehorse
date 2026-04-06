@@ -29,19 +29,21 @@ import { getThumbnailState, supportsThumbnail } from '../utils/thumbnailUtils'
 const POLL_SCHEDULE = [2000, 3000, 5000, 10000, 15000] // milliseconds
 const MAX_POLL_ATTEMPTS = POLL_SCHEDULE.length
 
-export function useDrawerThumbnailPoll({ asset, onAssetUpdate }) {
+export function useDrawerThumbnailPoll({ asset, onAssetUpdate, pollEnabled = true }) {
     const timeoutIdRef = useRef(null)
     const pollAttemptRef = useRef(0)
     const assetIdRef = useRef(asset?.id)
     const assetRef = useRef(asset)
     const onAssetUpdateRef = useRef(onAssetUpdate)
+    const pollEnabledRef = useRef(pollEnabled)
     const [drawerAsset, setDrawerAsset] = useState(asset)
 
     // Update refs when props change
     useEffect(() => {
         assetRef.current = asset
         onAssetUpdateRef.current = onAssetUpdate
-    }, [asset, onAssetUpdate])
+        pollEnabledRef.current = pollEnabled
+    }, [asset, onAssetUpdate, pollEnabled])
 
     // Update drawer asset when prop changes (sync grid updates to drawer)
     // CRITICAL: Grid owns asset state - prop is source of truth
@@ -98,6 +100,9 @@ export function useDrawerThumbnailPoll({ asset, onAssetUpdate }) {
 
     // Perform single asset thumbnail status check
     const performPoll = async () => {
+        if (!pollEnabledRef.current) {
+            return
+        }
         const currentAsset = assetRef.current
         if (!currentAsset || !currentAsset.id || currentAsset.is_virtual_google_font) {
             return
@@ -217,6 +222,14 @@ export function useDrawerThumbnailPoll({ asset, onAssetUpdate }) {
 
     // Start polling when drawer opens with an asset
     useEffect(() => {
+        if (!pollEnabled) {
+            if (timeoutIdRef.current) {
+                clearTimeout(timeoutIdRef.current)
+                timeoutIdRef.current = null
+            }
+            pollAttemptRef.current = 0
+            return
+        }
         const currentAsset = assetRef.current
         if (!currentAsset || !currentAsset.id || currentAsset.is_virtual_google_font) {
             return
@@ -272,7 +285,7 @@ export function useDrawerThumbnailPoll({ asset, onAssetUpdate }) {
             }
             pollAttemptRef.current = 0
         }
-    }, [asset?.id])
+    }, [asset?.id, pollEnabled])
 
     return {
         drawerAsset: drawerAsset || asset, // Fallback to prop if state not initialized

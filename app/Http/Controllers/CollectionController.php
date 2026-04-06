@@ -89,6 +89,12 @@ class CollectionController extends Controller
             ->withCount(['assets as assets_count' => function ($q) {
                 $q->where('assets.status', AssetStatus::VISIBLE)->whereNull('assets.deleted_at');
             }])
+            ->withCount([
+                'collectionAccessGrants as external_guest_grants_count' => function ($q) {
+                    $q->whereNotNull('accepted_at');
+                },
+                'collectionInvitations as external_guest_invites_count',
+            ])
             ->with(['brand', 'members'])
             ->orderBy('name');
 
@@ -165,6 +171,8 @@ class CollectionController extends Controller
                 'access_mode' => $c->access_mode ?? 'all_brand',
                 'allowed_brand_roles' => $c->allowed_brand_roles ?? [],
                 'allows_external_guests' => (bool) ($c->allows_external_guests ?? false),
+                'external_guest_grants_count' => (int) ($c->external_guest_grants_count ?? 0),
+                'external_guest_invites_count' => (int) ($c->external_guest_invites_count ?? 0),
                 'is_public' => $c->is_public,
                 'assets_count' => (int) ($c->assets_count ?? 0),
                 'featured_image_url' => isset($bestAssetIds[$c->id])
@@ -190,6 +198,12 @@ class CollectionController extends Controller
             $collection = Collection::query()
                 ->where('tenant_id', $tenant->id)
                 ->where('brand_id', $brand->id)
+                ->withCount([
+                    'collectionAccessGrants as external_guest_grants_count' => function ($q) {
+                        $q->whereNotNull('accepted_at');
+                    },
+                    'collectionInvitations as external_guest_invites_count',
+                ])
                 ->with(['brand', 'members'])
                 ->find($collectionIdParam);
 
@@ -203,6 +217,8 @@ class CollectionController extends Controller
                     'access_mode' => $collection->access_mode ?? 'all_brand',
                     'allowed_brand_roles' => $collection->allowed_brand_roles ?? [],
                     'allows_external_guests' => (bool) ($collection->allows_external_guests ?? false),
+                    'external_guest_grants_count' => (int) ($collection->external_guest_grants_count ?? 0),
+                    'external_guest_invites_count' => (int) ($collection->external_guest_invites_count ?? 0),
                     'slug' => $collection->slug,
                     'brand_slug' => $collectionBrand?->slug,
                     'is_public' => $collection->is_public,
@@ -385,22 +401,162 @@ class CollectionController extends Controller
     }
 
     /**
-     * C12: Return assets grid data for a single collection (used by collection-only view).
-     * Authorizes view, then returns same shape as index() assets array.
+     * Grid + filters + pagination for one collection (shared by /app/collections and collection-guest view).
+     *
+     * @return array{
+     *   assets: list<array<string, mixed>>,
+     *   paginator: \Illuminate\Contracts\Pagination\LengthAwarePaginator|null,
+     *   filter_categories: list<array<string, mixed>>,
+     *   filterable_schema: list<array<string, mixed>>,
+     *   available_values: array<string, mixed>,
+     *   filters: array<string, mixed>,
+     *   grid_folder_total: int,
+     *   collection_type: string,
+     *   category_id: int|null,
+     *   group_by_category: bool,
+     *   sort: string,
+     *   sort_direction: string
+     * }
      */
-    public function getCollectionAssetsGridData(Collection $collection, User $user): array
+    public function buildCollectionGridPayloadForRequest(Request $request, Collection $collection, User $user): array
     {
         Gate::forUser($user)->authorize('view', $collection);
+
         $tenant = $collection->tenant;
         $brand = $collection->brand;
-        if (! $tenant || ! $brand) {
-            return [];
-        }
-        $query = $this->collectionAssetQueryService->query($user, $collection);
-        $assetModels = $query->get();
-        $incidentSeverityByAsset = $this->buildIncidentSeverityByAsset($assetModels->pluck('id')->all());
 
-        return $assetModels->map(fn (Asset $asset) => $this->mapAssetToGridArray($asset, $tenant, $brand, $incidentSeverityByAsset))->values()->all();
+        $defaults = [
+            'assets' => [],
+            'paginator' => null,
+            'filter_categories' => [],
+            'filterable_schema' => [],
+            'available_values' => [],
+            'filters' => [],
+            'grid_folder_total' => 0,
+            'collection_type' => $this->normalizeCollectionTypeFilter($request->query('collection_type')),
+            'category_id' => null,
+            'group_by_category' => false,
+            'sort' => $this->assetSortService->normalizeSort($request->input('sort')),
+            'sort_direction' => $this->assetSortService->normalizeSortDirection($request->input('sort_direction')),
+        ];
+
+        if (! $tenant || ! $brand) {
+            return $defaults;
+        }
+
+        try {
+            $query = $this->collectionAssetQueryService->query($user, $collection);
+            $query->select('assets.*');
+
+            $collectionType = $this->normalizeCollectionTypeFilter($request->query('collection_type'));
+            $this->applyCollectionAssetTypeFilter($query, $collectionType);
+
+            $filterCategories = $this->categoriesPresentInCollection(
+                $user,
+                $collection,
+                $collectionType,
+                $tenant->id,
+                $brand->id
+            );
+
+            $categoryFilterId = $request->query('category_id');
+            $categoryFilterId = is_numeric($categoryFilterId) ? (int) $categoryFilterId : null;
+            $allowedCategoryIds = collect($filterCategories)->pluck('id')->map(fn ($id) => (int) $id)->all();
+            if ($categoryFilterId !== null && $categoryFilterId > 0 && ! in_array($categoryFilterId, $allowedCategoryIds, true)) {
+                $categoryFilterId = null;
+            }
+
+            if ($categoryFilterId !== null && $categoryFilterId > 0) {
+                $query->where('assets.metadata->category_id', $categoryFilterId);
+            }
+
+            $categoryModel = null;
+            if ($categoryFilterId !== null && $categoryFilterId > 0) {
+                $categoryModel = Category::query()
+                    ->where('tenant_id', $tenant->id)
+                    ->where('brand_id', $brand->id)
+                    ->find($categoryFilterId);
+            }
+
+            $fileType = $this->collectionGridMetadataFilterService->resolveSchemaFileType($collectionType);
+            $schema = $this->collectionGridMetadataFilterService->resolveSchema($tenant, $brand, $categoryModel?->id, $fileType);
+
+            $baseQueryForFilterVisibility = clone $query;
+            $parsedMetadataFilters = $this->collectionGridMetadataFilterService->parseFiltersFromRequest($request, $schema);
+            if (! empty($parsedMetadataFilters) && is_array($parsedMetadataFilters)) {
+                $this->metadataFilterService->applyFilters($query, $parsedMetadataFilters, $schema);
+            }
+
+            $searchQ = $request->input('q');
+            $qTrim = is_string($searchQ) ? trim($searchQ) : '';
+            if ($qTrim !== '') {
+                $this->assetSearchService->applyScopedSearch($query, $qTrim);
+                $this->assetSearchService->applyScopedSearch($baseQueryForFilterVisibility, $qTrim);
+            }
+
+            $gridFolderTotal = (int) (clone $baseQueryForFilterVisibility)->reorder()->count();
+
+            $hasNarrowingFilters = $qTrim !== ''
+                || ($categoryFilterId !== null && $categoryFilterId > 0)
+                || $collectionType !== 'all'
+                || ! empty($parsedMetadataFilters);
+            $groupByCategory = ! $hasNarrowingFilters;
+
+            $sort = $this->assetSortService->normalizeSort($request->input('sort'));
+            $sortDirection = $this->assetSortService->normalizeSortDirection($request->input('sort_direction'));
+            $this->assetSortService->applySort($query, $sort, $sortDirection);
+
+            $hueClusterCounts = $this->collectionGridMetadataFilterService->buildHueClusterCounts($query);
+
+            $perPage = 36;
+            $paginator = $query->paginate($perPage)->withQueryString();
+            $items = $paginator->items();
+            $incidentSeverityByAsset = $this->buildIncidentSeverityByAsset(collect($items)->pluck('id')->all());
+            $assets = collect($items)->map(fn (Asset $asset) => $this->mapAssetToGridArray($asset, $tenant, $brand, $incidentSeverityByAsset))->values()->all();
+
+            $filters = $parsedMetadataFilters;
+            $filterable_schema = [];
+            $available_values = [];
+            if (! $request->boolean('load_more')) {
+                $built = $this->collectionGridMetadataFilterService->buildFilterableSchemaAndAvailableValues(
+                    $schema,
+                    $categoryModel,
+                    $tenant,
+                    $baseQueryForFilterVisibility,
+                    $hueClusterCounts,
+                    collect($items),
+                    $assets
+                );
+                $filterable_schema = $built['filterable_schema'];
+                $available_values = $built['available_values'];
+            }
+
+            return [
+                'assets' => $assets,
+                'paginator' => $paginator,
+                'filter_categories' => $filterCategories,
+                'filterable_schema' => $filterable_schema,
+                'available_values' => $available_values,
+                'filters' => $filters,
+                'grid_folder_total' => $gridFolderTotal,
+                'collection_type' => $collectionType,
+                'category_id' => ($categoryFilterId !== null && $categoryFilterId > 0) ? $categoryFilterId : null,
+                'group_by_category' => $groupByCategory,
+                'sort' => $sort,
+                'sort_direction' => $sortDirection,
+            ];
+        } catch (\Throwable $e) {
+            Log::error('collections.grid_payload_failed', [
+                'collection_id' => $collection->id,
+                'tenant_id' => $tenant->id,
+                'brand_id' => $brand->id,
+                'user_id' => $user->id,
+                'message' => $e->getMessage(),
+                'exception' => get_class($e),
+            ]);
+
+            return $defaults;
+        }
     }
 
     /**
@@ -744,6 +900,13 @@ class CollectionController extends Controller
      */
     private function collectionJsonForEdit(Collection $collection): array
     {
+        $collection->loadCount([
+            'collectionAccessGrants as external_guest_grants_count' => function ($q) {
+                $q->whereNotNull('accepted_at');
+            },
+            'collectionInvitations as external_guest_invites_count',
+        ]);
+
         return [
             'id' => $collection->id,
             'name' => $collection->name,
@@ -752,6 +915,8 @@ class CollectionController extends Controller
             'access_mode' => $collection->access_mode ?? 'all_brand',
             'allowed_brand_roles' => $collection->allowed_brand_roles ?? [],
             'allows_external_guests' => (bool) ($collection->allows_external_guests ?? false),
+            'external_guest_grants_count' => (int) ($collection->external_guest_grants_count ?? 0),
+            'external_guest_invites_count' => (int) ($collection->external_guest_invites_count ?? 0),
             'is_public' => $collection->is_public,
             'slug' => $collection->slug,
         ];

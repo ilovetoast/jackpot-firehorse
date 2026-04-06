@@ -6,6 +6,7 @@ use App\Enums\OwnershipTransferStatus;
 use App\Models\AgencyPartnerReferral;
 use App\Models\AgencyPartnerReward;
 use App\Models\AgencyTier;
+use App\Models\CollectionUser;
 use App\Models\OwnershipTransfer;
 use App\Models\Tenant;
 use App\Models\TenantAgency;
@@ -330,7 +331,7 @@ class AgencyDashboardController extends Controller
             ] : null,
         ];
 
-        $agencyTeam = $this->buildAgencyWorkspaceTeamPayload($tenant);
+        $agencyTeamPayload = $this->buildAgencyWorkspaceTeamPayload($tenant);
         $agencyBrandsSummary = $this->buildAgencyWorkspaceBrandsSummary($tenant);
 
         return Inertia::render('Agency/Dashboard', [
@@ -374,21 +375,22 @@ class AgencyDashboardController extends Controller
             'managed_agency' => $managedAgency,
             'dashboard_links' => $dashboardLinks,
             'can_create_incubated_client' => $canCreateIncubatedClient,
-            'agency_team' => $agencyTeam,
+            'agency_team' => $agencyTeamPayload['core'],
+            'agency_team_external' => $agencyTeamPayload['external'],
             'agency_brands_summary' => $agencyBrandsSummary,
         ]);
     }
 
     /**
-     * Agency workspace members + per-brand roles (same shape as company team API, for dashboard display).
+     * Agency workspace members + per-brand roles. Splits collection-only guests (no brand membership) into `external`.
      *
-     * @return list<array<string, mixed>>
+     * @return array{core: list<array<string, mixed>>, external: list<array<string, mixed>>}
      */
     protected function buildAgencyWorkspaceTeamPayload(Tenant $agencyTenant): array
     {
         $tenantBrandIds = $agencyTenant->brands()->pluck('id')->all();
         if ($tenantBrandIds === []) {
-            return [];
+            return ['core' => [], 'external' => []];
         }
 
         $firstUserId = $agencyTenant->users()->orderBy('tenant_user.created_at')->first()?->id;
@@ -407,7 +409,34 @@ class AgencyDashboardController extends Controller
         $agencyIds = $members->pluck('pivot.agency_tenant_id')->filter()->unique()->values();
         $agencyNames = Tenant::whereIn('id', $agencyIds)->pluck('name', 'id');
 
-        return $members->map(function ($member) use ($firstUserId, $agencyNames) {
+        $externalUserIds = $members
+            ->filter(fn (User $m) => $m->isExternalCollectionAccessOnlyForTenant($agencyTenant))
+            ->pluck('id')
+            ->all();
+
+        $collectionsByUserId = collect();
+        if ($externalUserIds !== []) {
+            $grantRows = CollectionUser::query()
+                ->whereIn('user_id', $externalUserIds)
+                ->whereNotNull('accepted_at')
+                ->whereHas('collection', fn ($q) => $q->where('tenant_id', $agencyTenant->id))
+                ->with('collection:id,name')
+                ->get();
+
+            $collectionsByUserId = $grantRows
+                ->groupBy('user_id')
+                ->map(function ($rows) {
+                    return $rows
+                        ->pluck('collection')
+                        ->filter()
+                        ->unique('id')
+                        ->map(fn ($c) => ['id' => $c->id, 'name' => $c->name])
+                        ->values()
+                        ->all();
+                });
+        }
+
+        $mapRow = function (User $member) use ($firstUserId, $agencyNames) {
             $role = $member->pivot->role ?? null;
             if (empty($role)) {
                 $role = ($firstUserId && (int) $firstUserId === (int) $member->id) ? 'owner' : 'member';
@@ -434,7 +463,21 @@ class AgencyDashboardController extends Controller
                 'agency_tenant_id' => $agencyTenantId,
                 'agency_tenant_name' => $agencyTenantId ? ($agencyNames[$agencyTenantId] ?? null) : null,
             ];
-        })->values()->all();
+        };
+
+        $core = [];
+        $external = [];
+        foreach ($members as $member) {
+            $row = $mapRow($member);
+            if ($member->isExternalCollectionAccessOnlyForTenant($agencyTenant)) {
+                $row['collections'] = $collectionsByUserId->get($member->id, []);
+                $external[] = $row;
+            } else {
+                $core[] = $row;
+            }
+        }
+
+        return ['core' => $core, 'external' => $external];
     }
 
     /**
