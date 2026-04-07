@@ -151,6 +151,8 @@ export default function AssetCard({
     const selection = useSelectionOptional()
     const [isCardHovering, setIsCardHovering] = useState(false)
     const [previewLoaded, setPreviewLoaded] = useState(false)
+    /** Hover preview URL failed (e.g. unsupported format) — keep showing poster */
+    const [videoPreviewFailed, setVideoPreviewFailed] = useState(false)
     const videoPreviewRef = useRef(null)
     const isMobile = typeof window !== 'undefined' ? window.innerWidth < 768 : false
     /** Ignore synthetic click after a touch scroll/drag on the card */
@@ -492,6 +494,8 @@ export default function AssetCard({
                 onMouseEnter={() => !isMobile && isVideo && setIsHovering(true)}
                 onMouseLeave={() => {
                     setIsHovering(false)
+                    setPreviewLoaded(false)
+                    setVideoPreviewFailed(false)
                     // Pause and unload preview on mouse leave
                     if (videoPreviewRef.current) {
                         videoPreviewRef.current.pause()
@@ -530,16 +534,17 @@ export default function AssetCard({
                 ) : (
                     <>
                         {/* Phase V-1: Video hover preview (desktop only, lazy load) */}
-                        {isVideo && isHovering && asset.video_preview_url && !isMobile && (
+                        {isVideo && isHovering && asset.video_preview_url && !isMobile && !videoPreviewFailed && (
                             <video
                                 ref={videoPreviewRef}
                                 src={asset.video_preview_url}
-                                className="absolute inset-0 w-full h-full object-contain z-10 bg-gray-50"
+                                className="absolute inset-0 z-10 h-full w-full bg-black object-cover"
                                 autoPlay
                                 muted
                                 loop
                                 playsInline
                                 onLoadedData={() => setPreviewLoaded(true)}
+                                onError={() => setVideoPreviewFailed(true)}
                                 style={{ opacity: previewLoaded ? 1 : 0, transition: 'opacity 0.2s' }}
                             />
                         )}
@@ -553,13 +558,14 @@ export default function AssetCard({
                                 isMasonry
                                     ? 'w-full max-h-full min-h-0'
                                     : 'w-full h-full'
-                            } ${isHovering && isVideo && asset.video_preview_url && !isMobile ? 'opacity-0' : 'opacity-100'} transition-opacity duration-200`}
+                            } ${isHovering && isVideo && asset.video_preview_url && !isMobile && previewLoaded && !videoPreviewFailed ? 'opacity-0' : 'opacity-100'} transition-opacity duration-200`}
                             retryCount={0}
                             onRetry={null}
                             size="lg"
                             thumbnailVersion={thumbnailVersion}
                             shouldAnimateThumbnail={shouldAnimateThumbnail}
                             primaryColor={primaryColor}
+                            forceObjectFit={isVideo ? 'cover' : null}
                             masonryMaxHeight={isMasonry ? masonryMaxHeightPx : null}
                             masonryMinHeight={isMasonry ? masonryThumbnailMinHeightPx : null}
                         />

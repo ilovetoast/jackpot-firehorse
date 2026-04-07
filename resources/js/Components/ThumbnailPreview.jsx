@@ -255,7 +255,7 @@ export default function ThumbnailPreview({
         return Math.max(80, minH)
     }, [isMasonryHeight, masonryMaxHeight, masonryMinHeight])
     const imgFitClasses = isMasonryHeight
-        ? 'w-full h-auto max-h-full object-contain object-center'
+        ? `w-full h-auto max-h-full ${forceObjectFit ? `${objectFitClass} object-center` : 'object-contain object-center'}`
         : `w-full h-full ${objectFitClass}`
     const masonryWrapperStyle = isMasonryHeight
         ? { maxHeight: Number(masonryMaxHeight), minHeight: effectiveMasonryMinHeightPx }

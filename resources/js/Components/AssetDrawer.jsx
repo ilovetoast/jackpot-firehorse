@@ -802,6 +802,7 @@ export default function AssetDrawer({
     // Phase V-1: Hover video preview state (for drawer)
     const [isHoveringVideo, setIsHoveringVideo] = useState(false)
     const [videoPreviewLoaded, setVideoPreviewLoaded] = useState(false)
+    const [videoPreviewFailed, setVideoPreviewFailed] = useState(false)
     const videoPreviewRef = useRef(null)
     const isMobile = typeof window !== 'undefined' ? window.innerWidth < 768 : false
     const [pdfCurrentPage, setPdfCurrentPage] = useState(1)
@@ -2166,6 +2167,7 @@ export default function AssetDrawer({
                                     onMouseEnter={() => !isMobile && setIsHoveringVideo(true)}
                                     onMouseLeave={() => {
                                         setIsHoveringVideo(false)
+                                        setVideoPreviewFailed(false)
                                         // Pause and reset video on mouse leave
                                         if (videoPreviewRef.current) {
                                             videoPreviewRef.current.pause()
@@ -2175,16 +2177,17 @@ export default function AssetDrawer({
                                     }}
                                 >
                                     {/* Hover video preview (auto-play loop, no controls, no audio) */}
-                                    {isHoveringVideo && displayAsset.video_preview_url && !isMobile && (
+                                    {isHoveringVideo && displayAsset.video_preview_url && !isMobile && !videoPreviewFailed && (
 <video
                                             ref={videoPreviewRef}
                                             src={displayAsset.video_preview_url}
-                                            className="absolute inset-0 w-full h-full object-contain z-10 bg-gray-50"
+                                            className="absolute inset-0 z-10 h-full w-full bg-black object-cover"
                                             autoPlay
                                             muted
                                             loop
                                             playsInline
                                             onLoadedData={() => setVideoPreviewLoaded(true)}
+                                            onError={() => setVideoPreviewFailed(true)}
                                             style={{ opacity: videoPreviewLoaded ? 1 : 0, transition: 'opacity 0.2s' }}
                                         />
                                     )}
@@ -2193,7 +2196,7 @@ export default function AssetDrawer({
                                     <ThumbnailPreview
                                         asset={displayAsset}
                                         alt={displayAsset.title || displayAsset.original_filename || 'Video preview'}
-                                        className={`w-full h-full ${isHoveringVideo && displayAsset.video_preview_url && !isMobile && videoPreviewLoaded ? 'opacity-0' : 'opacity-100'} transition-opacity duration-200`}
+                                        className={`w-full h-full ${isHoveringVideo && displayAsset.video_preview_url && !isMobile && videoPreviewLoaded && !videoPreviewFailed ? 'opacity-0' : 'opacity-100'} transition-opacity duration-200`}
                                         retryCount={thumbnailRetryCount}
                                         onRetry={() => {
                                             if (thumbnailRetryCount < 2) {
@@ -2203,6 +2206,7 @@ export default function AssetDrawer({
                                         size="lg"
                                         thumbnailVersion={thumbnailVersion}
                                         shouldAnimateThumbnail={shouldAnimateThumbnail}
+                                        forceObjectFit="cover"
                                     />
                                     
                                     {/* Zoom overlay (only shown when hovering) */}
@@ -4064,6 +4068,12 @@ export default function AssetDrawer({
                                     )
                                 }
                                 
+                                const vw = currentCarouselAsset.video_width
+                                const vh = currentCarouselAsset.video_height
+                                const metaAspect =
+                                    vw && vh && Number(vw) > 0 && Number(vh) > 0
+                                        ? { aspectRatio: `${Number(vw)} / ${Number(vh)}` }
+                                        : {}
                                 return (
                                     <video
                                         key={currentCarouselAsset.id} // Key forces remount for clean transition
@@ -4080,6 +4090,7 @@ export default function AssetDrawer({
                                                 ? 'translateX(-30px)' 
                                                 : 'translateX(0)',
                                             opacity: transitionDirection ? 0 : 1,
+                                            ...metaAspect,
                                         }}
                                     >
                                         <source src={videoViewUrl} type={currentCarouselAsset.mime_type || 'video/mp4'} />
