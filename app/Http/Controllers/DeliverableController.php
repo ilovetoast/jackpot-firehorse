@@ -18,6 +18,7 @@ use App\Services\PlanService;
 use App\Services\SystemCategoryService;
 use App\Support\AssetVariant;
 use App\Support\DeliveryContext;
+use App\Support\ThumbnailModeDeliveryUrls;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -767,10 +768,17 @@ class DeliverableController extends Controller
                     'thumbnail_skip_reason' => $metadata['thumbnail_skip_reason'] ?? null, // Skip reason for skipped assets
                     'preview_url' => null, // Reserved for future full-size preview endpoint
                     'url' => null, // Reserved for future download endpoint
+                    // Phase V-1: Same hover preview MP4 + poster as main Assets grid (GenerateVideoPreviewJob pipeline)
+                    'video_preview_url' => $this->videoPreviewUrl($asset),
+                    'video_poster_url' => $this->videoPosterUrl($asset),
                     'analysis_status' => $asset->analysis_status ?? 'uploading',
                     'health_status' => $asset->computeHealthStatus($incidentSeverityByAsset[$asset->id] ?? null),
                     'brand_intelligence' => $asset->brandIntelligencePayloadForFrontend($brandIntelligenceReferenceAssetsById),
                     'reference_promotion' => $asset->brandReferenceAsset?->toFrontendArray(),
+                    // Grid Original / Enhanced / Presentation thumbnails (same as AssetController::index)
+                    'thumbnail_mode_urls' => ThumbnailModeDeliveryUrls::map($asset),
+                    'thumbnail_modes_meta' => ThumbnailModeDeliveryUrls::modesMetaForApi($asset),
+                    'thumbnail_modes_status' => $metadata['thumbnail_modes_status'] ?? null,
                 ];
                 if ($finalThumbnailUrl && str_contains($finalThumbnailUrl, 'X-Amz-Signature')) {
                     Log::info('ASSET API RESPONSE URL', [
@@ -793,7 +801,7 @@ class DeliverableController extends Controller
                 'after_transform_ms' => round(($t2 - $t1) * 1000),
                 'assets_count' => count($mappedAssets),
                 's3_presign_count' => 0,
-                'note' => 'Deliverables do not include video_preview_url',
+                'note' => 'Deliverables include video_preview_url when job completed (same as Assets)',
             ]);
         }
 
@@ -1158,6 +1166,23 @@ class DeliverableController extends Controller
             return $url;
         }
         $url = $asset->deliveryUrl(AssetVariant::THUMB_SMALL, DeliveryContext::AUTHENTICATED);
+
+        return $url !== '' ? $url : null;
+    }
+
+    /**
+     * Short hover MP4 via AssetDeliveryService (empty until GenerateVideoPreviewJob writes video_preview_url).
+     */
+    private function videoPreviewUrl(Asset $asset): ?string
+    {
+        $url = $asset->deliveryUrl(AssetVariant::VIDEO_PREVIEW, DeliveryContext::AUTHENTICATED);
+
+        return $url !== '' ? $url : null;
+    }
+
+    private function videoPosterUrl(Asset $asset): ?string
+    {
+        $url = $asset->deliveryUrl(AssetVariant::VIDEO_POSTER, DeliveryContext::AUTHENTICATED);
 
         return $url !== '' ? $url : null;
     }

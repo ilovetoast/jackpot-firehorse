@@ -48,6 +48,7 @@ use App\Services\MetadataSchemaResolver;
 use App\Services\PlanService;
 use App\Services\SystemIncidentService;
 use App\Services\TenantPermissionResolver;
+use App\Support\ThumbnailMetadata;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -4759,15 +4760,14 @@ class AssetMetadataController extends Controller
         // Final thumbnail URL (permanent, only when completed)
         $finalThumbnailUrl = null;
         $thumbnailVersion = $metadata['thumbnails_generated_at'] ?? null;
-        $thumbnails = $metadata['thumbnails'] ?? [];
-        $thumbnailsExistInMetadata = ! empty($thumbnails) && (isset($thumbnails['thumb']) || isset($thumbnails['medium']));
+        $thumbnailsExistInMetadata = ThumbnailMetadata::hasMediumOrThumb($metadata);
 
         if ($thumbnailStatus === 'completed' || $thumbnailsExistInMetadata) {
             // Prefer medium size for better quality, fallback to thumb if medium not available
             $thumbnailStyle = 'medium';
             $thumbnailPath = $asset->thumbnailPathForStyle('medium');
 
-            if (! $thumbnailPath && ! isset($thumbnails['medium'])) {
+            if (! $thumbnailPath && ThumbnailMetadata::stylePath($metadata, 'medium') === null) {
                 $thumbnailStyle = 'thumb';
                 $thumbnailPath = $asset->thumbnailPathForStyle('thumb');
             }

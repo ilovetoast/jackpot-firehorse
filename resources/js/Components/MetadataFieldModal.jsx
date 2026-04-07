@@ -29,6 +29,7 @@ import {
     toSnakeCase,
     validateSnakeCase,
     isDuplicateValue,
+    mergeBulkAddTextIntoOptions,
     normalizeOptions,
     prepareOptionsForSubmit,
     snakeToTitleCase,
@@ -307,6 +308,9 @@ export default function MetadataFieldModal({
 
     if (!isOpen) return null
 
+    const isTagsField = formData.key === 'tags' || field?.key === 'tags'
+    const requiresOptions = (formData.type === 'select' || formData.type === 'multiselect') && !isTagsField
+
     const handleSubmit = async (e) => {
         e.preventDefault()
         setSubmitting(true)
@@ -333,9 +337,24 @@ export default function MetadataFieldModal({
             return
         }
 
+        // Select/multiselect: merge any uncommitted bulk-add lines before validate/submit (same rules as "Add options")
+        let effectiveOptions = formData.options
+        if (requiresOptions && bulkAddText.trim()) {
+            const merged = mergeBulkAddTextIntoOptions(formData.options, bulkAddText)
+            if (merged.error) {
+                setErrors({
+                    options: merged.error,
+                    error: merged.error,
+                })
+                setSubmitting(false)
+                return
+            }
+            effectiveOptions = merged.options
+        }
+
         // Validate options for select/multiselect
         if (requiresOptions) {
-            const prepared = prepareOptionsForSubmit(formData.options)
+            const prepared = prepareOptionsForSubmit(effectiveOptions)
             if (prepared.length === 0) {
                 setErrors({ options: 'At least one option is required.', error: 'Please add at least one option.' })
                 setSubmitting(false)
@@ -358,7 +377,7 @@ export default function MetadataFieldModal({
         const submitData = {
             ...formData,
             key: fieldKey,
-            options: prepareOptionsForSubmit(formData.options),
+            options: prepareOptionsForSubmit(requiresOptions ? effectiveOptions : formData.options),
         }
 
         let skipFinally = false
@@ -452,7 +471,7 @@ export default function MetadataFieldModal({
 
                 // System fields: persist select/multiselect options (global metadata_options rows)
                 if (requiresOptions && !formData.option_editing_restricted) {
-                    const opts = prepareOptionsForSubmit(formData.options)
+                    const opts = prepareOptionsForSubmit(effectiveOptions)
                     const optionsResponse = await fetch(`/app/tenant/metadata/fields/${field.id}`, {
                         method: 'PUT',
                         headers: {
@@ -579,35 +598,18 @@ export default function MetadataFieldModal({
 
     const processBulkAdd = () => {
         setOptionError(null)
-        const lines = bulkAddText
-            .split('\n')
-            .map((l) => l.trim())
-            .filter(Boolean)
-        if (lines.length === 0) {
+        if (!bulkAddText.trim()) {
             setOptionError('Enter at least one value (one per line)')
             return
         }
-        const existingValues = new Set(formData.options.map((o) => o.value.toLowerCase()))
-        const toAdd = []
-        for (const line of lines) {
-            const value = toSnakeCase(line) || line.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '')
-            if (!value) continue
-            const snakeCheck = validateSnakeCase(value)
-            if (!snakeCheck.valid) {
-                setOptionError(snakeCheck.message)
-                return
-            }
-            if (existingValues.has(value)) continue
-            existingValues.add(value)
-            toAdd.push({ value, system_label: snakeToTitleCase(value) })
-        }
-        if (toAdd.length === 0) {
-            setOptionError('All values already exist or are invalid')
+        const { options: next, error } = mergeBulkAddTextIntoOptions(formData.options, bulkAddText)
+        if (error) {
+            setOptionError(error)
             return
         }
         setFormData({
             ...formData,
-            options: [...formData.options, ...toAdd],
+            options: next,
         })
         setBulkAddText('')
     }
@@ -625,8 +627,6 @@ export default function MetadataFieldModal({
         })
     }
 
-    const isTagsField = formData.key === 'tags' || field?.key === 'tags'
-    const requiresOptions = (formData.type === 'select' || formData.type === 'multiselect') && !isTagsField
     // dominant_hue_group: filter-only system field — user may only control is_filter_hidden
     const isFilterOnlyField = (field?.key ?? formData?.key) === 'dominant_hue_group'
 
@@ -964,6 +964,10 @@ export default function MetadataFieldModal({
                                         </button>
                                         {optionError && <span className="text-xs text-red-600 w-full">{optionError}</span>}
                                     </div>
+                                    <p className="mt-1.5 text-xs text-gray-500">
+                                        You can save without clicking Add options — lines in the box are applied when you
+                                        save the field.
+                                    </p>
                                     <div className="mt-3">
                                         <div className="rounded border border-gray-200 overflow-hidden bg-white">
                                             {formData.options.length === 0 ? (

@@ -4,6 +4,8 @@
  * Helper functions for asset-related operations and guards.
  */
 
+import { mergeThumbnailModeUrlsDrawerSync } from './thumbnailModes'
+
 /**
  * Resolves category ID from an asset object.
  * Backend may send category as category: { id, name } or metadata.category_id; not always top-level category_id.
@@ -64,6 +66,20 @@ export function mergeAsset(prev, incoming) {
     // HARD STABILIZATION: Stop re-merging identical assets
     // Prevents useless object replacement → prevents re-renders
     // Never short-circuit when Brand Intelligence (or other non-thumbnail) fields update.
+    // Never short-circuit when multi-mode thumbnail maps change only (drawer poll → grid must get presentation URLs).
+    const thumbModeUrlsUnchanged =
+        incoming.thumbnail_mode_urls === undefined ||
+        JSON.stringify(prev.thumbnail_mode_urls ?? null) ===
+            JSON.stringify(incoming.thumbnail_mode_urls ?? null)
+    const thumbModesStatusUnchanged =
+        incoming.thumbnail_modes_status === undefined ||
+        JSON.stringify(prev.thumbnail_modes_status ?? null) ===
+            JSON.stringify(incoming.thumbnail_modes_status ?? null)
+    const thumbModesMetaUnchanged =
+        incoming.thumbnail_modes_meta === undefined ||
+        JSON.stringify(prev.thumbnail_modes_meta ?? null) ===
+            JSON.stringify(incoming.thumbnail_modes_meta ?? null)
+
     if (
         incoming.brand_intelligence === undefined &&
         prev.preview_thumbnail_url === incoming.preview_thumbnail_url &&
@@ -71,11 +87,31 @@ export function mergeAsset(prev, incoming) {
         prev.thumbnail_version === incoming.thumbnail_version &&
         prev.pdf_page_count === incoming.pdf_page_count &&
         prev.first_page_url === incoming.first_page_url &&
-        prev.pdf_page_api_endpoint === incoming.pdf_page_api_endpoint
+        prev.pdf_page_api_endpoint === incoming.pdf_page_api_endpoint &&
+        thumbModeUrlsUnchanged &&
+        thumbModesStatusUnchanged &&
+        thumbModesMetaUnchanged
     ) {
         return prev
     }
     
+    const prevModesStatus =
+        prev.thumbnail_modes_status && typeof prev.thumbnail_modes_status === 'object'
+            ? prev.thumbnail_modes_status
+            : {}
+    const nextModesStatus =
+        incoming.thumbnail_modes_status && typeof incoming.thumbnail_modes_status === 'object'
+            ? incoming.thumbnail_modes_status
+            : {}
+    const prevModesMeta =
+        prev.thumbnail_modes_meta && typeof prev.thumbnail_modes_meta === 'object'
+            ? prev.thumbnail_modes_meta
+            : {}
+    const nextModesMeta =
+        incoming.thumbnail_modes_meta && typeof incoming.thumbnail_modes_meta === 'object'
+            ? incoming.thumbnail_modes_meta
+            : {}
+
     // Thumbnail fields: incoming wins when the update includes them (polling, reprocess).
     // Partial updates (e.g. only brand_intelligence) omit these keys — must keep prev, not null out.
     return {
@@ -90,6 +126,11 @@ export function mergeAsset(prev, incoming) {
         pdf_page_count: incoming.pdf_page_count ?? prev.pdf_page_count ?? null,
         first_page_url: incoming.first_page_url ?? prev.first_page_url ?? null,
         pdf_page_api_endpoint: incoming.pdf_page_api_endpoint ?? prev.pdf_page_api_endpoint ?? null,
+        thumbnail_mode_urls:
+            mergeThumbnailModeUrlsDrawerSync(incoming.thumbnail_mode_urls, prev.thumbnail_mode_urls) ??
+            prev.thumbnail_mode_urls,
+        thumbnail_modes_status: { ...prevModesStatus, ...nextModesStatus },
+        thumbnail_modes_meta: { ...prevModesMeta, ...nextModesMeta },
     }
 }
 

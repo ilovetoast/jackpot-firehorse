@@ -1,4 +1,4 @@
-import { usePage, router } from '@inertiajs/react'
+import { usePage, router, Link } from '@inertiajs/react'
 import { useState, useEffect } from 'react'
 import InsightsLayout from '../../layouts/InsightsLayout'
 import {
@@ -212,6 +212,20 @@ export default function MetadataAnalytics({ analytics, filters, is_admin }) {
                         ) : (
                             <p className="text-sm text-gray-500">No coverage data available</p>
                         )}
+                        <div className="mt-6 pt-6 border-t border-gray-200 flex flex-wrap gap-4">
+                            <Link
+                                href={route('manage.categories', { filter: 'low_coverage' })}
+                                className="inline-flex items-center text-sm font-medium text-indigo-600 hover:text-indigo-500"
+                            >
+                                View low coverage fields
+                            </Link>
+                            <Link
+                                href={route('manage.tags', { filter: 'missing' })}
+                                className="inline-flex items-center text-sm font-medium text-indigo-600 hover:text-indigo-500"
+                            >
+                                Fix missing tags
+                            </Link>
+                        </div>
                     </div>
                 </div>
 

@@ -1,84 +1,32 @@
-import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
-import { router } from '@inertiajs/react'
-import {
-    DndContext,
-    closestCenter,
-    KeyboardSensor,
-    PointerSensor,
-    useSensor,
-    useSensors,
-} from '@dnd-kit/core'
-import {
-    arrayMove,
-    SortableContext,
-    sortableKeyboardCoordinates,
-    useSortable,
-    verticalListSortingStrategy,
-} from '@dnd-kit/sortable'
-import { CSS } from '@dnd-kit/utilities'
+import { useState, useEffect, useMemo, useCallback } from 'react'
+import { Link, router } from '@inertiajs/react'
 import {
     ArrowPathIcon,
     ArrowUpCircleIcon,
-    Bars3Icon,
     CheckCircleIcon,
     ChevronDownIcon,
     ChevronRightIcon,
-    CloudArrowUpIcon,
     EllipsisVerticalIcon,
-    ExclamationCircleIcon,
-    EyeIcon,
     FolderIcon,
-    FunnelIcon,
     InformationCircleIcon,
     PencilIcon,
     PlusIcon,
     RectangleStackIcon,
     Squares2X2Icon,
-    SparklesIcon,
-    StarIcon,
     TrashIcon,
     XMarkIcon,
 } from '@heroicons/react/24/outline'
-import { StarIcon as StarIconSolid } from '@heroicons/react/24/solid'
 import ConfirmDialog from '../../../Components/ConfirmDialog'
-import ArchiveFieldModal from '../../../Components/ArchiveFieldModal'
-import MetadataFieldModal from '../../../Components/MetadataFieldModal'
 import AddCategoryModal from '../../../Components/Metadata/AddCategoryModal'
 import AdvancedSettingsSlideOver from '../../../Components/Metadata/AdvancedSettingsSlideOver'
 import CategorySettingsModal from '../../../Components/Metadata/CategorySettingsModal'
 import CategoryList from '../../../Components/Metadata/CategoryList'
-import {
-    normalizeOptions,
-    prepareOptionsForSubmit,
-    validateSnakeCase,
-    isDuplicateValue,
-    toSnakeCase,
-    snakeToTitleCase,
-} from '../../../utils/optionEditorUtils'
-
 /**
- * By Category View Component
- * 
- * Phase G.5: Category-First Metadata Enablement UX with improved presentation
- * 
- * ⚠️ PHASE LOCK: Phase G complete and paused. UI behavior verified and intentionally paused.
- * Do not refactor structure or behavior. Future improvements will be in Phase H.
- * 
- * 🎯 CANONICAL CONTROL SURFACE FOR ASSET GRID FILTERS
- * 
- * This is the ONLY place where filter visibility and primary/secondary placement
- * can be configured.
- * read-only or overview-only and must never reintroduce filter controls.
- * 
- * Ownership:
- * - Filter visibility (show_in_filters) → configured here per category
- * - Primary vs Secondary placement (is_primary) → configured here per category
- * - Category enablement → configured here
- * 
- * Displays metadata fields organized by category, making it clear
- * which fields are enabled for each category.
+ * By Category: category tree, EBI, advanced profiles, archived fields restore.
+ * Per-field enablement, upload/quick view/filter, primary/required, AI, ordering → Manage → Fields.
  */
-const METADATA_REGISTRY_URL = typeof route === 'function' ? route('tenant.metadata.registry.index') : '/app/tenant/metadata/registry'
+const MANAGE_CATEGORIES_URL =
+    typeof route === 'function' ? route('manage.categories') : '/app/manage/categories'
 const PENDING_SYSTEM_OPTIONS_URL =
     typeof route === 'function'
         ? route('tenant.metadata.system-options.pending-count')
@@ -95,23 +43,12 @@ const REVEAL_SYSTEM_FIELDS_URL =
     typeof route === 'function'
         ? route('tenant.metadata.system-fields.reveal-pending')
         : '/app/api/tenant/metadata/system-fields/reveal-pending'
-const CORE_FIELD_KEYS = ['collection', 'tags']
-
 function getCsrfTokenForOptions() {
     if (typeof document === 'undefined') return ''
     return document.querySelector('meta[name="csrf-token"]')?.content || ''
 }
 
-/** Select / multiselect fields (not tags) that allow editing options in the registry */
-function fieldSupportsQuickOptions(field) {
-    if (!field || field.option_editing_restricted) return false
-    if (field.key === 'tags') return false
-    const t = field.type ?? field.field_type ?? ''
-    return t === 'select' || t === 'multiselect'
-}
-
 export default function ByCategoryView({ 
-    registry, 
     brands = [],
     selectedBrandId,
     onBrandChange,
@@ -119,19 +56,10 @@ export default function ByCategoryView({
     canManageBrandCategories = false,
     canManageVisibility = true, // Default true so toggles are clickable; API enforces permission
     canManageFields = false,
-    customFieldsLimit = null,
-    metadataFieldFamilies = {},
     initialCategorySlug = null,
 }) {
     const [selectedCategoryId, setSelectedCategoryId] = useState(null)
-    const selectedCategoryIdRef = useRef(null)
-    const [fieldCategoryData, setFieldCategoryData] = useState({}) // Cache category data per field
-    const [loadingFields, setLoadingFields] = useState(new Set())
-    const [fieldOrder, setFieldOrder] = useState({}) // Store order per category: { categoryId: [fieldId, ...] }
     const [successMessage, setSuccessMessage] = useState(null) // Success message state
-    const [modalOpen, setModalOpen] = useState(false)
-    const [editingField, setEditingField] = useState(null)
-    const [loadingFieldData, setLoadingFieldData] = useState(false)
     const [copyFromSourceId, setCopyFromSourceId] = useState(null) // Source category for Copy from
     const [copyOrResetLoading, setCopyOrResetLoading] = useState(false)
     const [confirmCopyOpen, setConfirmCopyOpen] = useState(false)
@@ -139,8 +67,6 @@ export default function ByCategoryView({
     const [confirmApplyOtherBrandsOpen, setConfirmApplyOtherBrandsOpen] = useState(false)
     const [applyOtherBrandsTargets, setApplyOtherBrandsTargets] = useState([]) // { brand_name, category_name }[]
     const [applyOtherBrandsLoading, setApplyOtherBrandsLoading] = useState(false)
-    const [confirmDisableCoreOpen, setConfirmDisableCoreOpen] = useState(false)
-    const [pendingDisable, setPendingDisable] = useState(null) // { fieldId, categoryId, fieldLabel, categoryName }
     // Phase 3a: Named profiles
     const [saveProfileName, setSaveProfileName] = useState('')
     const [profileAvailableToAllBrands, setProfileAvailableToAllBrands] = useState(false)
@@ -154,14 +80,8 @@ export default function ByCategoryView({
     const [localCategories, setLocalCategories] = useState(categories)
     const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false)
     const [categoryToDelete, setCategoryToDelete] = useState(null)
-    const [confirmArchiveOpen, setConfirmArchiveOpen] = useState(false)
-    const [pendingArchiveField, setPendingArchiveField] = useState(null) // { field, onConfirm }
-    const [archiveRemoveFromAssets, setArchiveRemoveFromAssets] = useState(false)
-    const [archiveLoading, setArchiveLoading] = useState(false)
     const [editingCategoryId, setEditingCategoryId] = useState(null)
     const [editingCategoryName, setEditingCategoryName] = useState('')
-    const [expandedAvailable, setExpandedAvailable] = useState(false)
-    const [expandedAutomated, setExpandedAutomated] = useState(false)
     const [advancedSettingsOpen, setAdvancedSettingsOpen] = useState(false)
     const [categorySettingsOpen, setCategorySettingsOpen] = useState(false)
     const [categorySettingsCategory, setCategorySettingsCategory] = useState(null)
@@ -169,8 +89,6 @@ export default function ByCategoryView({
     const [categoryFormData, setCategoryFormData] = useState({ brand_roles: [], brand_users: [] })
     const [confirmRevertOpen, setConfirmRevertOpen] = useState(false)
     const [categoryToRevert, setCategoryToRevert] = useState(null)
-    const [highlightedFieldId, setHighlightedFieldId] = useState(null)
-    const [fieldReorderLoading, setFieldReorderLoading] = useState(false)
     const [showArchived, setShowArchived] = useState(false)
     const [archivedFields, setArchivedFields] = useState([])
     const [archivedLoading, setArchivedLoading] = useState(false)
@@ -236,32 +154,6 @@ export default function ByCategoryView({
             setSelectedCategoryId(categoriesForBrand[0]?.id ?? null)
         }
     }, [initialCategorySlug, categoriesForBrand])
-
-    // Sync ref with state
-    useEffect(() => {
-        selectedCategoryIdRef.current = selectedCategoryId
-    }, [selectedCategoryId])
-
-
-    const { system_fields: systemFields = [], tenant_fields = [] } = registry || {}
-    const allFields = [...systemFields, ...tenant_fields]
-
-    // Separate automated fields (population_mode = automatic AND readonly = true) from manageable fields
-    const { manageableFields, automatedFields } = useMemo(() => {
-        const manageable = []
-        const automated = []
-        
-        allFields.forEach(field => {
-            const isAutomated = (field.population_mode === 'automatic' && field.readonly === true)
-            if (isAutomated) {
-                automated.push(field)
-            } else {
-                manageable.push(field)
-            }
-        })
-        
-        return { manageableFields: manageable, automatedFields: automated }
-    }, [allFields])
 
     // Clear selected category if it no longer belongs to the selected brand
     useEffect(() => {
@@ -440,7 +332,6 @@ export default function ByCategoryView({
     const handleAddCategorySuccess = useCallback((newCategory) => {
         setLocalCategories(prev => [...prev, newCategory])
         setSelectedCategoryId(newCategory.id)
-        setFieldCategoryData({}) // Clear cache so UI refetches visibility (new category has minimal defaults)
         setAddCategoryOpen(false)
     }, [])
 
@@ -480,638 +371,6 @@ export default function ByCategoryView({
         setCategorySettingsCategory(cat)
         setCategorySettingsOpen(true)
     }, [])
-
-    // Load category data for a field (forceRefetch = true to skip cache after saving visibility)
-    const loadFieldCategoryData = async (field, forceRefetch = false) => {
-        if (!forceRefetch && fieldCategoryData[field.id]) {
-            return fieldCategoryData[field.id]
-        }
-
-        if (loadingFields.has(field.id)) {
-            return null // Already loading
-        }
-
-        setLoadingFields(prev => new Set(prev).add(field.id))
-
-        try {
-            const response = await fetch(`/app/api/tenant/metadata/fields/${field.id}/categories`)
-            const data = await response.json()
-            const suppressedIds = data.suppressed_category_ids || []
-            const categoryOverrides = data.category_overrides || {} // Keyed by category_id, includes is_primary
-            
-            const categoryData = {
-                suppressed: suppressedIds,
-                visible: categoriesForBrand.filter(cat => !suppressedIds.includes(cat.id)).map(cat => cat.id),
-                overrides: categoryOverrides, // Category-specific overrides including is_primary
-            }
-            
-            setFieldCategoryData(prev => ({
-                ...prev,
-                [field.id]: categoryData,
-            }))
-
-            return categoryData
-        } catch (error) {
-            console.error('Failed to load category data:', error)
-            return { suppressed: [], visible: categoriesForBrand.map(cat => cat.id) }
-        } finally {
-            setLoadingFields(prev => {
-                const next = new Set(prev)
-                next.delete(field.id)
-                return next
-            })
-        }
-    }
-
-    // Load category data for all fields when category is selected
-    useEffect(() => {
-        if (selectedCategoryId) {
-            [...manageableFields, ...automatedFields].forEach(field => {
-                loadFieldCategoryData(field)
-            })
-        }
-    }, [selectedCategoryId, manageableFields.length, automatedFields.length])
-
-    // Toggle field visibility for selected category (enable/disable per category)
-    // API enforces metadata.tenant.visibility.manage; we allow the click so toggles are always interactive
-    // meta: optional { fieldLabel, categoryName } for contextual success toast
-    const toggleCategoryField = useCallback(async (fieldId, categoryId, isSuppressed, meta = {}) => {
-        // isSuppressed=true means enabling (remove suppression), isSuppressed=false means disabling (add suppression)
-        const willBeEnabled = !!isSuppressed
-
-        // 1. Optimistically update local state immediately (use functional update to avoid stale closure)
-        let newSuppressed
-        setFieldCategoryData(prev => {
-            const current = prev[fieldId] || { suppressed: [], visible: [] }
-            const eq = (a, b) => String(a) === String(b)
-            newSuppressed = willBeEnabled
-                ? (current.suppressed || []).filter(id => !eq(id, categoryId))
-                : [...(current.suppressed || []), categoryId]
-            const visibleCategories = categoriesForBrand.filter(cat => !newSuppressed.some(sid => eq(sid, cat.id)))
-            return {
-                ...prev,
-                [fieldId]: {
-                    suppressed: newSuppressed,
-                    visible: visibleCategories.map(cat => cat.id),
-                }
-            }
-        })
-
-        if (willBeEnabled && !fieldOrder[categoryId]) {
-            setFieldOrder(prev => ({ ...prev, [categoryId]: [] }))
-        }
-
-        let succeeded = false
-        try {
-            const url = `/app/api/tenant/metadata/fields/${fieldId}/categories/${categoryId}/visibility`
-            const response = await fetch(url, {
-                method: 'PATCH',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Accept': 'application/json',
-                    'X-Requested-With': 'XMLHttpRequest',
-                    'X-CSRF-TOKEN': getCsrfToken(),
-                },
-                credentials: 'same-origin',
-                body: JSON.stringify({ is_hidden: !willBeEnabled }),
-            })
-
-            if (!response.ok) {
-                // Revert optimistic update on error
-                setFieldCategoryData(prev => {
-                    const current = prev[fieldId] || { suppressed: [], visible: [] }
-                    const eq = (a, b) => String(a) === String(b)
-                    const reverted = willBeEnabled
-                        ? [...(current.suppressed || []), categoryId]
-                        : (current.suppressed || []).filter(id => !eq(id, categoryId))
-                    const visibleCategories = categoriesForBrand.filter(cat => !reverted.some(sid => eq(sid, cat.id)))
-                    return {
-                        ...prev,
-                        [fieldId]: { suppressed: reverted, visible: visibleCategories.map(cat => cat.id) },
-                    }
-                })
-            } else {
-                succeeded = true
-            }
-        } catch (error) {
-            console.error('Failed to toggle category field:', error)
-            setFieldCategoryData(prev => {
-                const current = prev[fieldId] || { suppressed: [], visible: [] }
-                const eq = (a, b) => String(a) === String(b)
-                const reverted = willBeEnabled
-                    ? [...(current.suppressed || []), categoryId]
-                    : (current.suppressed || []).filter(id => !eq(id, categoryId))
-                const visibleCategories = categoriesForBrand.filter(cat => !reverted.some(sid => eq(sid, cat.id)))
-                return {
-                    ...prev,
-                    [fieldId]: { suppressed: reverted, visible: visibleCategories.map(cat => cat.id) },
-                }
-            })
-        }
-
-        if (succeeded && meta.fieldLabel && meta.categoryName) {
-            setSuccessMessage(`${meta.fieldLabel} ${willBeEnabled ? 'enabled' : 'disabled'} for ${meta.categoryName}.`)
-            setTimeout(() => setSuccessMessage(null), 3000)
-        }
-    }, [categoriesForBrand, fieldOrder])
-
-    // Wrapper: intercept core field disable to show confirmation; otherwise call toggleCategoryField with contextual meta
-    const handleToggleWithConfirm = useCallback((fieldId, categoryId, isSuppressed, field, categoryName) => {
-        const fieldLabel = field?.label || field?.system_label || field?.key || 'Field'
-        const name = categoryName ?? categoriesForBrand.find(c => String(c.id) === String(categoryId))?.name ?? 'Category'
-        if (!isSuppressed && field && CORE_FIELD_KEYS.includes(field.key)) {
-            setPendingDisable({ fieldId, categoryId, fieldLabel, categoryName: name })
-            setConfirmDisableCoreOpen(true)
-        } else {
-            toggleCategoryField(fieldId, categoryId, isSuppressed, { fieldLabel, categoryName: name })
-        }
-    }, [toggleCategoryField, categoriesForBrand])
-
-    const wrapToggle = useCallback((field, categoryId) => (fieldId, categoryIdArg, isSuppressed) => {
-        const catName = categoriesForBrand.find(c => String(c.id) === String(categoryIdArg ?? categoryId))?.name ?? 'Category'
-        handleToggleWithConfirm(fieldId, categoryIdArg ?? categoryId, isSuppressed, field, catName)
-    }, [handleToggleWithConfirm, categoriesForBrand])
-
-    const handleConfirmDisableCore = useCallback(() => {
-        if (!pendingDisable) return
-        const { fieldId, categoryId, fieldLabel, categoryName } = pendingDisable
-        toggleCategoryField(fieldId, categoryId, false, { fieldLabel, categoryName })
-        setPendingDisable(null)
-        setConfirmDisableCoreOpen(false)
-    }, [pendingDisable, toggleCategoryField])
-
-    // Toggle visibility for Upload/Edit/Filter
-    const toggleVisibility = async (fieldId, context, currentValue) => {
-        if (!canManageVisibility) return
-
-        const newValue = !currentValue
-        const visibilityKey = context === 'upload' ? 'show_on_upload' : context === 'edit' ? 'show_on_edit' : 'show_in_filters'
-        const contextLabel = context === 'upload' ? 'Upload' : context === 'edit' ? 'Quick View' : 'Filter'
-        const currentCategoryId = selectedCategoryIdRef.current
-
-        // Optimistic update
-        if (currentCategoryId) {
-            setFieldCategoryData((prev) => {
-                const fieldData = prev[fieldId] || { suppressed: [], visible: [], overrides: {} }
-                const updatedOverrides = {
-                    ...fieldData.overrides,
-                    [currentCategoryId]: {
-                        ...fieldData.overrides[currentCategoryId],
-                        [visibilityKey]: newValue,
-                    },
-                }
-                return {
-                    ...prev,
-                    [fieldId]: { ...fieldData, overrides: updatedOverrides },
-                }
-            })
-        }
-
-        try {
-            const requestBody = { [visibilityKey]: newValue }
-            if (currentCategoryId) requestBody.category_id = currentCategoryId
-
-            const response = await fetch(`/app/api/tenant/metadata/fields/${fieldId}/visibility`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-Requested-With': 'XMLHttpRequest',
-                    'X-CSRF-TOKEN': getCsrfToken(),
-                },
-                credentials: 'same-origin',
-                body: JSON.stringify(requestBody),
-            })
-            
-            const responseData = await response.json().catch(() => ({}))
-            if (response.ok) {
-                setSuccessMessage(`${contextLabel} visibility ${newValue ? 'enabled' : 'disabled'}`)
-                setTimeout(() => setSuccessMessage(null), 3000)
-                if (!currentCategoryId) {
-                    setFieldCategoryData((prev) => { const n = { ...prev }; delete n[fieldId]; return n })
-                    const f = manageableFields.find(x => x.id === fieldId) || automatedFields.find(x => x.id === fieldId)
-                    if (f) loadFieldCategoryData(f, true).catch(() => {})
-                }
-            } else {
-                const errorMsg = responseData?.error || responseData?.message || `Failed to update visibility (${response.status})`
-                setSuccessMessage(`Error: ${errorMsg}. Please try again.`)
-                setTimeout(() => setSuccessMessage(null), 5000)
-                if (currentCategoryId) {
-                    setFieldCategoryData((prev) => {
-                        const fieldData = prev[fieldId] || { suppressed: [], visible: [], overrides: {} }
-                        const updatedOverrides = {
-                            ...fieldData.overrides,
-                            [currentCategoryId]: {
-                                ...fieldData.overrides[currentCategoryId],
-                                [visibilityKey]: currentValue,
-                            },
-                        }
-                        return { ...prev, [fieldId]: { ...fieldData, overrides: updatedOverrides } }
-                    })
-                }
-            }
-        } catch (error) {
-            setSuccessMessage(error.message || 'Network error. Please try again.')
-            setTimeout(() => setSuccessMessage(null), 5000)
-            if (currentCategoryId) {
-                setFieldCategoryData((prev) => {
-                    const fieldData = prev[fieldId] || { suppressed: [], visible: [], overrides: {} }
-                    const updatedOverrides = {
-                        ...fieldData.overrides,
-                        [currentCategoryId]: {
-                            ...fieldData.overrides[currentCategoryId],
-                            [visibilityKey]: currentValue,
-                        },
-                    }
-                    return { ...prev, [fieldId]: { ...fieldData, overrides: updatedOverrides } }
-                })
-            }
-        }
-    }
-
-    // Toggle required field for category (must be filled when adding assets)
-    // ARCHITECTURAL RULE: Required status MUST be category-scoped (like is_primary).
-    const toggleRequired = async (fieldId, categoryId, currentValue) => {
-        if (!canManageVisibility || !categoryId) return
-
-        const newValue = !currentValue
-
-        setFieldCategoryData(prev => {
-            const fieldData = prev[fieldId] || { suppressed: [], visible: [], overrides: {} }
-            const updatedOverrides = {
-                ...fieldData.overrides,
-                [categoryId]: {
-                    ...fieldData.overrides[categoryId],
-                    is_required: newValue,
-                }
-            }
-            return {
-                ...prev,
-                [fieldId]: {
-                    ...fieldData,
-                    overrides: updatedOverrides,
-                }
-            }
-        })
-
-        try {
-            const response = await fetch(`/app/api/tenant/metadata/fields/${fieldId}/visibility`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-Requested-With': 'XMLHttpRequest',
-                    'X-CSRF-TOKEN': getCsrfToken(),
-                },
-                credentials: 'same-origin',
-                body: JSON.stringify({
-                    is_required: newValue,
-                    category_id: categoryId,
-                }),
-            })
-
-            if (response.ok) {
-                setSuccessMessage(`Required field ${newValue ? 'enabled' : 'disabled'} for this category`)
-                setTimeout(() => setSuccessMessage(null), 3000)
-            } else {
-                setFieldCategoryData(prev => {
-                    const fieldData = prev[fieldId] || { suppressed: [], visible: [], overrides: {} }
-                    const updatedOverrides = {
-                        ...fieldData.overrides,
-                        [categoryId]: {
-                            ...fieldData.overrides[categoryId],
-                            is_required: currentValue,
-                        }
-                    }
-                    return {
-                        ...prev,
-                        [fieldId]: {
-                            ...fieldData,
-                            overrides: updatedOverrides,
-                        }
-                    }
-                })
-                setSuccessMessage('Failed to update required field setting')
-                setTimeout(() => setSuccessMessage(null), 3000)
-            }
-        } catch (error) {
-            console.error('Failed to update required field setting:', error)
-            setFieldCategoryData(prev => {
-                const fieldData = prev[fieldId] || { suppressed: [], visible: [], overrides: {} }
-                const updatedOverrides = {
-                    ...fieldData.overrides,
-                    [categoryId]: {
-                        ...fieldData.overrides[categoryId],
-                        is_required: currentValue,
-                    }
-                }
-                return {
-                    ...prev,
-                    [fieldId]: {
-                        ...fieldData,
-                        overrides: updatedOverrides,
-                    }
-                }
-            })
-            setSuccessMessage('Failed to update required field setting')
-            setTimeout(() => setSuccessMessage(null), 3000)
-        }
-    }
-
-    // Toggle primary filter placement for category
-    // ARCHITECTURAL RULE: Primary vs secondary filter placement MUST be category-scoped.
-    // A field may be primary in Photography but secondary in Logos.
-    const togglePrimary = async (fieldId, categoryId, currentValue) => {
-        if (!canManageVisibility || !categoryId) return
-
-        const newValue = !currentValue
-
-        // Optimistically update local state immediately
-        setFieldCategoryData(prev => {
-            const fieldData = prev[fieldId] || { suppressed: [], visible: [], overrides: {} }
-            const updatedOverrides = {
-                ...fieldData.overrides,
-                [categoryId]: {
-                    ...fieldData.overrides[categoryId],
-                    is_primary: newValue,
-                }
-            }
-            return {
-                ...prev,
-                [fieldId]: {
-                    ...fieldData,
-                    overrides: updatedOverrides,
-                }
-            }
-        })
-
-        try {
-            const response = await fetch(`/app/api/tenant/metadata/fields/${fieldId}/visibility`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-Requested-With': 'XMLHttpRequest',
-                    'X-CSRF-TOKEN': getCsrfToken(),
-                },
-                credentials: 'same-origin',
-                body: JSON.stringify({
-                    is_primary: newValue,
-                    category_id: categoryId, // Category-scoped primary placement
-                }),
-            })
-            
-            if (response.ok) {
-                // Show success message
-                setSuccessMessage(`Primary filter ${newValue ? 'enabled' : 'disabled'} for this category`)
-                setTimeout(() => setSuccessMessage(null), 3000)
-                // No reload needed - state already updated optimistically
-            } else {
-                // Revert on error
-                setFieldCategoryData(prev => {
-                    const fieldData = prev[fieldId] || { suppressed: [], visible: [], overrides: {} }
-                    const updatedOverrides = {
-                        ...fieldData.overrides,
-                        [categoryId]: {
-                            ...fieldData.overrides[categoryId],
-                            is_primary: currentValue,
-                        }
-                    }
-                    return {
-                        ...prev,
-                        [fieldId]: {
-                            ...fieldData,
-                            overrides: updatedOverrides,
-                        }
-                    }
-                })
-                setSuccessMessage('Failed to update primary filter placement')
-                setTimeout(() => setSuccessMessage(null), 3000)
-            }
-        } catch (error) {
-            console.error('Failed to update primary filter placement:', error)
-            // Revert on error
-            setFieldCategoryData(prev => {
-                const fieldData = prev[fieldId] || { suppressed: [], visible: [], overrides: {} }
-                const updatedOverrides = {
-                    ...fieldData.overrides,
-                    [categoryId]: {
-                        ...fieldData.overrides[categoryId],
-                        is_primary: currentValue,
-                    }
-                }
-                return {
-                    ...prev,
-                    [fieldId]: {
-                        ...fieldData,
-                        overrides: updatedOverrides,
-                    }
-                }
-            })
-            setSuccessMessage('Failed to update primary filter placement')
-            setTimeout(() => setSuccessMessage(null), 3000)
-        }
-    }
-
-    // Toggle AI tagging suggestions (ai_eligible)
-    const toggleAiEligible = async (fieldId, currentValue) => {
-        if (!canManageVisibility) return
-
-        const newValue = !currentValue
-
-        try {
-            const response = await fetch(`/app/tenant/metadata/fields/${fieldId}/ai-eligible`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-Requested-With': 'XMLHttpRequest',
-                    'X-CSRF-TOKEN': getCsrfToken(),
-                },
-                credentials: 'same-origin',
-                body: JSON.stringify({
-                    ai_eligible: newValue,
-                }),
-            })
-            
-            if (response.ok) {
-                // Show success message
-                setSuccessMessage(`AI tagging suggestions ${newValue ? 'enabled' : 'disabled'}`)
-                setTimeout(() => setSuccessMessage(null), 3000)
-                
-                // Silently refresh registry preserving category + brand
-                refreshMetadataRegistry()
-            } else {
-                const errorData = await response.json().catch(() => ({}))
-                setSuccessMessage(errorData.error || 'Failed to update AI tagging suggestions')
-                setTimeout(() => setSuccessMessage(null), 3000)
-            }
-        } catch (error) {
-            console.error('Failed to update AI eligible:', error)
-            setSuccessMessage('Failed to update AI tagging suggestions')
-            setTimeout(() => setSuccessMessage(null), 3000)
-        }
-    }
-
-    // When previewing a profile, overlay snapshot onto field data so UI shows profile without saving
-    const previewOverlay = useMemo(() => {
-        if (!previewSnapshot || !selectedCategoryId) return {}
-        const overlay = {}
-        previewSnapshot.forEach(entry => {
-            const fid = entry.metadata_field_id
-            overlay[fid] = {
-                suppressed: entry.is_hidden ? [selectedCategoryId] : [],
-                visible: entry.is_hidden ? [] : [selectedCategoryId],
-                overrides: {
-                    [selectedCategoryId]: {
-                        show_on_upload: !entry.is_upload_hidden,
-                        show_on_edit: !(entry.is_edit_hidden ?? false),
-                        show_in_filters: !entry.is_filter_hidden,
-                        is_primary: entry.is_primary ?? false,
-                    },
-                },
-            }
-        })
-        return overlay
-    }, [previewSnapshot, selectedCategoryId])
-
-    // Get fields for selected category with ordering (uses previewOverlay when previewing a profile)
-    const getFieldsForCategory = useMemo(() => {
-        if (!selectedCategoryId) {
-            return { enabled: [], available: [], enabledAutomated: [], availableAutomated: [] }
-        }
-
-        const enabled = []
-        const available = []
-        const enabledAutomated = []
-        const availableAutomated = []
-
-        const eq = (a, b) => String(a) === String(b)
-        manageableFields.forEach(field => {
-            const categoryData = (previewOverlay[field.id] ?? fieldCategoryData[field.id]) || { suppressed: [], visible: [] }
-            const isEnabled = !(categoryData.suppressed || []).some(sid => eq(sid, selectedCategoryId))
-            
-            if (isEnabled) {
-                enabled.push(field)
-            } else {
-                available.push(field)
-            }
-        })
-
-        // Separate automated fields
-        automatedFields.forEach(field => {
-            const categoryData = (previewOverlay[field.id] ?? fieldCategoryData[field.id]) || { suppressed: [], visible: [] }
-            const isEnabled = !(categoryData.suppressed || []).some(sid => eq(sid, selectedCategoryId))
-            
-            if (isEnabled) {
-                enabledAutomated.push(field)
-            } else {
-                availableAutomated.push(field)
-            }
-        })
-
-        // Apply ordering to enabled fields
-        const order = fieldOrder[selectedCategoryId] || []
-        if (order.length > 0) {
-            // Sort enabled fields by order, then append any not in order
-            const ordered = order
-                .map(id => enabled.find(f => f.id === id))
-                .filter(Boolean)
-            const unordered = enabled.filter(f => !order.includes(f.id))
-            return { enabled: [...ordered, ...unordered], available, enabledAutomated, availableAutomated }
-        }
-
-        return { enabled, available, enabledAutomated, availableAutomated }
-    }, [selectedCategoryId, manageableFields, automatedFields, fieldCategoryData, fieldOrder, previewOverlay])
-
-    // Registry "type" family keys — used to hide non-applicable *_type fields (virtual "Type" per category)
-    const typeFamilyFieldKeys = useMemo(() => {
-        const tf = metadataFieldFamilies?.type
-        if (!tf || !Array.isArray(tf.fields)) return []
-        return tf.fields
-    }, [metadataFieldFamilies])
-
-    const tenantFieldIds = useMemo(() => new Set((registry?.tenant_fields || []).map(f => f.id)), [registry?.tenant_fields])
-
-    const fieldsByFamily = useMemo(() => {
-        const { enabled, available } = getFieldsForCategory
-        const resolvedTypeKey = selectedCategory?.type_field?.field_key ?? null
-
-        const hideTypeFamilyMember = (field) => {
-            if (!typeFamilyFieldKeys.length || !typeFamilyFieldKeys.includes(field.key)) {
-                return false
-            }
-            if (!resolvedTypeKey) {
-                return true
-            }
-
-            return field.key !== resolvedTypeKey
-        }
-
-        const primaryTypeField = resolvedTypeKey
-            ? (enabled.find((f) => f.key === resolvedTypeKey) || available.find((f) => f.key === resolvedTypeKey) || null)
-            : null
-
-        const primarySceneField =
-            enabled.find((f) => f.key === 'scene_classification') ||
-            available.find((f) => f.key === 'scene_classification') ||
-            null
-
-        const otherEnabled = enabled.filter(
-            (f) => !hideTypeFamilyMember(f) && f.key !== 'scene_classification' && !(resolvedTypeKey && f.key === resolvedTypeKey)
-        )
-        const otherAvailable = available.filter(
-            (f) => !hideTypeFamilyMember(f) && f.key !== 'scene_classification' && !(resolvedTypeKey && f.key === resolvedTypeKey)
-        )
-        return {
-            primaryTypeField,
-            primarySceneField,
-            otherEnabled,
-            otherAvailable,
-        }
-    }, [getFieldsForCategory, typeFamilyFieldKeys, tenantFieldIds, selectedCategory?.type_field?.field_key])
-
-    const buildFullFieldOrder = useCallback((primaryFieldIds, otherFieldIds) => {
-        return [...primaryFieldIds, ...otherFieldIds]
-    }, [])
-
-    const handleEnabledFieldsDragEnd = useCallback((event) => {
-        const { active, over } = event
-        if (!over || active.id === over.id || !selectedCategoryId || !brandId) return
-
-        const { otherEnabled, primaryTypeField, primarySceneField } = fieldsByFamily
-        const oldIndex = otherEnabled.findIndex(f => String(f.id) === String(active.id))
-        const newIndex = otherEnabled.findIndex(f => String(f.id) === String(over.id))
-        if (oldIndex === -1 || newIndex === -1) return
-
-        const reorderedOther = arrayMove(otherEnabled, oldIndex, newIndex)
-        const primaryIds = []
-        if (primaryTypeField) primaryIds.push(primaryTypeField.id)
-        if (primarySceneField) primaryIds.push(primarySceneField.id)
-        const newFieldIds = buildFullFieldOrder(primaryIds, reorderedOther.map(f => f.id))
-
-        setFieldOrder(prev => ({
-            ...prev,
-            [selectedCategoryId]: newFieldIds
-        }))
-
-        setFieldReorderLoading(true)
-        fetch(`/app/brands/${brandId}/categories/${selectedCategoryId}/fields/reorder`, {
-            method: 'PATCH',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-CSRF-TOKEN': getCsrfToken(),
-                'X-Requested-With': 'XMLHttpRequest',
-                Accept: 'application/json',
-            },
-            credentials: 'same-origin',
-            body: JSON.stringify({ field_order: newFieldIds }),
-        })
-            .then(res => { if (!res.ok) throw new Error('Failed to reorder') })
-            .catch(e => console.error('[ByCategory] Field reorder failed:', e))
-            .finally(() => setFieldReorderLoading(false))
-    }, [selectedCategoryId, brandId, fieldsByFamily, buildFullFieldOrder])
-
-    const sensors = useSensors(
-        useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
-        useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
-    )
 
     // Category-level Brand Intelligence (settings.ebi_enabled)
     const toggleEbiEnabled = async () => {
@@ -1155,101 +414,56 @@ export default function ByCategoryView({
         }
     }
 
-    // Refresh metadata page via router.get preserving category + brand in URL (replaces router.reload)
+    // Refresh via Manage → Categories (session brand); preserve selected folder slug when possible.
     const refreshMetadataRegistry = useCallback((opts = {}) => {
         const params = {}
-        if (selectedBrandId) params.brand = selectedBrandId
         if (selectedCategory?.slug) params.category = selectedCategory.slug
-        router.get(METADATA_REGISTRY_URL, params, {
+        router.get(MANAGE_CATEGORIES_URL, params, {
             preserveState: true,
             preserveScroll: true,
             ...opts,
         })
-    }, [selectedBrandId, selectedCategory?.slug])
+    }, [selectedCategory?.slug])
 
-    const handleAfterAddSystemCategory = useCallback(
-        (category) => {
-            const params = {}
-            if (selectedBrandId) params.brand = selectedBrandId
-            if (category?.slug) params.category = category.slug
-            router.get(METADATA_REGISTRY_URL, params, {
-                preserveState: true,
-                preserveScroll: true,
-                onSuccess: () => {
-                    if (category?.id != null) {
-                        setSelectedCategoryId(category.id)
-                    }
-                },
-            })
-        },
-        [selectedBrandId]
-    )
+    const handleAfterAddSystemCategory = useCallback((category) => {
+        const params = {}
+        if (category?.slug) params.category = category.slug
+        router.get(MANAGE_CATEGORIES_URL, params, {
+            preserveState: true,
+            preserveScroll: true,
+            onSuccess: () => {
+                if (category?.id != null) {
+                    setSelectedCategoryId(category.id)
+                }
+            },
+        })
+    }, [])
 
     // Select category: update URL and local state
     const handleSelectCategory = useCallback((categoryId) => {
         const cat = categoriesForBrand.find(c => c.id === categoryId)
         const params = {}
-        if (selectedBrandId) params.brand = selectedBrandId
         if (cat?.slug) params.category = cat.slug
-        router.get(METADATA_REGISTRY_URL, params, {
+        router.get(MANAGE_CATEGORIES_URL, params, {
             preserveState: true,
             preserveScroll: true,
         })
         setSelectedCategoryId(categoryId)
-    }, [categoriesForBrand, selectedBrandId])
+    }, [categoriesForBrand])
 
     // Brand change: update URL (Index syncs from initial_brand_id)
-    const handleBrandChange = useCallback((brandId) => {
-        const params = {}
-        if (brandId) params.brand = brandId
-        if (selectedCategory?.slug) params.category = selectedCategory.slug
-        router.get(METADATA_REGISTRY_URL, params, {
-            preserveState: true,
-            preserveScroll: true,
-        })
-        onBrandChange(brandId)
-    }, [selectedCategory?.slug, onBrandChange])
-
-    const handleArchiveField = useCallback((field) => {
-        setPendingArchiveField(field)
-        setArchiveRemoveFromAssets(false)
-        setConfirmArchiveOpen(true)
-    }, [])
-
-    const handleConfirmArchive = useCallback(async () => {
-        if (!pendingArchiveField) return
-        setArchiveLoading(true)
-        try {
-            const res = await fetch(`/app/tenant/metadata/fields/${pendingArchiveField.id}/archive`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRF-TOKEN': getCsrfToken(),
-                    'X-Requested-With': 'XMLHttpRequest',
-                    Accept: 'application/json',
-                },
-                credentials: 'same-origin',
-                body: JSON.stringify({ remove_from_assets: archiveRemoveFromAssets }),
+    const handleBrandChange = useCallback(
+        (brandId) => {
+            const params = {}
+            if (selectedCategory?.slug) params.category = selectedCategory.slug
+            router.get(MANAGE_CATEGORIES_URL, params, {
+                preserveState: true,
+                preserveScroll: true,
             })
-            const data = await res.json().catch(() => ({}))
-            if (res.ok && data.success) {
-                setConfirmArchiveOpen(false)
-                setPendingArchiveField(null)
-                setArchiveRemoveFromAssets(false)
-                refreshMetadataRegistry()
-                setSuccessMessage('Metadata field archived successfully.')
-                setTimeout(() => setSuccessMessage(null), 3000)
-            } else {
-                setSuccessMessage(data?.error || 'Failed to archive field')
-                setTimeout(() => setSuccessMessage(null), 5000)
-            }
-        } catch (e) {
-            setSuccessMessage(e?.message || 'Network error')
-            setTimeout(() => setSuccessMessage(null), 5000)
-        } finally {
-            setArchiveLoading(false)
-        }
-    }, [pendingArchiveField, archiveRemoveFromAssets, refreshMetadataRegistry])
+            onBrandChange(brandId)
+        },
+        [selectedCategory?.slug, onBrandChange]
+    )
 
     // Fetch archived fields when View Archived is toggled on
     useEffect(() => {
@@ -1299,84 +513,6 @@ export default function ByCategoryView({
         }
     }, [refreshMetadataRegistry])
 
-    const handleEditField = async (field) => {
-        setLoadingFieldData(true)
-        
-        try {
-            // Check if it's a custom field (tenant field)
-            const isCustom = !systemFields.some(sf => sf.id === field.id)
-            
-            if (isCustom && field.id) {
-                // Load field data from API for custom fields
-                const response = await fetch(`/app/tenant/metadata/fields/${field.id}`)
-                const data = await response.json()
-                if (data.field) {
-                    setEditingField(data.field)
-                    setModalOpen(true)
-                } else {
-                    console.error('Field not found')
-                }
-            } else {
-                // For system fields, fetch full field data including options and ai_eligible
-                // Use the tenant metadata field API which includes ai_eligible
-                try {
-                    // Fetch field details including options and ai_eligible
-                    const fieldResponse = await fetch(`/app/tenant/metadata/fields/${field.id}`)
-                    if (fieldResponse.ok) {
-                        const fieldData = await fieldResponse.json()
-                        setEditingField({
-                            ...field,
-                            ...fieldData.field,
-                            scope: 'system',
-                            is_system: true,
-                            // Ensure ai_eligible is included from API response or field prop
-                            ai_eligible: fieldData.field?.ai_eligible !== undefined 
-                                ? fieldData.field.ai_eligible 
-                                : (field.ai_eligible !== undefined ? field.ai_eligible : false),
-                        })
-                    } else {
-                        // Fallback to basic field data with ai_eligible from field prop
-                        setEditingField({
-                            ...field,
-                            scope: 'system',
-                            is_system: true,
-                            ai_eligible: field.ai_eligible !== undefined ? field.ai_eligible : false,
-                        })
-                    }
-                } catch (err) {
-                    // Fallback to basic field data with ai_eligible from field prop
-                    setEditingField({
-                        ...field,
-                        scope: 'system',
-                        is_system: true,
-                        ai_eligible: field.ai_eligible !== undefined ? field.ai_eligible : false,
-                    })
-                }
-                setModalOpen(true)
-            }
-        } catch (error) {
-            console.error('Failed to load field data:', error)
-        } finally {
-            setLoadingFieldData(false)
-        }
-    }
-
-    const handleModalSuccess = (newFieldId) => {
-        if (newFieldId) setHighlightedFieldId(newFieldId)
-        // Force full reload (preserveState: false) so registry gets fresh ai_eligible and other field data
-        router.get(METADATA_REGISTRY_URL, {
-            ...(selectedBrandId && { brand: selectedBrandId }),
-            ...(selectedCategory?.slug && { category: selectedCategory.slug }),
-        }, {
-            preserveState: false,
-            preserveScroll: true,
-            onSuccess: () => {
-                setFieldCategoryData({})
-                if (newFieldId) setTimeout(() => setHighlightedFieldId(null), 2000)
-            },
-        })
-    }
-
     // Copy visibility settings from another category to the selected category (called after confirm)
     const handleCopyFromConfirm = async () => {
         if (!canManageVisibility || !selectedCategoryId || !copyFromSourceId) return
@@ -1400,7 +536,7 @@ export default function ByCategoryView({
                 setTimeout(() => setSuccessMessage(null), 4000)
                 setCopyFromSourceId(null)
                 setConfirmCopyOpen(false)
-                refreshMetadataRegistry({ onSuccess: () => setFieldCategoryData({}) })
+                refreshMetadataRegistry()
             } else {
                 setSuccessMessage(data.error || 'Failed to copy settings.')
                 setTimeout(() => setSuccessMessage(null), 5000)
@@ -1432,7 +568,7 @@ export default function ByCategoryView({
                 setSuccessMessage(data.message || 'Category reset to default.')
                 setTimeout(() => setSuccessMessage(null), 4000)
                 setConfirmResetOpen(false)
-                refreshMetadataRegistry({ onSuccess: () => setFieldCategoryData({}) })
+                refreshMetadataRegistry()
             } else {
                 setSuccessMessage(data.error || 'Failed to reset.')
                 setTimeout(() => setSuccessMessage(null), 5000)
@@ -1469,7 +605,7 @@ export default function ByCategoryView({
                 setTimeout(() => setSuccessMessage(null), 4000)
                 setCategoryToRevert(null)
                 setConfirmRevertOpen(false)
-                refreshMetadataRegistry({ onSuccess: () => setFieldCategoryData({}) })
+                refreshMetadataRegistry()
             } else {
                 setSuccessMessage(data.error ?? 'Failed to revert.')
                 setTimeout(() => setSuccessMessage(null), 5000)
@@ -1529,7 +665,7 @@ export default function ByCategoryView({
                 setTimeout(() => setSuccessMessage(null), 4000)
                 setApplyOtherBrandsTargets([])
                 setConfirmApplyOtherBrandsOpen(false)
-                refreshMetadataRegistry({ onSuccess: () => setFieldCategoryData({}) })
+                refreshMetadataRegistry()
             } else {
                 setSuccessMessage(data.error ?? 'Failed to apply to other brands.')
                 setTimeout(() => setSuccessMessage(null), 5000)
@@ -1657,7 +793,7 @@ export default function ByCategoryView({
                 setConfirmApplyProfileOpen(false)
                 setPreviewSnapshot(null)
                 setPreviewProfileName(null)
-                refreshMetadataRegistry({ onSuccess: () => setFieldCategoryData({}) })
+                refreshMetadataRegistry()
             } else {
                 setSuccessMessage(data.error ?? 'Failed to apply profile.')
                 setTimeout(() => setSuccessMessage(null), 5000)
@@ -1926,255 +1062,34 @@ export default function ByCategoryView({
                             </div>
                         )}
 
-                        {/* Fields content — premium card */}
+                        {/* Fields — full editing lives under Manage → Fields */}
                         <div className="rounded-xl border border-gray-200 bg-white shadow-md overflow-hidden">
-                            <div className="px-8 py-6 space-y-0">
-                        {/* Enabled Fields */}
-                        <div className="mt-0 first:mt-0">
-                            <div className="flex items-center justify-between mb-3">
-                                <h3 className="text-sm font-medium text-gray-700">
-                                    Enabled Fields ({getFieldsForCategory.enabled.length})
-                                </h3>
-                                {canManageFields && (
-                                    <button
-                                        type="button"
-                                        onClick={() => {
-                                            setEditingField(null)
-                                            setModalOpen(true)
-                                        }}
-                                        disabled={customFieldsLimit && !customFieldsLimit.can_create}
-                                        className="inline-flex items-center gap-2 rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed"
-                                        title={customFieldsLimit && !customFieldsLimit.can_create 
-                                            ? `Plan limit reached (${customFieldsLimit.current}/${customFieldsLimit.max}). Upgrade to create more fields.`
-                                            : 'Add custom metadata field'}
+                            <div className="px-8 py-6 space-y-8">
+                                <div className="text-center max-w-xl mx-auto py-4">
+                                    <p className="text-sm text-gray-600">
+                                        Field enablement, upload and filter visibility, AI options, and ordering are
+                                        managed in <strong className="text-gray-900">Manage → Categories</strong> with a
+                                        table layout for this brand&apos;s folders.
+                                    </p>
+                                    <Link
+                                        href={
+                                            typeof route === 'function'
+                                                ? `${route('manage.categories')}${
+                                                      selectedCategory?.slug
+                                                          ? `?category=${encodeURIComponent(selectedCategory.slug)}`
+                                                          : ''
+                                                  }`
+                                                : `/app/manage/categories${
+                                                      selectedCategory?.slug
+                                                          ? `?category=${encodeURIComponent(selectedCategory.slug)}`
+                                                          : ''
+                                                  }`
+                                        }
+                                        className="mt-6 inline-flex items-center justify-center rounded-lg bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500"
                                     >
-                                        <PlusIcon className="h-4 w-4" />
-                                        Add Field
-                                    </button>
-                                )}
-                            </div>
-                            <div className="space-y-0.5">
-                                {(() => {
-                                    const showPrimary = Boolean(fieldsByFamily.primaryTypeField || fieldsByFamily.primarySceneField)
-                                    const showRest = fieldsByFamily.otherEnabled.length > 0
-                                    return showPrimary || showRest
-                                })() ? (
-                                    <>
-                                        <div className="flex items-center px-3 py-1.5 text-xs font-medium text-gray-500" aria-hidden>
-                                            <div className="flex-1" />
-                                            <span>Status</span>
-                                        </div>
-                                        {(fieldsByFamily.primaryTypeField || fieldsByFamily.primarySceneField) && (
-                                            <div className="mb-4 rounded-lg border border-indigo-100 bg-indigo-50/40 px-3 py-3">
-                                                <h4 className="text-xs font-semibold uppercase tracking-wide text-indigo-900/90">
-                                                    Primary classification
-                                                </h4>
-                                                <p className="mt-1 text-xs text-gray-600 leading-relaxed">
-                                                    Classify this asset based on its format or usage.
-                                                </p>
-                                                <div className="mt-3 space-y-0.5">
-                                                    {fieldsByFamily.primaryTypeField && (
-                                                        <FieldRow
-                                                            field={fieldsByFamily.primaryTypeField}
-                                                            categoryId={selectedCategoryId}
-                                                            isEnabled={getFieldsForCategory.enabled.some((f) => f.id === fieldsByFamily.primaryTypeField.id)}
-                                                            displayLabel="Type"
-                                                            onToggle={wrapToggle(fieldsByFamily.primaryTypeField, selectedCategoryId)}
-                                                            onVisibilityToggle={toggleVisibility}
-                                                            onPrimaryToggle={togglePrimary}
-                                                            onRequiredToggle={toggleRequired}
-                                                            onAiEligibleToggle={toggleAiEligible}
-                                                            onEdit={canManageFields ? handleEditField : null}
-                                                            onRegistryRefresh={refreshMetadataRegistry}
-                                                            canManage={canManageVisibility && !previewProfileName}
-                                                            canManageFields={canManageFields}
-                                                            systemFields={systemFields}
-                                                            fieldCategoryData={previewOverlay[fieldsByFamily.primaryTypeField.id] ?? fieldCategoryData[fieldsByFamily.primaryTypeField.id]}
-                                                            isHighlighted={fieldsByFamily.primaryTypeField.id === highlightedFieldId}
-                                                        />
-                                                    )}
-                                                    {fieldsByFamily.primarySceneField && (
-                                                        <FieldRow
-                                                            field={fieldsByFamily.primarySceneField}
-                                                            categoryId={selectedCategoryId}
-                                                            isEnabled={getFieldsForCategory.enabled.some((f) => f.id === fieldsByFamily.primarySceneField.id)}
-                                                            onToggle={wrapToggle(fieldsByFamily.primarySceneField, selectedCategoryId)}
-                                                            onVisibilityToggle={toggleVisibility}
-                                                            onPrimaryToggle={togglePrimary}
-                                                            onRequiredToggle={toggleRequired}
-                                                            onAiEligibleToggle={toggleAiEligible}
-                                                            onEdit={canManageFields ? handleEditField : null}
-                                                            onRegistryRefresh={refreshMetadataRegistry}
-                                                            canManage={canManageVisibility && !previewProfileName}
-                                                            canManageFields={canManageFields}
-                                                            systemFields={systemFields}
-                                                            fieldCategoryData={previewOverlay[fieldsByFamily.primarySceneField.id] ?? fieldCategoryData[fieldsByFamily.primarySceneField.id]}
-                                                            isHighlighted={fieldsByFamily.primarySceneField.id === highlightedFieldId}
-                                                        />
-                                                    )}
-                                                </div>
-                                            </div>
-                                        )}
-                                        {fieldsByFamily.otherEnabled.length > 0 && (
-                                            <>
-                                                <DndContext
-                                                    sensors={sensors}
-                                                    collisionDetection={closestCenter}
-                                                    onDragEnd={handleEnabledFieldsDragEnd}
-                                                >
-                                                    <SortableContext
-                                                        items={fieldsByFamily.otherEnabled.map(f => f.id)}
-                                                        strategy={verticalListSortingStrategy}
-                                                    >
-                                                        {fieldsByFamily.otherEnabled.map((field) => (
-                                                            <SortableFieldRow
-                                                                key={field.id}
-                                                                field={field}
-                                                                categoryId={selectedCategoryId}
-                                                                isEnabled={true}
-                                                                onToggle={wrapToggle(field, selectedCategoryId)}
-                                                                onVisibilityToggle={toggleVisibility}
-                                                                onPrimaryToggle={togglePrimary}
-                                                                onRequiredToggle={toggleRequired}
-                                                                onAiEligibleToggle={toggleAiEligible}
-                                                                onEdit={canManageFields ? handleEditField : null}
-                                                                onRegistryRefresh={refreshMetadataRegistry}
-                                                                onArchive={tenantFieldIds.has(field.id) ? handleArchiveField : null}
-                                                                canManage={canManageVisibility && !previewProfileName}
-                                                                canManageFields={canManageFields}
-                                                                systemFields={systemFields}
-                                                                fieldCategoryData={previewOverlay[field.id] ?? fieldCategoryData[field.id]}
-                                                                isHighlighted={field.id === highlightedFieldId}
-                                                            />
-                                                        ))}
-                                                    </SortableContext>
-                                                </DndContext>
-                                                {fieldReorderLoading && (
-                                                    <p className="text-xs text-gray-400 mt-1">Saving order…</p>
-                                                )}
-                                            </>
-                                        )}
-                                    </>
-                                ) : (
-                                    <div className="px-4 py-4 text-center text-sm text-gray-500">
-                                        No fields enabled.
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-
-                        {/* System Automated Fields — collapsed by default */}
-                        {(getFieldsForCategory.enabledAutomated.length > 0 || getFieldsForCategory.availableAutomated.length > 0) && (
-                            <div className="mt-8">
-                                <button
-                                    type="button"
-                                    onClick={() => setExpandedAutomated(v => !v)}
-                                    className="w-full flex items-center justify-between gap-2 text-left py-1.5 -mx-1 px-1 rounded hover:bg-gray-50/50 transition-colors"
-                                >
-                                    <h3 className="text-sm font-medium text-gray-700">
-                                        System Automated ({getFieldsForCategory.enabledAutomated.length + getFieldsForCategory.availableAutomated.length})
-                                    </h3>
-                                    {expandedAutomated ? <ChevronDownIcon className="w-4 h-4 text-gray-400" /> : <ChevronRightIcon className="w-4 h-4 text-gray-400" />}
-                                </button>
-                                {expandedAutomated && (
-                                <div className="space-y-0.5 mt-2">
-                                    {getFieldsForCategory.enabledAutomated.map(field => (
-                                        <AutomatedFieldRow
-                                            key={field.id}
-                                            field={field}
-                                            categoryId={selectedCategoryId}
-                                            isEnabled={true}
-                                            onToggle={wrapToggle(field, selectedCategoryId)}
-                                            onVisibilityToggle={toggleVisibility}
-                                            canManage={canManageVisibility && !previewProfileName}
-                                            systemFields={systemFields}
-                                            fieldCategoryData={previewOverlay[field.id] ?? fieldCategoryData[field.id]}
-                                        />
-                                    ))}
-                                    {getFieldsForCategory.availableAutomated.map(field => (
-                                        <AutomatedFieldRow
-                                            key={field.id}
-                                            field={field}
-                                            categoryId={selectedCategoryId}
-                                            isEnabled={false}
-                                            onToggle={wrapToggle(field, selectedCategoryId)}
-                                            onVisibilityToggle={toggleVisibility}
-                                            canManage={canManageVisibility && !previewProfileName}
-                                            systemFields={systemFields}
-                                            fieldCategoryData={previewOverlay[field.id] ?? fieldCategoryData[field.id]}
-                                        />
-                                    ))}
+                                        Open Categories workspace
+                                    </Link>
                                 </div>
-                                )}
-                            </div>
-                        )}
-
-                        {/* Available Fields — collapsed by default */}
-                        {fieldsByFamily.otherAvailable.length > 0 && (
-                            <div className="mt-8">
-                                <button
-                                    type="button"
-                                    onClick={() => setExpandedAvailable(v => !v)}
-                                    className="w-full flex items-center justify-between gap-2 text-left py-1.5 -mx-1 px-1 rounded hover:bg-gray-50/50 transition-colors"
-                                >
-                                    <h3 className="text-sm font-medium text-gray-700">
-                                        Available ({fieldsByFamily.otherAvailable.length})
-                                    </h3>
-                                    {expandedAvailable ? <ChevronDownIcon className="w-4 h-4 text-gray-400" /> : <ChevronRightIcon className="w-4 h-4 text-gray-400" />}
-                                </button>
-                                {expandedAvailable && (
-                                <div className="space-y-0.5 mt-2">
-                                    {fieldsByFamily.otherAvailable.map(field => (
-                                        <FieldRow
-                                            key={field.id}
-                                            field={field}
-                                            categoryId={selectedCategoryId}
-                                            isEnabled={false}
-                                            onToggle={wrapToggle(field, selectedCategoryId)}
-                                            onVisibilityToggle={toggleVisibility}
-                                            onPrimaryToggle={togglePrimary}
-                                            onRequiredToggle={toggleRequired}
-                                            onAiEligibleToggle={toggleAiEligible}
-                                            onEdit={canManageFields ? handleEditField : null}
-                                            onRegistryRefresh={refreshMetadataRegistry}
-                                            onArchive={tenantFieldIds.has(field.id) ? handleArchiveField : null}
-                                            canManage={canManageVisibility && !previewProfileName}
-                                            canManageFields={canManageFields}
-                                            systemFields={systemFields}
-                                            fieldCategoryData={previewOverlay[field.id] ?? fieldCategoryData[field.id]}
-                                            isDraggable={false}
-                                            isHighlighted={field.id === highlightedFieldId}
-                                        />
-                                    ))}
-                                </div>
-                                )}
-                            </div>
-                        )}
-
-                        {/* Custom Fields — empty state when no custom fields exist yet */}
-                        {canManageFields && tenant_fields.length === 0 && (
-                            <div className="mt-8">
-                                <div className="py-12 flex justify-center">
-                                    <div className="max-w-md w-full rounded-lg border border-dashed border-gray-200 bg-gray-50/50 px-6 py-8 text-center">
-                                        <p className="text-sm text-gray-500 mb-3">
-                                            Custom fields let you define structured metadata specific to this category.
-                                        </p>
-                                        <button
-                                            type="button"
-                                            onClick={() => { setEditingField(null); setModalOpen(true) }}
-                                            disabled={customFieldsLimit && !customFieldsLimit.can_create}
-                                            className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                                            title={customFieldsLimit && !customFieldsLimit.can_create
-                                                ? `Plan limit reached (${customFieldsLimit.current}/${customFieldsLimit.max}). Upgrade to create more fields.`
-                                                : 'Add custom metadata field'}
-                                        >
-                                            <PlusIcon className="h-4 w-4" />
-                                            Add Custom Field
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
-                        )}
 
                         {/* View Archived Fields toggle — at bottom of page */}
                         <div className="mt-8 pt-6 border-t border-gray-200">
@@ -2320,27 +1235,6 @@ export default function ByCategoryView({
                 variant="warning"
                 loading={copyOrResetLoading}
             />
-            {/* Disable core field confirmation */}
-            <ConfirmDialog
-                open={confirmDisableCoreOpen}
-                onClose={() => { setConfirmDisableCoreOpen(false); setPendingDisable(null) }}
-                onConfirm={handleConfirmDisableCore}
-                title="Disable Core Field?"
-                message="Disabling this field may affect filtering, organization, and AI suggestions."
-                confirmText="Disable"
-                cancelText="Cancel"
-                variant="warning"
-            />
-            {/* Archive custom field confirmation */}
-            <ArchiveFieldModal
-                open={confirmArchiveOpen}
-                onClose={() => { setConfirmArchiveOpen(false); setPendingArchiveField(null); setArchiveRemoveFromAssets(false) }}
-                onConfirm={handleConfirmArchive}
-                fieldLabel={pendingArchiveField?.label || pendingArchiveField?.system_label || pendingArchiveField?.key}
-                loading={archiveLoading}
-                removeFromAssets={archiveRemoveFromAssets}
-                onRemoveFromAssetsChange={setArchiveRemoveFromAssets}
-            />
             {/* Advanced Settings slide-over */}
             <AdvancedSettingsSlideOver
                 isOpen={advancedSettingsOpen}
@@ -2406,609 +1300,6 @@ export default function ByCategoryView({
                 onDelete={handleCategorySettingsDelete}
             />
 
-            {/* Metadata Field Modal */}
-            <MetadataFieldModal
-                isOpen={modalOpen}
-                onClose={() => {
-                    setModalOpen(false)
-                    setEditingField(null)
-                }}
-                field={editingField}
-                preselectedCategoryId={selectedCategoryId}
-                categories={categoriesForBrand}
-                canManageFields={canManageFields}
-                customFieldsLimit={customFieldsLimit}
-                onSuccess={handleModalSuccess}
-            />
-        </div>
-    )
-}
-
-/**
- * Sortable Field Row — wraps FieldRow with dnd-kit useSortable
- */
-function SortableFieldRow(props) {
-    const { field, canManage, ...rest } = props
-    const {
-        attributes,
-        listeners,
-        setNodeRef,
-        transform,
-        transition,
-        isDragging,
-    } = useSortable({ id: field.id })
-
-    const style = { transform: CSS.Transform.toString(transform), transition }
-
-    return (
-        <div ref={setNodeRef} style={style}>
-            <div className="transition-transform duration-200 ease-out hover:scale-[1.01] origin-left">
-                <FieldRow
-                {...rest}
-                field={field}
-                isDraggable={!!canManage}
-                isDragging={isDragging}
-                dragHandleProps={canManage ? { ...attributes, ...listeners } : null}
-            />
-            </div>
-        </div>
-    )
-}
-
-/**
- * Field Row Component
- * 
- * Phase G.5: Improved presentation with toggle, checkboxes, and drag-and-drop
- */
-function FieldRow({ 
-    field,
-    categoryId,
-    isEnabled,
-    displayLabel = null,
-    onToggle,
-    onVisibilityToggle,
-    onPrimaryToggle,
-    onRequiredToggle,
-    onAiEligibleToggle,
-    onEdit,
-    onArchive,
-    onRegistryRefresh = null,
-    canManage, 
-    canManageFields = false,
-    systemFields,
-    fieldCategoryData,
-    isDraggable = false,
-    onDragStart,
-    onDragOver,
-    onDrop,
-    onDragEnd,
-    isDragging = false,
-    dragHandleProps = null,
-    isHighlighted = false,
-}) {
-    // Determine if field is system or custom
-    // Custom fields have scope === 'tenant', system fields have scope === 'system' or are in systemFields array
-    const isSystem = field.scope === 'system' || (systemFields && systemFields.some(sf => sf.id === field.id))
-    // C9.2: Use category-level overrides when a category is selected; otherwise tenant-level effective values
-    const categoryOverride = categoryId && fieldCategoryData?.overrides?.[categoryId]
-    const effectiveUpload = categoryOverride?.show_on_upload !== undefined
-        ? categoryOverride.show_on_upload
-        : (field.effective_show_on_upload ?? field.show_on_upload ?? true)
-    const effectiveEdit = categoryOverride?.show_on_edit !== undefined
-        ? categoryOverride.show_on_edit
-        : (field.effective_show_on_edit ?? field.show_on_edit ?? true)
-    const effectiveFilter = categoryOverride?.show_in_filters !== undefined
-        ? categoryOverride.show_in_filters
-        : (field.effective_show_in_filters ?? field.show_in_filters ?? true)
-
-    // Resolve effective_is_primary for this category
-    // ARCHITECTURAL RULE: Primary vs secondary filter placement MUST be category-scoped.
-    // A field may be primary in Photography but secondary in Logos.
-    // Resolution order: category override > global is_primary (deprecated) > false
-    const resolvePrimaryPlacement = (field, categoryId, categoryData) => {
-        if (!categoryId || !categoryData) {
-            return field.is_primary ?? false // Fallback to global (backward compatibility)
-        }
-        
-        const categoryOverride = categoryData.overrides?.[categoryId]
-        if (categoryOverride && categoryOverride.is_primary !== null && categoryOverride.is_primary !== undefined) {
-            return categoryOverride.is_primary // Category override (highest priority)
-        }
-        
-        return field.is_primary ?? false // Fallback to global is_primary (deprecated)
-    }
-    
-    // Compute effective_is_primary for the selected category
-    // Note: For Asset Grid, MetadataSchemaResolver already computes effective_is_primary
-    // and includes it in field.is_primary. This local resolution is for UI display only.
-    const effectiveIsPrimary = categoryId && fieldCategoryData
-        ? resolvePrimaryPlacement(field, categoryId, fieldCategoryData)
-        : field.is_primary ?? false
-
-    // Resolve effective_is_required for this category (category-scoped, like is_primary)
-    const resolveRequired = (f, catId, categoryData) => {
-        if (!catId || !categoryData) return f.is_required ?? false
-        const override = categoryData.overrides?.[catId]
-        if (override && override.is_required !== null && override.is_required !== undefined) {
-            return override.is_required
-        }
-        return f.is_required ?? false
-    }
-    const effectiveIsRequired = categoryId && fieldCategoryData
-        ? resolveRequired(field, categoryId, fieldCategoryData)
-        : field.is_required ?? false
-
-    const aiEligible = field.ai_eligible ?? false
-    const resolvedTitle =
-        displayLabel ||
-        (field.key && String(field.key).endsWith('_type') ? 'Type' : null) ||
-        field.label ||
-        field.system_label ||
-        field.key ||
-        'Unnamed Field'
-    // dominant_hue_group: filter-only — user may only control is_filter_hidden
-    const isFilterOnlyField = (field.key ?? '') === 'dominant_hue_group'
-
-    const showQuickOptions = fieldSupportsQuickOptions(field) && canManageFields
-    const [quickExpanded, setQuickExpanded] = useState(false)
-    const [quickOptions, setQuickOptions] = useState([])
-    const [quickLoaded, setQuickLoaded] = useState(false)
-    const [quickLoading, setQuickLoading] = useState(false)
-    const [quickSaving, setQuickSaving] = useState(false)
-    const [quickAddInput, setQuickAddInput] = useState('')
-    const [quickError, setQuickError] = useState(null)
-    const [quickLoadVersion, setQuickLoadVersion] = useState(0)
-
-    useEffect(() => {
-        setQuickExpanded(false)
-        setQuickLoaded(false)
-        setQuickOptions([])
-        setQuickAddInput('')
-        setQuickError(null)
-        setQuickLoadVersion(0)
-    }, [field.id])
-
-    useEffect(() => {
-        if (!quickExpanded || quickLoaded || !field?.id || !showQuickOptions) return undefined
-        let cancelled = false
-        ;(async () => {
-            setQuickLoading(true)
-            setQuickError(null)
-            try {
-                const res = await fetch(`/app/tenant/metadata/fields/${field.id}`, {
-                    credentials: 'same-origin',
-                    headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
-                })
-                const data = await res.json().catch(() => ({}))
-                if (cancelled) return
-                if (!res.ok || !data?.field) {
-                    setQuickError(data?.error || 'Could not load options')
-                    return
-                }
-                const raw = data.field.options || data.field.allowed_values || []
-                setQuickOptions(normalizeOptions(raw))
-                setQuickLoaded(true)
-            } catch (e) {
-                if (!cancelled) setQuickError(e?.message || 'Network error')
-            } finally {
-                if (!cancelled) setQuickLoading(false)
-            }
-        })()
-        return () => { cancelled = true }
-    }, [quickExpanded, quickLoaded, field.id, showQuickOptions, quickLoadVersion])
-
-    const handleQuickAddOption = async () => {
-        if (!field?.id || !showQuickOptions) return
-        const trimmed = quickAddInput.trim()
-        if (!trimmed) {
-            setQuickError('Enter a label or value')
-            return
-        }
-        const value = toSnakeCase(trimmed)
-        const v = validateSnakeCase(value)
-        if (!v.valid) {
-            setQuickError(v.message || 'Invalid value')
-            return
-        }
-        if (isDuplicateValue(quickOptions, value)) {
-            setQuickError('That option already exists')
-            return
-        }
-        const systemLabel = snakeToTitleCase(value)
-        const next = [...quickOptions, { value, system_label: systemLabel }]
-        setQuickSaving(true)
-        setQuickError(null)
-        try {
-            const res = await fetch(`/app/tenant/metadata/fields/${field.id}`, {
-                method: 'PUT',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRF-TOKEN': getCsrfTokenForOptions(),
-                    'X-Requested-With': 'XMLHttpRequest',
-                },
-                credentials: 'same-origin',
-                body: JSON.stringify({ options: prepareOptionsForSubmit(next) }),
-            })
-            const data = await res.json().catch(() => ({}))
-            if (!res.ok) {
-                const errMsg =
-                    typeof data?.errors === 'object' && data.errors !== null
-                        ? Object.values(data.errors)
-                              .flat()
-                              .filter(Boolean)
-                              .join(' ')
-                        : (data?.error || data?.message || 'Failed to save')
-                setQuickError(errMsg)
-                return
-            }
-            setQuickAddInput('')
-            const reload = await fetch(`/app/tenant/metadata/fields/${field.id}`, {
-                credentials: 'same-origin',
-                headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
-            })
-            const reloadData = await reload.json().catch(() => ({}))
-            if (reload.ok && reloadData?.field?.options) {
-                setQuickOptions(normalizeOptions(reloadData.field.options))
-            } else {
-                setQuickOptions(normalizeOptions(next))
-            }
-            onRegistryRefresh?.()
-        } catch (e) {
-            setQuickError(e?.message || 'Network error')
-        } finally {
-            setQuickSaving(false)
-        }
-    }
-
-    const iconButtonClass = (active) =>
-        `w-8 h-8 flex items-center justify-center rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-            active ? 'text-indigo-600 bg-indigo-100' : 'text-gray-400 opacity-60 hover:opacity-80'
-        }`
-
-    const quickPanelId = `field-quick-options-${field.id}`
-
-    return (
-        <div 
-            className={`group px-3 py-1.5 rounded-md text-sm transition-colors duration-200 ease-out ${
-                isDragging ? 'opacity-50' : ''
-            } ${isEnabled ? 'bg-gray-50' : ''} ${isHighlighted ? 'bg-gray-100' : ''} ${!isEnabled ? 'hover:bg-gray-50/80' : ''}`}
-            draggable={isDraggable && canManage && !isSystem}
-            onDragStart={isDraggable && !isSystem ? (e) => onDragStart(e, field.id) : undefined}
-            onDragOver={isDraggable && !isSystem ? onDragOver : undefined}
-            onDrop={isDraggable && !isSystem ? (e) => onDrop(e, field.id) : undefined}
-            onDragEnd={isDraggable && !isSystem ? onDragEnd : undefined}
-        >
-            <div className="flex items-center gap-2">
-                {/* Drag Handle (only for enabled, non-system fields) */}
-                {isDraggable && canManage && (
-                    <div
-                        className={`flex-shrink-0 text-gray-400 opacity-60 hover:opacity-100 transition-opacity ${isSystem ? 'cursor-not-allowed' : 'cursor-grab active:cursor-grabbing hover:text-gray-600'}`}
-                        {...(dragHandleProps || {})}
-                    >
-                        <Bars3Icon className="w-4 h-4" aria-hidden />
-                    </div>
-                )}
-                {/* Left: Field name */}
-                <div className="flex-1 min-w-0 flex items-center gap-2">
-                    {/* Field Name with System dot */}
-                    <div className="flex items-center gap-2 min-w-0">
-                        {showQuickOptions && (
-                            <button
-                                type="button"
-                                id={`${quickPanelId}-toggle`}
-                                aria-expanded={quickExpanded}
-                                aria-controls={quickPanelId}
-                                title={quickExpanded ? 'Hide options' : 'Quick edit options'}
-                                onClick={(e) => {
-                                    e.stopPropagation()
-                                    setQuickExpanded((v) => !v)
-                                }}
-                                className="flex-shrink-0 rounded p-0.5 text-gray-500 hover:bg-gray-200/80 hover:text-gray-800"
-                            >
-                                {quickExpanded ? (
-                                    <ChevronDownIcon className="h-4 w-4" aria-hidden />
-                                ) : (
-                                    <ChevronRightIcon className="h-4 w-4" aria-hidden />
-                                )}
-                            </button>
-                        )}
-                        {isSystem && (
-                            <span className="w-1.5 h-1.5 rounded-full bg-gray-400 flex-shrink-0" aria-hidden title="System field" />
-                        )}
-                        <span className="text-sm font-semibold text-gray-900 truncate">
-                            {resolvedTitle}
-                        </span>
-                    </div>
-
-                    {/* Middle: Visibility icons — always visible; active = accent + soft bg, inactive = muted 60% */}
-                    {isEnabled && (
-                        <div className="flex items-center gap-0.5 flex-shrink-0 relative z-10" onClick={(e) => e.stopPropagation()}>
-                            {!isFilterOnlyField && (
-                                <button
-                                    type="button"
-                                    onClick={(e) => { e.stopPropagation(); canManage && onVisibilityToggle(field.id, 'upload', effectiveUpload) }}
-                                    disabled={!canManage}
-                                    title="Upload: Show in upload form when adding assets"
-                                    className={iconButtonClass(effectiveUpload)}
-                                >
-                                    <CloudArrowUpIcon className="w-4 h-4" />
-                                </button>
-                            )}
-                            {!isFilterOnlyField && (
-                                <button
-                                    type="button"
-                                    onClick={(e) => { e.stopPropagation(); canManage && onVisibilityToggle(field.id, 'edit', effectiveEdit) }}
-                                    disabled={!canManage}
-                                    title="Quick View: Show in asset details drawer and modal"
-                                    className={iconButtonClass(effectiveEdit)}
-                                >
-                                    <EyeIcon className="w-4 h-4" />
-                                </button>
-                            )}
-                            <button
-                                type="button"
-                                onClick={(e) => { e.stopPropagation(); canManage && onVisibilityToggle(field.id, 'filter', effectiveFilter) }}
-                                disabled={!canManage}
-                                title="Filter: Show in asset grid filter bar"
-                                className={iconButtonClass(effectiveFilter)}
-                            >
-                                <FunnelIcon className="w-4 h-4" />
-                            </button>
-                            {!isFilterOnlyField && (
-                                <button
-                                    type="button"
-                                    onClick={(e) => { e.stopPropagation(); effectiveFilter && canManage && categoryId && onPrimaryToggle(field.id, categoryId, effectiveIsPrimary) }}
-                                    disabled={!canManage || !effectiveFilter || !categoryId}
-                                    title={!effectiveFilter ? 'Enable Filter first to add to primary filter bar' : !categoryId ? 'Select a category first' : 'Primary: Show inline in grid. Off: Under Filters'}
-                                    className={iconButtonClass(effectiveFilter && effectiveIsPrimary)}
-                                >
-                                    {effectiveIsPrimary ? (
-                                        <StarIconSolid className="w-4 h-4" />
-                                    ) : (
-                                        <StarIcon className="w-4 h-4" />
-                                    )}
-                                </button>
-                            )}
-                            {!isFilterOnlyField && onRequiredToggle && (
-                                <button
-                                    type="button"
-                                    onClick={(e) => { e.stopPropagation(); effectiveUpload && canManage && categoryId && onRequiredToggle(field.id, categoryId, effectiveIsRequired) }}
-                                    disabled={!canManage || !effectiveUpload || !categoryId}
-                                    title={!effectiveUpload ? 'Enable Upload first to require this field' : !categoryId ? 'Select a category first' : 'Required: Must be filled when adding assets'}
-                                    className={iconButtonClass(effectiveUpload && effectiveIsRequired)}
-                                >
-                                    <ExclamationCircleIcon className="w-4 h-4" />
-                                </button>
-                            )}
-                            <span
-                                title="AI Suggestions: AI can suggest values for this field"
-                                className={`inline-flex items-center justify-center gap-1 min-w-8 h-8 px-1.5 rounded-full transition-colors pointer-events-none ${
-                                    aiEligible ? 'text-purple-600 bg-purple-100 ring-1 ring-purple-200' : 'text-gray-400 opacity-60'
-                                }`}
-                                aria-hidden
-                            >
-                                {aiEligible && <span className="text-[10px] font-semibold uppercase tracking-wide">AI</span>}
-                                <SparklesIcon className="w-4 h-4 flex-shrink-0" />
-                            </span>
-                        </div>
-                    )}
-                </div>
-
-                {/* Right: Status label above toggle column + Edit/Archive + toggle */}
-                <div className="flex-shrink-0 flex flex-col items-end gap-0.5">
-                    <span className="text-xs text-gray-500 font-medium" aria-hidden>
-                        {isEnabled ? 'Enabled' : 'Off'}
-                    </span>
-                    <div className="flex items-center gap-1.5">
-                        {onEdit && (canManageFields || !isSystem) && (field.key ?? '') !== 'dominant_hue_group' && (
-                            <button
-                                type="button"
-                                onClick={() => onEdit(field)}
-                                className="shrink-0 rounded-md border border-gray-200 bg-white px-2 py-1 text-xs font-medium text-indigo-600 shadow-sm hover:bg-indigo-50 hover:border-indigo-200"
-                            >
-                                Edit
-                            </button>
-                        )}
-                        {onArchive && !isSystem && canManageFields && (
-                            <button
-                                onClick={() => onArchive(field)}
-                                className="opacity-0 group-hover:opacity-70 focus:opacity-70 hover:opacity-100 text-gray-400 hover:text-red-600 rounded p-1 transition-opacity"
-                                title="Archive field"
-                            >
-                                <TrashIcon className="w-4 h-4" />
-                            </button>
-                        )}
-                        <button
-                            type="button"
-                            role="switch"
-                            aria-checked={isEnabled}
-                            onClick={(e) => {
-                                e.preventDefault()
-                                e.stopPropagation()
-                                onToggle(field.id, categoryId, !isEnabled)
-                            }}
-                            className="relative inline-flex items-center cursor-pointer focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-offset-1 rounded-full"
-                        >
-                            <div className={`relative w-9 h-5 rounded-full transition-colors ${isEnabled ? 'bg-indigo-600' : 'bg-gray-200'}`}>
-                                <div className={`absolute top-[2px] left-[2px] w-4 h-4 bg-white border border-gray-300 rounded-full transition-transform ${isEnabled ? 'translate-x-4' : 'translate-x-0'}`} />
-                            </div>
-                        </button>
-                    </div>
-                </div>
-            </div>
-
-            {showQuickOptions && quickExpanded && (
-                <div
-                    id={quickPanelId}
-                    role="region"
-                    aria-labelledby={`${quickPanelId}-toggle`}
-                    className="mt-2 border border-gray-200 rounded-lg bg-white px-3 py-2.5 shadow-sm"
-                >
-                    <p className="text-xs font-medium text-gray-700 mb-2">Options for this field</p>
-                    {quickLoading && (
-                        <p className="text-xs text-gray-500">Loading options…</p>
-                    )}
-                    {quickError && (
-                        <div className="flex flex-wrap items-center gap-2 mb-2">
-                            <p className="text-xs text-red-600">{quickError}</p>
-                            {!quickLoaded && !quickLoading && (
-                                <button
-                                    type="button"
-                                    onClick={() => {
-                                        setQuickError(null)
-                                        setQuickLoadVersion((v) => v + 1)
-                                    }}
-                                    className="text-xs font-medium text-indigo-600 hover:text-indigo-800"
-                                >
-                                    Retry
-                                </button>
-                            )}
-                        </div>
-                    )}
-                    {!quickLoading && quickLoaded && (
-                        <>
-                            <div className="flex flex-wrap gap-1.5 mb-2 max-h-36 overflow-y-auto">
-                                {quickOptions.length === 0 ? (
-                                    <span className="text-xs text-gray-500">No options yet — add one below.</span>
-                                ) : (
-                                    quickOptions.map((opt) => (
-                                        <span
-                                            key={opt.value}
-                                            className="inline-flex items-center rounded-md bg-gray-100 px-2 py-0.5 text-xs text-gray-800"
-                                            title={opt.value}
-                                        >
-                                            {opt.system_label || opt.value}
-                                        </span>
-                                    ))
-                                )}
-                            </div>
-                            <div className="flex flex-wrap items-center gap-2">
-                                <input
-                                    type="text"
-                                    value={quickAddInput}
-                                    onChange={(e) => { setQuickAddInput(e.target.value); setQuickError(null) }}
-                                    onKeyDown={(e) => {
-                                        if (e.key === 'Enter') {
-                                            e.preventDefault()
-                                            handleQuickAddOption()
-                                        }
-                                    }}
-                                    placeholder="e.g. social_display or Social display"
-                                    className="min-w-[12rem] flex-1 rounded-md border border-gray-300 px-2 py-1.5 text-xs text-gray-900 shadow-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
-                                    disabled={quickSaving}
-                                />
-                                <button
-                                    type="button"
-                                    onClick={handleQuickAddOption}
-                                    disabled={quickSaving}
-                                    className="inline-flex items-center gap-1 rounded-md bg-indigo-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
-                                >
-                                    <PlusIcon className="h-3.5 w-3.5" />
-                                    Add
-                                </button>
-                            </div>
-                            <p className="mt-1.5 text-[11px] text-gray-500">
-                                Values are saved as lowercase snake_case. Use <span className="font-medium">Edit</span> for full field settings.
-                            </p>
-                        </>
-                    )}
-                </div>
-            )}
-        </div>
-    )
-}
-
-/**
- * Automated Field Row Component
- * 
- * Subtle display for system automated fields (population_mode = automatic AND readonly = true).
- * These fields are automatically filled by the system, so Upload is greyed out.
- * Filter visibility and category enablement can still be controlled.
- */
-function AutomatedFieldRow({ 
-    field, 
-    categoryId, 
-    isEnabled, 
-    onToggle, 
-    onVisibilityToggle,
-    canManage, 
-    systemFields,
-    fieldCategoryData,
-}) {
-    const isSystem = field.scope === 'system' || (systemFields && systemFields.some(sf => sf.id === field.id))
-    const effectiveFilter = field.effective_show_in_filters ?? field.show_in_filters ?? true
-    const effectiveEdit = field.effective_show_on_edit ?? field.show_on_edit ?? false
-    // dominant_hue_group: filter-only — user may only control is_filter_hidden
-    const isFilterOnlyField = (field.key ?? '') === 'dominant_hue_group'
-
-    const iconButtonClass = (active) =>
-        `w-8 h-8 flex items-center justify-center rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-            active ? 'text-indigo-600 bg-indigo-100' : 'text-gray-400 opacity-60 hover:opacity-80'
-        }`
-
-    return (
-        <div
-            className={`group flex items-center justify-between py-1.5 px-3 rounded-md transition-colors duration-200 ease-out text-sm ${isEnabled ? 'bg-gray-50' : ''} ${!isEnabled ? 'hover:bg-gray-50/80' : ''}`}
-        >
-            <div className="flex items-center gap-3 flex-1 min-w-0">
-                <div className="flex items-center gap-2 min-w-0">
-                    {isSystem && (
-                        <span className="w-1.5 h-1.5 rounded-full bg-gray-400 flex-shrink-0" aria-hidden title="System automated field" />
-                    )}
-                    <span className="text-sm text-gray-900 truncate">
-                        {field.label || field.system_label || field.key || 'Unnamed Field'}
-                    </span>
-                </div>
-                {isEnabled && (
-                    <div className="flex items-center gap-0.5 flex-shrink-0 relative z-10" onClick={(e) => e.stopPropagation()}>
-                        {!isFilterOnlyField && (
-                            <span title="Upload: Disabled for automated fields (system-filled)" className="w-8 h-8 flex items-center justify-center rounded-full text-gray-300 opacity-60 cursor-not-allowed pointer-events-none">
-                                <CloudArrowUpIcon className="w-4 h-4" />
-                            </span>
-                        )}
-                        {!isFilterOnlyField && (
-                            <button
-                                type="button"
-                                onClick={(e) => { e.stopPropagation(); canManage && onVisibilityToggle(field.id, 'edit', effectiveEdit) }}
-                                disabled={!canManage}
-                                title="Quick View: Show in asset details drawer and modal"
-                                className={iconButtonClass(effectiveEdit)}
-                            >
-                                <EyeIcon className="w-4 h-4" />
-                            </button>
-                        )}
-                        <button
-                            type="button"
-                            onClick={(e) => { e.stopPropagation(); canManage && onVisibilityToggle(field.id, 'filter', effectiveFilter) }}
-                            disabled={!canManage}
-                            title="Filter: Show in asset grid filter bar"
-                            className={iconButtonClass(effectiveFilter)}
-                        >
-                            <FunnelIcon className="w-4 h-4" />
-                        </button>
-                    </div>
-                )}
-            </div>
-            <div className="flex flex-col items-end gap-0.5 flex-shrink-0">
-                <span className="text-xs text-gray-500 font-medium" aria-hidden>
-                    {isEnabled ? 'Enabled' : 'Off'}
-                </span>
-                <button
-                    type="button"
-                    role="switch"
-                    aria-checked={isEnabled}
-                    onClick={(e) => {
-                        e.preventDefault()
-                        e.stopPropagation()
-                        onToggle(field.id, categoryId, !isEnabled)
-                    }}
-                    className="relative inline-flex items-center cursor-pointer focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-offset-1 rounded-full"
-                >
-                    <div className={`relative w-9 h-5 rounded-full transition-colors ${isEnabled ? 'bg-indigo-600' : 'bg-gray-200'}`}>
-                        <div className={`absolute top-[2px] left-[2px] w-4 h-4 bg-white border border-gray-300 rounded-full transition-transform ${isEnabled ? 'translate-x-4' : 'translate-x-0'}`} />
-                    </div>
-                </button>
-            </div>
         </div>
     )
 }

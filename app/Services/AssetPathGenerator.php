@@ -11,7 +11,7 @@ use App\Models\Tenant;
  * Phase 5 + 6: All shared bucket assets MUST follow this structure:
  *
  *   tenants/{tenant_uuid}/assets/{asset_uuid}/v{version}/original.{ext}
- *   tenants/{tenant_uuid}/assets/{asset_uuid}/v{version}/thumbnails/{style}/{filename}
+ *   tenants/{tenant_uuid}/assets/{asset_uuid}/v{version}/thumbnails/{mode}/{style}/{filename}
  *
  * NO tenant_id usage. NO brand_id in path. NO legacy uuid_filename pattern.
  */
@@ -20,15 +20,15 @@ class AssetPathGenerator
     /**
      * Generate canonical path for original asset file.
      *
-     * @param Tenant $tenant Tenant model (required for isolation)
-     * @param Asset $asset Asset model
-     * @param int $version Version number (e.g. 1, 2, 3)
-     * @param string $extension File extension (e.g. jpg, png)
+     * @param  Tenant  $tenant  Tenant model (required for isolation)
+     * @param  Asset  $asset  Asset model
+     * @param  int  $version  Version number (e.g. 1, 2, 3)
+     * @param  string  $extension  File extension (e.g. jpg, png)
      * @return string Canonical S3 key
      */
     public function generateOriginalPath(Tenant $tenant, Asset $asset, int $version, string $extension): string
     {
-        if (!$tenant->uuid) {
+        if (! $tenant->uuid) {
             throw new \RuntimeException('Tenant UUID required for canonical storage path.');
         }
         if ($version < 1) {
@@ -63,38 +63,28 @@ class AssetPathGenerator
     /**
      * Generate canonical path for thumbnail.
      *
-     * @param Tenant $tenant Tenant model (required for isolation)
-     * @param Asset $asset Asset model
-     * @param int $version Version number
-     * @param string $style Thumbnail style (e.g. grid, detail, preview)
-     * @param string $filename Thumbnail filename (e.g. grid.jpg)
-     * @return string Canonical S3 key
+     * @param  string  $mode  Thumbnail pipeline mode ({@see \App\Support\ThumbnailMode}, e.g. original)
+     * @param  string  $style  Thumbnail style (thumb, medium, large, preview)
      */
-    public function generateThumbnailPath(Tenant $tenant, Asset $asset, int $version, string $style, string $filename): string
+    public function generateThumbnailPath(Tenant $tenant, Asset $asset, int $version, string $mode, string $style, string $filename): string
     {
-        if (!$tenant->uuid) {
+        if (! $tenant->uuid) {
             throw new \RuntimeException('Tenant UUID required for canonical storage path.');
         }
         if ($version < 1) {
             throw new \RuntimeException('Version must be >= 1 for canonical storage path. Non-versioned path writes are not allowed.');
         }
+        $mode = \App\Support\ThumbnailMode::normalize($mode);
 
-        return "tenants/{$tenant->uuid}/assets/{$asset->id}/v{$version}/thumbnails/{$style}/{$filename}";
+        return "tenants/{$tenant->uuid}/assets/{$asset->id}/v{$version}/thumbnails/{$mode}/{$style}/{$filename}";
     }
 
     /**
      * Generate canonical path for a rendered PDF page.
-     *
-     * @param Tenant $tenant
-     * @param Asset $asset
-     * @param int $version
-     * @param int $page
-     * @param string $extension
-     * @return string
      */
     public function generatePdfPagePath(Tenant $tenant, Asset $asset, int $version, int $page, string $extension = 'webp'): string
     {
-        if (!$tenant->uuid) {
+        if (! $tenant->uuid) {
             throw new \RuntimeException('Tenant UUID required for canonical storage path.');
         }
         if ($version < 1) {

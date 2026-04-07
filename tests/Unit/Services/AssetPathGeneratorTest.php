@@ -74,9 +74,32 @@ class AssetPathGeneratorTest extends TestCase
         ]);
 
         $generator = app(AssetPathGenerator::class);
-        $path = $generator->generateThumbnailPath($tenant, $asset, 1, 'grid', 'grid.jpg');
+        $path = $generator->generateThumbnailPath($tenant, $asset, 1, 'original', 'grid', 'grid.jpg');
 
-        $this->assertEquals("tenants/{$tenant->uuid}/assets/{$asset->id}/v1/thumbnails/grid/grid.jpg", $path);
+        $this->assertEquals("tenants/{$tenant->uuid}/assets/{$asset->id}/v1/thumbnails/original/grid/grid.jpg", $path);
+    }
+
+    public function test_generate_thumbnail_path_includes_mode_segment(): void
+    {
+        $tenant = Tenant::create(['name' => 'T', 'slug' => 't']);
+        $brand = Brand::create(['tenant_id' => $tenant->id, 'name' => 'B', 'slug' => 'b']);
+        $asset = Asset::create([
+            'tenant_id' => $tenant->id,
+            'brand_id' => $brand->id,
+            'storage_bucket_id' => StorageBucket::create(['tenant_id' => $tenant->id, 'name' => 'b', 'region' => 'us-east-1', 'status' => StorageBucketStatus::ACTIVE])->id,
+            'status' => AssetStatus::VISIBLE,
+            'type' => AssetType::ASSET,
+            'title' => 'Test',
+            'original_filename' => 'photo.jpg',
+            'mime_type' => 'image/jpeg',
+            'size_bytes' => 1024,
+            'storage_root_path' => 'temp/placeholder',
+        ]);
+
+        $generator = app(AssetPathGenerator::class);
+        $enhanced = $generator->generateThumbnailPath($tenant, $asset, 2, 'enhanced', 'medium', 'medium.webp');
+
+        $this->assertEquals("tenants/{$tenant->uuid}/assets/{$asset->id}/v2/thumbnails/enhanced/medium/medium.webp", $enhanced);
     }
 
     public function test_generate_pdf_page_path_returns_canonical_structure(): void

@@ -195,9 +195,9 @@ export default function AddCategoryModal({
     // Success state: prompt to configure metadata fields
     if (createdCategory && canViewMetadataRegistry) {
         const slug = createdCategory.slug || createdCategory.name?.toLowerCase().replace(/\s+/g, '-')
-        const registryUrl = typeof route === 'function'
-            ? route('tenant.metadata.registry.index', { brand: brandId, category: slug })
-            : `/app/tenant/metadata/registry?brand=${brandId}&category=${encodeURIComponent(slug)}`
+        const manageCategoriesUrl = typeof route === 'function'
+            ? route('manage.categories', { category: slug })
+            : `/app/manage/categories?category=${encodeURIComponent(slug)}`
 
         const successContent = (
             <div className="fixed inset-0 z-50 overflow-y-auto" aria-labelledby="add-category-success" role="dialog" aria-modal="true">
@@ -214,7 +214,7 @@ export default function AddCategoryModal({
                             </p>
                             <div className="mt-6 flex flex-col sm:flex-row gap-3 justify-center">
                                 <a
-                                    href={registryUrl}
+                                    href={manageCategoriesUrl}
                                     className="inline-flex items-center justify-center gap-2 rounded-md bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500"
                                 >
                                     <ArrowTopRightOnSquareIcon className="h-4 w-4" />

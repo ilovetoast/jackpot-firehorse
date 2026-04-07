@@ -179,7 +179,7 @@ class BrandActivityFeedService
                 ->orderBy('first_name')
                 ->orderBy('last_name')
                 ->orderBy('email')
-                ->get(['id', 'name', 'email', 'first_name', 'last_name'])
+                ->get(['id', 'email', 'first_name', 'last_name'])
                 ->map(fn (User $u) => [
                     'id' => (int) $u->id,
                     'name' => $u->name,

@@ -2,13 +2,14 @@
 
 namespace App\Console\Commands;
 
-use App\Models\Asset;
 use App\Enums\ThumbnailStatus;
+use App\Models\Asset;
+use App\Support\ThumbnailMetadata;
 use Illuminate\Console\Command;
 
 /**
  * Fix Thumbnail Status Command
- * 
+ *
  * Fixes assets where thumbnail_status is 'failed' but thumbnails actually exist in metadata.
  * This can happen due to race conditions or errors in the thumbnail generation pipeline.
  */
@@ -62,6 +63,7 @@ class FixThumbnailStatus extends Command
 
         if ($assets->isEmpty()) {
             $this->info('No assets found with thumbnail status issues.');
+
             return 0;
         }
 
@@ -72,26 +74,26 @@ class FixThumbnailStatus extends Command
 
         foreach ($assets as $asset) {
             $metadata = $asset->metadata ?? [];
-            $hasThumbnails = !empty($metadata['thumbnails']) && isset($metadata['thumbnails']['thumb']);
+            $hasThumbnails = ThumbnailMetadata::hasThumb($metadata);
             $hasGeneratedAt = isset($metadata['thumbnails_generated_at']);
 
             if ($hasThumbnails && $hasGeneratedAt) {
                 $thumbnailSizes = array_keys($metadata['thumbnails']);
-                
+
                 $this->line("Asset {$asset->id} ({$asset->original_filename}):");
                 $this->line("  - Current status: {$asset->thumbnail_status->value}");
-                $this->line("  - Thumbnails available: " . implode(', ', $thumbnailSizes));
+                $this->line('  - Thumbnails available: '.implode(', ', $thumbnailSizes));
                 $this->line("  - Generated at: {$metadata['thumbnails_generated_at']}");
 
-                if (!$dryRun) {
+                if (! $dryRun) {
                     // Fix the status
                     $asset->thumbnail_status = ThumbnailStatus::COMPLETED;
                     $asset->thumbnail_error = null;
                     $asset->save();
 
-                    $this->info("  ✅ Fixed thumbnail status to completed");
+                    $this->info('  ✅ Fixed thumbnail status to completed');
                 } else {
-                    $this->comment("  🔍 Would fix thumbnail status to completed (dry run)");
+                    $this->comment('  🔍 Would fix thumbnail status to completed (dry run)');
                 }
 
                 $fixedCount++;
@@ -102,19 +104,19 @@ class FixThumbnailStatus extends Command
         }
 
         $this->newLine();
-        
+
         if ($dryRun) {
-            $this->info("Dry run completed:");
+            $this->info('Dry run completed:');
             $this->info("  - Would fix: {$fixedCount} assets");
             $this->info("  - Would skip: {$skippedCount} assets");
-            $this->comment("Run without --dry-run to apply fixes");
+            $this->comment('Run without --dry-run to apply fixes');
         } else {
-            $this->info("Thumbnail status fix completed:");
+            $this->info('Thumbnail status fix completed:');
             $this->info("  - Fixed: {$fixedCount} assets");
             $this->info("  - Skipped: {$skippedCount} assets");
-            
+
             if ($fixedCount > 0) {
-                $this->comment("Fixed assets should now display proper thumbnails after browser refresh.");
+                $this->comment('Fixed assets should now display proper thumbnails after browser refresh.');
             }
         }
 

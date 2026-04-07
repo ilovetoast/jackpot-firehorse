@@ -34,7 +34,7 @@ final class EditorGenerativeImagePersistService
 
     /**
      * @param  array<string, mixed>  $context
-     *   Optional: generative_layer_uuid, composition_id
+     *                                         Optional: generative_layer_uuid, composition_id
      * @return array{url: string, asset_id: string}
      *
      * @throws \InvalidArgumentException
@@ -434,6 +434,16 @@ final class EditorGenerativeImagePersistService
             : (! empty($context['source_asset_id']) ? 'generative_edit' : 'generative_generate');
 
         return GenerativeAiProvenance::forPersistedGenerativeOutput($user, $brand, $tenant, $context, $operation);
+    }
+
+    /**
+     * Decode provider output (https URL or data URL) to raw image bytes.
+     *
+     * @throws \InvalidArgumentException
+     */
+    public function binaryFromProviderReference(string $urlOrDataUrl): string
+    {
+        return $this->loadBinary($urlOrDataUrl);
     }
 
     /**

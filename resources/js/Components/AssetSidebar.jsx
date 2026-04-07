@@ -184,7 +184,11 @@ export default function AssetSidebar({
                                     <div className="flex items-center gap-0.5">
                                         {activeBrandId && (
                                             <Link
-                                                href={typeof route === 'function' ? route('tenant.metadata.registry.index', { brand: activeBrandId }) : `/app/tenant/metadata/registry?brand=${activeBrandId}`}
+                                                href={
+                                                    typeof route === 'function'
+                                                        ? route('manage.categories')
+                                                        : '/app/manage/categories'
+                                                }
                                                 className="rounded p-1 opacity-70 hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-white/30"
                                                 title="Manage categories and fields"
                                                 aria-label="Manage categories and fields"

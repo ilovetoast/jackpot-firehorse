@@ -13,6 +13,7 @@ use App\Models\ProstaffPeriodStat;
 use App\Models\User;
 use App\Support\AssetVariant;
 use App\Support\DeliveryContext;
+use App\Support\ThumbnailMetadata;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Support\Facades\Log;
@@ -570,7 +571,7 @@ class GetProstaffDashboardData
 
         $previewThumbnailUrl = $asset->deliveryUrl(AssetVariant::THUMB_PREVIEW, DeliveryContext::AUTHENTICATED) ?: null;
 
-        $thumbnailsExistInMetadata = ! empty($metadata['thumbnails']) && isset($metadata['thumbnails']['thumb']);
+        $thumbnailsExistInMetadata = ThumbnailMetadata::hasThumb($metadata);
         if ($thumbnailStatus === ThumbnailStatus::COMPLETED->value || $thumbnailsExistInMetadata) {
             $thumbnailStyle = $asset->thumbnailPathForStyle('medium') ? 'medium' : 'thumb';
             $pathExists = $asset->thumbnailPathForStyle($thumbnailStyle) ?? $asset->thumbnailPathForStyle('thumb');

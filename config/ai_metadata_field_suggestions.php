@@ -60,4 +60,10 @@ return [
 
     /** Max rows returned on Insights → Review (values + fields tabs). */
     'insight_review_max_items' => 50,
+
+    /**
+     * Minimum minutes between manual “Run library pattern scan” requests (Insights / AI settings).
+     * The scheduled job still uses its own 24h cooldown; this only limits repeat queue clicks.
+     */
+    'manual_insights_run_cooldown_minutes' => (int) env('MANUAL_INSIGHTS_RUN_COOLDOWN_MINUTES', 45),
 ];

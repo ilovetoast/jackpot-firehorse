@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Asset;
 use App\Models\AssetVersion;
 use App\Models\StorageBucket;
+use App\Support\ThumbnailMode;
 use Aws\S3\Exception\S3Exception;
 use Aws\S3\S3Client;
 use Illuminate\Support\Facades\Log;
@@ -32,7 +33,7 @@ use Illuminate\Support\Str;
  * - Video: mp4, mov → first frame extraction - @todo Implement
  *
  * All thumbnails are stored in S3 alongside the original asset.
- * Thumbnail paths follow pattern: {asset_path_base}/thumbnails/{style}/{filename}
+ * Thumbnail paths follow pattern: {asset_path_base}/thumbnails/{mode}/{style}/{filename}
  *
  * PDF thumbnail generation:
  * - Uses spatie/pdf-to-image with ImageMagick/Ghostscript backend
@@ -60,6 +61,17 @@ class ThumbnailGenerationService
      * S3 client instance.
      */
     protected ?S3Client $s3Client = null;
+
+    protected string $generationMode = 'original';
+
+    /**
+     * @var array{path: string, applied: bool, confidence: float, skip_reason?: string}|null
+     */
+    protected ?array $preferredCropSummary = null;
+
+    protected ?string $preferredPdfRasterCachePath = null;
+
+    protected ?string $preferredVideoRasterCachePath = null;
 
     /**
      * Convert technical error messages to user-friendly messages.
@@ -102,8 +114,10 @@ class ThumbnailGenerationService
      *
      * @throws \RuntimeException If regeneration fails
      */
-    public function regenerateThumbnailStyles(Asset $asset, array $styleNames, bool $forceImageMagick = false): array
+    public function regenerateThumbnailStyles(Asset $asset, array $styleNames, bool $forceImageMagick = false, string $mode = 'original'): array
     {
+        $mode = ThumbnailMode::normalize($mode);
+
         if (! $asset->storage_root_path || ! $asset->storageBucket) {
             throw new \RuntimeException('Asset missing storage path or bucket');
         }
@@ -158,7 +172,8 @@ class ThumbnailGenerationService
                             $thumbnailPath,
                             $styleName,
                             $outputBasePath,
-                            null
+                            null,
+                            $mode
                         );
 
                         // Get metadata
@@ -204,9 +219,9 @@ class ThumbnailGenerationService
             }
 
             return [
-                'thumbnails' => $finalStyles,
-                'preview_thumbnails' => $previewStyles,
-                'thumbnail_dimensions' => $thumbnailDimensions,
+                'thumbnails' => [$mode => $finalStyles],
+                'preview_thumbnails' => [$mode => $previewStyles],
+                'thumbnail_dimensions' => [$mode => $thumbnailDimensions],
                 'regenerated' => $regenerated,
             ];
         } finally {
@@ -223,13 +238,14 @@ class ThumbnailGenerationService
      * @param  AssetVersion  $version  The version to generate thumbnails for
      * @return array Array of thumbnail metadata
      */
-    public function generateThumbnailsForVersion(AssetVersion $version): array
+    public function generateThumbnailsForVersion(AssetVersion $version, string $mode = 'original'): array
     {
         return $this->generateThumbnails(
             $version->asset,
             $version->file_path,
             dirname($version->file_path),
-            $version
+            $version,
+            $mode
         );
     }
 
@@ -243,12 +259,19 @@ class ThumbnailGenerationService
      * @param  string|null  $sourceS3Path  Override source path (default: asset->storage_root_path)
      * @param  string|null  $outputBasePath  Override output base for thumbnails (default: dirname of source)
      * @param  AssetVersion|null  $version  When provided, use version->mime_type for file type detection (version-aware)
-     * @return array Array of thumbnail metadata with keys: thumb, medium, large
+     * @param  string  $mode  Thumbnail mode ({@see ThumbnailMode}); default {@see ThumbnailMode::Original}
+     * @return array Nested thumbnail metadata: thumbnails, preview_thumbnails, thumbnail_dimensions keyed by mode
      *
      * @throws \RuntimeException If thumbnail generation fails
      */
-    public function generateThumbnails(Asset $asset, ?string $sourceS3Path = null, ?string $outputBasePath = null, ?AssetVersion $version = null): array
+    public function generateThumbnails(Asset $asset, ?string $sourceS3Path = null, ?string $outputBasePath = null, ?AssetVersion $version = null, string $mode = 'original'): array
     {
+        $mode = ThumbnailMode::normalize($mode);
+        $this->generationMode = $mode;
+        $this->preferredCropSummary = null;
+        $this->preferredPdfRasterCachePath = null;
+        $this->preferredVideoRasterCachePath = null;
+
         $sourceS3Path = $sourceS3Path ?? $asset->storage_root_path;
         $outputBasePath = $outputBasePath ?? ($sourceS3Path ? dirname($sourceS3Path) : null);
 
@@ -455,6 +478,40 @@ class ThumbnailGenerationService
             ]);
         }
 
+        if ($mode === ThumbnailMode::Preferred->value
+            && in_array($fileType, ['image', 'tiff', 'avif', 'cr2'], true)
+        ) {
+            $crop = app(ThumbnailSmartCropService::class)->smartCrop($tempPath);
+            $this->preferredCropSummary = $crop;
+            if (($crop['applied'] ?? false)
+                && ($crop['path'] ?? '') !== ''
+                && $crop['path'] !== $tempPath
+                && is_file($crop['path'])) {
+                @unlink($tempPath);
+                $tempPath = $crop['path'];
+            }
+
+            if (($crop['applied'] ?? false) && $fileType === 'image') {
+                $imageInfo = @getimagesize($tempPath);
+                if ($imageInfo !== false) {
+                    $sourceImageWidth = (int) ($imageInfo[0] ?? 0);
+                    $sourceImageHeight = (int) ($imageInfo[1] ?? 0);
+                }
+            } elseif (($crop['applied'] ?? false) && in_array($fileType, ['tiff', 'avif', 'cr2'], true) && extension_loaded('imagick')) {
+                try {
+                    $imagickProbe = new \Imagick;
+                    $probePath = $fileType === 'cr2' ? $tempPath.'[0]' : $tempPath;
+                    $imagickProbe->pingImage($probePath);
+                    $imagickProbe->setIteratorIndex(0);
+                    $sourceImageWidth = (int) $imagickProbe->getImageWidth();
+                    $sourceImageHeight = (int) $imagickProbe->getImageHeight();
+                    $imagickProbe->clear();
+                    $imagickProbe->destroy();
+                } catch (\Throwable) {
+                }
+            }
+        }
+
         try {
             // Determine file type and generate thumbnails
             // File type was already detected above, reuse it
@@ -500,7 +557,8 @@ class ThumbnailGenerationService
                             $previewPath,
                             'preview',
                             $outputBasePath,
-                            $version
+                            $version,
+                            $mode
                         );
 
                         // Get preview thumbnail metadata
@@ -525,7 +583,7 @@ class ThumbnailGenerationService
                         // preview_thumbnail_url while final thumb/medium/large are still generating.
                         // Previously metadata was only written at job completion, so the grid saw no blur
                         // for the entire PROCESSING window (see docs/MEDIA_PIPELINE.md).
-                        $this->persistEarlyLqipMetadata($asset, $previewThumbnails, $version);
+                        $this->persistEarlyLqipMetadata($asset, $previewThumbnails, $version, $mode);
 
                         // Clean up local preview thumbnail
                         @unlink($previewPath);
@@ -590,7 +648,8 @@ class ThumbnailGenerationService
                             $thumbnailPath,
                             $styleName,
                             $outputBasePath,
-                            $version
+                            $version,
+                            $mode
                         );
 
                         // Get thumbnail metadata
@@ -667,20 +726,88 @@ class ThumbnailGenerationService
             }
 
             return [
-                'thumbnails' => $thumbnails,
-                'preview_thumbnails' => $previewThumbnails,
-                'thumbnail_dimensions' => $thumbnailDimensions,
+                'thumbnails' => [$mode => $thumbnails],
+                'preview_thumbnails' => [$mode => $previewThumbnails],
+                'thumbnail_dimensions' => [$mode => $thumbnailDimensions],
                 'image_width' => $sourceImageWidth,
                 'image_height' => $sourceImageHeight,
                 'thumbnail_quality' => $degradedMode ? 'degraded_large_skipped' : null,
                 'pdf_page_count' => $pdfPageCount,
+                'thumbnail_modes_meta' => $this->buildThumbnailModesMetaPayload(),
             ];
         } finally {
+            $this->unlinkPreferredRasterCaches();
             // Clean up temporary file
             if (file_exists($tempPath)) {
                 @unlink($tempPath);
             }
         }
+    }
+
+    /**
+     * @return array<string, array<string, mixed>>
+     */
+    protected function buildThumbnailModesMetaPayload(): array
+    {
+        if ($this->generationMode !== ThumbnailMode::Preferred->value) {
+            return [];
+        }
+
+        $s = $this->preferredCropSummary ?? [];
+        $applied = (bool) ($s['applied'] ?? false);
+        $signals = $s['signals'] ?? [
+            'trim_ratio' => null,
+            'edge_density' => null,
+            'padding_applied' => false,
+        ];
+        if (! is_array($signals)) {
+            $signals = [
+                'trim_ratio' => null,
+                'edge_density' => null,
+                'padding_applied' => false,
+            ];
+        }
+
+        return [
+            'preferred' => [
+                'applied' => $applied,
+                'crop_applied' => $applied,
+                'confidence' => (float) ($s['confidence'] ?? 0.0),
+                'skip_reason' => $s['skip_reason'] ?? null,
+                'signals' => [
+                    'trim_ratio' => $signals['trim_ratio'] ?? null,
+                    'edge_density' => $signals['edge_density'] ?? null,
+                    'padding_applied' => (bool) ($signals['padding_applied'] ?? false),
+                ],
+            ],
+        ];
+    }
+
+    protected function unlinkPreferredRasterCaches(): void
+    {
+        if ($this->preferredPdfRasterCachePath !== null && is_file($this->preferredPdfRasterCachePath)) {
+            @unlink($this->preferredPdfRasterCachePath);
+        }
+        $this->preferredPdfRasterCachePath = null;
+
+        if ($this->preferredVideoRasterCachePath !== null && is_file($this->preferredVideoRasterCachePath)) {
+            @unlink($this->preferredVideoRasterCachePath);
+        }
+        $this->preferredVideoRasterCachePath = null;
+    }
+
+    protected function copyRasterToTemp(string $sourcePath): string
+    {
+        $ext = strtolower(pathinfo($sourcePath, PATHINFO_EXTENSION));
+        if ($ext === '') {
+            $ext = 'png';
+        }
+        $dest = tempnam(sys_get_temp_dir(), 'thumb_raster_copy_').'.'.$ext;
+        if (! @copy($sourcePath, $dest)) {
+            throw new \RuntimeException('Failed to copy raster temp for thumbnail pipeline');
+        }
+
+        return $dest;
     }
 
     /**
@@ -690,31 +817,56 @@ class ThumbnailGenerationService
      * preview_thumbnail_url was null for the whole PROCESSING interval and the grid showed icons.
      * Final metadata merge at job completion overwrites/aligns the same keys.
      */
-    protected function persistEarlyLqipMetadata(Asset $asset, array $previewThumbnails, ?AssetVersion $version = null): void
+    protected function persistEarlyLqipMetadata(Asset $asset, array $previewThumbnails, ?AssetVersion $version = null, string $mode = 'original'): void
     {
+        $mode = ThumbnailMode::normalize($mode);
+
         if (empty($previewThumbnails['preview']['path'])) {
             return;
         }
 
-        $merge = ['preview_thumbnails' => $previewThumbnails];
+        $mergeFn = function (array $meta) use ($previewThumbnails, $mode): array {
+            $thumbs = $meta['thumbnails'] ?? [];
+            if (! is_array($thumbs)) {
+                $thumbs = [];
+            }
+            if (! isset($thumbs[$mode]) || ! is_array($thumbs[$mode])) {
+                $thumbs[$mode] = [];
+            }
+            $thumbs[$mode]['preview'] = $previewThumbnails['preview'];
+            $meta['thumbnails'] = $thumbs;
+
+            $pt = $meta['preview_thumbnails'] ?? [];
+            if (! is_array($pt)) {
+                $pt = [];
+            }
+            if (! isset($pt[$mode]) || ! is_array($pt[$mode])) {
+                $pt[$mode] = [];
+            }
+            $pt[$mode]['preview'] = $previewThumbnails['preview'];
+            $meta['preview_thumbnails'] = $pt;
+
+            return $meta;
+        };
 
         try {
             if ($version !== null) {
                 $version->refresh();
                 $version->update([
-                    'metadata' => array_merge($version->metadata ?? [], $merge),
+                    'metadata' => $mergeFn($version->metadata ?? []),
                 ]);
             }
 
             $asset->refresh();
             $asset->update([
-                'metadata' => array_merge($asset->metadata ?? [], $merge),
+                'metadata' => $mergeFn($asset->metadata ?? []),
             ]);
 
             Log::debug('[LQIP] Early persist: preview_thumbnails available before final thumbnails finish', [
                 'asset_id' => $asset->id,
                 'version_id' => $version?->id,
                 'preview_path' => $previewThumbnails['preview']['path'],
+                'mode' => $mode,
             ]);
         } catch (\Throwable $e) {
             // Non-fatal: final job completion still writes preview_thumbnails
@@ -818,8 +970,52 @@ class ThumbnailGenerationService
     }
 
     /**
+     * Download an arbitrary S3 object to a temp file (e.g. existing thumbnail raster).
+     *
+     * @param  int|string|null  $assetId
+     */
+    public function downloadObjectToTemp(StorageBucket $bucket, string $s3Key, $assetId = null): string
+    {
+        return $this->downloadFromS3($bucket, $s3Key, $assetId);
+    }
+
+    /**
+     * ETag (preferred) or Last-Modified for fingerprinting thumbnail objects (enhanced preview staleness).
+     */
+    public function headObjectFingerprint(StorageBucket $bucket, string $s3Key): string
+    {
+        if ($s3Key === '') {
+            return '';
+        }
+        try {
+            $result = $this->s3Client->headObject([
+                'Bucket' => $bucket->name,
+                'Key' => $s3Key,
+            ]);
+            $etag = isset($result['ETag']) ? trim((string) $result['ETag'], '"') : '';
+            if ($etag !== '') {
+                return $etag;
+            }
+            $lm = $result['LastModified'] ?? null;
+            if ($lm instanceof \DateTimeInterface) {
+                return $lm->format('c');
+            }
+
+            return '';
+        } catch (S3Exception $e) {
+            Log::warning('[ThumbnailGenerationService] headObjectFingerprint failed', [
+                'bucket' => $bucket->name,
+                'key' => $s3Key,
+                'error' => $e->getMessage(),
+            ]);
+
+            return '';
+        }
+    }
+
+    /**
      * Upload thumbnail to S3.
-     * Uses AssetPathGenerator for canonical path: tenants/{tenant_uuid}/assets/{asset_uuid}/v{version}/thumbnails/{style}/{filename}
+     * Uses AssetPathGenerator for canonical path: tenants/.../thumbnails/{mode}/{style}/{filename}
      *
      * @param  string|null  $outputBasePath  Unused; kept for signature compatibility
      * @param  AssetVersion|null  $version  When provided, version_number used for path
@@ -833,13 +1029,15 @@ class ThumbnailGenerationService
         string $localThumbnailPath,
         string $styleName,
         ?string $outputBasePath = null,
-        ?AssetVersion $version = null
+        ?AssetVersion $version = null,
+        string $mode = 'original'
     ): string {
+        $mode = ThumbnailMode::normalize($mode);
         $versionNumber = $version?->version_number ?? $asset->currentVersion?->version_number ?? 1;
         $extension = pathinfo($localThumbnailPath, PATHINFO_EXTENSION) ?: 'jpg';
         $thumbnailFilename = "{$styleName}.{$extension}";
         $pathGenerator = app(AssetPathGenerator::class);
-        $s3ThumbnailPath = $pathGenerator->generateThumbnailPath($asset->tenant, $asset, $versionNumber, $styleName, $thumbnailFilename);
+        $s3ThumbnailPath = $pathGenerator->generateThumbnailPath($asset->tenant, $asset, $versionNumber, $mode, $styleName, $thumbnailFilename);
 
         try {
             $this->s3Client->putObject([
@@ -850,6 +1048,7 @@ class ThumbnailGenerationService
                 'Metadata' => [
                     'original-asset-id' => $asset->id,
                     'style' => $styleName,
+                    'mode' => $mode,
                     'generated-at' => now()->toIso8601String(),
                 ],
             ]);
@@ -997,6 +1196,17 @@ class ThumbnailGenerationService
         $targetWidth = $svgWidths[$configWidth] ?? min(4096, $configWidth);
 
         $pngPath = $this->renderSvgViaRsvg($sourcePath, $targetWidth);
+
+        if ($this->generationMode === ThumbnailMode::Preferred->value) {
+            $svgCrop = app(ThumbnailSmartCropService::class)->smartCrop($pngPath);
+            $this->preferredCropSummary = $svgCrop;
+            if (($svgCrop['path'] ?? $pngPath) !== $pngPath && is_file((string) $svgCrop['path'])) {
+                if (file_exists($pngPath)) {
+                    unlink($pngPath);
+                }
+                $pngPath = $svgCrop['path'];
+            }
+        }
 
         try {
             $imagick = new \Imagick($pngPath);
@@ -1982,6 +2192,21 @@ class ThumbnailGenerationService
                 'image_size_bytes' => filesize($tempImagePath),
             ]);
 
+            if ($this->generationMode === ThumbnailMode::Preferred->value) {
+                if ($this->preferredPdfRasterCachePath !== null) {
+                    @unlink($tempImagePath);
+                    $tempImagePath = $this->copyRasterToTemp($this->preferredPdfRasterCachePath);
+                } else {
+                    $cropResult = app(ThumbnailSmartCropService::class)->smartCrop($tempImagePath);
+                    $this->preferredCropSummary = $cropResult;
+                    if (($cropResult['path'] ?? $tempImagePath) !== $tempImagePath && is_file((string) $cropResult['path'])) {
+                        @unlink($tempImagePath);
+                        $tempImagePath = $cropResult['path'];
+                    }
+                    $this->preferredPdfRasterCachePath = $tempImagePath;
+                }
+            }
+
             // Resize the extracted image to match thumbnail style dimensions
             // Use GD library to resize (same as image thumbnails for consistency)
             if (! extension_loaded('gd')) {
@@ -2114,8 +2339,8 @@ class ThumbnailGenerationService
                 if (isset($thumbImage)) {
                     imagedestroy($thumbImage);
                 }
-                // Clean up temporary extracted image
-                if (file_exists($tempImagePath)) {
+                // Clean up temporary extracted image (retain shared preferred-mode cache file)
+                if (file_exists($tempImagePath) && $tempImagePath !== $this->preferredPdfRasterCachePath) {
                     @unlink($tempImagePath);
                 }
             }
@@ -2654,6 +2879,21 @@ class ThumbnailGenerationService
                 'image_size_bytes' => filesize($tempImagePath),
             ]);
 
+            if ($this->generationMode === ThumbnailMode::Preferred->value) {
+                if ($this->preferredVideoRasterCachePath !== null) {
+                    @unlink($tempImagePath);
+                    $tempImagePath = $this->copyRasterToTemp($this->preferredVideoRasterCachePath);
+                } else {
+                    $videoCrop = app(ThumbnailSmartCropService::class)->smartCrop($tempImagePath);
+                    $this->preferredCropSummary = $videoCrop;
+                    if (($videoCrop['path'] ?? $tempImagePath) !== $tempImagePath && is_file((string) $videoCrop['path'])) {
+                        @unlink($tempImagePath);
+                        $tempImagePath = $videoCrop['path'];
+                    }
+                    $this->preferredVideoRasterCachePath = $tempImagePath;
+                }
+            }
+
             // Resize the extracted frame to match thumbnail style dimensions
             // Use GD library to resize (same as image thumbnails for consistency)
             if (! extension_loaded('gd')) {
@@ -2749,8 +2989,8 @@ class ThumbnailGenerationService
                 if (isset($thumbImage)) {
                     imagedestroy($thumbImage);
                 }
-                // Clean up temporary extracted frame
-                if (file_exists($tempImagePath)) {
+                // Clean up temporary extracted frame (retain shared preferred-mode cache file)
+                if (file_exists($tempImagePath) && $tempImagePath !== $this->preferredVideoRasterCachePath) {
                     @unlink($tempImagePath);
                 }
             }
@@ -3086,6 +3326,192 @@ class ThumbnailGenerationService
         ]);
 
         return $needsDarkBackground;
+    }
+
+    /**
+     * Generate enhanced-mode thumbnails from an existing local raster (preferred or original pipeline output).
+     * Does not download or process the original asset file — keeps main pipeline untouched.
+     *
+     * @return array{
+     *     thumbnails: array<string, array<string, array<string, mixed>>>,
+     *     thumbnail_dimensions: array<string, array<string, array{width:int, height:int}>>,
+     *     preview_thumbnails: array<string, array<string, mixed>>,
+     *     template: string,
+     *     source_mode: string
+     * }
+     */
+    public function generateEnhancedPreviewsFromLocalRaster(
+        Asset $asset,
+        AssetVersion $version,
+        string $localRasterPath,
+        string $templateId,
+        string $sourceModeLabel
+    ): array {
+        $mode = ThumbnailMode::Enhanced->value;
+        $this->generationMode = $mode;
+
+        $bucket = $asset->storageBucket;
+        if (! $bucket) {
+            throw new \RuntimeException('Asset missing storage bucket');
+        }
+
+        $allStyles = config('assets.thumbnail_styles', []);
+        $styleNames = config('enhanced_preview.styles', ['thumb', 'medium']);
+        if (! is_array($styleNames) || $styleNames === []) {
+            $styleNames = ['thumb', 'medium'];
+        }
+
+        $renderer = app(TemplateRenderer::class);
+        $outputBasePath = $version->file_path ? dirname($version->file_path) : null;
+
+        $thumbnails = [];
+        $thumbnailDimensions = [];
+        $tempFiles = [];
+
+        try {
+            foreach ($styleNames as $styleName) {
+                if ($styleName === 'preview' || ! isset($allStyles[$styleName]) || ! is_array($allStyles[$styleName])) {
+                    continue;
+                }
+                $styleConfig = $allStyles[$styleName];
+                $localOut = $renderer->renderCompositedThumbnail($localRasterPath, $templateId, (string) $styleName, $styleConfig);
+                if ($localOut === null || ! is_file($localOut)) {
+                    continue;
+                }
+                $tempFiles[] = $localOut;
+
+                $s3Path = $this->uploadThumbnailToS3(
+                    $bucket,
+                    $asset,
+                    $localOut,
+                    (string) $styleName,
+                    $outputBasePath,
+                    $version,
+                    $mode
+                );
+
+                $info = $this->getThumbnailMetadata($localOut);
+                $thumbnails[$styleName] = [
+                    'path' => $s3Path,
+                    'width' => $info['width'] ?? null,
+                    'height' => $info['height'] ?? null,
+                    'size_bytes' => $info['size_bytes'] ?? (is_file($localOut) ? filesize($localOut) : null),
+                    'generated_at' => now()->toIso8601String(),
+                ];
+                if (isset($info['width'], $info['height'])) {
+                    $thumbnailDimensions[$styleName] = [
+                        'width' => (int) $info['width'],
+                        'height' => (int) $info['height'],
+                    ];
+                }
+            }
+        } finally {
+            foreach ($tempFiles as $f) {
+                if (is_string($f) && is_file($f)) {
+                    @unlink($f);
+                }
+            }
+        }
+
+        if ($thumbnails === []) {
+            throw new \RuntimeException('No enhanced thumbnails were generated');
+        }
+
+        return [
+            'thumbnails' => [$mode => $thumbnails],
+            'thumbnail_dimensions' => [$mode => $thumbnailDimensions],
+            'preview_thumbnails' => [$mode => []],
+            'template' => $templateId,
+            'source_mode' => $sourceModeLabel,
+        ];
+    }
+
+    /**
+     * Resize an AI presentation output raster into presentation-mode thumbnail styles and upload to S3.
+     *
+     * @return array{
+     *     thumbnails: array<string, array<string, array<string, mixed>>>,
+     *     thumbnail_dimensions: array<string, array<string, array{width:int, height:int}>>,
+     *     styles_generated: list<string>
+     * }
+     */
+    public function generatePresentationPreviewsFromLocalRaster(
+        Asset $asset,
+        AssetVersion $version,
+        string $localRasterPath
+    ): array {
+        $mode = ThumbnailMode::Presentation->value;
+        $this->generationMode = $mode;
+
+        $bucket = $asset->storageBucket;
+        if (! $bucket) {
+            throw new \RuntimeException('Asset missing storage bucket');
+        }
+
+        $allStyles = config('assets.thumbnail_styles', []);
+        $styleNames = config('presentation_preview.styles', ['thumb', 'medium']);
+        if (! is_array($styleNames) || $styleNames === []) {
+            $styleNames = ['thumb', 'medium'];
+        }
+
+        $thumbnails = [];
+        $thumbnailDimensions = [];
+        $tempFiles = [];
+
+        try {
+            foreach ($styleNames as $styleName) {
+                if ($styleName === 'preview' || ! isset($allStyles[$styleName]) || ! is_array($allStyles[$styleName])) {
+                    continue;
+                }
+                $styleConfig = $allStyles[$styleName];
+                $localOut = $this->generateImageThumbnail($localRasterPath, $styleConfig);
+                if ($localOut === null || ! is_file($localOut)) {
+                    continue;
+                }
+                $tempFiles[] = $localOut;
+
+                $s3Path = $this->uploadThumbnailToS3(
+                    $bucket,
+                    $asset,
+                    $localOut,
+                    (string) $styleName,
+                    null,
+                    $version,
+                    $mode
+                );
+
+                $info = $this->getThumbnailMetadata($localOut);
+                $thumbnails[$styleName] = [
+                    'path' => $s3Path,
+                    'width' => $info['width'] ?? null,
+                    'height' => $info['height'] ?? null,
+                    'size_bytes' => $info['size_bytes'] ?? (is_file($localOut) ? filesize($localOut) : null),
+                    'generated_at' => now()->toIso8601String(),
+                ];
+                if (isset($info['width'], $info['height'])) {
+                    $thumbnailDimensions[$styleName] = [
+                        'width' => (int) $info['width'],
+                        'height' => (int) $info['height'],
+                    ];
+                }
+            }
+        } finally {
+            foreach ($tempFiles as $f) {
+                if (is_string($f) && is_file($f)) {
+                    @unlink($f);
+                }
+            }
+        }
+
+        if ($thumbnails === []) {
+            throw new \RuntimeException('No presentation thumbnails were generated');
+        }
+
+        return [
+            'thumbnails' => [$mode => $thumbnails],
+            'thumbnail_dimensions' => [$mode => $thumbnailDimensions],
+            'styles_generated' => array_keys($thumbnails),
+        ];
     }
 
     /**

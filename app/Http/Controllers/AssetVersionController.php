@@ -27,7 +27,7 @@ class AssetVersionController extends Controller
     {
         Gate::authorize('view', $asset);
 
-        if (!$asset->tenant->plan_allows_versions) {
+        if (! $asset->tenant->plan_allows_versions) {
             abort(403);
         }
 
@@ -38,7 +38,7 @@ class AssetVersionController extends Controller
         $thumbnailUrlForVersion = function (AssetVersion $v) use ($asset): ?string {
             $meta = $v->metadata ?? [];
             foreach (['medium', 'thumb', 'large'] as $style) {
-                $path = $meta['thumbnails'][$style]['path'] ?? null;
+                $path = \App\Support\ThumbnailMetadata::stylePath($meta, $style);
                 if (is_string($path) && $path !== '') {
                     return CdnUrl::url($path);
                 }
@@ -74,6 +74,7 @@ class AssetVersionController extends Controller
         $total = $query->count();
         if ($total > 50) {
             $paginator = $query->paginate(50);
+
             return response()->json($paginator->through($mapVersion));
         }
 
@@ -91,7 +92,7 @@ class AssetVersionController extends Controller
     {
         Gate::authorize('restoreVersion', $asset);
 
-        if (!$asset->tenant->plan_allows_versions) {
+        if (! $asset->tenant->plan_allows_versions) {
             abort(403);
         }
 
@@ -100,7 +101,7 @@ class AssetVersionController extends Controller
             ? AssetVersion::where('asset_id', $asset->id)->where('id', $versionParam)->first()
             : AssetVersion::where('asset_id', $asset->id)->where('version_number', (int) $versionParam)->first();
 
-        if (!$version) {
+        if (! $version) {
             abort(404, 'Version not found');
         }
 

@@ -2,7 +2,9 @@
 
 namespace App\Services;
 
+use App\Enums\AITaskType;
 use App\Exceptions\PlanLimitExceededException;
+use App\Models\AIAgentRun;
 use App\Models\Tenant;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -431,5 +433,106 @@ class AiUsageService
                 'calls' => (int) $row->call_count,
             ];
         })->toArray();
+    }
+
+    /**
+     * Enhanced preview runs ({@see AITaskType::THUMBNAIL_ENHANCEMENT}) for dashboards — current calendar month, finished only.
+     *
+     * @return array{
+     *     count: int,
+     *     success_count: int,
+     *     failed_count: int,
+     *     skipped_count: int,
+     *     success_rate: float|null,
+     *     avg_duration_ms: float|null,
+     *     p95_duration_ms: float|null
+     * }
+     */
+    public function getThumbnailEnhancementMetrics(Tenant $tenant): array
+    {
+        $start = now()->startOfMonth();
+        $end = now()->endOfMonth();
+
+        $rows = AIAgentRun::query()
+            ->where('tenant_id', $tenant->id)
+            ->where('task_type', AITaskType::THUMBNAIL_ENHANCEMENT)
+            ->whereBetween('started_at', [$start, $end])
+            ->whereNotNull('completed_at')
+            ->get(['status', 'started_at', 'completed_at']);
+
+        $count = $rows->count();
+        if ($count === 0) {
+            return [
+                'count' => 0,
+                'success_count' => 0,
+                'failed_count' => 0,
+                'skipped_count' => 0,
+                'success_rate' => null,
+                'avg_duration_ms' => null,
+                'p95_duration_ms' => null,
+            ];
+        }
+
+        $successCount = $rows->where('status', 'success')->count();
+        $failedCount = $rows->where('status', 'failed')->count();
+        $skippedCount = $rows->where('status', 'skipped')->count();
+
+        $successOrFailed = $successCount + $failedCount;
+        $successRate = $successOrFailed > 0
+            ? round(100 * $successCount / $successOrFailed, 1)
+            : null;
+
+        $durations = [];
+        foreach ($rows as $row) {
+            if ($row->status === 'success' && $row->started_at && $row->completed_at) {
+                $durations[] = $row->started_at->diffInMilliseconds($row->completed_at);
+            }
+        }
+
+        $avgMs = $durations !== [] ? array_sum($durations) / count($durations) : null;
+
+        $p95Ms = null;
+        if ($durations !== []) {
+            sort($durations, SORT_NUMERIC);
+            $n = count($durations);
+            $idx = (int) min($n - 1, max(0, (int) ceil(0.95 * $n) - 1));
+            $p95Ms = $durations[$idx];
+        }
+
+        return [
+            'count' => $count,
+            'success_count' => $successCount,
+            'failed_count' => $failedCount,
+            'skipped_count' => $skippedCount,
+            'success_rate' => $successRate,
+            'avg_duration_ms' => $avgMs !== null ? round($avgMs, 1) : null,
+            'p95_duration_ms' => $p95Ms !== null ? round((float) $p95Ms, 1) : null,
+        ];
+    }
+
+    /**
+     * Adds {@see getThumbnailEnhancementMetrics()} to tenant AI usage payloads (dashboard / insights).
+     *
+     * @param  array<string, mixed>|null  $aiUsageData
+     * @return array<string, mixed>|null
+     */
+    public function augmentAiUsageDashboardPayload(?array $aiUsageData, Tenant $tenant): ?array
+    {
+        if ($aiUsageData === null) {
+            return null;
+        }
+
+        $m = $this->getThumbnailEnhancementMetrics($tenant);
+        $aiUsageData['thumbnail_enhancement'] = [
+            'count' => $m['count'],
+            'success_count' => $m['success_count'],
+            'failed_count' => $m['failed_count'],
+            'skipped_count' => $m['skipped_count'],
+            'success_rate' => $m['success_rate'],
+            'avg_duration_ms' => $m['avg_duration_ms'],
+            'p95_duration_ms' => $m['p95_duration_ms'],
+        ];
+
+        return $aiUsageData;
     }
 }

@@ -524,8 +524,8 @@ class AiMetadataGenerationService
     {
         $metadata = $asset->metadata ?? [];
 
-        if (isset($metadata['thumbnails']['medium']['path'])) {
-            $path = $metadata['thumbnails']['medium']['path'];
+        $path = \App\Support\ThumbnailMetadata::stylePath($metadata, 'medium');
+        if ($path) {
             if (str_starts_with($path, 'assets/') || str_starts_with($path, 'temp/uploads/')) {
                 if (str_starts_with($path, 'temp/uploads/') && $asset->thumbnail_status !== \App\Enums\ThumbnailStatus::COMPLETED) {
                     return null;
@@ -535,8 +535,9 @@ class AiMetadataGenerationService
             }
         }
 
-        if (isset($metadata['preview_thumbnails']['preview']['path'])) {
-            return $metadata['preview_thumbnails']['preview']['path'];
+        $previewPath = \App\Support\ThumbnailMetadata::previewPath($metadata);
+        if ($previewPath) {
+            return $previewPath;
         }
 
         return null;
@@ -672,7 +673,6 @@ class AiMetadataGenerationService
 
         return $prompt;
     }
-
 
     /**
      * Category/brand context for vision prompts.

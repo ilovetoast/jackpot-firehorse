@@ -6,7 +6,7 @@ use App\Enums\AssetStatus;
 use App\Enums\EventType;
 use App\Models\Asset;
 use App\Models\User;
-use App\Services\ActivityRecorder;
+use App\Support\ThumbnailMetadata;
 use Aws\S3\S3Client;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
@@ -30,10 +30,10 @@ class AssetArchiveService
      * and transitions S3 objects to cheaper storage class.
      * Enforces permissions and guards against invalid states.
      *
-     * @param Asset $asset The asset to archive
-     * @param User $actor The user performing the action
-     * @param string|null $reason Optional reason for archiving
-     * @return void
+     * @param  Asset  $asset  The asset to archive
+     * @param  User  $actor  The user performing the action
+     * @param  string|null  $reason  Optional reason for archiving
+     *
      * @throws \Illuminate\Auth\Access\AuthorizationException
      * @throws \RuntimeException
      */
@@ -97,9 +97,9 @@ class AssetArchiveService
      * publication state, and transitions S3 objects back to standard storage class.
      * Enforces permissions.
      *
-     * @param Asset $asset The asset to restore
-     * @param User $actor The user performing the action
-     * @return void
+     * @param  Asset  $asset  The asset to restore
+     * @param  User  $actor  The user performing the action
+     *
      * @throws \Illuminate\Auth\Access\AuthorizationException
      * @throws \RuntimeException
      */
@@ -114,7 +114,7 @@ class AssetArchiveService
         }
 
         // Idempotent: If already restored (not archived), do nothing
-        if (!$asset->isArchived()) {
+        if (! $asset->isArchived()) {
             return;
         }
 
@@ -166,8 +166,7 @@ class AssetArchiveService
      * This method transitions the main asset file and all thumbnails to a cheaper
      * storage class. The operation is non-blocking and fails gracefully.
      *
-     * @param Asset $asset The asset to transition
-     * @return void
+     * @param  Asset  $asset  The asset to transition
      */
     protected function transitionToArchiveStorageClass(Asset $asset): void
     {
@@ -175,10 +174,11 @@ class AssetArchiveService
             $s3Client = $this->getS3Client();
             $bucket = config('filesystems.disks.s3.bucket');
 
-            if (!$s3Client || !$bucket) {
+            if (! $s3Client || ! $bucket) {
                 Log::warning('[AssetArchiveService] S3 client or bucket not configured, skipping storage class transition', [
                     'asset_id' => $asset->id,
                 ]);
+
                 return;
             }
 
@@ -224,8 +224,7 @@ class AssetArchiveService
      * This method transitions the main asset file and all thumbnails back to
      * STANDARD storage class for active use. The operation is non-blocking.
      *
-     * @param Asset $asset The asset to transition
-     * @return void
+     * @param  Asset  $asset  The asset to transition
      */
     protected function transitionToStandardStorageClass(Asset $asset): void
     {
@@ -233,10 +232,11 @@ class AssetArchiveService
             $s3Client = $this->getS3Client();
             $bucket = config('filesystems.disks.s3.bucket');
 
-            if (!$s3Client || !$bucket) {
+            if (! $s3Client || ! $bucket) {
                 Log::warning('[AssetArchiveService] S3 client or bucket not configured, skipping storage class transition', [
                     'asset_id' => $asset->id,
                 ]);
+
                 return;
             }
 
@@ -279,7 +279,7 @@ class AssetArchiveService
     /**
      * Get all S3 paths for an asset (main file + thumbnails).
      *
-     * @param Asset $asset The asset
+     * @param  Asset  $asset  The asset
      * @return array<string> Array of S3 paths
      */
     protected function getAssetS3Paths(Asset $asset): array
@@ -291,23 +291,10 @@ class AssetArchiveService
             $paths[] = $asset->storage_root_path;
         }
 
-        // Add thumbnail paths from metadata
+        // Add thumbnail + LQIP paths from metadata (nested by mode + legacy)
         $metadata = $asset->metadata ?? [];
-        if (isset($metadata['thumbnails']) && is_array($metadata['thumbnails'])) {
-            foreach ($metadata['thumbnails'] as $thumbnail) {
-                if (isset($thumbnail['path'])) {
-                    $paths[] = $thumbnail['path'];
-                }
-            }
-        }
-
-        // Add preview thumbnail paths
-        if (isset($metadata['preview_thumbnails']) && is_array($metadata['preview_thumbnails'])) {
-            foreach ($metadata['preview_thumbnails'] as $thumbnail) {
-                if (isset($thumbnail['path'])) {
-                    $paths[] = $thumbnail['path'];
-                }
-            }
+        foreach (ThumbnailMetadata::allThumbnailObjectPaths($metadata) as $thumbPath) {
+            $paths[] = $thumbPath;
         }
 
         return array_filter($paths); // Remove any null/empty paths
@@ -315,14 +302,12 @@ class AssetArchiveService
 
     /**
      * Get S3 client instance.
-     *
-     * @return S3Client|null
      */
     protected function getS3Client(): ?S3Client
     {
         try {
             $disk = Storage::disk('s3');
-            
+
             // Laravel 9+ exposes S3Client directly via getClient() method
             if (method_exists($disk, 'getClient')) {
                 return $disk->getClient();
@@ -338,11 +323,13 @@ class AssetArchiveService
                 $config['endpoint'] = config('filesystems.disks.s3.endpoint');
                 $config['use_path_style_endpoint'] = config('filesystems.disks.s3.use_path_style_endpoint', false);
             }
+
             return new S3Client($config);
         } catch (\Exception $e) {
             Log::error('[AssetArchiveService] Failed to get S3 client', [
                 'error' => $e->getMessage(),
             ]);
+
             return null;
         }
     }

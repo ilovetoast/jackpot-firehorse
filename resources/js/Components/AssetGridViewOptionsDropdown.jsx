@@ -107,6 +107,9 @@ export default function AssetGridViewOptionsDropdown({
     onToggleInfo = () => {},
     primaryColor = '#6366f1',
     className = '',
+    /** Deliverables: grid uses standard | enhanced | presentation thumbnails */
+    executionThumbnailViewMode = null,
+    onExecutionThumbnailViewModeChange = null,
 }) {
     const currentPresetIndex = SIZE_PRESETS.indexOf(snapToPreset(cardSize))
     const idx = currentPresetIndex >= 0 ? currentPresetIndex : 1
@@ -114,8 +117,49 @@ export default function AssetGridViewOptionsDropdown({
     const layoutLabel = layoutMode === 'masonry' ? 'Masonry' : 'Grid'
     const triggerSubtitle = `${sizeLabel} · ${layoutLabel}`
 
+    const executionGridModeSection =
+        executionThumbnailViewMode != null && onExecutionThumbnailViewModeChange ? (
+            <div className="border-b border-gray-100 pb-3">
+                <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-gray-500">
+                    Grid thumbnails
+                </p>
+                <p className="mb-2 text-xs text-gray-600">
+                    Applies to the executions grid only. <span className="font-medium text-gray-800">Standard</span> uses
+                    each asset&apos;s preferred tile from the drawer when set; otherwise the source thumbnail.
+                </p>
+                <div
+                    className="grid grid-cols-3 gap-0.5 rounded-lg border border-gray-200 bg-white p-0.5"
+                    role="group"
+                    aria-label="Grid thumbnail mode"
+                >
+                    {[
+                        { mode: 'standard', label: 'Standard' },
+                        { mode: 'enhanced', label: 'Enhanced' },
+                        { mode: 'presentation', label: 'Pres.' },
+                    ].map(({ mode, label }) => (
+                        <button
+                            key={mode}
+                            type="button"
+                            onClick={() => onExecutionThumbnailViewModeChange(mode)}
+                            className={`rounded-md px-1 py-1.5 text-[11px] font-medium leading-tight transition-colors ${
+                                executionThumbnailViewMode === mode
+                                    ? 'text-white shadow-sm'
+                                    : 'text-gray-700 hover:bg-gray-50'
+                            }`}
+                            style={
+                                executionThumbnailViewMode === mode ? { backgroundColor: primaryColor } : undefined
+                            }
+                        >
+                            {label}
+                        </button>
+                    ))}
+                </div>
+            </div>
+        ) : null
+
     const panelInner = (
         <div className="flex flex-col gap-3">
+            {executionGridModeSection}
             <div>
                 <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-gray-500">Tile size</p>
                 <div className="flex flex-col gap-1">

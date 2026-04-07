@@ -19,12 +19,13 @@ use App\Services\AiUsageService;
 use App\Services\AssetCompletionService;
 use App\Services\BrandGateway\BrandThemeBuilder;
 use App\Services\BrandInsightEngine;
-use App\Services\Insights\BrandActivityFeedService;
 use App\Services\FeatureGate;
+use App\Services\Insights\BrandActivityFeedService;
 use App\Services\PlanService;
 use App\Support\AssetVariant;
 use App\Support\DashboardLinks;
 use App\Support\DeliveryContext;
+use App\Support\ThumbnailMetadata;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -209,6 +210,7 @@ class DashboardController extends Controller
                     'percentage' => $usageStatus['suggestions']['percentage'] ?? 0,
                 ],
             ];
+            $aiUsageData = $this->aiUsageService->augmentAiUsageDashboardPayload($aiUsageData, $tenant);
         }
 
         // Phase M-1: Pending AI suggestions — same per-user asset scope as AI Review / notification bell
@@ -586,8 +588,7 @@ class DashboardController extends Controller
                 $finalThumbnailUrl = null;
                 if ($thumbnailStatus === 'completed') {
                     $thumbnailVersion = $metadata['thumbnails_generated_at'] ?? null;
-                    $thumbnails = $metadata['thumbnails'] ?? [];
-                    $thumbnailStyle = (! empty($thumbnails) && isset($thumbnails['large'])) ? 'large' : 'medium';
+                    $thumbnailStyle = ThumbnailMetadata::stylePath($metadata, 'large') ? 'large' : 'medium';
                     $variant = $thumbnailStyle === 'large' ? AssetVariant::THUMB_LARGE : AssetVariant::THUMB_MEDIUM;
                     $finalThumbnailUrl = $asset->deliveryUrl($variant, DeliveryContext::AUTHENTICATED);
                     if ($finalThumbnailUrl && $thumbnailVersion && ! str_contains($finalThumbnailUrl, 'X-Amz-Signature')) {
@@ -694,8 +695,7 @@ class DashboardController extends Controller
                 $finalThumbnailUrl = null;
                 if ($thumbnailStatus === 'completed') {
                     $thumbnailVersion = $metadata['thumbnails_generated_at'] ?? null;
-                    $thumbnails = $metadata['thumbnails'] ?? [];
-                    $thumbnailStyle = (! empty($thumbnails) && isset($thumbnails['large'])) ? 'large' : 'medium';
+                    $thumbnailStyle = ThumbnailMetadata::stylePath($metadata, 'large') ? 'large' : 'medium';
                     $variant = $thumbnailStyle === 'large' ? AssetVariant::THUMB_LARGE : AssetVariant::THUMB_MEDIUM;
                     $finalThumbnailUrl = $asset->deliveryUrl($variant, DeliveryContext::AUTHENTICATED);
                     if ($finalThumbnailUrl && $thumbnailVersion && ! str_contains($finalThumbnailUrl, 'X-Amz-Signature')) {
@@ -796,8 +796,7 @@ class DashboardController extends Controller
                 $previewThumbnailUrl = $asset->deliveryUrl(AssetVariant::THUMB_PREVIEW, DeliveryContext::AUTHENTICATED) ?: null;
                 $finalThumbnailUrl = null;
                 if ($thumbnailStatus === 'completed') {
-                    $thumbnails = $metadata['thumbnails'] ?? [];
-                    $thumbnailStyle = (! empty($thumbnails) && isset($thumbnails['large'])) ? 'large' : 'medium';
+                    $thumbnailStyle = ThumbnailMetadata::stylePath($metadata, 'large') ? 'large' : 'medium';
                     $variant = $thumbnailStyle === 'large' ? AssetVariant::THUMB_LARGE : AssetVariant::THUMB_MEDIUM;
                     $finalThumbnailUrl = $asset->deliveryUrl($variant, DeliveryContext::AUTHENTICATED);
                     $thumbnailVersion = $metadata['thumbnails_generated_at'] ?? null;
@@ -858,10 +857,9 @@ class DashboardController extends Controller
                     return null;
                 }
 
-                $thumbnails = $metadata['thumbnails'] ?? [];
                 // Collage tiles are large; only medium+ derivatives avoid blocky upscaling.
-                $hasLarge = isset($thumbnails['large']);
-                if (! isset($thumbnails['medium']) && ! $hasLarge) {
+                $hasLarge = ThumbnailMetadata::stylePath($metadata, 'large') !== null;
+                if (ThumbnailMetadata::stylePath($metadata, 'medium') === null && ! $hasLarge) {
                     return null;
                 }
 

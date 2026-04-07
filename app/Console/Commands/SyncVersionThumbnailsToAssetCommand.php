@@ -2,8 +2,9 @@
 
 namespace App\Console\Commands;
 
-use App\Models\Asset;
 use App\Enums\ThumbnailStatus;
+use App\Models\Asset;
+use App\Support\ThumbnailMetadata;
 use Illuminate\Console\Command;
 
 /**
@@ -53,32 +54,36 @@ class SyncVersionThumbnailsToAssetCommand extends Command
 
         if ($assets->isEmpty()) {
             $this->info('No assets found to process.');
+
             return 0;
         }
 
-        $this->info('Scanning ' . $assets->count() . ' assets for version→asset thumbnail sync...');
+        $this->info('Scanning '.$assets->count().' assets for version→asset thumbnail sync...');
 
         $synced = 0;
         $skipped = 0;
 
         foreach ($assets as $asset) {
             $version = $asset->currentVersion;
-            if (!$version) {
+            if (! $version) {
                 $skipped++;
+
                 continue;
             }
 
             $versionMeta = $version->metadata ?? [];
-            $hasThumbnails = !empty($versionMeta['thumbnails']) && isset($versionMeta['thumbnails']['thumb']);
-            if (!$hasThumbnails) {
+            $hasThumbnails = ThumbnailMetadata::hasThumb($versionMeta);
+            if (! $hasThumbnails) {
                 $skipped++;
+
                 continue;
             }
 
             $assetMeta = $asset->metadata ?? [];
-            $assetHasThumbnails = !empty($assetMeta['thumbnails']) && isset($assetMeta['thumbnails']['thumb']);
+            $assetHasThumbnails = ThumbnailMetadata::hasThumb($assetMeta);
             if ($assetHasThumbnails) {
                 $skipped++;
+
                 continue;
             }
 
@@ -97,18 +102,19 @@ class SyncVersionThumbnailsToAssetCommand extends Command
 
             if (empty($toMerge)) {
                 $skipped++;
+
                 continue;
             }
 
-            $this->line("Asset {$asset->id} ({$asset->original_filename}): syncing " . count($toMerge) . " keys from version");
+            $this->line("Asset {$asset->id} ({$asset->original_filename}): syncing ".count($toMerge).' keys from version');
 
-            if (!$dryRun) {
+            if (! $dryRun) {
                 $asset->update([
                     'metadata' => array_merge($assetMeta, $toMerge),
                 ]);
                 $synced++;
             } else {
-                $this->comment("  🔍 Would sync (dry run)");
+                $this->comment('  🔍 Would sync (dry run)');
                 $synced++;
             }
         }

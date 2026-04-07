@@ -97,6 +97,48 @@ export function normalizeOptions(options) {
  * @param {Array} options
  * @returns {Array<{value: string, system_label: string, color?: string, icon?: string}>}
  */
+/**
+ * Parse bulk-add lines (one per line) and append new options, skipping duplicates.
+ * Used by MetadataFieldModal "Add options" and on Save so uncommitted textarea lines persist.
+ *
+ * @param {Array<{ value?: string, system_label?: string }>} existingOptions
+ * @param {string} bulkAddText
+ * @returns {{ options: Array, error: string|null }}
+ */
+export function mergeBulkAddTextIntoOptions(existingOptions, bulkAddText) {
+    const raw = typeof bulkAddText === 'string' ? bulkAddText : ''
+    const lines = raw.split('\n').map((l) => l.trim()).filter(Boolean)
+    if (lines.length === 0) {
+        return { options: existingOptions || [], error: null }
+    }
+
+    const existingValues = new Set((existingOptions || []).map((o) => String(o.value).toLowerCase()))
+    const toAdd = []
+    for (const line of lines) {
+        const value =
+            toSnakeCase(line) || line.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '')
+        if (!value) {
+            continue
+        }
+        const snakeCheck = validateSnakeCase(value)
+        if (!snakeCheck.valid) {
+            return { options: existingOptions || [], error: snakeCheck.message || 'Invalid option value' }
+        }
+        if (existingValues.has(value)) {
+            continue
+        }
+        existingValues.add(value)
+        toAdd.push({ value, system_label: snakeToTitleCase(value) })
+    }
+    if (toAdd.length === 0) {
+        return {
+            options: existingOptions || [],
+            error: 'All lines in the bulk box already exist or could not be used as values.',
+        }
+    }
+    return { options: [...(existingOptions || []), ...toAdd], error: null }
+}
+
 export function prepareOptionsForSubmit(options) {
     if (!options || !Array.isArray(options)) return []
     return options

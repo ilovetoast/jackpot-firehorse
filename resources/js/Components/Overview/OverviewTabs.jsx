@@ -6,7 +6,7 @@ export default function OverviewTabs({ children }) {
 
     const tabs = [
         { name: 'Overview', route: 'overview' },
-        { name: 'Categories & Filters', route: 'tenant.metadata.registry.index' },
+        { name: 'Categories', route: 'manage.categories' },
         { name: 'Team', route: 'companies.team' },
         { name: 'Activity', route: 'companies.activity' },
         { name: 'Insights', route: 'insights.metadata' },

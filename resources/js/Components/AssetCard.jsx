@@ -19,7 +19,12 @@ import { TrashIcon } from '@heroicons/react/24/outline'
 import { StarIcon } from '@heroicons/react/24/solid'
 import ThumbnailPreview from './ThumbnailPreview'
 import { isImageLikeForAssetCard } from '../utils/damFileTypes'
-import { getThumbnailVersion, getThumbnailState } from '../utils/thumbnailUtils'
+import { getThumbnailVersion, getThumbnailState, supportsThumbnail } from '../utils/thumbnailUtils'
+import { getExecutionGridDisplayUrl, getExecutionGridHoverCrossfadeUrl } from '../utils/executionThumbnailDisplay'
+import {
+    assetCardEnhancedExecutionChromeClass,
+    isExecutionEnhancedGridMode,
+} from '../utils/assetCardEnhancedExecutionChrome'
 
 export default function AssetCard({
     asset,
@@ -43,6 +48,8 @@ export default function AssetCard({
     selectionAssetType = 'asset',
     layoutMode = 'grid',
     masonryMaxHeightPx = 560,
+    /** Deliverables grid: standard | enhanced | presentation — null disables mode-aware thumbnails */
+    executionThumbnailViewMode = null,
 }) {
     const { auth } = usePage().props
     /** Brand Guidelines Google Fonts (no DAM file) — grid preview only, no drawer */
@@ -136,14 +143,24 @@ export default function AssetCard({
     // Determine if asset is an image based on mime_type or extension
     const extLower = fileExtension.toLowerCase()
     const isImage = isImageLikeForAssetCard(asset.mime_type, extLower)
-    
+
     // Phase V-1: Detect if asset is a video
     const videoExtensions = ['mp4', 'mov', 'avi', 'mkv', 'webm', 'm4v']
     const isVideo = Boolean(asset?.mime_type?.startsWith('video/') || videoExtensions.includes(extLower))
 
+    /** Raster thumbnails (PDF, PSD, …) are not “image-like” for card chrome but still need execution grid modes. */
+    const supportsExecutionGridThumbnailMode =
+        supportsThumbnail(asset.mime_type, extLower) && !isVideo
+
     const fontExtensions = ['woff2', 'woff', 'ttf', 'otf', 'eot']
     const isFontMime = Boolean(asset?.mime_type?.startsWith('font/') || fontExtensions.includes(extLower))
-    
+
+    const categorySlug = asset?.category?.slug
+    const showFontSwatch =
+        isVirtualGoogleFont ||
+        categorySlug === 'fonts' ||
+        (isFontMime && !isImage && !isVideo)
+
     // Phase V-1: Hover preview state (desktop only)
     const [isHovering, setIsHovering] = useState(false)
     // Phase D1: Card hover for bucket checkbox visibility
@@ -151,6 +168,7 @@ export default function AssetCard({
     const selection = useSelectionOptional()
     const [isCardHovering, setIsCardHovering] = useState(false)
     const [previewLoaded, setPreviewLoaded] = useState(false)
+    const [executionThumbHover, setExecutionThumbHover] = useState(false)
     /** Hover preview URL failed (e.g. unsupported format) — keep showing poster */
     const [videoPreviewFailed, setVideoPreviewFailed] = useState(false)
     const videoPreviewRef = useRef(null)
@@ -223,7 +241,47 @@ export default function AssetCard({
         
         prevThumbnailStateRef.current = currentState
     }, [thumbnailState.state, asset?.id, thumbnailState.thumbnailUrl])
-    
+
+    /** Re-render when per-asset "Standard" preference changes (localStorage + custom event). */
+    const [preferredTierBump, setPreferredTierBump] = useState(0)
+    useEffect(() => {
+        if (executionThumbnailViewMode !== 'standard') {
+            return undefined
+        }
+        const onChange = () => setPreferredTierBump((n) => n + 1)
+        window.addEventListener('jackpot_preferred_thumbnail_tier_changed', onChange)
+        return () => window.removeEventListener('jackpot_preferred_thumbnail_tier_changed', onChange)
+    }, [executionThumbnailViewMode])
+
+    const executionDisplayUrl = useMemo(() => {
+        if (executionThumbnailViewMode == null || !supportsExecutionGridThumbnailMode || showFontSwatch) {
+            return null
+        }
+        if (thumbnailState.state !== 'AVAILABLE') {
+            return null
+        }
+        return getExecutionGridDisplayUrl(asset, executionThumbnailViewMode, 'medium')
+    }, [
+        executionThumbnailViewMode,
+        supportsExecutionGridThumbnailMode,
+        showFontSwatch,
+        thumbnailState.state,
+        asset,
+        preferredTierBump,
+    ])
+
+    const executionHoverUrl = useMemo(() => {
+        if (!executionDisplayUrl || executionThumbnailViewMode == null) {
+            return null
+        }
+        return getExecutionGridHoverCrossfadeUrl(asset, executionThumbnailViewMode, 'medium')
+    }, [asset, executionThumbnailViewMode, executionDisplayUrl, preferredTierBump])
+
+    const showExecutionDualThumb = Boolean(executionDisplayUrl && executionHoverUrl)
+    const showExecutionSingleThumb = Boolean(executionDisplayUrl && !executionHoverUrl)
+    const isExecutionEnhancedGrid = isExecutionEnhancedGridMode(executionThumbnailViewMode)
+    const executionEnhancedChromeClass = assetCardEnhancedExecutionChromeClass(executionThumbnailViewMode)
+
     // Get appropriate icon for non-image files
     const getFileIcon = () => {
         if (extLower === 'pdf') {
@@ -439,12 +497,7 @@ export default function AssetCard({
 
     /** Light checkerboard so white/light marks stay visible (logos + graphics; CSS-only). */
     /** Applies in both grid styles: "impact" (default card) and "clean" (guidelines — white tile would hide white logos). */
-    const slug = asset?.category?.slug
-    const isLogoOrGraphicCategory = slug === 'logos' || slug === 'graphics'
-    const showFontSwatch =
-        isVirtualGoogleFont ||
-        slug === 'fonts' ||
-        (isFontMime && !isImage && !isVideo)
+    const isLogoOrGraphicCategory = categorySlug === 'logos' || categorySlug === 'graphics'
     const checkerboardThumbnailStyle =
         isLogoOrGraphicCategory && !isCinematic
             ? {
@@ -480,7 +533,7 @@ export default function AssetCard({
                 className={`${
                     /* Masonry: center content vertically in min-height tile (short logos vs tall neighbors) */
                     isMasonry ? 'w-full flex flex-col items-center justify-center' : aspectRatio
-                } relative overflow-hidden rounded-2xl transition-all duration-200 ${imageBorderClass} ${imageShadowClass} ${isGuidelines ? (isLogoOrGraphicCategory ? 'bg-transparent shadow-none group-hover:shadow-lg' : 'bg-white shadow-none group-hover:shadow-lg') : isCinematic ? 'bg-black/20' : isLogoOrGraphicCategory ? 'bg-transparent' : 'bg-gray-50'}`}
+                } relative overflow-hidden rounded-2xl transition-all duration-200 ${imageBorderClass} ${imageShadowClass} ${executionEnhancedChromeClass} ${isGuidelines ? (isLogoOrGraphicCategory ? 'bg-transparent shadow-none group-hover:shadow-lg' : 'bg-white shadow-none group-hover:shadow-lg') : isCinematic ? 'bg-black/20' : isLogoOrGraphicCategory ? 'bg-transparent' : 'bg-gray-50'}`}
                 style={{
                     ...(isMasonry
                         ? {
@@ -496,6 +549,7 @@ export default function AssetCard({
                     setIsHovering(false)
                     setPreviewLoaded(false)
                     setVideoPreviewFailed(false)
+                    setExecutionThumbHover(false)
                     // Pause and unload preview on mouse leave
                     if (videoPreviewRef.current) {
                         videoPreviewRef.current.pause()
@@ -508,6 +562,19 @@ export default function AssetCard({
                     <div className="absolute top-2 right-2 z-10 flex items-center justify-center" aria-hidden>
                         <span className="h-2.5 w-2.5 rounded-full bg-amber-500 animate-pulse" title="Processing" />
                     </div>
+                )}
+                {isExecutionEnhancedGrid && (
+                    <span
+                        className="pointer-events-none absolute left-2 top-2 z-10 select-none text-sm opacity-80 drop-shadow-sm"
+                        title={
+                            executionThumbnailViewMode === 'presentation'
+                                ? 'Presentation grid thumbnails'
+                                : 'Enhanced grid thumbnails'
+                        }
+                        aria-hidden
+                    >
+                        ✨
+                    </span>
                 )}
                 {showFontSwatch ? (
                     <div className="absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-br from-slate-50 to-slate-100 text-zinc-800">
@@ -549,26 +616,57 @@ export default function AssetCard({
                             />
                         )}
 
-                        {/* Phase V-1: Use ThumbnailPreview for videos (same as drawer) */}
-                        <ThumbnailPreview
-                            asset={asset}
-                            alt={asset.title || asset.original_filename || (isVideo ? 'Video' : 'Asset')}
-                            className={`${
-                                /* Masonry: no `display:block` — ThumbnailPreview uses flex to center img in min-height box */
-                                isMasonry
-                                    ? 'w-full max-h-full min-h-0'
-                                    : 'w-full h-full'
-                            } ${isHovering && isVideo && asset.video_preview_url && !isMobile && previewLoaded && !videoPreviewFailed ? 'opacity-0' : 'opacity-100'} transition-opacity duration-200`}
-                            retryCount={0}
-                            onRetry={null}
-                            size="lg"
-                            thumbnailVersion={thumbnailVersion}
-                            shouldAnimateThumbnail={shouldAnimateThumbnail}
-                            primaryColor={primaryColor}
-                            forceObjectFit={isVideo ? 'cover' : null}
-                            masonryMaxHeight={isMasonry ? masonryMaxHeightPx : null}
-                            masonryMinHeight={isMasonry ? masonryThumbnailMinHeightPx : null}
-                        />
+                        {showExecutionDualThumb || showExecutionSingleThumb ? (
+                            <div
+                                className={`relative flex h-full w-full items-center justify-center ${
+                                    isMasonry ? 'max-h-full min-h-0' : ''
+                                }`}
+                                onMouseEnter={() => !isMobile && showExecutionDualThumb && setExecutionThumbHover(true)}
+                                onMouseLeave={() => setExecutionThumbHover(false)}
+                            >
+                                <img
+                                    src={executionDisplayUrl}
+                                    alt=""
+                                    className={`max-h-full max-w-full object-contain transition-opacity duration-200 ${
+                                        showExecutionDualThumb && executionThumbHover ? 'opacity-0' : 'opacity-100'
+                                    }`}
+                                    draggable={false}
+                                />
+                                {showExecutionDualThumb ? (
+                                    <img
+                                        src={executionHoverUrl}
+                                        alt=""
+                                        className={`absolute inset-0 m-auto max-h-full max-w-full object-contain transition-opacity duration-200 ${
+                                            executionThumbHover ? 'opacity-100' : 'opacity-0'
+                                        }`}
+                                        draggable={false}
+                                    />
+                                ) : null}
+                            </div>
+                        ) : (
+                            <>
+                                {/* Phase V-1: Use ThumbnailPreview for videos (same as drawer) */}
+                                <ThumbnailPreview
+                                    asset={asset}
+                                    alt={asset.title || asset.original_filename || (isVideo ? 'Video' : 'Asset')}
+                                    className={`${
+                                        /* Masonry: no `display:block` — ThumbnailPreview uses flex to center img in min-height box */
+                                        isMasonry
+                                            ? 'w-full max-h-full min-h-0'
+                                            : 'w-full h-full'
+                                    } ${isHovering && isVideo && asset.video_preview_url && !isMobile && previewLoaded && !videoPreviewFailed ? 'opacity-0' : 'opacity-100'} transition-opacity duration-200`}
+                                    retryCount={0}
+                                    onRetry={null}
+                                    size="lg"
+                                    thumbnailVersion={thumbnailVersion}
+                                    shouldAnimateThumbnail={shouldAnimateThumbnail}
+                                    primaryColor={primaryColor}
+                                    forceObjectFit={isVideo ? 'cover' : null}
+                                    masonryMaxHeight={isMasonry ? masonryMaxHeightPx : null}
+                                    masonryMinHeight={isMasonry ? masonryThumbnailMinHeightPx : null}
+                                />
+                            </>
+                        )}
 
                         {/* Phase V-1: Play icon overlay for videos */}
                         {isVideo && (

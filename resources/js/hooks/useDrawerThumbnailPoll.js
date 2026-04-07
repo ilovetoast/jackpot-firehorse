@@ -14,7 +14,7 @@
  * Polling stops immediately when:
  * - Drawer closes (asset becomes null)
  * - Asset changes (asset.id changes)
- * - Final thumbnail is confirmed (final_thumbnail_url exists and status is 'completed')
+ * - After one refresh when final thumbnail is confirmed (so full thumbnail_mode_urls can load), or on terminal error
  * - Thumbnail error exists (status is 'failed' or 'skipped')
  * 
  * @param {Object} options
@@ -24,6 +24,7 @@
  */
 import { useEffect, useRef, useState } from 'react'
 import { getThumbnailState, supportsThumbnail } from '../utils/thumbnailUtils'
+import { mergeThumbnailModeUrlsDrawerSync, mergeThumbnailModeUrlsPreserveCache } from '../utils/thumbnailModes'
 
 // Poll schedule: 2s → 3s → 5s → 10s → 15s → stop
 const POLL_SCHEDULE = [2000, 3000, 5000, 10000, 15000] // milliseconds
@@ -59,12 +60,36 @@ export function useDrawerThumbnailPoll({ asset, onAssetUpdate, pollEnabled = tru
                 // Same asset ID - grid state (prop) is source of truth
                 // Use prop values, but allow polling to add thumbnail URLs if missing
                 // Grid state updates (from handleThumbnailUpdate/handleLifecycleUpdate) take precedence
+                const prevStatus =
+                    prevDrawerAsset?.thumbnail_modes_status &&
+                    typeof prevDrawerAsset.thumbnail_modes_status === 'object'
+                        ? prevDrawerAsset.thumbnail_modes_status
+                        : {}
+                const nextStatus =
+                    asset.thumbnail_modes_status && typeof asset.thumbnail_modes_status === 'object'
+                        ? asset.thumbnail_modes_status
+                        : {}
+                const prevMeta =
+                    prevDrawerAsset?.thumbnail_modes_meta &&
+                    typeof prevDrawerAsset.thumbnail_modes_meta === 'object'
+                        ? prevDrawerAsset.thumbnail_modes_meta
+                        : {}
+                const nextMeta =
+                    asset.thumbnail_modes_meta && typeof asset.thumbnail_modes_meta === 'object'
+                        ? asset.thumbnail_modes_meta
+                        : {}
                 return {
                     ...asset, // Grid state is source of truth
                     // Only use polling updates if grid doesn't have them yet
                     final_thumbnail_url: asset.final_thumbnail_url || prevDrawerAsset?.final_thumbnail_url,
                     preview_thumbnail_url: asset.preview_thumbnail_url || prevDrawerAsset?.preview_thumbnail_url,
                     thumbnail_version: asset.thumbnail_version || prevDrawerAsset?.thumbnail_version,
+                    thumbnail_mode_urls: mergeThumbnailModeUrlsDrawerSync(
+                        asset.thumbnail_mode_urls,
+                        prevDrawerAsset?.thumbnail_mode_urls,
+                    ),
+                    thumbnail_modes_status: { ...prevStatus, ...nextStatus },
+                    thumbnail_modes_meta: { ...prevMeta, ...nextMeta },
                 }
             })
             assetIdRef.current = asset.id
@@ -112,18 +137,12 @@ export function useDrawerThumbnailPoll({ asset, onAssetUpdate, pollEnabled = tru
         const thumbnailStatus = currentAsset.thumbnail_status?.value || currentAsset.thumbnail_status
         const hasFinal = !!currentAsset.final_thumbnail_url
         const hasPreview = !!currentAsset.preview_thumbnail_url
-        const isCompleted = thumbnailStatus === 'completed'
         const isFailed = thumbnailStatus === 'failed'
         const isSkipped = thumbnailStatus === 'skipped'
         const hasError = !!currentAsset.thumbnail_error
         const isPending = thumbnailStatus === 'pending' || thumbnailStatus === 'processing'
 
-        // Stop conditions
-        if (isCompleted && hasFinal) {
-            // Final thumbnail confirmed - stop polling
-            return
-        }
-
+        // Stop conditions (completed+final still runs one batch fetch below for full thumbnail_mode_urls)
         if (isFailed || isSkipped || hasError) {
             // Terminal error state - stop polling
             return
@@ -178,8 +197,33 @@ export function useDrawerThumbnailPoll({ asset, onAssetUpdate, pollEnabled = tru
                 const previewNowAvailable = !!updatedAssetData.preview_thumbnail_url && !currentAsset.preview_thumbnail_url
                 const statusChanged = updatedAssetData.thumbnail_status !== thumbnailStatus
                 const errorChanged = updatedAssetData.thumbnail_error !== currentAsset.thumbnail_error
+                const nextModesMeta = updatedAssetData.thumbnail_modes_meta
+                const mergedModeUrls = mergeThumbnailModeUrlsPreserveCache(
+                    currentAsset.thumbnail_mode_urls,
+                    updatedAssetData.thumbnail_mode_urls,
+                    currentAsset.thumbnail_modes_meta,
+                    nextModesMeta,
+                )
+                const modeUrlsEffectivelyChanged =
+                    JSON.stringify(mergedModeUrls ?? null) !==
+                    JSON.stringify(currentAsset.thumbnail_mode_urls ?? null)
+                const modeMetaChanged =
+                    JSON.stringify(nextModesMeta ?? null) !==
+                    JSON.stringify(currentAsset.thumbnail_modes_meta ?? null)
+                const modesStatusChanged =
+                    JSON.stringify(updatedAssetData.thumbnail_modes_status ?? null) !==
+                    JSON.stringify(currentAsset.thumbnail_modes_status ?? null)
 
-                if (versionChanged || finalNowAvailable || previewNowAvailable || statusChanged || errorChanged) {
+                if (
+                    versionChanged ||
+                    finalNowAvailable ||
+                    previewNowAvailable ||
+                    statusChanged ||
+                    errorChanged ||
+                    modeUrlsEffectivelyChanged ||
+                    modeMetaChanged ||
+                    modesStatusChanged
+                ) {
                     // Merge updated data into current asset
                     // Note: updatedAssetData has asset_id, but we keep id from currentAsset
                     const updatedAsset = {
@@ -189,6 +233,10 @@ export function useDrawerThumbnailPoll({ asset, onAssetUpdate, pollEnabled = tru
                         thumbnail_status: updatedAssetData.thumbnail_status ?? currentAsset.thumbnail_status,
                         thumbnail_version: updatedAssetData.thumbnail_version ?? currentAsset.thumbnail_version,
                         thumbnail_error: updatedAssetData.thumbnail_error ?? currentAsset.thumbnail_error,
+                        thumbnail_mode_urls: mergedModeUrls ?? updatedAssetData.thumbnail_mode_urls ?? currentAsset.thumbnail_mode_urls,
+                        thumbnail_modes_meta: nextModesMeta ?? currentAsset.thumbnail_modes_meta,
+                        thumbnail_modes_status:
+                            updatedAssetData.thumbnail_modes_status ?? currentAsset.thumbnail_modes_status,
                     }
 
                     // Update ref for next poll
@@ -206,6 +254,18 @@ export function useDrawerThumbnailPoll({ asset, onAssetUpdate, pollEnabled = tru
         } catch (error) {
             console.error('[useDrawerThumbnailPoll] Poll error:', error)
             // Stop polling on error
+            return
+        }
+
+        const a = assetRef.current
+        const stAfter = a.thumbnail_status?.value || a.thumbnail_status
+        const hasFinalAfter = !!a.final_thumbnail_url
+        if (
+            (stAfter === 'completed' && hasFinalAfter) ||
+            stAfter === 'failed' ||
+            stAfter === 'skipped' ||
+            !!a.thumbnail_error
+        ) {
             return
         }
 
@@ -242,16 +302,10 @@ export function useDrawerThumbnailPoll({ asset, onAssetUpdate, pollEnabled = tru
         const thumbnailStatus = currentAsset.thumbnail_status?.value || currentAsset.thumbnail_status
         const hasFinal = !!currentAsset.final_thumbnail_url
         const hasPreview = !!currentAsset.preview_thumbnail_url
-        const isCompleted = thumbnailStatus === 'completed'
         const isFailed = thumbnailStatus === 'failed'
         const isSkipped = thumbnailStatus === 'skipped'
         const hasError = !!currentAsset.thumbnail_error
         const isPending = thumbnailStatus === 'pending' || thumbnailStatus === 'processing'
-
-        // Don't poll if already completed with final
-        if (isCompleted && hasFinal) {
-            return
-        }
 
         // Don't poll if terminal error state
         if (isFailed || isSkipped || hasError) {

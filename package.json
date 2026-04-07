@@ -4,7 +4,8 @@
     "type": "module",
     "scripts": {
         "build": "vite build",
-        "dev": "vite"
+        "dev": "vite",
+        "test:js": "node --test resources/js/utils/thumbnailModes.test.mjs resources/js/utils/executionThumbnailDisplay.test.mjs resources/js/utils/enhancedPreviewComparisonStorage.test.mjs resources/js/utils/assetCardEnhancedExecutionChrome.test.mjs resources/js/utils/executionEnhancedGridContainerClass.test.mjs"
     },
     "devDependencies": {
         "@tailwindcss/typography": "^0.5.19",

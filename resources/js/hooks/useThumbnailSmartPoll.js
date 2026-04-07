@@ -168,10 +168,30 @@ export function useThumbnailSmartPoll({ assets, onAssetUpdate, selectedCategoryI
                 const previewUrlChanged = updatedAsset.preview_thumbnail_url !== currentAsset.preview_thumbnail_url
                 const finalUrlChanged = updatedAsset.final_thumbnail_url !== currentAsset.final_thumbnail_url
                 const errorChanged = updatedAsset.thumbnail_error !== currentAsset.thumbnail_error
-                
+                const modeUrlsChanged =
+                    JSON.stringify(updatedAsset.thumbnail_mode_urls ?? null) !==
+                    JSON.stringify(currentAsset.thumbnail_mode_urls ?? null)
+                const modesMetaChanged =
+                    JSON.stringify(updatedAsset.thumbnail_modes_meta ?? null) !==
+                    JSON.stringify(currentAsset.thumbnail_modes_meta ?? null)
+                const modesStatusChanged =
+                    JSON.stringify(updatedAsset.thumbnail_modes_status ?? null) !==
+                    JSON.stringify(currentAsset.thumbnail_modes_status ?? null)
+
                 // Only update if something actually changed (prevent unnecessary re-renders)
-                if (versionChanged || finalNowAvailable || previewNowAvailable || isFailed || 
-                    thumbnailStatusChanged || previewUrlChanged || finalUrlChanged || errorChanged) {
+                if (
+                    versionChanged ||
+                    finalNowAvailable ||
+                    previewNowAvailable ||
+                    isFailed ||
+                    thumbnailStatusChanged ||
+                    previewUrlChanged ||
+                    finalUrlChanged ||
+                    errorChanged ||
+                    modeUrlsChanged ||
+                    modesMetaChanged ||
+                    modesStatusChanged
+                ) {
                     hasUpdates = true
                     
                     // Map updatedAsset to match currentAsset structure

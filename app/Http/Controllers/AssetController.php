@@ -24,17 +24,19 @@ use App\Services\AssetSearchService;
 use App\Services\AssetSortService;
 use App\Services\BrandDNA\GoogleFontLibraryEntriesService;
 use App\Services\BrandLibraryCategoryCountService;
+use App\Services\FeatureGate;
 use App\Services\Lifecycle\LifecycleResolver;
 use App\Services\Metadata\MetadataValueNormalizer;
 use App\Services\MetadataFilterService;
 use App\Services\MetadataSchemaResolver;
-use App\Services\FeatureGate;
 use App\Services\PlanService;
 use App\Services\Prostaff\GetProstaffDamFilterOptions;
 use App\Services\SystemCategoryService;
 use App\Services\UploadInitiationService;
 use App\Support\AssetVariant;
 use App\Support\DeliveryContext;
+use App\Support\ThumbnailMetadata;
+use App\Support\ThumbnailModeDeliveryUrls;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -427,6 +429,20 @@ class AssetController extends Controller
                     ->from('asset_metadata')
                     ->whereColumn('asset_metadata.asset_id', 'assets.id')
                     ->whereNotNull('asset_metadata.approved_at');
+            });
+        }
+
+        // Special filter: missing_tags=1 — library assets with no rows in asset_tags (Manage → Tags deep link)
+        if ($request->boolean('missing_tags')) {
+            $assetsQuery->whereNotExists(function ($query) {
+                $query->select(\DB::raw(1))
+                    ->from('asset_tags')
+                    ->whereColumn('asset_tags.asset_id', 'assets.id');
+            });
+            $baseQueryForFilterVisibility->whereNotExists(function ($query) {
+                $query->select(\DB::raw(1))
+                    ->from('asset_tags')
+                    ->whereColumn('asset_tags.asset_id', 'assets.id');
             });
         }
 
@@ -857,7 +873,7 @@ class AssetController extends Controller
                         : null;
                     $firstPageUrl = null;
 
-                    $thumbnailsExistInMetadata = ! empty($metadata['thumbnails']) && isset($metadata['thumbnails']['thumb']);
+                    $thumbnailsExistInMetadata = ThumbnailMetadata::hasThumb($metadata);
                     if ($thumbnailStatus === 'completed' || $thumbnailsExistInMetadata) {
                         $thumbnailVersion = $metadata['thumbnails_generated_at'] ?? null;
                         $thumbnailStyle = $asset->thumbnailPathForStyle('medium') ? 'medium' : 'thumb';
@@ -960,6 +976,9 @@ class AssetController extends Controller
                         // Brand Intelligence (EBI): human-readable drawer payload (no raw overall score)
                         'brand_intelligence' => $asset->brandIntelligencePayloadForFrontend(),
                         'reference_promotion' => $asset->brandReferenceAsset?->toFrontendArray(),
+                        'thumbnail_mode_urls' => ThumbnailModeDeliveryUrls::map($asset),
+                        'thumbnail_modes_meta' => ThumbnailModeDeliveryUrls::modesMetaForApi($asset),
+                        'thumbnail_modes_status' => $metadata['thumbnail_modes_status'] ?? null,
                     ];
                     if ($finalThumbnailUrl && str_contains($finalThumbnailUrl, 'X-Amz-Signature')) {
                         Log::info('ASSET API RESPONSE URL', [
@@ -1016,6 +1035,9 @@ class AssetController extends Controller
                         'health_status' => 'healthy',
                         'brand_intelligence' => null,
                         'reference_promotion' => null,
+                        'thumbnail_mode_urls' => [],
+                        'thumbnail_modes_meta' => [],
+                        'thumbnail_modes_status' => null,
                     ];
                 }
             })
@@ -1699,6 +1721,7 @@ class AssetController extends Controller
 
         // Limit to reasonable batch size
         $assetIds = array_slice($assetIds, 0, 50);
+        $includeEnhancedOutputFreshness = count($assetIds) === 1;
 
         try {
             $assets = Asset::where('tenant_id', $tenant->id)
@@ -1707,7 +1730,7 @@ class AssetController extends Controller
                 ->whereNull('deleted_at')
                 ->with('storageBucket')
                 ->get(['id', 'thumbnail_status', 'thumbnail_error', 'metadata', 'storage_bucket_id'])
-                ->map(function ($asset) {
+                ->map(function ($asset) use ($includeEnhancedOutputFreshness) {
                     $thumbnailStatus = $asset->thumbnail_status instanceof \App\Enums\ThumbnailStatus
                         ? $asset->thumbnail_status->value
                         : ($asset->thumbnail_status ?? 'pending');
@@ -1792,6 +1815,8 @@ class AssetController extends Controller
                     // Preview thumbnail URL - returned even when status is pending or processing
                     $previewThumbnailUrl = $asset->deliveryUrl(AssetVariant::THUMB_PREVIEW, DeliveryContext::AUTHENTICATED) ?: null;
 
+                    $modesStatus = $metadata['thumbnail_modes_status'] ?? null;
+
                     return [
                         'asset_id' => $asset->id,
                         'thumbnail_status' => $verifiedStatus, // Use verified status, not raw status
@@ -1801,6 +1826,9 @@ class AssetController extends Controller
                         'thumbnail_error' => $asset->thumbnail_error,
                         'thumbnail_skip_reason' => $skipReason, // Skip reason for skipped assets
                         'preview_unavailable_user_message' => $previewUnavailableMessage,
+                        'thumbnail_mode_urls' => ThumbnailModeDeliveryUrls::map($asset),
+                        'thumbnail_modes_meta' => ThumbnailModeDeliveryUrls::modesMetaForApi($asset, $includeEnhancedOutputFreshness),
+                        'thumbnail_modes_status' => is_array($modesStatus) ? $modesStatus : null,
                     ];
                 })
                 ->values()
@@ -1899,6 +1927,8 @@ class AssetController extends Controller
                 }
             }
 
+            $modesStatus = $metadata['thumbnail_modes_status'] ?? null;
+
             return response()->json([
                 'thumbnail_status' => $thumbnailStatus,
                 'preview_thumbnail_url' => $previewThumbnailUrl,
@@ -1910,6 +1940,9 @@ class AssetController extends Controller
                 'preview_unavailable_user_message' => $metadata['preview_unavailable_user_message'] ?? null,
                 'pdf_page_count' => $asset->pdf_page_count,
                 'pdf_pages_rendered' => (bool) ($asset->pdf_pages_rendered ?? false),
+                'thumbnail_mode_urls' => ThumbnailModeDeliveryUrls::map($asset),
+                'thumbnail_modes_meta' => ThumbnailModeDeliveryUrls::modesMetaForApi($asset, true),
+                'thumbnail_modes_status' => is_array($modesStatus) ? $modesStatus : null,
             ], 200);
         } catch (\Throwable $e) {
             Log::warning('[AssetController::processingStatus] Degraded JSON response (thumbnail poll)', [
@@ -1948,6 +1981,9 @@ class AssetController extends Controller
             'preview_unavailable_user_message' => $metadata['preview_unavailable_user_message'] ?? null,
             'pdf_page_count' => $asset->pdf_page_count,
             'pdf_pages_rendered' => (bool) ($asset->pdf_pages_rendered ?? false),
+            'thumbnail_mode_urls' => [],
+            'thumbnail_modes_meta' => [],
+            'thumbnail_modes_status' => null,
             'degraded' => true,
         ], 200);
     }

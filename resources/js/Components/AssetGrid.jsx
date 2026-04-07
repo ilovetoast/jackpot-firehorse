@@ -30,6 +30,8 @@ import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } fr
 import AssetCard from './AssetCard'
 import AssetGridContainer from './AssetGridContainer'
 import { useSelectionOptional } from '../contexts/SelectionContext'
+import { executionEnhancedGridContainerClass } from '../utils/executionEnhancedGridContainerClass'
+import { isExecutionEnhancedGridMode } from '../utils/assetCardEnhancedExecutionChrome'
 
 const MARQUEE_DRAG_THRESHOLD_PX = 5
 /** Matches Tailwind `gap-7` (1.75rem) for column width math */
@@ -81,6 +83,7 @@ export default function AssetGrid({
     onAssetApproved = null, // Phase L.6.2: Callback when asset is approved/rejected
     selectionAssetType = 'asset', // Phase 2 Selection: 'asset' | 'execution' for SelectionContext type
     layoutMode = 'grid', // 'grid' | 'masonry' — column count still follows card size; masonry uses natural heights (capped)
+    executionThumbnailViewMode = null, // Deliverables: standard | enhanced | presentation
 }) {
     const safeAssets = (assets || []).filter(Boolean)
     const selection = useSelectionOptional()
@@ -286,6 +289,9 @@ export default function AssetGrid({
         return null
     }
 
+    const isEnhancedGridMode = isExecutionEnhancedGridMode(executionThumbnailViewMode)
+    const enhancedGridContainerClass = executionEnhancedGridContainerClass(executionThumbnailViewMode)
+
     const minAnimatedIndex = safeAssets.findIndex((a) => animatedIds.has(a.id))
     const staggerMs = 20
     const masonryMaxPx = masonryMaxHeightForCardSize(cardSize)
@@ -334,6 +340,7 @@ export default function AssetGrid({
                     selectionAssetType={selectionAssetType}
                     layoutMode={layoutMode}
                     masonryMaxHeightPx={masonryMaxPx}
+                    executionThumbnailViewMode={executionThumbnailViewMode}
                 />
             </div>
         )
@@ -342,9 +349,19 @@ export default function AssetGrid({
     return (
         <div
             ref={containerRef}
-            className="relative -m-1 rounded-lg p-1"
+            data-enhanced-grid-mode={isEnhancedGridMode ? 'true' : 'false'}
+            className={['relative -m-1 rounded-lg p-1', enhancedGridContainerClass].filter(Boolean).join(' ')}
             onPointerDownCapture={handleContainerPointerDown}
         >
+            {isEnhancedGridMode && (
+                <span
+                    className="pointer-events-none absolute right-1.5 top-1.5 z-[1] select-none text-base opacity-80 drop-shadow-sm"
+                    title="Enhanced preview mode"
+                    aria-hidden
+                >
+                    ✨
+                </span>
+            )}
             {marqueeRect && (
                 <div
                     className="pointer-events-none fixed z-[100] border-2 border-dashed rounded-sm"

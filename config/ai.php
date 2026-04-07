@@ -597,6 +597,19 @@ PROMPT
             'allowed_actions' => ['read', 'generate_image'],
             'permissions' => [],
         ],
+        'presentation_preview' => [
+            'name' => 'Presentation preview',
+            'description' => 'AI context-aware presentation still from pipeline thumbnail (drawer / deliverables)',
+            'scope' => 'tenant',
+            'default_model' => 'gpt-image-1',
+            'allowed_models' => [
+                'gpt-image-1',
+                'gemini-2.5-flash-image',
+                'gemini-3-pro-image-preview',
+            ],
+            'allowed_actions' => ['read', 'generate_image'],
+            'permissions' => [],
+        ],
     ],
 
     /*

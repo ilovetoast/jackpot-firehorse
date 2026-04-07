@@ -119,9 +119,10 @@ export default function CategorySettingsModal({
         onClose()
     }
 
-    const registryUrl = typeof route === 'function'
-        ? route('tenant.metadata.registry.index', { brand: brandId, category: category.slug || category.name?.toLowerCase().replace(/\s+/g, '-') })
-        : `/app/tenant/metadata/registry?brand=${brandId}&category=${encodeURIComponent(category.slug || category.name?.toLowerCase().replace(/\s+/g, '-') || '')}`
+    const slug = category.slug || category.name?.toLowerCase().replace(/\s+/g, '-') || ''
+    const manageCategoriesUrl = typeof route === 'function'
+        ? route('manage.categories', { category: slug })
+        : `/app/manage/categories?category=${encodeURIComponent(slug)}`
 
     const modalContent = (
         <div className="fixed inset-0 z-50 overflow-y-auto" aria-labelledby="category-settings-title" role="dialog" aria-modal="true">
@@ -211,7 +212,7 @@ export default function CategorySettingsModal({
                                         Configure which metadata fields appear for assets in this category.
                                     </p>
                                     <a
-                                        href={registryUrl}
+                                        href={manageCategoriesUrl}
                                         className="inline-flex items-center gap-2 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
                                     >
                                         <ArrowTopRightOnSquareIcon className="h-4 w-4" />

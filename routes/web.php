@@ -551,6 +551,14 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
             Route::get('/insights/activity', [\App\Http\Controllers\AnalyticsOverviewController::class, 'activity'])->name('insights.activity');
             Route::get('/insights/review', [\App\Http\Controllers\AiReviewController::class, 'index'])->name('insights.review');
             Route::get('/insights/creator', [\App\Http\Controllers\InsightsCreatorApprovalsController::class, 'index'])->name('insights.creator');
+            // Manage — categories (folders + fields), tags, values (brand library configuration)
+            Route::prefix('manage')->name('manage.')->group(function () {
+                Route::get('/categories', [\App\Http\Controllers\ManageController::class, 'categories'])->name('categories');
+                Route::get('/structure', [\App\Http\Controllers\ManageController::class, 'structure'])->name('structure');
+                Route::get('/fields', [\App\Http\Controllers\ManageController::class, 'fields'])->name('fields');
+                Route::get('/tags', [\App\Http\Controllers\ManageController::class, 'tags'])->name('tags');
+                Route::get('/values', [\App\Http\Controllers\ManageController::class, 'values'])->name('values');
+            });
             // Backward compatibility: redirect /analytics to /insights
             Route::redirect('/analytics', '/insights', 301);
             Route::redirect('/analytics/overview', '/insights/overview', 301);
@@ -718,6 +726,8 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
             Route::get('/assets/{asset}/metrics/views', [\App\Http\Controllers\AssetMetricController::class, 'views'])->name('assets.metrics.views');
             // Thumbnail retry endpoint
             Route::post('/assets/{asset}/thumbnails/retry', [\App\Http\Controllers\AssetThumbnailController::class, 'retry'])->name('assets.thumbnails.retry');
+            Route::post('/assets/{asset}/enhanced-preview/generate', [\App\Http\Controllers\AssetThumbnailController::class, 'generateEnhancedPreview'])->name('assets.enhanced-preview.generate');
+            Route::post('/assets/{asset}/presentation-preview/generate', [\App\Http\Controllers\AssetThumbnailController::class, 'generatePresentationPreview'])->name('assets.presentation-preview.generate');
             // Thumbnail generation endpoint (for existing assets without thumbnails)
             Route::post('/assets/{asset}/thumbnails/generate', [\App\Http\Controllers\AssetThumbnailController::class, 'generate'])->name('assets.thumbnails.generate');
             // Remove preview thumbnails endpoint
@@ -885,6 +895,8 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
             Route::get('/api/brands/{brand}/tags/summary', [\App\Http\Controllers\BrandTagManagementController::class, 'summary'])->name('api.brands.tags.summary');
             Route::post('/api/brands/{brand}/tags/purge', [\App\Http\Controllers\BrandTagManagementController::class, 'purge'])->name('api.brands.tags.purge');
             Route::post('/api/brands/{brand}/tags/purge-bulk', [\App\Http\Controllers\BrandTagManagementController::class, 'purgeBulk'])->name('api.brands.tags.purge-bulk');
+            Route::get('/api/brands/{brand}/metadata-values/summary', [\App\Http\Controllers\BrandMetadataValueManagementController::class, 'summary'])->name('api.brands.metadata-values.summary');
+            Route::post('/api/brands/{brand}/metadata-values/purge', [\App\Http\Controllers\BrandMetadataValueManagementController::class, 'purge'])->name('api.brands.metadata-values.purge');
 
             // Phase AF-1: Asset approval workflow
             Route::get('/brands/{brand}/approvals', [\App\Http\Controllers\BrandController::class, 'approvals'])->name('brands.approvals');

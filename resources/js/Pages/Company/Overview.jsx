@@ -266,6 +266,25 @@ export default function CompanyOverview({
                                         : `${ai_usage.suggestions.remaining ?? 0} remaining this month`}
                                     formatValue={(v) => ai_usage.suggestions.is_unlimited ? `${v.toLocaleString()}` : `${v.toLocaleString()} of ${ai_usage.suggestions.cap.toLocaleString()}`}
                                 />
+                                {ai_usage.thumbnail_enhancement && (
+                                    <StatCard
+                                        icon={SparklesIcon}
+                                        title="Thumbnail enhancement"
+                                        value={ai_usage.thumbnail_enhancement.count ?? 0}
+                                        subtext={
+                                            (ai_usage.thumbnail_enhancement.count ?? 0) === 0
+                                                ? 'No completed runs this month'
+                                                : `${ai_usage.thumbnail_enhancement.success_rate ?? '—'}% success · avg ${ai_usage.thumbnail_enhancement.avg_duration_ms != null ? `${Math.round(ai_usage.thumbnail_enhancement.avg_duration_ms)} ms` : '—'}` +
+                                                  (ai_usage.thumbnail_enhancement.p95_duration_ms != null
+                                                      ? ` · p95 ${Math.round(ai_usage.thumbnail_enhancement.p95_duration_ms)} ms`
+                                                      : '') +
+                                                  ((ai_usage.thumbnail_enhancement.skipped_count ?? 0) > 0
+                                                      ? ` · ${ai_usage.thumbnail_enhancement.skipped_count} skipped (guardrails)`
+                                                      : '')
+                                        }
+                                        formatValue={(v) => v.toLocaleString()}
+                                    />
+                                )}
                             </>
                         )}
                     </div>

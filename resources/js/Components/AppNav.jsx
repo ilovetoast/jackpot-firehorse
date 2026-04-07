@@ -7,6 +7,7 @@ import JackpotLogo from './JackpotLogo'
 import AgencyStripBrandSelect from './agency/AgencyStripBrandSelect'
 import GlobalUserControls from './Layout/GlobalUserControls'
 import {
+    AdjustmentsHorizontalIcon,
     ArrowDownTrayIcon,
     BookOpenIcon,
     ChartBarIcon,
@@ -428,11 +429,12 @@ export default function AppNav({
         }, 160)
     }
 
-    /** Desktop workspace nav: Overview + hover panel (Insights, brand settings) when a brand is active. */
+    /** Desktop workspace nav: Overview + hover panel (Insights, Manage, Settings, Creators) when a brand is active. */
     const renderDesktopOverviewNav = () => {
         const overviewPathActive =
             currentUrl === '/app/overview' || currentUrl.startsWith('/app/overview')
         const insightsPathActive = currentUrl.startsWith('/app/insights')
+        const managePathActive = currentUrl.startsWith('/app/manage')
         const creatorsPathActive =
             Boolean(activeBrand?.id) && currentUrl.startsWith(`/app/brands/${activeBrand.id}/creators`)
         const brandSettingsPathActive =
@@ -440,7 +442,11 @@ export default function AppNav({
             currentUrl.startsWith(`/app/brands/${activeBrand.id}`) &&
             !creatorsPathActive
         const overviewGroupActive =
-            overviewPathActive || insightsPathActive || brandSettingsPathActive || creatorsPathActive
+            overviewPathActive ||
+            insightsPathActive ||
+            managePathActive ||
+            brandSettingsPathActive ||
+            creatorsPathActive
 
         const inactiveNavColor = textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)'
         const accent = activeBrand?.primary_color || '#6366f1'
@@ -462,9 +468,12 @@ export default function AppNav({
 
         const showBrandSettings = can('brand_settings.manage')
         const showInsightsNav = canViewWorkspaceInsights
+        const showManageNav =
+            can('metadata.registry.view') || can('metadata.tenant.visibility.manage')
         const canViewCreatorsDashboard = Boolean(auth?.permissions?.can_view_creators_dashboard)
         const showCreatorsNav = Boolean(activeBrand?.id) && canViewCreatorsDashboard
-        const showOverviewDropdown = showInsightsNav || showBrandSettings || showCreatorsNav
+        const showOverviewDropdown =
+            showInsightsNav || showBrandSettings || showCreatorsNav || showManageNav
 
         if (!showOverviewDropdown) {
             return (
@@ -571,7 +580,22 @@ export default function AppNav({
                                 </span>
                             </Link>
                         ) : null}
-                        {(showCreatorsNav || showInsightsNav) && showBrandSettings ? (
+                        {showManageNav ? (
+                            <Link
+                                href={typeof route === 'function' ? route('manage.categories') : '/app/manage/categories'}
+                                className={`${subLinkBase} ${managePathActive ? subLinkActive : subLinkInactive}`}
+                                style={managePathActive ? { borderLeftColor: accent } : undefined}
+                            >
+                                <span className="inline-flex items-center gap-2">
+                                    <AdjustmentsHorizontalIcon
+                                        className="h-4 w-4 shrink-0 opacity-70"
+                                        aria-hidden="true"
+                                    />
+                                    Manage
+                                </span>
+                            </Link>
+                        ) : null}
+                        {(showCreatorsNav || showInsightsNav || showManageNav) && showBrandSettings ? (
                             <div
                                 role="separator"
                                 className={
@@ -602,7 +626,19 @@ export default function AppNav({
 
     // Guides removed from bottom nav on mobile — shown as icon in header next to Downloads
     const mobileAppNavItems = [
-        { href: '/app/overview', label: 'Overview', shortLabel: 'Overview', icon: HomeIcon, isActive: (url) => url === '/app/overview' || url.startsWith('/app/overview') },
+        {
+            href: '/app/overview',
+            label: 'Overview',
+            shortLabel: 'Overview',
+            icon: HomeIcon,
+            isActive: (url) => {
+                if (url === '/app/overview' || url.startsWith('/app/overview')) return true
+                if (url.startsWith('/app/insights')) return true
+                if (url.startsWith('/app/manage')) return true
+                if (activeBrand?.id && url.startsWith(`/app/brands/${activeBrand.id}`)) return true
+                return false
+            },
+        },
         { href: '/app/assets', label: 'Assets', shortLabel: 'Assets', icon: PhotoIcon, isActive: (url) => url.startsWith('/app/assets') && !url.startsWith('/app/executions') },
         { href: '/app/executions', label: DELIVERABLES_PAGE_LABEL, shortLabel: 'Exec', icon: Squares2X2Icon, isActive: (url) => url.startsWith('/app/executions') },
         { href: '/app/generative', label: 'Generate', shortLabel: 'Gen', icon: SparklesIcon, isActive: (url) => url.startsWith('/app/generative') },
@@ -888,7 +924,7 @@ export default function AppNav({
                             )}
                         </div>
 
-                        {/* Main menu: Overview, Assets, Executions, Collections, Generative (C12: flag + .app-nav-main-links for CSS) */}
+                        {/* Main menu: Overview (dropdown: Insights, Manage, Settings…), Assets, Executions, Collections, Generative */}
                         {isAppPage ? (isExternalCollectionChrome ? (
                             <div className="hidden min-w-0 flex-1 sm:flex sm:min-w-0 sm:items-center sm:gap-6 lg:gap-8 sm:pl-4 lg:pl-6 overflow-x-auto" data-collection-only="true">
                                 {(() => {
@@ -1330,7 +1366,11 @@ export default function AppNav({
                 const isOnOverview = currentUrl === '/app/overview' || currentUrl.startsWith('/app/overview')
                 const isOnCreators =
                     activeBrand?.id && currentUrl.startsWith(`/app/brands/${activeBrand.id}/creators`)
-                const isDarkNav = isOnOverview || Boolean(isOnCreators)
+                const isDarkNav =
+                    isOnOverview ||
+                    currentUrl.startsWith('/app/insights') ||
+                    currentUrl.startsWith('/app/manage') ||
+                    Boolean(isOnCreators)
                 return (
                     <div className={`fixed inset-x-0 bottom-0 z-[95] sm:hidden safe-area-pb ${
                         isDarkNav

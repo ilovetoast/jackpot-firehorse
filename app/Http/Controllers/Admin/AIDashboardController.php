@@ -2,16 +2,21 @@
 
 namespace App\Http\Controllers\Admin;
 
+use App\Enums\AITaskType;
 use App\Http\Controllers\Controller;
 use App\Models\AIAgentRun;
 use App\Models\AlertCandidate;
+use App\Models\Asset;
 use App\Models\DetectionRule;
 use App\Models\Ticket;
 use App\Services\AIBudgetService;
 use App\Services\AIConfigService;
 use App\Services\AICostReportingService;
+use App\Support\AssetVariant;
+use App\Support\DeliveryContext;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Log;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -567,7 +572,8 @@ class AIDashboardController extends Controller
     }
 
     /**
-     * Editor canvas: generative image + AI image edit runs with structured {@see AIService::buildGenerativeAuditForRun} metadata.
+     * Image AI audit: canvas generative + editor edit + DAM presentation preview runs
+     * (structured {@see AIService::buildGenerativeAuditForRun} metadata where applicable).
      */
     public function editorImageAudit(Request $request): Response
     {
@@ -575,17 +581,23 @@ class AIDashboardController extends Controller
             abort(403);
         }
 
-        $editorTaskTypes = ['editor_generative_image', 'editor_edit_image'];
+        $imageAuditTaskTypes = [
+            'editor_generative_image',
+            'editor_edit_image',
+            AITaskType::THUMBNAIL_PRESENTATION_PREVIEW,
+        ];
+
+        $allowedAgentIds = ['editor_generative_image', 'editor_edit_image', 'presentation_preview'];
 
         $query = AIAgentRun::query()
             ->forAdminActivityList()
-            ->whereIn('task_type', $editorTaskTypes)
+            ->whereIn('task_type', $imageAuditTaskTypes)
             ->with($this->eagerLoadsForAdminAiRunList())
             ->orderByDesc('id');
 
         if ($request->filled('agent_id')) {
             $aid = (string) $request->agent_id;
-            if (in_array($aid, ['editor_generative_image', 'editor_edit_image'], true)) {
+            if (in_array($aid, $allowedAgentIds, true)) {
                 $query->where('agent_id', $aid);
             }
         }
@@ -596,7 +608,7 @@ class AIDashboardController extends Controller
 
         if ($request->filled('task_type')) {
             $tt = (string) $request->task_type;
-            if (in_array($tt, $editorTaskTypes, true)) {
+            if (in_array($tt, $imageAuditTaskTypes, true)) {
                 $query->where('task_type', $tt);
             }
         }
@@ -679,11 +691,13 @@ class AIDashboardController extends Controller
             'agents' => [
                 ['value' => 'editor_generative_image', 'label' => $this->getAgentName('editor_generative_image')],
                 ['value' => 'editor_edit_image', 'label' => $this->getAgentName('editor_edit_image')],
+                ['value' => 'presentation_preview', 'label' => $this->getAgentName('presentation_preview')],
             ],
             'models' => $this->getModelOptions(),
             'task_types' => [
                 ['value' => 'editor_generative_image', 'label' => 'editor_generative_image'],
                 ['value' => 'editor_edit_image', 'label' => 'editor_edit_image'],
+                ['value' => AITaskType::THUMBNAIL_PRESENTATION_PREVIEW, 'label' => AITaskType::THUMBNAIL_PRESENTATION_PREVIEW],
             ],
             'environments' => $this->getEnvironmentOptions(),
         ];
@@ -1109,6 +1123,8 @@ class AIDashboardController extends Controller
 
         $relatedTickets = $this->relatedTicketsForAiAgentRun($run);
 
+        $sourceAssetSummary = $this->sourceAssetSummaryForAiRun($run);
+
         return response()->json([
             'id' => $run->id,
             'timestamp' => $run->started_at->format('Y-m-d H:i:s'),
@@ -1145,6 +1161,56 @@ class AIDashboardController extends Controller
                 ];
             })->values(),
             'metadata' => $run->metadata, // Includes prompts and responses if store_prompts is enabled
+            'source_asset' => $sourceAssetSummary,
         ]);
+    }
+
+    /**
+     * Best-effort link + thumbnail for the raster that was sent into image-edit flows.
+     * Raw bytes are not stored on the run ({@see AIService::buildMetadata}); use asset when known.
+     *
+     * @return array<string, mixed>|null
+     */
+    protected function sourceAssetSummaryForAiRun(AIAgentRun $run): ?array
+    {
+        $meta = is_array($run->metadata) ? $run->metadata : [];
+        $ga = is_array($meta['generative_audit'] ?? null) ? $meta['generative_audit'] : [];
+        $req = is_array($meta['editor_admin_request'] ?? null) ? $meta['editor_admin_request'] : [];
+
+        $rawId = $ga['source_asset_id'] ?? $req['asset_id'] ?? null;
+        if (($rawId === null || $rawId === '') && $run->entity_type === 'asset' && $run->entity_id !== null && $run->entity_id !== '') {
+            $rawId = $run->entity_id;
+        }
+        if ($rawId === null || $rawId === '') {
+            return null;
+        }
+
+        $assetId = is_string($rawId) ? trim($rawId) : (string) $rawId;
+
+        $asset = Asset::query()->find($assetId);
+        if (! $asset) {
+            return [
+                'id' => $assetId,
+                'missing' => true,
+                'admin_url' => url('/app/admin/assets/'.$assetId),
+            ];
+        }
+
+        $thumbnailUrl = null;
+        try {
+            $thumbnailUrl = $asset->deliveryUrl(AssetVariant::THUMB_MEDIUM, DeliveryContext::AUTHENTICATED);
+        } catch (\Throwable $e) {
+            Log::debug('[AIDashboardController] source asset thumbnail URL failed', [
+                'asset_id' => $asset->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        return [
+            'id' => $asset->id,
+            'title' => $asset->title ?: $asset->original_filename,
+            'thumbnail_url' => $thumbnailUrl,
+            'admin_url' => url('/app/admin/assets/'.$asset->id),
+        ];
     }
 }

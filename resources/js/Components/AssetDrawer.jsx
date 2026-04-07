@@ -44,7 +44,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense } from 'react'
 import { createPortal } from 'react-dom'
-import { XMarkIcon, ArrowPathIcon, ChevronLeftIcon, ChevronRightIcon, ExclamationTriangleIcon, EyeIcon, ArrowDownTrayIcon, CheckCircleIcon, CheckIcon, ArrowUturnLeftIcon, ClockIcon, XCircleIcon, CloudArrowUpIcon, RectangleStackIcon, TicketIcon, InformationCircleIcon, PhotoIcon } from '@heroicons/react/24/outline'
+import { XMarkIcon, ArrowPathIcon, ChevronLeftIcon, ChevronRightIcon, ChevronDownIcon, ExclamationTriangleIcon, EyeIcon, ArrowDownTrayIcon, CheckCircleIcon, CheckIcon, ArrowUturnLeftIcon, ClockIcon, XCircleIcon, CloudArrowUpIcon, RectangleStackIcon, TicketIcon, InformationCircleIcon, PhotoIcon } from '@heroicons/react/24/outline'
 import { usePage, router, Link } from '@inertiajs/react'
 import AssetImage from './AssetImage'
 import AssetTimeline from './AssetTimeline'
@@ -62,7 +62,24 @@ import ApprovalHistory from './ApprovalHistory'
 import PendingAssetReviewModal from './PendingAssetReviewModal'
 import PDFViewer from './PDFViewer'
 import { getUploadAcceptAttribute } from '../utils/damFileTypes'
-import { getThumbnailState, getThumbnailVersion, supportsThumbnail } from '../utils/thumbnailUtils'
+import {
+    getThumbnailState,
+    getThumbnailUrl,
+    getThumbnailUrlModeOnly,
+    getThumbnailVersion,
+    supportsThumbnail,
+} from '../utils/thumbnailUtils'
+import {
+    ENHANCED_SKIP_REASON_TOO_SMALL,
+    getThumbnailModesModeMeta,
+    getThumbnailModesStatus,
+    isEnhancedOutputStale,
+    shouldShowEnhancedPreviewOption,
+    shouldShowEnhancedPreviewRadio,
+    shouldShowPreferredPreviewOption,
+    shouldShowPresentationPreviewOption,
+    shouldShowPresentationPreviewRadio,
+} from '../utils/thumbnailModes'
 import { getPipelineStageLabel, getPipelineStageIndex, PIPELINE_STAGES } from '../utils/pipelineStatusUtils'
 import { getAssetCategoryId, parseAssetQualityRating } from '../utils/assetUtils'
 
@@ -76,6 +93,12 @@ import { CheckCircleIcon as CheckCircleIconSolid } from '@heroicons/react/24/sol
 import CollectionSelector from './Collections/CollectionSelector' // C9.1
 import CreateCollectionModal from './Collections/CreateCollectionModal' // C9.1
 import { useSelectionOptional } from '../contexts/SelectionContext'
+import { useDeliverablesThumbnailMode } from '../contexts/DeliverablesThumbnailModeContext'
+import ExecutionTripleCompareModal from './ExecutionTripleCompareModal'
+import {
+    getPreferredExecutionThumbnailTier,
+    setPreferredExecutionThumbnailTier,
+} from '../utils/executionPreferredThumbnailStorage'
 
 /** Brand reference CTA thresholds: quality rating must be > this (i.e. 4–5 on 1–5 scale), or starred, or engagement. */
 const BRAND_REFERENCE_PROMPT_MIN_QUALITY_EXCLUSIVE = 3
@@ -189,6 +212,7 @@ export default function AssetDrawer({
     const closeButtonRef = useRef(null)
     /** One-shot: grid double-click initial zoom per drawer mount */
     const initialZoomAppliedRef = useRef(false)
+    const previewStyleAssetIdRef = useRef(null)
     const [showZoomModal, setShowZoomModal] = useState(false)
     /** Google Fonts virtual row: stylesheet loaded for specimen preview in drawer/lightbox */
     const [virtualGoogleFontReady, setVirtualGoogleFontReady] = useState(false)
@@ -202,6 +226,13 @@ export default function AssetDrawer({
     const [isLayoutSettling, setIsLayoutSettling] = useState(true)
     // Phase 3.0C: Track thumbnail retry count (UI only, max 2 retries)
     const [thumbnailRetryCount, setThumbnailRetryCount] = useState(0)
+    /** Drawer preview pipeline mode: original | preferred (clean) | enhanced | presentation */
+    const [previewStyleMode, setPreviewStyleMode] = useState('original')
+    const [enhancedPreviewLoading, setEnhancedPreviewLoading] = useState(false)
+    const [presentationPreviewLoading, setPresentationPreviewLoading] = useState(false)
+    /** Deliverables: collapsible “Preview options” (enhanced controls) */
+    const [previewOptionsExpanded, setPreviewOptionsExpanded] = useState(false)
+    const [executionTripleCompareOpen, setExecutionTripleCompareOpen] = useState(false)
     // Thumbnail retry state
     const [showRetryModal, setShowRetryModal] = useState(false)
     const [retryLoading, setRetryLoading] = useState(false)
@@ -325,6 +356,7 @@ export default function AssetDrawer({
     const { trackView, getViewCount, getDownloadCount } = useAssetMetrics()
     // Phase 3: SelectionContext for Add to download button
     const selection = useSelectionOptional()
+    const deliverablesThumbMode = useDeliverablesThumbnailMode()
     
     // Analytics/metrics state
     const [viewCount, setViewCount] = useState(null)
@@ -640,6 +672,10 @@ export default function AssetDrawer({
     // CRITICAL: Drawer must tolerate undefined asset during async updates
     // Asset may be temporarily undefined while localAssets array is being updated
     const displayAsset = drawerAsset || asset || null
+
+    useEffect(() => {
+        setExecutionTripleCompareOpen(false)
+    }, [displayAsset?.id])
 
     const isOwnUpload = useMemo(() => {
         const uid = auth?.user?.id
@@ -1219,6 +1255,297 @@ export default function AssetDrawer({
         || displayAsset.mime_type === 'application/pdf'
         || fileExtension.toUpperCase() === 'PDF'
 
+    const showPreferredPreviewOption = useMemo(
+        () => shouldShowPreferredPreviewOption(displayAsset),
+        [
+            displayAsset?.id,
+            displayAsset?.thumbnail_mode_urls,
+            displayAsset?.thumbnail_modes_status,
+            displayAsset?.metadata?.thumbnail_modes_status,
+            displayAsset?.thumbnail_modes_meta,
+            displayAsset?.metadata?.thumbnail_modes_meta,
+        ],
+    )
+    const showEnhancedPreviewOption = useMemo(
+        () => shouldShowEnhancedPreviewOption(displayAsset),
+        [displayAsset?.id, displayAsset?.thumbnail_mode_urls],
+    )
+
+    const preferredPipelineStatus = String(
+        getThumbnailModesStatus(displayAsset).preferred || '',
+    ).toLowerCase()
+    const enhancedPipelineStatus = String(
+        getThumbnailModesStatus(displayAsset).enhanced || '',
+    ).toLowerCase()
+
+    const displayEnhancedMeta = useMemo(
+        () => getThumbnailModesModeMeta(displayAsset, 'enhanced'),
+        [
+            displayAsset?.id,
+            displayAsset?.thumbnail_modes_meta,
+            displayAsset?.metadata?.thumbnail_modes_meta,
+        ],
+    )
+
+    const enhancedOutputStale = useMemo(() => isEnhancedOutputStale(displayAsset), [
+        displayAsset,
+        displayAsset?.id,
+        displayAsset?.thumbnail_modes_status,
+        displayAsset?.metadata?.thumbnail_modes_status,
+        displayAsset?.thumbnail_modes_meta,
+        displayAsset?.metadata?.thumbnail_modes_meta,
+    ])
+
+    const enhancedSkipTooSmall =
+        enhancedPipelineStatus === 'skipped' &&
+        displayEnhancedMeta.skip_reason === ENHANCED_SKIP_REASON_TOO_SMALL
+
+    const isExecutionDrawer = selectionAssetType === 'execution'
+    /** Deliverables / executions: show full art (crop marks, etc.) without cropping the preview pane. */
+    const drawerPreviewForceObjectFit = useMemo(() => {
+        const slug = String(displayAsset?.category?.slug || '').toLowerCase()
+        if (isExecutionDrawer || slug === 'executions') {
+            return 'contain'
+        }
+        return null
+    }, [displayAsset?.category?.slug, isExecutionDrawer])
+
+    const showExecutionPreviewChrome =
+        isExecutionDrawer &&
+        hasThumbnailSupport &&
+        !isVideo &&
+        !isVirtualGoogleFont &&
+        !externalCollectionGuest
+
+    const showEnhancedPreviewRadio = useMemo(
+        () => (isExecutionDrawer ? shouldShowEnhancedPreviewRadio(displayAsset) : false),
+        [
+            isExecutionDrawer,
+            displayAsset,
+            displayAsset?.id,
+            displayAsset?.thumbnail_mode_urls,
+            displayAsset?.thumbnail_modes_status,
+            displayAsset?.metadata?.thumbnail_modes_status,
+        ],
+    )
+
+    const showPresentationPreviewOption = useMemo(
+        () => shouldShowPresentationPreviewOption(displayAsset),
+        [displayAsset, displayAsset?.id, displayAsset?.thumbnail_mode_urls],
+    )
+
+    const presentationPipelineStatus = String(
+        getThumbnailModesStatus(displayAsset).presentation || '',
+    ).toLowerCase()
+
+    const displayPresentationMeta = useMemo(
+        () => getThumbnailModesModeMeta(displayAsset, 'presentation'),
+        [
+            displayAsset,
+            displayAsset?.id,
+            displayAsset?.thumbnail_modes_meta,
+            displayAsset?.metadata?.thumbnail_modes_meta,
+        ],
+    )
+
+    const presentationSkipTooSmall =
+        presentationPipelineStatus === 'skipped' &&
+        displayPresentationMeta.skip_reason === ENHANCED_SKIP_REASON_TOO_SMALL
+
+    const showPresentationPreviewRadio = useMemo(
+        () => (isExecutionDrawer ? shouldShowPresentationPreviewRadio(displayAsset) : false),
+        [
+            isExecutionDrawer,
+            displayAsset,
+            displayAsset?.id,
+            displayAsset?.thumbnail_mode_urls,
+            displayAsset?.thumbnail_modes_status,
+            displayAsset?.metadata?.thumbnail_modes_status,
+        ],
+    )
+
+    const isDrawerSvgRasterPreview =
+        displayAsset?.mime_type === 'image/svg+xml' ||
+        String(displayAsset?.file_extension || '').toLowerCase() === 'svg' ||
+        String(displayAsset?.original_filename || '')
+            .toLowerCase()
+            .endsWith('.svg')
+
+    const useDrawerThumbnailModeOverride =
+        showExecutionPreviewChrome &&
+        (previewStyleMode === 'preferred' ||
+            previewStyleMode === 'enhanced' ||
+            previewStyleMode === 'presentation')
+
+    const drawerForcedPreviewUrl = useMemo(() => {
+        if (!useDrawerThumbnailModeOverride || !displayAsset?.id) {
+            return null
+        }
+        const style = isDrawerSvgRasterPreview ? 'large' : 'medium'
+        return getThumbnailUrl(displayAsset, style, previewStyleMode)
+    }, [
+        useDrawerThumbnailModeOverride,
+        displayAsset,
+        displayAsset?.id,
+        displayAsset?.thumbnail_mode_urls,
+        displayAsset?.final_thumbnail_url,
+        displayAsset?.thumbnail_medium,
+        displayAsset?.thumbnail_url,
+        previewStyleMode,
+        isDrawerSvgRasterPreview,
+    ])
+
+    const drawerForcedModeSpinnerOverlay =
+        showExecutionPreviewChrome &&
+        ((previewStyleMode === 'preferred' && preferredPipelineStatus === 'processing') ||
+            (previewStyleMode === 'enhanced' && enhancedPipelineStatus === 'processing') ||
+            (previewStyleMode === 'presentation' && presentationPipelineStatus === 'processing'))
+
+    const executionDrawerThumbStyle = isDrawerSvgRasterPreview ? 'large' : 'medium'
+
+    const executionDrawerOriginalUrl = useMemo(() => {
+        if (!displayAsset?.id || !showExecutionPreviewChrome) {
+            return null
+        }
+        return getThumbnailUrl(displayAsset, executionDrawerThumbStyle, 'original')
+    }, [displayAsset, displayAsset?.id, showExecutionPreviewChrome, executionDrawerThumbStyle])
+
+    /** Drawer tiles + version modal: resolve URL even if primary style key is missing from a mode bucket. */
+    const executionDrawerEnhancedDisplayUrl = useMemo(() => {
+        if (!displayAsset?.id || !showExecutionPreviewChrome) {
+            return null
+        }
+        const a = displayAsset
+        const s = executionDrawerThumbStyle
+        const pick = (mode) =>
+            getThumbnailUrlModeOnly(a, s, mode) ||
+            getThumbnailUrlModeOnly(a, 'medium', mode) ||
+            getThumbnailUrlModeOnly(a, 'large', mode) ||
+            getThumbnailUrlModeOnly(a, 'thumb', mode)
+        const preferred = pick('preferred')
+        const enhanced = pick('enhanced')
+        if (preferred || enhanced) {
+            return preferred || enhanced
+        }
+        const gEnh = getThumbnailUrl(a, s, 'enhanced')
+        const gOrig = getThumbnailUrl(a, s, 'original')
+        if (gEnh && gOrig && gEnh !== gOrig) {
+            return gEnh
+        }
+        return null
+    }, [displayAsset, displayAsset?.id, showExecutionPreviewChrome, executionDrawerThumbStyle])
+
+    const executionDrawerPresentationDisplayUrl = useMemo(() => {
+        if (!displayAsset?.id || !showExecutionPreviewChrome) {
+            return null
+        }
+        const a = displayAsset
+        const s = executionDrawerThumbStyle
+        const pick = (mode) =>
+            getThumbnailUrlModeOnly(a, s, mode) ||
+            getThumbnailUrlModeOnly(a, 'medium', mode) ||
+            getThumbnailUrlModeOnly(a, 'large', mode) ||
+            getThumbnailUrlModeOnly(a, 'thumb', mode)
+        const pres = pick('presentation')
+        if (pres) {
+            return pres
+        }
+        const gPres = getThumbnailUrl(a, s, 'presentation')
+        const gOrig = getThumbnailUrl(a, s, 'original')
+        if (gPres && gOrig && gPres !== gOrig) {
+            return gPres
+        }
+        return null
+    }, [displayAsset, displayAsset?.id, showExecutionPreviewChrome, executionDrawerThumbStyle])
+
+    const selectExecutionPreviewTier = useCallback(
+        (tier) => {
+            if (tier === 'original') {
+                setPreviewStyleMode('original')
+            } else if (tier === 'enhanced') {
+                setPreviewStyleMode('enhanced')
+            } else {
+                setPreviewStyleMode('presentation')
+            }
+            if (displayAsset?.id) {
+                setPreferredExecutionThumbnailTier(displayAsset.id, tier)
+            }
+        },
+        [displayAsset?.id],
+    )
+
+    useEffect(() => {
+        if (!displayAsset?.id) {
+            return
+        }
+        const idChanged = previewStyleAssetIdRef.current !== displayAsset.id
+        if (idChanged) {
+            previewStyleAssetIdRef.current = displayAsset.id
+        }
+
+        if (!isExecutionDrawer || deliverablesThumbMode == null) {
+            if (idChanged) {
+                if (isExecutionDrawer && isPdfAsset) {
+                    setPreviewStyleMode('original')
+                } else {
+                    setPreviewStyleMode(
+                        isExecutionDrawer && shouldShowPreferredPreviewOption(displayAsset)
+                            ? 'preferred'
+                            : 'original',
+                    )
+                }
+            }
+            return
+        }
+
+        /* Drawer preview style is independent of the global grid thumbnail mode. */
+        setPreviewStyleMode((prev) => {
+            if (idChanged) {
+                const pref = getPreferredExecutionThumbnailTier(displayAsset.id)
+                if (pref === 'enhanced') {
+                    return 'enhanced'
+                }
+                if (pref === 'presentation') {
+                    return 'presentation'
+                }
+                return 'original'
+            }
+            if (prev === 'enhanced' && !showEnhancedPreviewRadio) {
+                return 'original'
+            }
+            if (prev === 'preferred' || prev === 'original' || prev === 'presentation') {
+                return prev
+            }
+            return 'original'
+        })
+    }, [displayAsset?.id, isExecutionDrawer, isPdfAsset, deliverablesThumbMode, showEnhancedPreviewRadio])
+
+    useEffect(() => {
+        setPreviewStyleMode((prev) => {
+            if (prev === 'preferred' && !showPreferredPreviewOption) {
+                return 'original'
+            }
+            if (prev === 'enhanced' && !showEnhancedPreviewRadio) {
+                return 'original'
+            }
+            if (prev === 'presentation' && !showPresentationPreviewRadio) {
+                return 'original'
+            }
+            return prev
+        })
+    }, [showPreferredPreviewOption, showEnhancedPreviewRadio, showPresentationPreviewRadio])
+
+    useEffect(() => {
+        setPreviewOptionsExpanded(false)
+    }, [displayAsset?.id])
+
+    useEffect(() => {
+        if (!isExecutionDrawer) {
+            return
+        }
+        setPreviewStyleMode((p) => (p === 'preferred' ? 'original' : p))
+    }, [isExecutionDrawer, displayAsset?.id])
+
     const isFontFile = useMemo(() => {
         if (!displayAsset || displayAsset.is_virtual_google_font) return false
         const mime = (displayAsset.mime_type || '').toLowerCase()
@@ -1255,6 +1582,13 @@ export default function AssetDrawer({
         displayAsset?.preview_thumbnail_url, // Include preview URL so version changes when poll updates it
         displayAsset?.thumbnail_status?.value || displayAsset?.thumbnail_status,
         displayAsset?.updated_at,
+        displayAsset?.thumbnail_mode_urls,
+        displayAsset?.thumbnail_modes_status,
+        displayAsset?.metadata?.thumbnail_modes_status,
+        displayAsset?.thumbnail_modes_meta,
+        displayAsset?.metadata?.thumbnail_modes_meta,
+        getThumbnailModesStatus(displayAsset).enhanced,
+        getThumbnailModesStatus(displayAsset).presentation,
     ])
 
     // Check thumbnail status (for legacy compatibility - ThumbnailPreview handles state machine)
@@ -1367,6 +1701,205 @@ export default function AssetDrawer({
 
     // Check if user has permission to generate/retry thumbnails (can from usePermission at top of drawer)
     const canRetryThumbnails = can('assets.retry_thumbnails')
+
+    const canBypassTooSmallEnhanced = useMemo(() => {
+        const tr = String(auth?.tenant_role || auth?.user?.tenant_role || '').toLowerCase()
+        return ['owner', 'admin', 'agency_admin'].includes(tr)
+    }, [auth?.tenant_role, auth?.user?.tenant_role])
+
+    const canOfferEnhancedPreviewGenerate =
+        canRetryThumbnails &&
+        hasThumbnailSupport &&
+        !isVideo &&
+        !isVirtualGoogleFont &&
+        !externalCollectionGuest
+
+    const enhancedPrimaryActionBlocked = enhancedSkipTooSmall && !canBypassTooSmallEnhanced
+
+    const enhancedPreviewForce = useMemo(
+        () =>
+            showEnhancedPreviewOption ||
+            enhancedPipelineStatus === 'complete' ||
+            enhancedPipelineStatus === 'failed' ||
+            enhancedPipelineStatus === 'skipped',
+        [showEnhancedPreviewOption, enhancedPipelineStatus],
+    )
+
+    const enhancedPreviewPrimaryLabel = useMemo(() => {
+        if (enhancedSkipTooSmall && canBypassTooSmallEnhanced) {
+            return 'Retry (admin)'
+        }
+        if (enhancedPipelineStatus === 'failed') {
+            return 'Retry'
+        }
+        if (enhancedOutputStale) {
+            return 'Regenerate'
+        }
+        if (enhancedPipelineStatus === 'complete' || showEnhancedPreviewOption) {
+            return 'Regenerate'
+        }
+        return 'Generate preview'
+    }, [
+        enhancedPipelineStatus,
+        showEnhancedPreviewOption,
+        enhancedSkipTooSmall,
+        canBypassTooSmallEnhanced,
+        enhancedOutputStale,
+    ])
+
+    const handleGenerateEnhancedPreview = async (opts = {}) => {
+        const force = Boolean(opts.force)
+        if (!displayAsset?.id || !canRetryThumbnails) return
+        setEnhancedPreviewLoading(true)
+        try {
+            const res = await window.axios.post(
+                `/app/assets/${displayAsset.id}/enhanced-preview/generate`,
+                null,
+                {
+                    params: { force: force ? 1 : 0 },
+                    validateStatus: (s) => s >= 200 && s < 500,
+                },
+            )
+            if (res.status === 202) {
+                setToastType('success')
+                setToastMessage(res.data?.message || 'Enhanced preview generation started.')
+                const meta = displayAsset.metadata || {}
+                const nestedStatus = meta.thumbnail_modes_status || {}
+                const topStatus = displayAsset.thumbnail_modes_status || {}
+                onAssetUpdate?.({
+                    ...displayAsset,
+                    thumbnail_modes_status: { ...topStatus, enhanced: 'processing' },
+                    metadata: {
+                        ...meta,
+                        thumbnail_modes_status: { ...nestedStatus, enhanced: 'processing' },
+                    },
+                })
+                return
+            }
+            if (res.status === 409) {
+                setToastType('error')
+                setToastMessage(res.data?.error || 'Enhanced preview generation already in progress.')
+                return
+            }
+            if (res.status === 403) {
+                setToastType('error')
+                setToastMessage(res.data?.error || 'You do not have permission to force this action.')
+                return
+            }
+            if (res.status === 422) {
+                setToastType('error')
+                setToastMessage(res.data?.error || 'Cannot start enhanced preview for this asset.')
+                return
+            }
+            if (res.status >= 200 && res.status < 300) {
+                setToastType('success')
+                setToastMessage(res.data?.message || 'OK')
+                return
+            }
+            setToastType('error')
+            setToastMessage(res.data?.error || 'Could not start enhanced preview generation.')
+        } catch (err) {
+            setToastType('error')
+            setToastMessage(err.response?.data?.error || 'Could not start enhanced preview generation.')
+        } finally {
+            setEnhancedPreviewLoading(false)
+        }
+    }
+
+    const presentationPrimaryActionBlocked = presentationSkipTooSmall && !canBypassTooSmallEnhanced
+
+    const presentationPreviewForce = useMemo(
+        () =>
+            showPresentationPreviewOption ||
+            presentationPipelineStatus === 'complete' ||
+            presentationPipelineStatus === 'failed' ||
+            presentationPipelineStatus === 'skipped',
+        [showPresentationPreviewOption, presentationPipelineStatus],
+    )
+
+    const presentationPreviewPrimaryLabel = useMemo(() => {
+        if (presentationSkipTooSmall && canBypassTooSmallEnhanced) {
+            return 'Retry (admin)'
+        }
+        if (presentationPipelineStatus === 'failed') {
+            return 'Retry'
+        }
+        if (presentationPipelineStatus === 'complete' || showPresentationPreviewOption) {
+            return 'Regenerate'
+        }
+        return 'Generate preview'
+    }, [
+        presentationPipelineStatus,
+        showPresentationPreviewOption,
+        presentationSkipTooSmall,
+        canBypassTooSmallEnhanced,
+    ])
+
+    const handleGeneratePresentationPreview = async (opts = {}) => {
+        const force = Boolean(opts.force)
+        if (!displayAsset?.id || !canRetryThumbnails) return
+        setPresentationPreviewLoading(true)
+        try {
+            const res = await window.axios.post(
+                `/app/assets/${displayAsset.id}/presentation-preview/generate`,
+                null,
+                {
+                    params: { force: force ? 1 : 0 },
+                    validateStatus: (s) => s >= 200 && s < 500,
+                },
+            )
+            if (res.status === 202) {
+                setToastType('success')
+                setToastMessage(res.data?.message || 'Presentation preview generation started.')
+                const meta = displayAsset.metadata || {}
+                const nestedStatus = meta.thumbnail_modes_status || {}
+                const topStatus = displayAsset.thumbnail_modes_status || {}
+                onAssetUpdate?.({
+                    ...displayAsset,
+                    thumbnail_modes_status: { ...topStatus, presentation: 'processing' },
+                    metadata: {
+                        ...meta,
+                        thumbnail_modes_status: { ...nestedStatus, presentation: 'processing' },
+                    },
+                })
+                return
+            }
+            if (res.status === 409) {
+                setToastType('error')
+                setToastMessage(res.data?.error || 'Presentation preview generation already in progress.')
+                return
+            }
+            if (res.status === 403) {
+                setToastType('error')
+                setToastMessage(res.data?.error || 'You do not have permission to force this action.')
+                return
+            }
+            if (res.status === 422) {
+                setToastType('error')
+                setToastMessage(res.data?.error || 'Cannot start presentation preview for this asset.')
+                return
+            }
+            if (res.status >= 200 && res.status < 300) {
+                setToastType('success')
+                setToastMessage(res.data?.message || 'OK')
+                return
+            }
+            setToastType('error')
+            setToastMessage(res.data?.error || 'Could not start presentation preview generation.')
+        } catch (err) {
+            setToastType('error')
+            setToastMessage(err.response?.data?.error || 'Could not start presentation preview generation.')
+        } finally {
+            setPresentationPreviewLoading(false)
+        }
+    }
+
+    const compareModalShowEnhancedGenerate =
+        showEnhancedPreviewRadio && canOfferEnhancedPreviewGenerate && !enhancedPrimaryActionBlocked
+
+    const compareModalShowPresentationGenerate =
+        showPresentationPreviewRadio && canRetryThumbnails && !presentationPrimaryActionBlocked
+
     const canPublish = can('asset.publish')
     const canApproveMetadata = can('metadata.bypass_approval')
     // Admins/brand_managers: assets.delete (any file). Managers: assets.delete_own (own files only)
@@ -2206,7 +2739,9 @@ export default function AssetDrawer({
                                         size="lg"
                                         thumbnailVersion={thumbnailVersion}
                                         shouldAnimateThumbnail={shouldAnimateThumbnail}
-                                        forceObjectFit="cover"
+                                        forceObjectFit={drawerPreviewForceObjectFit || 'cover'}
+                                        forcedImageUrl={drawerForcedPreviewUrl}
+                                        forcedImageSpinnerOverlay={drawerForcedModeSpinnerOverlay}
                                     />
                                     
                                     {/* Zoom overlay (only shown when hovering) */}
@@ -2215,63 +2750,107 @@ export default function AssetDrawer({
                                     </div>
                                 </div>
                             ) : isPdf && displayAsset.id ? (
-                                <div
-                                    className={`relative w-full h-full bg-white ${pdfPageCache[pdfCurrentPage] || pdfPageCache[1] ? 'cursor-pointer group' : ''}`}
-                                    onClick={() => {
-                                        if (pdfPageCache[pdfCurrentPage] || pdfPageCache[1]) {
-                                            setShowZoomModal(true)
-                                            setShowLightboxDetails(false)
-                                        }
-                                    }}
-                                    role={pdfPageCache[pdfCurrentPage] || pdfPageCache[1] ? 'button' : undefined}
-                                    tabIndex={pdfPageCache[pdfCurrentPage] || pdfPageCache[1] ? 0 : undefined}
-                                    onKeyDown={(e) => {
-                                        if ((pdfPageCache[pdfCurrentPage] || pdfPageCache[1]) && (e.key === 'Enter' || e.key === ' ')) {
-                                            e.preventDefault()
-                                            setShowZoomModal(true)
-                                            setShowLightboxDetails(false)
-                                        }
-                                    }}
-                                >
-                                    {pdfPageCache[pdfCurrentPage] ? (
-                                        <img
-                                            src={pdfPageCache[pdfCurrentPage]}
-                                            alt={`PDF page ${pdfCurrentPage}`}
-                                            className="w-full h-full object-contain"
-                                            onError={() => {
-                                                setPdfPageCache(prev => {
-                                                    const next = { ...prev }
-                                                    delete next[pdfCurrentPage]
-                                                    return next
-                                                })
-                                                setPdfPageLoading(true)
-                                                setPdfPageError(null)
-                                                fetchPdfPage(pdfCurrentPage)
+                                useDrawerThumbnailModeOverride ? (
+                                    <div
+                                        className="relative h-full w-full cursor-pointer bg-white group"
+                                        onClick={() => {
+                                            const { state } = getThumbnailState(displayAsset, thumbnailRetryCount)
+                                            const canZoom =
+                                                Boolean(drawerForcedPreviewUrl) || state === 'AVAILABLE'
+                                            if (canZoom) {
+                                                setShowZoomModal(true)
+                                                setShowLightboxDetails(false)
+                                            }
+                                        }}
+                                    >
+                                        <ThumbnailPreview
+                                            asset={displayAsset}
+                                            alt={displayAsset.title || displayAsset.original_filename || 'PDF preview'}
+                                            className="h-full w-full"
+                                            retryCount={thumbnailRetryCount}
+                                            onRetry={() => {
+                                                if (thumbnailRetryCount < 2) {
+                                                    setThumbnailRetryCount((prev) => prev + 1)
+                                                }
                                             }}
+                                            size="lg"
+                                            thumbnailVersion={thumbnailVersion}
+                                            shouldAnimateThumbnail={shouldAnimateThumbnail}
+                                            preferLargeForVector
+                                            forceObjectFit={drawerPreviewForceObjectFit || undefined}
+                                            forcedImageUrl={drawerForcedPreviewUrl}
+                                            forcedImageSpinnerOverlay={drawerForcedModeSpinnerOverlay}
                                         />
-                                    ) : (
-                                        <div className="w-full h-full flex items-center justify-center">
-                                            <div className="text-center px-4">
-                                                {pdfPageLoading ? (
-                                                    <>
-                                                        <ArrowPathIcon className="h-6 w-6 mx-auto text-gray-400 animate-spin" />
-                                                        <p className="mt-2 text-sm text-gray-500">Rendering page {pdfCurrentPage}...</p>
-                                                    </>
-                                                ) : (
-                                                    <p className="text-sm text-gray-500">Preparing PDF preview...</p>
-                                                )}
-                                                {pdfPageError && (
-                                                    <p className="mt-2 text-xs text-amber-600">{pdfPageError}</p>
-                                                )}
+                                        {(drawerForcedPreviewUrl ||
+                                            displayAsset.thumbnail_url ||
+                                            displayAsset.final_thumbnail_url ||
+                                            displayAsset.preview_thumbnail_url) && (
+                                            <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/0 opacity-0 transition-colors group-hover:bg-black/10 group-hover:opacity-100">
+                                                <span className="text-sm font-medium text-white">Click to zoom</span>
                                             </div>
-                                        </div>
-                                    )}
-                                    {(pdfPageCache[pdfCurrentPage] || pdfPageCache[1]) && (
-                                        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100 pointer-events-none z-20">
-                                            <span className="text-white text-sm font-medium">Click to zoom</span>
-                                        </div>
-                                    )}
-                                </div>
+                                        )}
+                                    </div>
+                                ) : (
+                                    <div
+                                        className={`relative w-full h-full bg-white ${pdfPageCache[pdfCurrentPage] || pdfPageCache[1] ? 'cursor-pointer group' : ''}`}
+                                        onClick={() => {
+                                            if (pdfPageCache[pdfCurrentPage] || pdfPageCache[1]) {
+                                                setShowZoomModal(true)
+                                                setShowLightboxDetails(false)
+                                            }
+                                        }}
+                                        role={pdfPageCache[pdfCurrentPage] || pdfPageCache[1] ? 'button' : undefined}
+                                        tabIndex={pdfPageCache[pdfCurrentPage] || pdfPageCache[1] ? 0 : undefined}
+                                        onKeyDown={(e) => {
+                                            if ((pdfPageCache[pdfCurrentPage] || pdfPageCache[1]) && (e.key === 'Enter' || e.key === ' ')) {
+                                                e.preventDefault()
+                                                setShowZoomModal(true)
+                                                setShowLightboxDetails(false)
+                                            }
+                                        }}
+                                    >
+                                        {pdfPageCache[pdfCurrentPage] ? (
+                                            <img
+                                                src={pdfPageCache[pdfCurrentPage]}
+                                                alt={`PDF page ${pdfCurrentPage}`}
+                                                className="h-full w-full object-contain"
+                                                onError={() => {
+                                                    setPdfPageCache((prev) => {
+                                                        const next = { ...prev }
+                                                        delete next[pdfCurrentPage]
+                                                        return next
+                                                    })
+                                                    setPdfPageLoading(true)
+                                                    setPdfPageError(null)
+                                                    fetchPdfPage(pdfCurrentPage)
+                                                }}
+                                            />
+                                        ) : (
+                                            <div className="flex h-full w-full items-center justify-center">
+                                                <div className="px-4 text-center">
+                                                    {pdfPageLoading ? (
+                                                        <>
+                                                            <ArrowPathIcon className="mx-auto h-6 w-6 animate-spin text-gray-400" />
+                                                            <p className="mt-2 text-sm text-gray-500">
+                                                                Rendering page {pdfCurrentPage}...
+                                                            </p>
+                                                        </>
+                                                    ) : (
+                                                        <p className="text-sm text-gray-500">Preparing PDF preview...</p>
+                                                    )}
+                                                    {pdfPageError && (
+                                                        <p className="mt-2 text-xs text-amber-600">{pdfPageError}</p>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        )}
+                                        {(pdfPageCache[pdfCurrentPage] || pdfPageCache[1]) && (
+                                            <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-black/0 opacity-0 transition-colors group-hover:bg-black/10 group-hover:opacity-100">
+                                                <span className="text-sm font-medium text-white">Click to zoom</span>
+                                            </div>
+                                        )}
+                                    </div>
+                                )
                             ) : hasThumbnailSupport && displayAsset.id ? (
                                 // Assets with thumbnail support (images and PDFs): Use ThumbnailPreview with state machine
                                 // Use displayAsset (with live updates) instead of prop asset
@@ -2304,6 +2883,9 @@ export default function AssetDrawer({
                                         thumbnailVersion={thumbnailVersion}
                                         shouldAnimateThumbnail={shouldAnimateThumbnail}
                                         preferLargeForVector
+                                        forceObjectFit={drawerPreviewForceObjectFit || undefined}
+                                        forcedImageUrl={drawerForcedPreviewUrl}
+                                        forcedImageSpinnerOverlay={drawerForcedModeSpinnerOverlay}
                                     />
                                     {/* Zoom overlay (only shown when thumbnail is available) */}
                                     {(displayAsset.thumbnail_url || displayAsset.final_thumbnail_url || displayAsset.preview_thumbnail_url) && (
@@ -2351,27 +2933,35 @@ export default function AssetDrawer({
 
                     {isPdf && (
                         <div className="space-y-2 rounded-md border border-gray-200 bg-white px-3 py-2">
-                            <div className="flex items-center justify-between">
-                                <button
-                                    type="button"
-                                    onClick={() => handlePdfPageNavigate(pdfCurrentPage - 1)}
-                                    disabled={pdfCurrentPage <= 1 || pdfPageLoading}
-                                    className="inline-flex items-center rounded border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700 disabled:cursor-not-allowed disabled:opacity-50 hover:bg-gray-50"
-                                >
-                                    Previous
-                                </button>
-                                <div className="text-xs text-gray-600">
-                                    Page {pdfCurrentPage} of {effectivePdfPageCount}
+                            {useDrawerThumbnailModeOverride ? (
+                                <p className="text-xs text-gray-600">
+                                    Styled preview uses the PDF cover thumbnail. Choose{' '}
+                                    <span className="font-medium text-gray-800">Original</span> in Preview Options to
+                                    page through the document.
+                                </p>
+                            ) : (
+                                <div className="flex items-center justify-between">
+                                    <button
+                                        type="button"
+                                        onClick={() => handlePdfPageNavigate(pdfCurrentPage - 1)}
+                                        disabled={pdfCurrentPage <= 1 || pdfPageLoading}
+                                        className="inline-flex items-center rounded border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                    >
+                                        Previous
+                                    </button>
+                                    <div className="text-xs text-gray-600">
+                                        Page {pdfCurrentPage} of {effectivePdfPageCount}
+                                    </div>
+                                    <button
+                                        type="button"
+                                        onClick={() => handlePdfPageNavigate(pdfCurrentPage + 1)}
+                                        disabled={pdfCurrentPage >= effectivePdfPageCount || pdfPageLoading}
+                                        className="inline-flex items-center rounded border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                    >
+                                        Next
+                                    </button>
                                 </div>
-                                <button
-                                    type="button"
-                                    onClick={() => handlePdfPageNavigate(pdfCurrentPage + 1)}
-                                    disabled={pdfCurrentPage >= effectivePdfPageCount || pdfPageLoading}
-                                    className="inline-flex items-center rounded border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700 disabled:cursor-not-allowed disabled:opacity-50 hover:bg-gray-50"
-                                >
-                                    Next
-                                </button>
-                            </div>
+                            )}
                             {canRequestFullPdfExtraction && effectivePdfPageCount > 1 && (
                                 <div className="flex items-center justify-between gap-2 border-t border-gray-100 pt-2">
                                     <p className="text-xs text-gray-500">
@@ -2939,6 +3529,285 @@ export default function AssetDrawer({
                                             <p className="text-xs text-slate-600">
                                                 By downloading, you confirm you have the right to use this font. {auth?.activeBrand?.name || 'This brand'} does not provide font licensing or redistribution; you are responsible for complying with the font license.
                                             </p>
+                                        )}
+                                        {showExecutionPreviewChrome && (
+                                            <div className="rounded-md border border-gray-200 bg-white px-3 py-2.5">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setPreviewOptionsExpanded((o) => !o)}
+                                                    className="flex w-full items-center justify-between gap-2 text-left"
+                                                    aria-expanded={previewOptionsExpanded}
+                                                >
+                                                    <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                                                        Preview Options
+                                                    </span>
+                                                    <ChevronDownIcon
+                                                        className={`h-4 w-4 shrink-0 text-gray-500 transition-transform ${
+                                                            previewOptionsExpanded ? 'rotate-180' : ''
+                                                        }`}
+                                                        aria-hidden
+                                                    />
+                                                </button>
+                                                {previewOptionsExpanded && (
+                                                    <div className="mt-3 space-y-3 border-t border-gray-100 pt-3">
+                                                        <p className="text-xs text-gray-500">
+                                                            Tap a tile to use it as the main preview and as your preference
+                                                            when the grid is on{' '}
+                                                            <span className="font-medium text-gray-700">Standard</span>{' '}
+                                                            (View → Grid thumbnails). Regenerate from{' '}
+                                                            <span className="font-medium text-gray-700">Compare all versions</span>{' '}
+                                                            or fullscreen <span className="font-medium text-gray-700">Versions</span>.
+                                                        </p>
+                                                        <div className="grid grid-cols-3 gap-2">
+                                                            {(['original', 'enhanced', 'presentation']).map((tier) => {
+                                                                const selected = previewStyleMode === tier
+                                                                const thumbUrl =
+                                                                    tier === 'original'
+                                                                        ? executionDrawerOriginalUrl
+                                                                        : tier === 'enhanced'
+                                                                          ? executionDrawerEnhancedDisplayUrl
+                                                                          : executionDrawerPresentationDisplayUrl
+                                                                const label =
+                                                                    tier === 'original'
+                                                                        ? 'Original'
+                                                                        : tier === 'enhanced'
+                                                                          ? 'Enhanced'
+                                                                          : 'Presentation'
+                                                                const drawerEnhancedHideGenerateUnderTile =
+                                                                    enhancedPipelineStatus === 'complete' &&
+                                                                    Boolean(executionDrawerEnhancedDisplayUrl)
+                                                                const drawerPresentationHideGenerateUnderTile =
+                                                                    presentationPipelineStatus === 'complete' &&
+                                                                    Boolean(executionDrawerPresentationDisplayUrl)
+                                                                return (
+                                                                    <div key={tier} className="flex min-w-0 flex-col gap-2">
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => selectExecutionPreviewTier(tier)}
+                                                                            className={`flex flex-col gap-1.5 rounded-lg border p-2 text-left transition-colors ${
+                                                                                selected
+                                                                                    ? 'border-indigo-500 bg-indigo-50/80 ring-1 ring-indigo-500/30'
+                                                                                    : 'border-gray-200 bg-white hover:border-gray-300'
+                                                                            }`}
+                                                                            aria-pressed={selected}
+                                                                            aria-label={`Use ${label} as main preview`}
+                                                                        >
+                                                                            <div className="relative aspect-square w-full overflow-hidden rounded-md bg-gray-100">
+                                                                                {thumbUrl ? (
+                                                                                    <img
+                                                                                        src={thumbUrl}
+                                                                                        alt=""
+                                                                                        className="h-full w-full object-contain"
+                                                                                    />
+                                                                                ) : (
+                                                                                    <div className="flex h-full w-full items-center justify-center px-1 text-center text-[10px] font-medium text-gray-400">
+                                                                                        Empty
+                                                                                    </div>
+                                                                                )}
+                                                                            </div>
+                                                                            <span className="text-center text-[10px] font-semibold uppercase tracking-wide text-gray-600">
+                                                                                {label}
+                                                                            </span>
+                                                                        </button>
+                                                                        {tier === 'original' &&
+                                                                            preferredPipelineStatus === 'failed' &&
+                                                                            canRetryThumbnails && (
+                                                                                <button
+                                                                                    type="button"
+                                                                                    onClick={() => handleRetryThumbnail()}
+                                                                                    disabled={
+                                                                                        retryLoading ||
+                                                                                        thumbnailStatus === 'processing'
+                                                                                    }
+                                                                                    className="w-full rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-[10px] font-medium text-amber-900 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50"
+                                                                                >
+                                                                                    Retry clean thumbnail
+                                                                                </button>
+                                                                            )}
+                                                                        {tier === 'enhanced' && (
+                                                                            <div className="flex min-h-[2.5rem] flex-col gap-1">
+                                                                                {enhancedPipelineStatus === 'processing' && (
+                                                                                    <div className="flex items-center gap-1 text-[10px] text-gray-600">
+                                                                                        <ArrowPathIcon className="h-3 w-3 shrink-0 animate-spin text-gray-500" />
+                                                                                        <span>Generating…</span>
+                                                                                    </div>
+                                                                                )}
+                                                                                {enhancedPipelineStatus === 'failed' && (
+                                                                                    <p
+                                                                                        className="line-clamp-2 text-[10px] text-amber-800"
+                                                                                        title={
+                                                                                            displayEnhancedMeta.failure_message !=
+                                                                                                null &&
+                                                                                            String(
+                                                                                                displayEnhancedMeta.failure_message,
+                                                                                            ).trim() !== ''
+                                                                                                ? String(
+                                                                                                      displayEnhancedMeta.failure_message,
+                                                                                                  )
+                                                                                                : 'Failed'
+                                                                                        }
+                                                                                    >
+                                                                                        {(displayEnhancedMeta.failure_message !=
+                                                                                            null &&
+                                                                                        String(
+                                                                                            displayEnhancedMeta.failure_message,
+                                                                                        ).trim() !== ''
+                                                                                            ? String(
+                                                                                                  displayEnhancedMeta.failure_message,
+                                                                                              )
+                                                                                            : null) || 'Failed'}
+                                                                                    </p>
+                                                                                )}
+                                                                                {enhancedPipelineStatus === 'skipped' && (
+                                                                                    <p className="line-clamp-3 text-[10px] text-slate-600">
+                                                                                        {enhancedSkipTooSmall
+                                                                                            ? 'Source too small for enhanced.'
+                                                                                            : (displayEnhancedMeta.failure_message !=
+                                                                                                  null &&
+                                                                                                  String(
+                                                                                                      displayEnhancedMeta.failure_message,
+                                                                                                  ).trim() !== ''
+                                                                                                  ? String(
+                                                                                                        displayEnhancedMeta.failure_message,
+                                                                                                    )
+                                                                                                  : null) || 'Skipped'}
+                                                                                    </p>
+                                                                                )}
+                                                                                {canOfferEnhancedPreviewGenerate &&
+                                                                                showEnhancedPreviewRadio ? (
+                                                                                    enhancedPipelineStatus === 'processing' ? null : enhancedPrimaryActionBlocked ? (
+                                                                                        <p className="text-[10px] text-gray-500">
+                                                                                            Too small to generate.
+                                                                                        </p>
+                                                                                    ) : drawerEnhancedHideGenerateUnderTile ? (
+                                                                                        <p className="text-[10px] text-gray-500">
+                                                                                            Use Compare to regenerate.
+                                                                                        </p>
+                                                                                    ) : (
+                                                                                        <button
+                                                                                            type="button"
+                                                                                            onClick={() =>
+                                                                                                handleGenerateEnhancedPreview({
+                                                                                                    force: enhancedPreviewForce,
+                                                                                                })
+                                                                                            }
+                                                                                            disabled={enhancedPreviewLoading}
+                                                                                            className="w-full rounded-md px-2 py-1.5 text-[10px] font-semibold text-white shadow-sm disabled:cursor-not-allowed disabled:opacity-50"
+                                                                                            style={{
+                                                                                                backgroundColor: brandPrimary,
+                                                                                            }}
+                                                                                        >
+                                                                                            {enhancedPreviewLoading
+                                                                                                ? 'Queueing…'
+                                                                                                : enhancedPreviewPrimaryLabel}
+                                                                                        </button>
+                                                                                    )
+                                                                                ) : (
+                                                                                    <p className="text-[10px] text-gray-400">
+                                                                                        Not available
+                                                                                    </p>
+                                                                                )}
+                                                                            </div>
+                                                                        )}
+                                                                        {tier === 'presentation' && (
+                                                                            <div className="flex min-h-[2.5rem] flex-col gap-1">
+                                                                                {presentationPipelineStatus === 'processing' && (
+                                                                                    <div className="flex items-center gap-1 text-[10px] text-gray-600">
+                                                                                        <ArrowPathIcon className="h-3 w-3 shrink-0 animate-spin text-gray-500" />
+                                                                                        <span>Generating…</span>
+                                                                                    </div>
+                                                                                )}
+                                                                                {presentationPipelineStatus === 'failed' && (
+                                                                                    <p
+                                                                                        className="line-clamp-2 text-[10px] text-amber-800"
+                                                                                        title={
+                                                                                            displayPresentationMeta.failure_message !=
+                                                                                                null &&
+                                                                                            String(
+                                                                                                displayPresentationMeta.failure_message,
+                                                                                            ).trim() !== ''
+                                                                                                ? String(
+                                                                                                      displayPresentationMeta.failure_message,
+                                                                                                  )
+                                                                                                : 'Failed'
+                                                                                        }
+                                                                                    >
+                                                                                        {(displayPresentationMeta.failure_message !=
+                                                                                            null &&
+                                                                                        String(
+                                                                                            displayPresentationMeta.failure_message,
+                                                                                        ).trim() !== ''
+                                                                                            ? String(
+                                                                                                  displayPresentationMeta.failure_message,
+                                                                                              )
+                                                                                            : null) || 'Failed'}
+                                                                                    </p>
+                                                                                )}
+                                                                                {presentationPipelineStatus === 'skipped' && (
+                                                                                    <p className="line-clamp-3 text-[10px] text-slate-600">
+                                                                                        {presentationSkipTooSmall
+                                                                                            ? 'Source too small.'
+                                                                                            : (displayPresentationMeta.failure_message !=
+                                                                                                  null &&
+                                                                                                  String(
+                                                                                                      displayPresentationMeta.failure_message,
+                                                                                                  ).trim() !== ''
+                                                                                                  ? String(
+                                                                                                        displayPresentationMeta.failure_message,
+                                                                                                    )
+                                                                                                  : null) || 'Skipped'}
+                                                                                    </p>
+                                                                                )}
+                                                                                {canOfferEnhancedPreviewGenerate &&
+                                                                                showPresentationPreviewRadio ? (
+                                                                                    presentationPipelineStatus === 'processing' ? null : presentationPrimaryActionBlocked ? (
+                                                                                        <p className="text-[10px] text-gray-500">
+                                                                                            Too small to generate.
+                                                                                        </p>
+                                                                                    ) : drawerPresentationHideGenerateUnderTile ? (
+                                                                                        <p className="text-[10px] text-gray-500">
+                                                                                            Use Compare to regenerate.
+                                                                                        </p>
+                                                                                    ) : (
+                                                                                        <button
+                                                                                            type="button"
+                                                                                            onClick={() =>
+                                                                                                handleGeneratePresentationPreview({
+                                                                                                    force: presentationPreviewForce,
+                                                                                                })
+                                                                                            }
+                                                                                            disabled={presentationPreviewLoading}
+                                                                                            className="w-full rounded-md px-2 py-1.5 text-[10px] font-semibold text-white shadow-sm disabled:cursor-not-allowed disabled:opacity-50"
+                                                                                            style={{
+                                                                                                backgroundColor: brandPrimary,
+                                                                                            }}
+                                                                                        >
+                                                                                            {presentationPreviewLoading
+                                                                                                ? 'Queueing…'
+                                                                                                : presentationPreviewPrimaryLabel}
+                                                                                        </button>
+                                                                                    )
+                                                                                ) : (
+                                                                                    <p className="text-[10px] text-gray-400">
+                                                                                        Not available
+                                                                                    </p>
+                                                                                )}
+                                                                            </div>
+                                                                        )}
+                                                                    </div>
+                                                                )
+                                                            })}
+                                                        </div>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setExecutionTripleCompareOpen(true)}
+                                                            className="w-full rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-center text-xs font-semibold text-gray-800 hover:bg-gray-100"
+                                                        >
+                                                            Compare all versions
+                                                        </button>
+                                                    </div>
+                                                )}
+                                            </div>
                                         )}
                                     </div>
                                 )
@@ -3927,6 +4796,49 @@ export default function AssetDrawer({
                 
             </div>
 
+            <ExecutionTripleCompareModal
+                open={Boolean(executionTripleCompareOpen && showExecutionPreviewChrome)}
+                onClose={() => setExecutionTripleCompareOpen(false)}
+                primaryColor={brandPrimary}
+                originalUrl={executionDrawerOriginalUrl}
+                enhancedUrl={executionDrawerEnhancedDisplayUrl}
+                presentationUrl={executionDrawerPresentationDisplayUrl}
+                templateLabelEnhanced={
+                    displayEnhancedMeta?.template_label != null
+                        ? String(displayEnhancedMeta.template_label)
+                        : null
+                }
+                preferredPipelineFailed={preferredPipelineStatus === 'failed'}
+                canRetryCleanPreferred={canRetryThumbnails}
+                onRetryCleanPreferred={() => handleRetryThumbnail()}
+                retryCleanPreferredLoading={retryLoading}
+                retryCleanPreferredDisabled={retryLoading || thumbnailStatus === 'processing'}
+                enhancedPipelineStatus={enhancedPipelineStatus}
+                showEnhancedGenerate={compareModalShowEnhancedGenerate}
+                enhancedGenerateLabel={enhancedPreviewPrimaryLabel}
+                onEnhancedGenerate={() =>
+                    handleGenerateEnhancedPreview({
+                        force: enhancedPreviewForce || enhancedOutputStale,
+                    })
+                }
+                enhancedGenerateLoading={enhancedPreviewLoading}
+                enhancedGenerateDisabled={
+                    enhancedPreviewLoading || enhancedPipelineStatus === 'processing'
+                }
+                presentationPipelineStatus={presentationPipelineStatus}
+                showPresentationGenerate={compareModalShowPresentationGenerate}
+                presentationGenerateLabel={presentationPreviewPrimaryLabel}
+                onPresentationGenerate={() =>
+                    handleGeneratePresentationPreview({
+                        force: presentationPreviewForce,
+                    })
+                }
+                presentationGenerateLoading={presentationPreviewLoading}
+                presentationGenerateDisabled={
+                    presentationPreviewLoading || presentationPipelineStatus === 'processing'
+                }
+            />
+
             {/* Phase 3.1: Lightbox + optional details column (same content as former slide-out AssetDetailPanel) — portaled for Safari fixed/z-index inside overflow ancestors */}
             {showZoomModal && (hasThumbnailSupport || isVideo || displayAsset?.is_virtual_google_font) && (currentCarouselAsset?.id || displayAsset?.id) && typeof document !== 'undefined' && createPortal(
                 <div
@@ -3953,6 +4865,17 @@ export default function AssetDrawer({
                             >
                                 Details
                             </button>
+                            {showExecutionPreviewChrome &&
+                                isExecutionDrawer &&
+                                currentCarouselAsset?.id === displayAsset?.id && (
+                                    <button
+                                        type="button"
+                                        onClick={() => setExecutionTripleCompareOpen(true)}
+                                        className="rounded-md bg-white/15 px-3 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-white/25"
+                                    >
+                                        Versions
+                                    </button>
+                                )}
                             <button
                                 type="button"
                                 onClick={() => setShowZoomModal(false)}

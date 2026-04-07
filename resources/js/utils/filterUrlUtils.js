@@ -17,6 +17,9 @@ const RESERVED_PARAMS = new Set([
   'edit_metadata',
   'page',
   'filters',
+  'missing_metadata',
+  'missing_tags',
+  'pending_suggestions',
 ])
 
 /** Keys that must be included in URL for load_more / infinite scroll to respect filters (backend applies these even if not in schema). */
@@ -223,7 +226,17 @@ export function clearToolbarFilterParams(searchString, { filterKeys = [], collec
   const raw = searchString.startsWith('?') ? searchString.slice(1) : searchString
   const next = new URLSearchParams(raw)
 
-  const alwaysClear = ['q', 'page', 'lifecycle', 'uploaded_by', 'file_type', 'compliance_filter', 'filters']
+  const alwaysClear = [
+    'q',
+    'page',
+    'lifecycle',
+    'uploaded_by',
+    'file_type',
+    'compliance_filter',
+    'filters',
+    'asset',
+    'edit_metadata',
+  ]
   for (const p of alwaysClear) {
     deleteParamAndArrayVariants(next, p)
   }
@@ -251,6 +264,8 @@ export function toolbarQueryHasClearableFilters(searchString, filterKeys = [], c
   const raw = searchString.startsWith('?') ? searchString.slice(1) : searchString
   const u = new URLSearchParams(raw)
   if ((u.get('q') || '').trim()) return true
+  if ((u.get('asset') || '').trim()) return true
+  if ((u.get('edit_metadata') || '').trim()) return true
   if (u.get('lifecycle')) return true
   if (u.get('uploaded_by')) return true
   const ft = u.get('file_type')

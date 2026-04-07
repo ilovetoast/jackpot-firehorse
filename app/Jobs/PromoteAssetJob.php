@@ -2,15 +2,15 @@
 
 namespace App\Jobs;
 
-use App\Enums\AssetStatus;
 use App\Jobs\Concerns\QueuesOnImagesChannel;
 use App\Models\Asset;
 use App\Models\AssetEvent;
 use App\Services\AssetPathGenerator;
 use App\Services\AssetProcessingFailureService;
 use App\Services\Reliability\ReliabilityEngine;
-use Aws\S3\S3Client;
+use App\Support\ThumbnailMetadata;
 use Aws\S3\Exception\S3Exception;
+use Aws\S3\S3Client;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -97,21 +97,23 @@ class PromoteAssetJob implements ShouldQueue
         // Only promote assets with completed processing pipeline
         // Check processing completion state, not status (status is visibility only)
         $completionService = app(\App\Services\AssetCompletionService::class);
-        if (!$completionService->isComplete($asset)) {
+        if (! $completionService->isComplete($asset)) {
             Log::debug('Asset promotion skipped - asset processing not completed yet', [
                 'asset_id' => $asset->id,
                 'status' => $asset->status->value,
             ]);
             \App\Services\UploadDiagnosticLogger::jobSkip('PromoteAssetJob', $asset->id, 'processing_not_complete');
+
             return;
         }
 
         // Only promote asset and deliverable types
-        if (!in_array($asset->type->value, ['asset', 'deliverable'])) {
+        if (! in_array($asset->type->value, ['asset', 'deliverable'])) {
             Log::info('Asset promotion skipped - unsupported asset type', [
                 'asset_id' => $asset->id,
                 'type' => $asset->type->value,
             ]);
+
             return;
         }
 
@@ -123,22 +125,25 @@ class PromoteAssetJob implements ShouldQueue
                 'storage_root_path' => $asset->storage_root_path,
             ]);
             \App\Services\UploadDiagnosticLogger::jobSkip('PromoteAssetJob', $asset->id, 'already_promoted');
+
             return;
         }
 
-        if (!$asset->storageBucket) {
+        if (! $asset->storageBucket) {
             Log::error('Asset promotion failed - missing storage bucket', [
                 'asset_id' => $asset->id,
             ]);
             $this->markPromotionFailed($asset, 'Missing storage bucket');
+
             return;
         }
 
-        if (!$asset->storage_root_path) {
+        if (! $asset->storage_root_path) {
             Log::error('Asset promotion failed - missing storage root path', [
                 'asset_id' => $asset->id,
             ]);
             $this->markPromotionFailed($asset, 'Missing storage root path');
+
             return;
         }
 
@@ -154,22 +159,24 @@ class PromoteAssetJob implements ShouldQueue
 
         // Double-check: if source path is not in temp/, skip promotion
         // (This should have been caught by isAlreadyPromoted, but extra safety check)
-        if (!str_starts_with($sourcePath, 'temp/')) {
+        if (! str_starts_with($sourcePath, 'temp/')) {
             Log::debug('Asset promotion skipped - source path is not in temp/ (extra safety check)', [
                 'asset_id' => $asset->id,
                 'source_path' => $sourcePath,
             ]);
+
             return;
         }
 
         // Verify source file exists before attempting move
-        if (!$s3Client->doesObjectExist($bucket->name, $sourcePath)) {
+        if (! $s3Client->doesObjectExist($bucket->name, $sourcePath)) {
             Log::error('Asset promotion failed - source file not found in S3', [
                 'asset_id' => $asset->id,
                 'source_path' => $sourcePath,
                 'bucket' => $bucket->name,
             ]);
             $this->markPromotionFailed($asset, 'Source file not found in S3');
+
             return;
         }
 
@@ -271,15 +278,12 @@ class PromoteAssetJob implements ShouldQueue
      * 2. It's NOT in temp/ location (temp/uploads/{upload_session_id}/original)
      *
      * Legacy paths (assets/{tenant_id}/...) are deprecated and no longer written.
-     *
-     * @param Asset $asset
-     * @return bool
      */
     protected function isAlreadyPromoted(Asset $asset): bool
     {
         $path = $asset->storage_root_path;
 
-        if (!$path) {
+        if (! $path) {
             return false;
         }
 
@@ -318,6 +322,7 @@ class PromoteAssetJob implements ShouldQueue
                 return strtolower($ext);
             }
         }
+
         return 'file';
     }
 
@@ -327,10 +332,6 @@ class PromoteAssetJob implements ShouldQueue
      * S3 doesn't have a native "move" operation, so we copy then delete.
      * This is atomic from the application's perspective.
      *
-     * @param S3Client $s3Client
-     * @param string $bucketName
-     * @param string $sourceKey
-     * @param string $destinationKey
      * @throws \RuntimeException If move fails
      */
     protected function moveObject(S3Client $s3Client, string $bucketName, string $sourceKey, string $destinationKey): void
@@ -344,8 +345,8 @@ class PromoteAssetJob implements ShouldQueue
             ]);
 
             // Verify copy succeeded
-            if (!$s3Client->doesObjectExist($bucketName, $destinationKey)) {
-                throw new \RuntimeException("Copy verification failed: destination object not found");
+            if (! $s3Client->doesObjectExist($bucketName, $destinationKey)) {
+                throw new \RuntimeException('Copy verification failed: destination object not found');
             }
 
             // Delete source object
@@ -371,15 +372,10 @@ class PromoteAssetJob implements ShouldQueue
     /**
      * Move thumbnails to canonical location.
      *
-     * Thumbnails are stored at: tenants/{tenant_uuid}/assets/{asset_uuid}/v{version}/thumbnails/{style}/{filename}
+     * Thumbnails are stored at: tenants/.../thumbnails/{mode}/{style}/{filename} (legacy: thumbnails/{style}/...)
      *
      * Thumbnail promotion failures do NOT block original promotion.
      *
-     * @param S3Client $s3Client
-     * @param \App\Models\StorageBucket $bucket
-     * @param Asset $asset
-     * @param string $oldAssetPath
-     * @param string $newAssetPath
      * @return array Array of successfully moved thumbnail paths [old_path => new_path]
      */
     protected function moveThumbnails(
@@ -397,6 +393,7 @@ class PromoteAssetJob implements ShouldQueue
             Log::debug('No thumbnails to move', [
                 'asset_id' => $asset->id,
             ]);
+
             return $moved;
         }
 
@@ -404,44 +401,58 @@ class PromoteAssetJob implements ShouldQueue
         $pathGenerator = app(AssetPathGenerator::class);
         $tenant = $asset->tenant;
 
-        foreach ($thumbnails as $style => $thumbnailInfo) {
+        ThumbnailMetadata::walkThumbnailStyles($thumbnails, function (string $mode, string $style, array $thumbnailInfo) use (
+            &$moved,
+            $s3Client,
+            $bucket,
+            $asset,
+            $tenant,
+            $pathGenerator,
+            $version,
+            $newAssetPath
+        ): void {
             $oldThumbnailPath = $thumbnailInfo['path'] ?? null;
 
-            if (!$oldThumbnailPath) {
-                continue;
+            if (! $oldThumbnailPath) {
+                return;
             }
 
             $thumbnailFilename = basename($oldThumbnailPath);
-            $newThumbnailPath = $pathGenerator->generateThumbnailPath($tenant, $asset, $version, $style, $thumbnailFilename);
+            $newThumbnailPath = $pathGenerator->generateThumbnailPath($tenant, $asset, $version, $mode, $style, $thumbnailFilename);
 
             // Skip if thumbnail is already in canonical location
             if ($oldThumbnailPath === $newThumbnailPath || str_starts_with($oldThumbnailPath, dirname($newAssetPath))) {
                 Log::debug('Thumbnail already in canonical location', [
                     'asset_id' => $asset->id,
+                    'mode' => $mode,
                     'style' => $style,
                     'path' => $oldThumbnailPath,
                 ]);
-                continue;
+
+                return;
             }
 
             try {
                 // Check if old thumbnail exists
-                if (!$s3Client->doesObjectExist($bucket->name, $oldThumbnailPath)) {
+                if (! $s3Client->doesObjectExist($bucket->name, $oldThumbnailPath)) {
                     Log::warning('Thumbnail not found in S3, skipping move', [
                         'asset_id' => $asset->id,
+                        'mode' => $mode,
                         'style' => $style,
                         'old_path' => $oldThumbnailPath,
                     ]);
-                    continue;
+
+                    return;
                 }
 
                 // Move thumbnail
                 $this->moveObject($s3Client, $bucket->name, $oldThumbnailPath, $newThumbnailPath);
-                
+
                 $moved[$oldThumbnailPath] = $newThumbnailPath;
 
                 Log::debug('Thumbnail moved successfully', [
                     'asset_id' => $asset->id,
+                    'mode' => $mode,
                     'style' => $style,
                     'old_path' => $oldThumbnailPath,
                     'new_path' => $newThumbnailPath,
@@ -450,13 +461,14 @@ class PromoteAssetJob implements ShouldQueue
                 // Log error but don't block promotion
                 Log::warning('Failed to move thumbnail, continuing promotion', [
                     'asset_id' => $asset->id,
+                    'mode' => $mode,
                     'style' => $style,
                     'old_path' => $oldThumbnailPath,
                     'new_path' => $newThumbnailPath,
                     'error' => $e->getMessage(),
                 ]);
             }
-        }
+        });
 
         return $moved;
     }
@@ -464,9 +476,7 @@ class PromoteAssetJob implements ShouldQueue
     /**
      * Update thumbnail paths in asset metadata.
      *
-     * @param Asset $asset
-     * @param string $newAssetPath
-     * @param array $thumbnailMoves Map of old_path => new_path
+     * @param  array  $thumbnailMoves  Map of old_path => new_path
      */
     protected function updateThumbnailPathsInMetadata(Asset $asset, string $newAssetPath, array $thumbnailMoves): void
     {
@@ -475,17 +485,34 @@ class PromoteAssetJob implements ShouldQueue
         }
 
         $metadata = $asset->metadata ?? [];
-        $thumbnails = $metadata['thumbnails'] ?? [];
+        $metadata['thumbnails'] = $this->applyThumbnailPathMovesRecursive($metadata['thumbnails'] ?? [], $thumbnailMoves);
+        $metadata['preview_thumbnails'] = $this->applyThumbnailPathMovesRecursive($metadata['preview_thumbnails'] ?? [], $thumbnailMoves);
+        $asset->update(['metadata' => $metadata]);
+    }
 
-        foreach ($thumbnails as $style => &$thumbnailInfo) {
-            $oldPath = $thumbnailInfo['path'] ?? null;
-            if ($oldPath && isset($thumbnailMoves[$oldPath])) {
-                $thumbnailInfo['path'] = $thumbnailMoves[$oldPath];
+    /**
+     * @param  array<string, mixed>  $node
+     * @param  array<string, string>  $thumbnailMoves
+     * @return array<string, mixed>
+     */
+    protected function applyThumbnailPathMovesRecursive(array $node, array $thumbnailMoves): array
+    {
+        foreach ($node as $key => &$value) {
+            if (! is_array($value)) {
+                continue;
+            }
+            if (isset($value['path'])) {
+                $old = $value['path'];
+                if (is_string($old) && $old !== '' && isset($thumbnailMoves[$old])) {
+                    $value['path'] = $thumbnailMoves[$old];
+                }
+            } else {
+                $value = $this->applyThumbnailPathMovesRecursive($value, $thumbnailMoves);
             }
         }
+        unset($value);
 
-        $metadata['thumbnails'] = $thumbnails;
-        $asset->update(['metadata' => $metadata]);
+        return $node;
     }
 
     /**
@@ -493,10 +520,6 @@ class PromoteAssetJob implements ShouldQueue
      *
      * Removes temp/{upload_session_id}/ folder if it's empty.
      * Only deletes if all files have been moved.
-     *
-     * @param S3Client $s3Client
-     * @param \App\Models\StorageBucket $bucket
-     * @param string $uploadSessionId
      */
     protected function cleanupTempFolder(S3Client $s3Client, \App\Models\StorageBucket $bucket, string $uploadSessionId): void
     {
@@ -517,6 +540,7 @@ class PromoteAssetJob implements ShouldQueue
                     'upload_session_id' => $uploadSessionId,
                     'prefix' => $tempFolderPrefix,
                 ]);
+
                 return;
             }
 
@@ -538,9 +562,6 @@ class PromoteAssetJob implements ShouldQueue
 
     /**
      * Mark asset promotion as failed.
-     *
-     * @param Asset $asset
-     * @param string $errorMessage
      */
     protected function markPromotionFailed(Asset $asset, string $errorMessage): void
     {
@@ -577,13 +598,11 @@ class PromoteAssetJob implements ShouldQueue
 
     /**
      * Get or create S3 client instance.
-     *
-     * @return S3Client
      */
     protected function getS3Client(): S3Client
     {
         if ($this->s3Client === null) {
-            if (!class_exists(S3Client::class)) {
+            if (! class_exists(S3Client::class)) {
                 throw new \RuntimeException('AWS SDK not installed. Install aws/aws-sdk-php.');
             }
 

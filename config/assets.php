@@ -278,6 +278,32 @@ return [
              */
             'raw_auto_white_balance' => env('THUMBNAIL_CR2_RAW_AUTO_WB', false),
         ],
+
+        /*
+         * Async "preferred" thumbnails (smart-cropped margins) — generated after original completes.
+         * See GeneratePreferredThumbnailJob and ThumbnailSmartCropService.
+         */
+        'preferred' => [
+            'enabled' => env('THUMBNAIL_PREFERRED_ENABLED', true),
+            /*
+             * When smart crop was applied, reject preferred thumbnails below this confidence (0–1).
+             * Prevents visibly bad crops; asset keeps original thumbnails only.
+             */
+            'min_crop_confidence' => (float) env('THUMBNAIL_PREFERRED_MIN_CROP_CONFIDENCE', 0.55),
+            /*
+             * Styles that must exist in S3 (headObject) for idempotent "complete" — subset of generated finals.
+             * Typically thumb + medium; large optional. Intersected with styles actually present in metadata.
+             */
+            'completion_verify_styles' => ['thumb', 'medium'],
+            'smart_crop' => [
+                'min_dimension' => (int) env('THUMBNAIL_PREFERRED_MIN_DIMENSION', 400),
+                'tight_area_ratio' => (float) env('THUMBNAIL_PREFERRED_TIGHT_AREA_RATIO', 0.95),
+                'max_content_area_ratio' => (float) env('THUMBNAIL_PREFERRED_MAX_CONTENT_AREA_RATIO', 0.80),
+                'min_content_area_ratio' => (float) env('THUMBNAIL_PREFERRED_MIN_CONTENT_AREA_RATIO', 0.05),
+                'padding_fraction' => (float) env('THUMBNAIL_PREFERRED_PADDING_FRACTION', 0.07),
+                'fuzz_quantum_fraction' => (float) env('THUMBNAIL_PREFERRED_TRIM_FUZZ', 0.08),
+            ],
+        ],
     ],
 
     /*

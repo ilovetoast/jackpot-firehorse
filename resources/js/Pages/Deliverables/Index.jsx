@@ -34,6 +34,7 @@ import { CategoryIcon } from '../../Helpers/categoryIcons'
 import AssetSidebar from '../../Components/AssetSidebar'
 import AddCategoryModal from '../../Components/Metadata/AddCategoryModal'
 import AddExistingCategoryModal from '../../Components/AddExistingCategoryModal'
+import { DeliverablesThumbnailModeProvider, useDeliverablesThumbnailMode } from '../../contexts/DeliverablesThumbnailModeContext'
 
 const DELIVERABLE_GRID_QUERY_KEYS = ['assets', 'next_page_url', 'filtered_grid_total', 'grid_folder_total']
 
@@ -53,9 +54,10 @@ const DELIVERABLE_CATEGORY_NAV_ONLY = [
 
 const DELIVERABLE_SIDEBAR_COUNTS_ONLY = ['categories', 'categories_by_type', 'show_all_button', 'total_asset_count']
 
-export default function DeliverablesIndex({ categories, total_asset_count = 0, selected_category, show_all_button = false, assets = [], next_page_url = null, filtered_grid_total = 0, grid_folder_total = 0, filterable_schema = [], available_values = {}, sort = 'created', sort_direction = 'desc', compliance_filter = '', show_compliance_filter = false, q: searchQuery = '', lifecycle = '', can_view_trash = false, trash_count = 0 }) {
+function DeliverablesIndexPage({ categories, total_asset_count = 0, selected_category, show_all_button = false, assets = [], next_page_url = null, filtered_grid_total = 0, grid_folder_total = 0, filterable_schema = [], available_values = {}, sort = 'created', sort_direction = 'desc', compliance_filter = '', show_compliance_filter = false, q: searchQuery = '', lifecycle = '', can_view_trash = false, trash_count = 0 }) {
     const pageProps = usePage().props
     const { auth } = pageProps
+    const { thumbnailViewMode, setThumbnailViewMode } = useDeliverablesThumbnailMode()
     const { can } = usePermission()
     const canUpload = can('asset.upload')
     
@@ -853,6 +855,8 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
                                 showComplianceFilter={show_compliance_filter}
                                 clearFiltersInertiaOnly={[...DELIVERABLE_GRID_QUERY_KEYS, 'filters', 'uploaded_by_users', 'q', 'compliance_filter', 'show_compliance_filter']}
                                 showMoreFilters={true}
+                                executionThumbnailViewMode={thumbnailViewMode}
+                                onExecutionThumbnailViewModeChange={setThumbnailViewMode}
                                 moreFiltersContent={
                                     /* Secondary Metadata Filters - Renders metadata fields with is_primary !== true */
                                     /* 
@@ -932,6 +936,7 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
                                 selectedAssetId={activeAssetId}
                                 primaryColor={workspaceAccentColor}
                                 selectionAssetType="execution"
+                                executionThumbnailViewMode={thumbnailViewMode}
                             />
                             {nextPageUrl ? <div ref={loadMoreRef} className="h-10" aria-hidden="true" /> : null}
                             {loading && (
@@ -1127,5 +1132,13 @@ export default function DeliverablesIndex({ categories, total_asset_count = 0, s
                 />
             )}
         </div>
+    )
+}
+
+export default function DeliverablesIndex(props) {
+    return (
+        <DeliverablesThumbnailModeProvider>
+            <DeliverablesIndexPage {...props} />
+        </DeliverablesThumbnailModeProvider>
     )
 }

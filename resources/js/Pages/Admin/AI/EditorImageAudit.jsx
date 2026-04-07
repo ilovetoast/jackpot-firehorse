@@ -72,14 +72,16 @@ function formatBrandContextDigestJson(digest) {
     return JSON.stringify(expandJsonLikeStrings(obj), null, 2)
 }
 
-/** Max length for inline img src (data URLs can be huge). */
+/** Default cap for table “Request / image” dialog (avoid huge attribute strings). */
 const MAX_INLINE_IMAGE_SRC_CHARS = 2_400_000
+/** Run details JSON already contains `image_ref`; allow larger data URLs for admin troubleshooting. */
+const MAX_DETAILS_MODAL_IMAGE_REF_CHARS = 6_000_000
 
-function imageSrcForPreview(ref) {
+function imageSrcForPreview(ref, maxChars = MAX_INLINE_IMAGE_SRC_CHARS) {
     if (typeof ref !== 'string' || ref === '') {
         return null
     }
-    if (ref.length > MAX_INLINE_IMAGE_SRC_CHARS) {
+    if (ref.length > maxChars) {
         return null
     }
     if (ref.startsWith('data:image') || ref.startsWith('http://') || ref.startsWith('https://')) {
@@ -275,7 +277,13 @@ export default function EditorImageAudit({ runs, filters, filterOptions }) {
                             </Link>
                         </div>
                         <h1 className="text-3xl font-bold tracking-tight text-gray-900">Editor image AI audit</h1>
-                        <p className="mt-2 text-sm text-gray-700">Canvas generative image and AI image edit runs. Structured audit lives in run metadata (<code className="text-xs bg-gray-100 px-1 rounded">generative_audit</code>).</p>
+                        <p className="mt-2 text-sm text-gray-700">
+                            Canvas text-to-image, canvas image edit, and DAM <strong>presentation preview</strong> runs. Structured
+                            fields live in <code className="text-xs bg-gray-100 px-1 rounded">generative_audit</code>. Raw source
+                            bytes are not stored on the run; when an <code className="text-xs bg-gray-100 px-1 rounded">asset_id</code>{' '}
+                            is recorded, the preview dialog loads that asset&apos;s current thumbnail as the best stand-in for
+                            &quot;what went in.&quot;
+                        </p>
                     </div>
 
                     {/* Filters */}
@@ -617,7 +625,7 @@ export default function EditorImageAudit({ runs, filters, filterOptions }) {
                                 <div className="inline-block w-full max-w-5xl transform overflow-hidden rounded-lg bg-white text-left align-bottom shadow-xl transition-all sm:my-8 sm:align-middle">
                                     <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3 sm:px-6">
                                         <h3 id="preview-modal-title" className="text-lg font-medium text-gray-900">
-                                            Request &amp; model output
+                                            Input vs model output
                                         </h3>
                                         <button
                                             type="button"
@@ -631,36 +639,122 @@ export default function EditorImageAudit({ runs, filters, filterOptions }) {
                                         {loadingPreview ? (
                                             <p className="text-sm text-gray-500">Loading…</p>
                                         ) : previewRun ? (
-                                            <div className="grid gap-6 lg:grid-cols-2">
-                                                <div>
-                                                    <p className="text-xs font-medium uppercase tracking-wide text-gray-500 mb-2">Returned image</p>
-                                                    {(() => {
-                                                        const src = imageSrcForPreview(previewRun.metadata?.image_ref)
-                                                        if (src) {
-                                                            return (
+                                            <div className="space-y-6">
+                                                <div className="grid gap-6 lg:grid-cols-2">
+                                                    <div>
+                                                        <p className="text-xs font-medium uppercase tracking-wide text-gray-500 mb-2">
+                                                            Input (sent to the model)
+                                                        </p>
+                                                        {previewRun.source_asset?.thumbnail_url ? (
+                                                            <div className="space-y-2">
                                                                 <img
-                                                                    src={src}
-                                                                    alt="Model output"
+                                                                    src={previewRun.source_asset.thumbnail_url}
+                                                                    alt=""
                                                                     className="max-h-80 w-full rounded border border-gray-200 object-contain bg-gray-50"
                                                                 />
-                                                            )
-                                                        }
-                                                        return (
+                                                                <p className="text-xs text-gray-600">
+                                                                    Linked asset{' '}
+                                                                    <span className="font-mono text-gray-800">{previewRun.source_asset.id}</span>
+                                                                    {previewRun.source_asset.title ? (
+                                                                        <>
+                                                                            {' '}
+                                                                            — {previewRun.source_asset.title}
+                                                                        </>
+                                                                    ) : null}
+                                                                    . Thumbnail is the asset&apos;s current delivery URL (may differ
+                                                                    slightly from the exact raster sent if the file changed since the
+                                                                    run).
+                                                                </p>
+                                                                {previewRun.source_asset.admin_url ? (
+                                                                    <Link
+                                                                        href={previewRun.source_asset.admin_url}
+                                                                        className="text-xs font-medium text-indigo-600 hover:text-indigo-500"
+                                                                    >
+                                                                        Open in admin asset console →
+                                                                    </Link>
+                                                                ) : null}
+                                                            </div>
+                                                        ) : previewRun.source_asset?.missing ? (
+                                                            <div className="space-y-2">
+                                                                <p className="text-sm text-amber-800">
+                                                                    Recorded asset id{' '}
+                                                                    <span className="font-mono">{previewRun.source_asset.id}</span>{' '}
+                                                                    was not found (deleted or wrong tenant).
+                                                                </p>
+                                                                {previewRun.source_asset.admin_url ? (
+                                                                    <Link
+                                                                        href={previewRun.source_asset.admin_url}
+                                                                        className="text-xs font-medium text-indigo-600 hover:text-indigo-500"
+                                                                    >
+                                                                        Try admin asset console →
+                                                                    </Link>
+                                                                ) : null}
+                                                            </div>
+                                                        ) : previewRun.task_type === 'editor_generative_image' ? (
                                                             <p className="text-sm text-gray-600">
-                                                                No inline preview (missing <code className="text-xs">image_ref</code>, non-HTTP/data URL, or reference too large). See JSON for length and kind.
+                                                                Text-to-image: there is no source raster.{' '}
+                                                                {previewRun.metadata?.editor_admin_request?.reference_asset_count !=
+                                                                null ? (
+                                                                    <>
+                                                                        Reference assets in request:{' '}
+                                                                        <span className="font-mono">
+                                                                            {previewRun.metadata.editor_admin_request.reference_asset_count}
+                                                                        </span>
+                                                                        .
+                                                                    </>
+                                                                ) : null}
                                                             </p>
-                                                        )
-                                                    })()}
-                                                </div>
-                                                <div className="space-y-4">
+                                                        ) : (
+                                                            <p className="text-sm text-gray-600">
+                                                                Raw image bytes are not stored on AI runs. No{' '}
+                                                                <code className="text-xs">asset_id</code> / entity link was recorded,
+                                                                so we can&apos;t show a stand-in thumbnail. Use{' '}
+                                                                <strong>Details</strong> for prompts and audit fields, or enable asset
+                                                                attribution on the client when calling edit endpoints.
+                                                            </p>
+                                                        )}
+                                                    </div>
                                                     <div>
-                                                        <p className="text-xs font-medium uppercase tracking-wide text-gray-500 mb-1">Request (JSON)</p>
+                                                        <p className="text-xs font-medium uppercase tracking-wide text-gray-500 mb-2">
+                                                            Output (model response)
+                                                        </p>
+                                                        {(() => {
+                                                            const src = imageSrcForPreview(
+                                                                previewRun.metadata?.image_ref,
+                                                                MAX_DETAILS_MODAL_IMAGE_REF_CHARS,
+                                                            )
+                                                            if (src) {
+                                                                return (
+                                                                    <img
+                                                                        src={src}
+                                                                        alt="Model output"
+                                                                        className="max-h-80 w-full rounded border border-gray-200 object-contain bg-gray-50"
+                                                                    />
+                                                                )
+                                                            }
+                                                            return (
+                                                                <p className="text-sm text-gray-600">
+                                                                    No inline preview (missing{' '}
+                                                                    <code className="text-xs">image_ref</code>, non-HTTP/data URL, or
+                                                                    reference too large). See JSON for length and kind.
+                                                                </p>
+                                                            )
+                                                        })()}
+                                                    </div>
+                                                </div>
+                                                <div className="grid gap-4 lg:grid-cols-2">
+                                                    <div>
+                                                        <p className="text-xs font-medium uppercase tracking-wide text-gray-500 mb-1">
+                                                            Request (JSON)
+                                                        </p>
                                                         <pre className="max-h-64 overflow-auto rounded border border-gray-200 bg-slate-50 p-3 text-xs">
                                                             {JSON.stringify(buildRequestResponsePayload(previewRun).request, null, 2)}
                                                         </pre>
                                                     </div>
                                                     <div>
-                                                        <p className="text-xs font-medium uppercase tracking-wide text-gray-500 mb-1">Response summary (JSON)</p>
+                                                        <p className="text-xs font-medium uppercase tracking-wide text-gray-500 mb-1">
+                                                            Response summary (JSON)
+                                                        </p>
                                                         <pre className="max-h-64 overflow-auto rounded border border-gray-200 bg-slate-50 p-3 text-xs">
                                                             {JSON.stringify(buildRequestResponsePayload(previewRun).response, null, 2)}
                                                         </pre>
@@ -760,6 +854,126 @@ export default function EditorImageAudit({ runs, filters, filterOptions }) {
                                                         <div>
                                                             <label className="text-xs font-medium text-gray-500">Cost (USD)</label>
                                                             <p className="text-sm text-gray-900">${formatUsd6(runDetails.estimated_cost)}</p>
+                                                        </div>
+                                                    </div>
+                                                </section>
+
+                                                {/* Source vs model output — same data as Request / image, visible without a second click */}
+                                                <section className="rounded-lg border border-indigo-100 bg-indigo-50/40 p-4">
+                                                    <h4 className="text-xs font-semibold uppercase tracking-wide text-indigo-800 mb-1">
+                                                        Visual previews
+                                                    </h4>
+                                                    <p className="text-xs text-gray-600 mb-4">
+                                                        <span className="font-medium text-gray-800">Original</span> uses the linked
+                                                        asset&apos;s current thumbnail when available.{' '}
+                                                        <span className="font-medium text-gray-800">New</span> is the stored model
+                                                        output (<code className="text-[10px] bg-white/80 px-1 rounded">image_ref</code>
+                                                        ). Very large data URLs may still be skipped for browser safety.
+                                                    </p>
+                                                    <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+                                                        <div>
+                                                            <p className="text-xs font-medium uppercase tracking-wide text-gray-500 mb-2">
+                                                                Original (source asset)
+                                                            </p>
+                                                            {runDetails.source_asset?.thumbnail_url ? (
+                                                                <div className="space-y-2">
+                                                                    <img
+                                                                        src={runDetails.source_asset.thumbnail_url}
+                                                                        alt=""
+                                                                        className="max-h-72 w-full rounded-lg border border-gray-200 bg-white object-contain shadow-sm"
+                                                                    />
+                                                                    <p className="text-xs text-gray-600">
+                                                                        Asset{' '}
+                                                                        <span className="font-mono text-gray-800">
+                                                                            {runDetails.source_asset.id}
+                                                                        </span>
+                                                                        {runDetails.source_asset.title
+                                                                            ? ` — ${runDetails.source_asset.title}`
+                                                                            : ''}
+                                                                    </p>
+                                                                    {runDetails.source_asset.admin_url ? (
+                                                                        <Link
+                                                                            href={runDetails.source_asset.admin_url}
+                                                                            className="text-xs font-medium text-indigo-600 hover:text-indigo-500"
+                                                                        >
+                                                                            Open in admin asset console →
+                                                                        </Link>
+                                                                    ) : null}
+                                                                </div>
+                                                            ) : runDetails.source_asset?.missing ? (
+                                                                <p className="text-sm text-amber-800">
+                                                                    Source asset id recorded but asset not found (deleted?).{' '}
+                                                                    {runDetails.source_asset.admin_url ? (
+                                                                        <Link
+                                                                            href={runDetails.source_asset.admin_url}
+                                                                            className="font-medium text-indigo-600 hover:text-indigo-500"
+                                                                        >
+                                                                            Try admin link
+                                                                        </Link>
+                                                                    ) : null}
+                                                                </p>
+                                                            ) : runDetails.task_type === 'editor_generative_image' ? (
+                                                                <p className="text-sm text-gray-600">
+                                                                    Text-to-image run — no source raster.{' '}
+                                                                    {runDetails.metadata?.editor_admin_request?.reference_asset_count !=
+                                                                    null ? (
+                                                                        <>
+                                                                            Reference assets:{' '}
+                                                                            <span className="font-mono">
+                                                                                {
+                                                                                    runDetails.metadata.editor_admin_request
+                                                                                        .reference_asset_count
+                                                                                }
+                                                                            </span>
+                                                                        </>
+                                                                    ) : null}
+                                                                </p>
+                                                            ) : (
+                                                                <p className="text-sm text-gray-600">
+                                                                    No linked asset on this run — raw input bytes are not stored. Check{' '}
+                                                                    <code className="text-xs">Source asset id</code> in Generative audit
+                                                                    if the client omitted <code className="text-xs">asset_id</code>.
+                                                                </p>
+                                                            )}
+                                                        </div>
+                                                        <div>
+                                                            <p className="text-xs font-medium uppercase tracking-wide text-gray-500 mb-2">
+                                                                New (model output)
+                                                            </p>
+                                                            {(() => {
+                                                                const outSrc = imageSrcForPreview(
+                                                                    runDetails.metadata?.image_ref,
+                                                                    MAX_DETAILS_MODAL_IMAGE_REF_CHARS,
+                                                                )
+                                                                if (outSrc) {
+                                                                    return (
+                                                                        <img
+                                                                            src={outSrc}
+                                                                            alt="Model output"
+                                                                            className="max-h-72 w-full rounded-lg border border-gray-200 bg-white object-contain shadow-sm"
+                                                                        />
+                                                                    )
+                                                                }
+                                                                const len = runDetails.metadata?.image_ref
+                                                                    ? String(runDetails.metadata.image_ref).length
+                                                                    : 0
+                                                                if (len > 0) {
+                                                                    return (
+                                                                        <p className="text-sm text-gray-600">
+                                                                            Output is present ({len.toLocaleString()} chars) but too
+                                                                            large or not a displayable URL. See Output ref kind /
+                                                                            length in Generative audit below, or use Request / image
+                                                                            from the table.
+                                                                        </p>
+                                                                    )
+                                                                }
+                                                                return (
+                                                                    <p className="text-sm text-gray-600">
+                                                                        No <code className="text-xs">image_ref</code> on this run
+                                                                        (failed before save, or older record).
+                                                                    </p>
+                                                                )
+                                                            })()}
                                                         </div>
                                                     </div>
                                                 </section>

@@ -22,14 +22,12 @@ use App\Services\SystemMetadataOptionProvisioningService;
 use App\Services\TenantMetadataFieldService;
 use App\Services\TenantMetadataRegistryService;
 use App\Services\TenantMetadataVisibilityService;
-use App\Support\Metadata\CategoryTypeResolver;
 use App\Support\MetadataCache;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Str;
-use Inertia\Inertia;
-use Inertia\Response;
 
 /**
  * Tenant Metadata Registry Controller
@@ -57,11 +55,12 @@ class TenantMetadataRegistryController extends Controller
     ) {}
 
     /**
-     * Display the Tenant Metadata Registry.
+     * Legacy URL: the Inertia "Categories & Fields" workspace moved to Manage → Categories.
      *
-     * GET /tenant/metadata/registry
+     * GET /tenant/metadata/registry → redirect to manage.categories (same permission gate).
+     * Preserves ?category= and ?filter=; maps ?category_id= to a slug when possible.
      */
-    public function index(Request $request): Response
+    public function index(Request $request): RedirectResponse
     {
         $tenant = app('tenant');
         $user = Auth::user();
@@ -70,7 +69,6 @@ class TenantMetadataRegistryController extends Controller
             abort(404, 'Tenant not found');
         }
 
-        // Check permission
         $canView = $user->hasPermissionForTenant($tenant, 'metadata.registry.view')
             || $user->hasPermissionForTenant($tenant, 'metadata.tenant.visibility.manage');
 
@@ -78,139 +76,31 @@ class TenantMetadataRegistryController extends Controller
             abort(403, 'You do not have permission to view the metadata registry.');
         }
 
-        // Get registry data
-        $registry = $this->registryService->getRegistry($tenant);
+        $categorySlug = $request->query('category');
+        $categorySlug = is_string($categorySlug) && $categorySlug !== '' ? $categorySlug : null;
 
-        // Brands list for By Category brand selector (one brand at a time to avoid duplicate category names)
-        // Include category_limits per brand for Add Category modal
-        $visibilityLimit = app(\App\Services\CategoryVisibilityLimitService::class);
-        $planService = app(\App\Services\PlanService::class);
-        $limits = $planService->getPlanLimits($tenant);
-
-        $brands = $tenant->brands()
-            ->orderBy('name')
-            ->get()
-            ->map(function ($b) use ($visibilityLimit) {
-                $currentCount = $b->categories()->custom()->count();
-                $visibleByAssetType = $visibilityLimit->limitsPayloadForBrand($b);
-
-                return [
-                    'id' => $b->id,
-                    'name' => $b->name,
-                    'primary_color' => $b->primary_color,
-                    'accent_color' => $b->accent_color,
-                    'category_limits' => [
-                        'current' => $currentCount,
-                        'max' => null,
-                        'can_create' => true,
-                        'visible_by_asset_type' => $visibleByAssetType,
-                    ],
-                ];
-            })
-            ->values();
-
-        // Active brand id for initial By Category brand dropdown selection (session/context brand)
-        $activeBrand = app()->bound('brand') ? app('brand') : null;
-        $active_brand_id = $activeBrand ? $activeBrand->id : null;
-
-        // Get all active categories for suppression UI
-        // Include both system and non-system categories (use active() scope)
-        // ordered() sorts by sort_order ASC; include is_hidden, sort_order, is_system for Metadata page
-        // Eager load brand to avoid LazyLoadingViolationException
-        $categories = Category::whereHas('brand', fn ($q) => $q->where('tenant_id', $tenant->id))
-            ->with('brand')
-            ->active()
-            ->ordered()
-            ->orderBy('name')
-            ->get();
-
-        // Batch template existence (avoids N+1 exists() on system_categories per category — see Category::isActive / systemTemplateExists)
-        $systemTemplateExistsByCategoryId = Category::templateExistsLookupForCategories($categories);
-
-        $categories = $categories
-            ->filter(function (Category $category) use ($systemTemplateExistsByCategoryId) {
-                if (! $category->id || $category->deleted_at) {
-                    return false;
+        if ($categorySlug === null && $request->filled('category_id')) {
+            $cid = (int) $request->query('category_id');
+            if ($cid > 0) {
+                $row = Category::query()
+                    ->where('id', $cid)
+                    ->whereHas('brand', fn ($q) => $q->where('tenant_id', $tenant->id))
+                    ->first();
+                if ($row) {
+                    $categorySlug = $row->slug ?? Str::slug($row->name);
                 }
-                if ($category->is_system) {
-                    return $systemTemplateExistsByCategoryId[$category->id] ?? false;
-                }
+            }
+        }
 
-                return true;
-            })
-            ->map(function ($category) {
-                $accessRules = [];
-                if ($category->is_private && ! $category->is_system) {
-                    $accessRules = $category->accessRules()->get()->map(function ($rule) {
-                        if ($rule->access_type === 'role') {
-                            return ['type' => 'role', 'role' => $rule->role];
-                        }
-                        if ($rule->access_type === 'user') {
-                            return ['type' => 'user', 'user_id' => $rule->user_id];
-                        }
+        $filter = $request->query('filter');
+        $filter = is_string($filter) && $filter !== '' ? $filter : null;
 
-                        return null;
-                    })->filter()->values()->toArray();
-                }
+        $params = array_filter([
+            'category' => $categorySlug,
+            'filter' => $filter,
+        ], fn ($v) => $v !== null && $v !== '');
 
-                $slug = $category->slug ?? \Illuminate\Support\Str::slug($category->name);
-
-                return [
-                    'id' => $category->id,
-                    'name' => $category->name,
-                    'slug' => $slug,
-                    'type_field' => CategoryTypeResolver::resolve($slug),
-                    'brand_id' => $category->brand_id,
-                    'brand_name' => $category->brand?->name ?? null,
-                    'asset_type' => $category->asset_type?->value ?? 'asset',
-                    'is_system' => $category->is_system,
-                    'is_hidden' => $category->is_hidden,
-                    'is_private' => $category->is_private,
-                    'access_rules' => $accessRules,
-                    'sort_order' => $category->sort_order,
-                    'system_version' => $category->system_version,
-                    'upgrade_available' => $category->upgrade_available ?? false,
-                    'deletion_available' => $category->deletion_available ?? false,
-                    'ebi_enabled' => $category->isEbiEnabled(),
-                ];
-            })
-            ->values();
-
-        // Get plan limits for custom metadata fields (reuse $planService, $limits from brands block above)
-        $maxCustomFields = $limits['max_custom_metadata_fields'] ?? 0;
-
-        // Count current custom fields (exclude archived)
-        $currentCustomFieldsCount = \Illuminate\Support\Facades\DB::table('metadata_fields')
-            ->where('tenant_id', $tenant->id)
-            ->where('scope', 'tenant')
-            ->where('is_active', true)
-            ->whereNull('deprecated_at')
-            ->whereNull('archived_at')
-            ->count();
-
-        $canCreateCustomField = $maxCustomFields === 0 || $currentCustomFieldsCount < $maxCustomFields;
-
-        // Owners and admins should have full access to manage fields
-        $tenantRole = $user->getRoleForTenant($tenant);
-        $isTenantOwnerOrAdmin = in_array($tenantRole, ['owner', 'admin']);
-
-        return Inertia::render('Tenant/MetadataRegistry/Index', [
-            'registry' => $registry,
-            'brands' => $brands,
-            'active_brand_id' => $active_brand_id,
-            'categories' => $categories,
-            'initial_category_slug' => $request->query('category'),
-            'initial_brand_id' => $request->query('brand') ? (int) $request->query('brand') : null,
-            'canManageBrandCategories' => $user->hasPermissionForTenant($tenant, 'brand_categories.manage'),
-            'canManageVisibility' => $isTenantOwnerOrAdmin || $user->hasPermissionForTenant($tenant, 'metadata.tenant.visibility.manage'),
-            'canManageFields' => $isTenantOwnerOrAdmin || $user->hasPermissionForTenant($tenant, 'metadata.tenant.field.manage'),
-            'customFieldsLimit' => [
-                'max' => $maxCustomFields,
-                'current' => $currentCustomFieldsCount,
-                'can_create' => $canCreateCustomField,
-            ],
-            'metadata_field_families' => config('metadata_field_families', []),
-        ]);
+        return redirect()->route('manage.categories', $params);
     }
 
     /**
@@ -869,6 +759,10 @@ class TenantMetadataRegistryController extends Controller
      * Copy metadata visibility settings from one category to another.
      *
      * POST /api/tenant/metadata/categories/{targetCategory}/copy-from/{sourceCategory}
+     *
+     * @deprecated SUNSET (2026): UI removed from Advanced Settings; no new callers. Safe to delete this
+     * method, its web route (`tenant.metadata.category.copy-from`), and `copyCategoryVisibility` usage once
+     * confirmed no external integrations rely on it.
      */
     public function copyCategoryFrom(int $targetCategory, int $sourceCategory): JsonResponse
     {
@@ -946,6 +840,8 @@ class TenantMetadataRegistryController extends Controller
      * Get target categories for "Apply to other brands" (same slug + asset_type in other brands).
      *
      * GET /api/tenant/metadata/categories/{category}/apply-to-other-brands
+     *
+     * @deprecated SUNSET (2026): UI removed from Advanced Settings alongside copy-from-category.
      */
     public function getApplyToOtherBrandsTargets(int $category): JsonResponse
     {
@@ -981,6 +877,8 @@ class TenantMetadataRegistryController extends Controller
      * Apply current category's metadata visibility settings to the same category type in other brands.
      *
      * POST /api/tenant/metadata/categories/{category}/apply-to-other-brands
+     *
+     * @deprecated SUNSET (2026): UI removed from Advanced Settings alongside copy-from-category.
      */
     public function applyToOtherBrands(int $category): JsonResponse
     {

@@ -7,6 +7,12 @@
  */
 
 import { getThumbnailExtensions, getThumbnailMimeTypes } from './damFileTypes'
+import {
+    getThumbnailUrl as getThumbnailUrlFromResolve,
+    getThumbnailUrlModeOnly,
+} from './thumbnailUrlResolve.js'
+
+export { getThumbnailUrlFromResolve as getThumbnailUrl, getThumbnailUrlModeOnly }
 
 /**
  * Video types the DAM generates poster/preview for ({@see config/file_types.php} `video`).
@@ -72,10 +78,22 @@ export function getThumbnailVersion(asset) {
     
     // Tertiary: updated_at (fallback - changes on any update)
     const updatedAt = asset.updated_at || asset.created_at || ''
+
+    const modeUrls = asset.thumbnail_mode_urls
+    const modeUrlsKey =
+        modeUrls && typeof modeUrls === 'object' ? JSON.stringify(modeUrls) : ''
+    const modesStatus = asset.thumbnail_modes_status || asset.metadata?.thumbnail_modes_status
+    const modesStatusKey =
+        modesStatus && typeof modesStatus === 'object' ? JSON.stringify(modesStatus) : ''
+    const modesMeta = asset.thumbnail_modes_meta || asset.metadata?.thumbnail_modes_meta
+    const modeMetaCacheKey =
+        modesMeta?.preferred?.cache_key ||
+        modesMeta?.original?.cache_key ||
+        ''
     
     // Combine into stable version string
     // This will change when any thumbnail-related field changes
-    return `${thumbnailUrl}|${finalThumbnailUrl}|${previewThumbnailUrl}|${thumbnailStatus}|${updatedAt}`
+    return `${thumbnailUrl}|${finalThumbnailUrl}|${previewThumbnailUrl}|${thumbnailStatus}|${updatedAt}|${modeUrlsKey}|${modesStatusKey}|${modeMetaCacheKey}`
 }
 
 /**

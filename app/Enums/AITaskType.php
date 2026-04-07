@@ -21,21 +21,35 @@ class AITaskType
 {
     // Support ticket tasks
     public const SUPPORT_TICKET_SUMMARY = 'support_ticket_summary';
+
     public const TICKET_CLASSIFICATION = 'ticket_classification';
+
     public const SLA_RISK_DETECTION = 'sla_risk_detection';
+
     public const ERROR_PATTERN_ANALYSIS = 'error_pattern_analysis';
+
     public const DUPLICATE_TICKET_DETECTION = 'duplicate_ticket_detection';
-    
+
     // Audit and reporting tasks
     public const AUDIT_REPORT_GENERATION = 'audit_report_generation';
+
     public const PERFORMANCE_ANALYSIS = 'performance_analysis';
+
     public const SYSTEM_RELIABILITY_ANALYSIS = 'system_reliability_analysis';
-    
+
     // Asset management tasks
     public const ASSET_TAG_SUGGESTION = 'asset_tag_suggestion';
+
     public const ASSET_METADATA_GENERATION = 'asset_metadata_generation';
+
     public const APPROVAL_FEEDBACK_SUMMARY = 'approval_feedback_summary'; // Phase AF-6
-    
+
+    /** Template-based or future-AI enhanced thumbnail previews */
+    public const THUMBNAIL_ENHANCEMENT = 'thumbnail_enhancement';
+
+    /** AI image-edit presentation still from preferred/original thumbnail */
+    public const THUMBNAIL_PRESENTATION_PREVIEW = 'thumbnail_presentation_preview';
+
     // Alert and monitoring tasks
     public const ALERT_SUMMARY = 'alert_summary';
 
@@ -107,24 +121,23 @@ class AITaskType
             self::EDITOR_COPY_ASSIST,
             self::EDITOR_GENERATIVE_IMAGE,
             self::EDITOR_EDIT_IMAGE,
+            self::THUMBNAIL_ENHANCEMENT,
+            self::THUMBNAIL_PRESENTATION_PREVIEW,
         ];
     }
-    
+
     /**
      * Validate if a task type is valid.
-     *
-     * @param string $taskType
-     * @return bool
      */
     public static function isValid(string $taskType): bool
     {
         return in_array($taskType, self::all(), true);
     }
-    
+
     /**
      * Get task types by category/domain.
      *
-     * @param string $category (e.g., 'support', 'audit', 'asset')
+     * @param  string  $category  (e.g., 'support', 'audit', 'asset')
      * @return array<string>
      */
     public static function byCategory(string $category): array
@@ -138,9 +151,9 @@ class AITaskType
             ],
             'engineering' => [self::ERROR_PATTERN_ANALYSIS],
             'audit' => [self::AUDIT_REPORT_GENERATION, self::PERFORMANCE_ANALYSIS, self::SYSTEM_RELIABILITY_ANALYSIS],
-            'asset' => [self::ASSET_TAG_SUGGESTION, self::ASSET_METADATA_GENERATION, self::APPROVAL_FEEDBACK_SUMMARY],
+            'asset' => [self::ASSET_TAG_SUGGESTION, self::ASSET_METADATA_GENERATION, self::APPROVAL_FEEDBACK_SUMMARY, self::THUMBNAIL_ENHANCEMENT, self::THUMBNAIL_PRESENTATION_PREVIEW],
         ];
-        
+
         return $mapping[$category] ?? [];
     }
 }

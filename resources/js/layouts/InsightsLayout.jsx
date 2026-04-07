@@ -68,7 +68,7 @@ function InsightsSidebarNav({ activeSection, sidebarItems }) {
 }
 
 export default function InsightsLayout({ children, title = 'Insights', activeSection = 'overview' }) {
-    const { auth, tenant, creator_module_status } = usePage().props
+    const { auth, tenant, creator_module_status, reviewTabCounts } = usePage().props
 
     const sidebarItems = useMemo(() => {
         const creatorOn = creator_module_status?.enabled === true
@@ -88,7 +88,7 @@ export default function InsightsLayout({ children, title = 'Insights', activeSec
     }, [creator_module_status?.enabled])
 
     return (
-        <InsightsCountsProvider>
+        <InsightsCountsProvider initialReviewTabCounts={reviewTabCounts ?? null}>
             <div className="min-h-screen flex flex-col bg-gray-50">
                 <AppHead title={title} />
                 <AppNav brand={auth?.activeBrand} tenant={tenant} />

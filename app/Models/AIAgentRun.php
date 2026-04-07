@@ -3,7 +3,6 @@
 namespace App\Models;
 
 use App\Enums\EventType;
-use App\Enums\AITaskType;
 use App\Services\ApplicationErrorEventService;
 use App\Traits\RecordsActivity;
 use Illuminate\Database\Eloquent\Builder;
@@ -134,7 +133,7 @@ class AIAgentRun extends Model
      */
     public function getDurationAttribute(): ?int
     {
-        if (!$this->started_at || !$this->completed_at) {
+        if (! $this->started_at || ! $this->completed_at) {
             return null;
         }
 
@@ -143,8 +142,6 @@ class AIAgentRun extends Model
 
     /**
      * Get formatted duration string (e.g., "1.5s", "2m 30s").
-     *
-     * @return string|null
      */
     public function getFormattedDurationAttribute(): ?string
     {
@@ -281,6 +278,7 @@ class AIAgentRun extends Model
     public function scopeOlderThan(Builder $query, int $days): Builder
     {
         $cutoffDate = Carbon::now()->subDays($days);
+
         return $query->where('started_at', '<', $cutoffDate);
     }
 
@@ -324,6 +322,11 @@ class AIAgentRun extends Model
         return $this->status === 'failed';
     }
 
+    public function isSkipped(): bool
+    {
+        return $this->status === 'skipped';
+    }
+
     /**
      * Get total tokens used (input + output).
      */
@@ -335,13 +338,9 @@ class AIAgentRun extends Model
     /**
      * Mark the agent run as completed with success.
      *
-     * @param int $tokensIn
-     * @param int $tokensOut
-     * @param float $estimatedCost
-     * @param array|null $metadata
-     * @param string|null $severity Parsed from agent response
-     * @param float|null $confidence Parsed from agent response (0-1)
-     * @param string|null $summary Parsed from agent response
+     * @param  string|null  $severity  Parsed from agent response
+     * @param  float|null  $confidence  Parsed from agent response (0-1)
+     * @param  string|null  $summary  Parsed from agent response
      */
     public function markAsSuccessful(
         int $tokensIn,
@@ -396,5 +395,20 @@ class AIAgentRun extends Model
                 'error' => $e->getMessage(),
             ]);
         }
+    }
+
+    /**
+     * Guardrail / no-op completion (e.g. source too small) — not counted as LLM failure; no application_error_events row.
+     */
+    public function markAsSkipped(string $message, ?array $metadata = null): void
+    {
+        $this->update([
+            'status' => 'skipped',
+            'error_message' => $message,
+            'severity' => 'info',
+            'summary' => 'Skipped',
+            'completed_at' => now(),
+            'metadata' => $metadata ?? $this->metadata,
+        ]);
     }
 }

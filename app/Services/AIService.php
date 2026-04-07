@@ -80,7 +80,7 @@ class AIService
 
         if (trim((string) config('ai.openai.api_key', '')) !== '') {
             try {
-                $this->providers['openai'] = new OpenAIProvider();
+                $this->providers['openai'] = new OpenAIProvider;
             } catch (\Throwable $e) {
                 Log::warning('[AIService] OpenAIProvider failed to initialize', ['error' => $e->getMessage()]);
             }
@@ -88,7 +88,7 @@ class AIService
 
         if (config('ai.anthropic.api_key')) {
             try {
-                $this->providers['anthropic'] = new AnthropicProvider();
+                $this->providers['anthropic'] = new AnthropicProvider;
             } catch (\Throwable $e) {
                 Log::warning('[AIService] AnthropicProvider failed to initialize', ['error' => $e->getMessage()]);
             }
@@ -96,7 +96,7 @@ class AIService
 
         if (config('ai.gemini.api_key')) {
             try {
-                $this->providers['gemini'] = new GeminiProvider();
+                $this->providers['gemini'] = new GeminiProvider;
             } catch (\Throwable $e) {
                 Log::warning('[AIService] GeminiProvider failed to initialize', ['error' => $e->getMessage()]);
             }
@@ -104,7 +104,7 @@ class AIService
 
         if (trim((string) config('ai.flux.api_key', '')) !== '') {
             try {
-                $this->providers['flux'] = new FluxProvider();
+                $this->providers['flux'] = new FluxProvider;
             } catch (\Throwable $e) {
                 Log::warning('[AIService] FluxProvider failed to initialize', ['error' => $e->getMessage()]);
             }
@@ -126,28 +126,29 @@ class AIService
      * 6. Tracks costs and updates agent run
      * 7. Optionally logs prompts/responses if enabled
      *
-     * @param string $agentId Agent identifier from config/ai.php
-     * @param string $taskType Task type from AITaskType enum
-     * @param string $prompt The prompt to send to the AI
-     * @param array $options Additional options:
-     *   - model: Override default model
-     *   - tenant: Tenant instance (required for tenant-scoped agents)
-     *   - user: User instance (optional, for user context)
-     *   - triggering_context: Override context ('system', 'tenant', 'user')
-     *   - Other provider-specific options (max_tokens, temperature, etc.)
+     * @param  string  $agentId  Agent identifier from config/ai.php
+     * @param  string  $taskType  Task type from AITaskType enum
+     * @param  string  $prompt  The prompt to send to the AI
+     * @param  array  $options  Additional options:
+     *                          - model: Override default model
+     *                          - tenant: Tenant instance (required for tenant-scoped agents)
+     *                          - user: User instance (optional, for user context)
+     *                          - triggering_context: Override context ('system', 'tenant', 'user')
+     *                          - Other provider-specific options (max_tokens, temperature, etc.)
      * @return array Response array:
-     *   - text: Generated text response
-     *   - agent_run_id: ID of the created agent run
-     *   - cost: Estimated cost in USD
-     *   - tokens_in: Input tokens used
-     *   - tokens_out: Output tokens used
-     *   - metadata: Provider metadata (e.g. Gemini image generation includes inline_images)
+     *               - text: Generated text response
+     *               - agent_run_id: ID of the created agent run
+     *               - cost: Estimated cost in USD
+     *               - tokens_in: Input tokens used
+     *               - tokens_out: Output tokens used
+     *               - metadata: Provider metadata (e.g. Gemini image generation includes inline_images)
+     *
      * @throws \Exception If agent doesn't exist, permissions fail, or API call fails
      */
     public function executeAgent(string $agentId, string $taskType, string $prompt, array $options = []): array
     {
         // Validate task type
-        if (!AITaskType::isValid($taskType)) {
+        if (! AITaskType::isValid($taskType)) {
             throw new \InvalidArgumentException("Invalid task type: {$taskType}");
         }
 
@@ -157,18 +158,18 @@ class AIService
 
         // Get agent configuration with overrides
         $agentConfig = $this->getAgentConfig($agentId, $environment);
-        if (!$agentConfig) {
+        if (! $agentConfig) {
             throw new \InvalidArgumentException("Agent '{$agentId}' not found in configuration.");
         }
 
         // Get tenant and user from options or context
         $tenant = $options['tenant'] ?? null;
-        if (!$tenant && isset($options['tenant_id']) && $options['tenant_id']) {
+        if (! $tenant && isset($options['tenant_id']) && $options['tenant_id']) {
             $tenant = Tenant::find($options['tenant_id']);
         }
-        
+
         $user = $options['user'] ?? null;
-        if (!$user && isset($options['user_id']) && $options['user_id']) {
+        if (! $user && isset($options['user_id']) && $options['user_id']) {
             $user = User::find($options['user_id']);
         }
 
@@ -176,7 +177,7 @@ class AIService
         $systemUser = null;
         if ($triggeringContext === 'system') {
             $systemUser = User::where('email', 'system@internal')->first();
-            if (!$systemUser) {
+            if (! $systemUser) {
                 Log::warning('System user not found, using user ID 1 as fallback');
                 $systemUser = User::find(1);
             }
@@ -186,14 +187,14 @@ class AIService
         $this->enforcePermissions($agentConfig, $triggeringContext, $tenant, $user ?? $systemUser);
 
         // Validate tenant boundaries for tenant-scoped agents
-        if ($agentConfig['scope'] === 'tenant' && !$tenant) {
+        if ($agentConfig['scope'] === 'tenant' && ! $tenant) {
             throw new \InvalidArgumentException("Tenant-scoped agent '{$agentId}' requires a tenant.");
         }
 
         // Get model to use
         $modelKey = $options['model'] ?? $agentConfig['default_model'];
         $modelConfig = $this->getModelConfig($modelKey, $environment);
-        if (!$modelConfig || !($modelConfig['active'] ?? true)) {
+        if (! $modelConfig || ! ($modelConfig['active'] ?? true)) {
             throw new \InvalidArgumentException("Model '{$modelKey}' is not available or inactive.");
         }
 
@@ -370,15 +371,15 @@ class AIService
      * Execute a generative image agent (editor image layers): agent runs, budgets, token/cost attribution.
      *
      * @param  array<string, mixed>  $options
-     *   - model: Registry key from config/ai.php models (required)
-     *   - image_size: OpenAI size e.g. 1024x1024
-     *   - tenant, user, brand_id, composition_id, asset_id: attribution
+     *                                         - model: Registry key from config/ai.php models (required)
+     *                                         - image_size: OpenAI size e.g. 1024x1024
+     *                                         - tenant, user, brand_id, composition_id, asset_id: attribution
      * @return array<string, mixed>
      */
     public function executeGenerativeImageAgent(string $agentId, string $taskType, string $prompt, array $options = []): array
     {
         if ($taskType !== AITaskType::EDITOR_GENERATIVE_IMAGE) {
-            throw new \InvalidArgumentException("Task type must be ".AITaskType::EDITOR_GENERATIVE_IMAGE);
+            throw new \InvalidArgumentException('Task type must be '.AITaskType::EDITOR_GENERATIVE_IMAGE);
         }
 
         $triggeringContext = $options['triggering_context'] ?? $this->determineContext($options);
@@ -609,16 +610,19 @@ class AIService
      * OpenAI: images/edits. Gemini: generateContent with image + prompt (Nano Banana).
      *
      * @param  array<string, mixed>  $options
-     *   - model: Registry key (e.g. gpt-image-1, gemini-2.5-flash-image)
-     *   - image_binary: raw bytes (required)
-     *   - mime_type: optional hint for Gemini (from original bytes)
-     *   - tenant, user, brand_id, composition_id, asset_id: attribution
+     *                                         - model: Registry key (e.g. gpt-image-1, gemini-2.5-flash-image)
+     *                                         - image_binary: raw bytes (required)
+     *                                         - mime_type: optional hint for Gemini (from original bytes)
+     *                                         - tenant, user, brand_id, composition_id, asset_id: attribution
      * @return array<string, mixed>
      */
     public function executeEditorImageEditAgent(string $agentId, string $taskType, string $prompt, array $options = []): array
     {
-        if ($taskType !== AITaskType::EDITOR_EDIT_IMAGE) {
-            throw new \InvalidArgumentException('Task type must be '.AITaskType::EDITOR_EDIT_IMAGE);
+        $allowedEditTasks = [AITaskType::EDITOR_EDIT_IMAGE, AITaskType::THUMBNAIL_PRESENTATION_PREVIEW];
+        if (! in_array($taskType, $allowedEditTasks, true)) {
+            throw new \InvalidArgumentException(
+                'Task type must be '.AITaskType::EDITOR_EDIT_IMAGE.' or '.AITaskType::THUMBNAIL_PRESENTATION_PREVIEW
+            );
         }
 
         $imageBinary = $options['image_binary'] ?? null;
@@ -651,7 +655,11 @@ class AIService
         }
 
         $modelKey = $options['model'] ?? $agentConfig['default_model'];
-        $this->assertEditorEditImageModelAllowed($modelKey, $environment);
+        if ($taskType === AITaskType::THUMBNAIL_PRESENTATION_PREVIEW) {
+            $this->assertPresentationPreviewModelAllowed($modelKey, $environment);
+        } else {
+            $this->assertEditorEditImageModelAllowed($modelKey, $environment);
+        }
 
         $modelConfig = $this->getModelConfig($modelKey, $environment);
         if (! $modelConfig || ! ($modelConfig['active'] ?? true)) {
@@ -817,7 +825,10 @@ class AIService
                 $this->budgetService->recordUsage($taskBudget, $cost, $environment);
             }
 
-            Log::info('AI editor image edit agent executed successfully', [
+            $successLogKey = $taskType === AITaskType::THUMBNAIL_PRESENTATION_PREVIEW
+                ? 'AI presentation preview agent executed successfully'
+                : 'AI editor image edit agent executed successfully';
+            Log::info($successLogKey, [
                 'agent_id' => $agentId,
                 'task_type' => $taskType,
                 'agent_run_id' => $agentRun->id,
@@ -930,10 +941,41 @@ class AIService
     }
 
     /**
+     * Allowed models for presentation preview job (image edit from pipeline thumbnail).
+     */
+    protected function assertPresentationPreviewModelAllowed(string $modelKey, ?string $environment = null): void
+    {
+        $configured = config('presentation_preview.allowed_model_keys');
+        $allowed = is_array($configured) && $configured !== []
+            ? $configured
+            : (config('ai.generative_editor.edit_allowed_model_keys', []) ?: config('ai.generative_editor.allowed_model_keys', []));
+        $modelConfig = $this->getModelConfig($modelKey, $environment);
+
+        if (is_array($allowed) && $allowed !== []) {
+            if (! in_array($modelKey, $allowed, true)) {
+                throw new \InvalidArgumentException("Model '{$modelKey}' is not allowed for presentation preview.");
+            }
+            if (! $modelConfig || ! ($modelConfig['active'] ?? true)) {
+                throw new \InvalidArgumentException("Model '{$modelKey}' is not available or inactive.");
+            }
+
+            return;
+        }
+
+        if (! $modelConfig || ! ($modelConfig['active'] ?? true)) {
+            throw new \InvalidArgumentException("Model '{$modelKey}' is not available or inactive.");
+        }
+        $caps = $modelConfig['capabilities'] ?? [];
+        if (! in_array('image_generation', $caps, true)) {
+            throw new \InvalidArgumentException("Model '{$modelKey}' does not support image generation.");
+        }
+    }
+
+    /**
      * Get agent configuration from config with DB overrides.
      *
-     * @param string $agentId Agent identifier
-     * @param string|null $environment Environment name (null = current environment)
+     * @param  string  $agentId  Agent identifier
+     * @param  string|null  $environment  Environment name (null = current environment)
      * @return array|null Agent configuration or null if not found
      */
     protected function getAgentConfig(string $agentId, ?string $environment = null): ?array
@@ -944,8 +986,8 @@ class AIService
     /**
      * Get model configuration from config with DB overrides.
      *
-     * @param string $modelKey Model key from config
-     * @param string|null $environment Environment name (null = current environment)
+     * @param  string  $modelKey  Model key from config
+     * @param  string|null  $environment  Environment name (null = current environment)
      * @return array|null Model configuration or null if not found
      */
     protected function getModelConfig(string $modelKey, ?string $environment = null): ?array
@@ -956,15 +998,16 @@ class AIService
     /**
      * Get provider for a model configuration.
      *
-     * @param array $modelConfig Model configuration
+     * @param  array  $modelConfig  Model configuration
      * @return AIProviderInterface Provider instance
+     *
      * @throws \Exception If provider is not available
      */
     protected function getProviderForModel(array $modelConfig): AIProviderInterface
     {
         $providerName = $modelConfig['provider'] ?? config('ai.default_provider', 'openai');
 
-        if (!isset($this->providers[$providerName])) {
+        if (! isset($this->providers[$providerName])) {
             throw new \Exception("Provider '{$providerName}' is not available.");
         }
 
@@ -974,7 +1017,7 @@ class AIService
     /**
      * Determine triggering context from options.
      *
-     * @param array $options Execution options
+     * @param  array  $options  Execution options
      * @return string Context ('system', 'tenant', 'user')
      */
     protected function determineContext(array $options): string
@@ -1054,10 +1097,10 @@ class AIService
     /**
      * Build metadata for agent run.
      *
-     * @param string $prompt The prompt
-     * @param array $options Execution options
-     * @param array $agentConfig Agent configuration
-     * @param string $triggeringContext Triggering context
+     * @param  string  $prompt  The prompt
+     * @param  array  $options  Execution options
+     * @param  array  $agentConfig  Agent configuration
+     * @param  string  $triggeringContext  Triggering context
      * @return array Metadata array
      */
     protected function buildMetadata(string $prompt, array $options, array $agentConfig, string $triggeringContext): array
@@ -1183,11 +1226,11 @@ class AIService
      * - Tenant-scoped agents: Require tenant-specific permissions
      * - Uses existing Spatie permission system
      *
-     * @param array $agentConfig Agent configuration
-     * @param string $triggeringContext Triggering context
-     * @param Tenant|null $tenant Tenant instance (if applicable)
-     * @param User|null $user User instance (system user for system context)
-     * @return void
+     * @param  array  $agentConfig  Agent configuration
+     * @param  string  $triggeringContext  Triggering context
+     * @param  Tenant|null  $tenant  Tenant instance (if applicable)
+     * @param  User|null  $user  User instance (system user for system context)
+     *
      * @throws \Exception If permissions check fails
      */
     protected function enforcePermissions(array $agentConfig, string $triggeringContext, ?Tenant $tenant, ?User $user): void
@@ -1208,18 +1251,18 @@ class AIService
         }
 
         // Tenant/User context: Check permissions on user
-        if (!$user) {
+        if (! $user) {
             throw new \Exception('Tenant or user context requires a user for permission checks.');
         }
 
         // Validate user belongs to tenant if tenant is provided
-        if ($tenant && !$user->tenants()->where('tenants.id', $tenant->id)->exists()) {
+        if ($tenant && ! $user->tenants()->where('tenants.id', $tenant->id)->exists()) {
             throw new \Exception('User does not belong to the specified tenant.');
         }
 
         // Check permissions (tenant-scoped permissions will be checked by Spatie)
         foreach ($permissions as $permission) {
-            if (!$user->can($permission)) {
+            if (! $user->can($permission)) {
                 throw new \Exception("Agent '{$agentConfig['name']}' requires permission '{$permission}' which is not granted.");
             }
         }
@@ -1228,7 +1271,7 @@ class AIService
     /**
      * Get a provider instance by name.
      *
-     * @param string $providerName Provider name
+     * @param  string  $providerName  Provider name
      * @return AIProviderInterface|null Provider instance or null if not found
      */
     public function getProvider(string $providerName): ?AIProviderInterface

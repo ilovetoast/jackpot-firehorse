@@ -3,19 +3,23 @@
 namespace App\Http\Controllers;
 
 use App\Enums\ThumbnailStatus;
+use App\Jobs\GenerateEnhancedPreviewJob;
+use App\Jobs\GeneratePresentationPreviewJob;
 use App\Models\Asset;
 use App\Models\Collection;
-use Illuminate\Support\Facades\Auth;
 use App\Models\Download;
 use App\Services\FeatureGate;
+use App\Services\ThumbnailEnhancementAiTaskRecorder;
 use App\Support\PipelineQueueResolver;
-use Aws\S3\S3Client;
-use Illuminate\Support\Arr;
+use App\Support\ThumbnailMetadata;
+use App\Support\ThumbnailMode;
 use Aws\S3\Exception\S3Exception;
+use Aws\S3\S3Client;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 
 /**
@@ -26,33 +30,34 @@ use Illuminate\Support\Facades\Storage;
  *
  * CRITICAL CACHE CORRECTNESS RULES:
  * =================================
- * 
+ *
  * 1. NO PLACEHOLDER IMAGES
  *    - Backend MUST NEVER return fake/placeholder images (1x1 pixel, solid colors, etc.)
  *    - Missing or invalid thumbnails MUST return 404
  *    - This prevents browser from caching placeholder images that can never be replaced
- * 
+ *
  * 2. PREVIEW vs FINAL SEPARATION
  *    - Preview thumbnails: /app/assets/{asset}/thumbnail/preview/{style}
  *    - Final thumbnails: /app/assets/{asset}/thumbnail/final/{style}
  *    - These URLs MUST NEVER be the same to prevent cache confusion
- * 
+ *
  * 3. VERSION-BASED CACHE BUSTING
  *    - Final thumbnails include thumbnail_version query param
  *    - Version changes ONLY when final thumbnail is ready (thumbnails_generated_at)
  *    - Browser will refetch final thumbnail when version changes
  *    - Preview thumbnails do NOT include version (they're temporary)
- * 
+ *
  * 4. WHY THIS MATTERS
  *    - Prevents cached placeholders: Browser never caches 404s
  *    - Prevents green tiles: No placeholder images means no cached placeholders
  *    - Enables safe preview→final swap: Different URLs ensure no cache collision
- * 
+ *
  * Authorization:
  * - Asset must belong to authenticated user's tenant
  * - Asset must belong to active brand (unless tenant owner/admin)
  *
  * Future work notes (see ThumbnailGenerationService for implementation details):
+ *
  * @todo PSD / PSB thumbnail generation (Imagick) - See ThumbnailGenerationService::generatePsdThumbnail()
  * @todo PDF first-page + multi-page previews - See ThumbnailGenerationService::generatePdfThumbnail()
  * @todo Video poster frame generation (FFmpeg) - See ThumbnailGenerationService::generateVideoThumbnail()
@@ -88,7 +93,7 @@ class AssetThumbnailController extends Controller
     public function adminThumbnail(Request $request, string $asset): \Symfony\Component\HttpFoundation\Response
     {
         $user = Auth::user();
-        if (!$user) {
+        if (! $user) {
             abort(403);
         }
         $siteRoles = $user->getSiteRoles();
@@ -96,7 +101,7 @@ class AssetThumbnailController extends Controller
         $isSiteAdmin = in_array('site_admin', $siteRoles) || in_array('site_owner', $siteRoles);
         $isEngineering = in_array('site_engineering', $siteRoles);
         $canRegenerate = $user->can('assets.regenerate_thumbnails_admin');
-        if (!$isSiteOwner && !$isSiteAdmin && !$isEngineering && !$canRegenerate) {
+        if (! $isSiteOwner && ! $isSiteAdmin && ! $isEngineering && ! $canRegenerate) {
             abort(403, 'Admin access required');
         }
 
@@ -133,6 +138,7 @@ class AssetThumbnailController extends Controller
                 ]);
                 $content = $result['Body']->getContents();
                 $contentType = $result['ContentType'] ?? 'image/jpeg';
+
                 return response($content, 200)
                     ->header('Content-Type', $contentType)
                     ->header('Cache-Control', 'public, max-age=3600')
@@ -159,10 +165,7 @@ class AssetThumbnailController extends Controller
      * CRITICAL: This endpoint MUST return 404 if thumbnail is not ready.
      * NO placeholder images are ever returned - browser must never cache fake images.
      *
-     * @param Request $request
-     * @param Asset $asset
-     * @param string $style Thumbnail style (thumb, medium, large)
-     * @return \Symfony\Component\HttpFoundation\Response
+     * @param  string  $style  Thumbnail style (thumb, medium, large)
      */
     public function preview(Request $request, Asset $asset, string $style): \Symfony\Component\HttpFoundation\Response
     {
@@ -172,40 +175,40 @@ class AssetThumbnailController extends Controller
         // Step 6: Serve actual preview thumbnail files (LQIP)
         // Preview thumbnails are real derivative images, not placeholders
         // They are generated early in the pipeline and stored separately from final thumbnails
-        
+
         // Check if preview thumbnail exists in metadata
         $metadata = $asset->metadata ?? [];
         $previewThumbnails = $metadata['preview_thumbnails'] ?? [];
-        
+
         // For preview endpoint, we only serve the 'preview' style (LQIP)
         // Other styles (thumb, medium, large) should use the final endpoint
         if ($style !== 'preview') {
             abort(404, 'Preview endpoint only serves preview style');
         }
-        
+
         $previewData = $previewThumbnails['preview'] ?? null;
-        if (!$previewData || !isset($previewData['path'])) {
+        if (! $previewData || ! isset($previewData['path'])) {
             abort(404, 'Preview thumbnail not available');
         }
-        
+
         $previewPath = $previewData['path'];
         $bucket = $asset->storageBucket;
-        
-        if (!$bucket) {
+
+        if (! $bucket) {
             abort(404, 'Storage bucket not found');
         }
-        
-            // Stream preview thumbnail from S3
-            try {
-                $s3Client = $this->getS3Client();
-                $result = $s3Client->getObject([
+
+        // Stream preview thumbnail from S3
+        try {
+            $s3Client = $this->getS3Client();
+            $result = $s3Client->getObject([
                 'Bucket' => $bucket->name,
                 'Key' => $previewPath,
             ]);
-            
+
             $content = $result['Body']->getContents();
             $contentType = $result['ContentType'] ?? 'image/jpeg';
-            
+
             return response($content, 200)
                 ->header('Content-Type', $contentType)
                 ->header('Cache-Control', 'public, max-age=3600') // Cache preview for 1 hour
@@ -214,14 +217,14 @@ class AssetThumbnailController extends Controller
             if ($e->getStatusCode() === 404) {
                 abort(404, 'Preview thumbnail file not found');
             }
-            
+
             Log::error('Failed to stream preview thumbnail from S3', [
                 'asset_id' => $asset->id,
                 'preview_path' => $previewPath,
                 'bucket' => $bucket->name,
                 'error' => $e->getMessage(),
             ]);
-            
+
             abort(500, 'Failed to retrieve preview thumbnail');
         }
     }
@@ -238,10 +241,7 @@ class AssetThumbnailController extends Controller
      * CRITICAL: This endpoint MUST return 404 if thumbnail is not ready.
      * NO placeholder images are ever returned - browser must never cache fake images.
      *
-     * @param Request $request
-     * @param Asset $asset
-     * @param string $style Thumbnail style (thumb, medium, large)
-     * @return \Symfony\Component\HttpFoundation\Response
+     * @param  string  $style  Thumbnail style (thumb, medium, large)
      */
     public function final(Request $request, Asset $asset, string $style): \Symfony\Component\HttpFoundation\Response
     {
@@ -259,41 +259,41 @@ class AssetThumbnailController extends Controller
 
         // Verify thumbnail file exists in metadata
         $thumbnailPath = $asset->thumbnailPathForStyle($style);
-        
-        if (!$thumbnailPath) {
+
+        if (! $thumbnailPath) {
             Log::warning('Final thumbnail path not found in asset metadata', [
                 'asset_id' => $asset->id,
                 'style' => $style,
                 'thumbnail_status' => $thumbnailStatus?->value ?? 'null',
             ]);
-            
+
             // Downgrade thumbnail_status to prevent false "completed" state
             if ($asset->thumbnail_status === ThumbnailStatus::COMPLETED) {
                 $asset->thumbnail_status = ThumbnailStatus::PENDING;
                 $asset->save();
             }
-            
+
             abort(404, 'Final thumbnail not found');
         }
 
         // Stream thumbnail from S3
         try {
             $response = $this->streamThumbnailFromS3($asset, $thumbnailPath);
-            
+
             // Add version-based cache headers for final thumbnails
             // Version is thumbnails_generated_at timestamp - changes only when final is ready
             $metadata = $asset->metadata ?? [];
             $thumbnailVersion = $metadata['thumbnails_generated_at'] ?? null;
-            
+
             if ($thumbnailVersion) {
                 // Add version to ETag to ensure cache invalidation when version changes
                 $headers = $response->headers->all();
                 if (isset($headers['etag'][0])) {
-                    $headers['etag'][0] = $headers['etag'][0] . '-' . md5($thumbnailVersion);
+                    $headers['etag'][0] = $headers['etag'][0].'-'.md5($thumbnailVersion);
                 }
                 $response->headers->set('X-Thumbnail-Version', $thumbnailVersion);
             }
-            
+
             return $response;
         } catch (\RuntimeException $e) {
             // All errors result in 404 - NO placeholder images
@@ -306,7 +306,7 @@ class AssetThumbnailController extends Controller
                 ]);
                 abort(404, 'Final thumbnail not found');
             }
-            
+
             if (str_contains($e->getMessage(), 'too small') || str_contains($e->getMessage(), 'invalid')) {
                 Log::warning('Final thumbnail file invalid, returning 404', [
                     'asset_id' => $asset->id,
@@ -346,10 +346,6 @@ class AssetThumbnailController extends Controller
      *
      * Resolves the download's brand background asset (random one of background_asset_ids),
      * then streams that asset's medium thumbnail from S3. Used for public download/error pages.
-     *
-     * @param Request $request
-     * @param Download $download
-     * @return \Symfony\Component\HttpFoundation\Response
      */
     public function streamThumbnailForPublicDownload(Request $request, Download $download): \Symfony\Component\HttpFoundation\Response
     {
@@ -405,10 +401,6 @@ class AssetThumbnailController extends Controller
      *
      * Resolves the download's brand logo_asset_id, then streams the asset's
      * medium thumbnail (transparent for logos).
-     *
-     * @param Request $request
-     * @param Download $download
-     * @return \Symfony\Component\HttpFoundation\Response
      */
     public function streamLogoForPublicDownload(Request $request, Download $download): \Symfony\Component\HttpFoundation\Response
     {
@@ -606,10 +598,7 @@ class AssetThumbnailController extends Controller
      * DEPRECATED: Use /preview/{style} or /final/{style} instead.
      * This endpoint redirects to final if completed, otherwise returns 404.
      *
-     * @param Request $request
-     * @param Asset $asset
-     * @param string $style Thumbnail style (thumb, medium, large)
-     * @return \Symfony\Component\HttpFoundation\Response
+     * @param  string  $style  Thumbnail style (thumb, medium, large)
      */
     public function show(Request $request, Asset $asset, string $style): \Symfony\Component\HttpFoundation\Response
     {
@@ -631,10 +620,6 @@ class AssetThumbnailController extends Controller
      * - Does not modify existing GenerateThumbnailsJob
      * - Does not mutate Asset.status (status represents visibility only)
      * - Retry attempts are tracked for audit purposes
-     *
-     * @param Request $request
-     * @param Asset $asset
-     * @return \Illuminate\Http\JsonResponse
      */
     public function retry(Request $request, Asset $asset): \Illuminate\Http\JsonResponse
     {
@@ -646,7 +631,7 @@ class AssetThumbnailController extends Controller
 
         // Validate retry eligibility
         $canRetry = $retryService->canRetry($asset);
-        if (!$canRetry['allowed']) {
+        if (! $canRetry['allowed']) {
             // Determine appropriate HTTP status code
             $statusCode = 422; // Unprocessable Entity (default)
             if (str_contains($canRetry['reason'] ?? '', 'Maximum retry attempts')) {
@@ -671,7 +656,7 @@ class AssetThumbnailController extends Controller
         // Dispatch retry
         $result = $retryService->dispatchRetry($asset, $user->id);
 
-        if (!$result['success']) {
+        if (! $result['success']) {
             Log::error('[AssetThumbnailController] Failed to dispatch thumbnail retry', [
                 'asset_id' => $asset->id,
                 'user_id' => $user->id,
@@ -716,6 +701,143 @@ class AssetThumbnailController extends Controller
     }
 
     /**
+     * Queue template-based enhanced preview generation (async; uses preferred thumbnail as input, else original).
+     *
+     * POST /app/assets/{asset}/enhanced-preview/generate
+     */
+    public function generateEnhancedPreview(Request $request, Asset $asset): \Illuminate\Http\JsonResponse
+    {
+        $this->authorize('retryThumbnails', $asset);
+
+        $tenant = app('tenant');
+        $brand = app('brand');
+        if (! $tenant || ! $brand || $asset->tenant_id !== $tenant->id || $asset->brand_id !== $brand->id) {
+            abort(404);
+        }
+
+        $asset->loadMissing(['storageBucket', 'category', 'currentVersion']);
+        $version = $asset->currentVersion;
+        if (! $version) {
+            return response()->json(['error' => 'Asset has no current version'], 422);
+        }
+
+        $meta = is_array($version->metadata) ? $version->metadata : [];
+        $preferredMode = ThumbnailMode::Preferred->value;
+        $originalMode = ThumbnailMode::Original->value;
+
+        $hasPreferred = ThumbnailMetadata::stylePath($meta, 'medium', $preferredMode) !== null
+            || ThumbnailMetadata::stylePath($meta, 'thumb', $preferredMode) !== null;
+        $hasOriginal = ThumbnailMetadata::stylePath($meta, 'medium', $originalMode) !== null
+            || ThumbnailMetadata::stylePath($meta, 'thumb', $originalMode) !== null;
+
+        if (! $hasPreferred && ! $hasOriginal) {
+            return response()->json([
+                'error' => 'No preferred or original thumbnail available to build an enhanced preview.',
+            ], 422);
+        }
+
+        $force = $request->boolean('force');
+        $modesStatus = is_array($meta['thumbnail_modes_status'] ?? null) ? $meta['thumbnail_modes_status'] : [];
+        $modesMetaFull = is_array($meta['thumbnail_modes_meta'] ?? null) ? $meta['thumbnail_modes_meta'] : [];
+        $enhMetaGate = is_array($modesMetaFull['enhanced'] ?? null) ? $modesMetaFull['enhanced'] : [];
+        if (($modesStatus['enhanced'] ?? '') === 'skipped'
+            && ($enhMetaGate['skip_reason'] ?? '') === ThumbnailEnhancementAiTaskRecorder::SKIP_REASON_TOO_SMALL) {
+            if (! $force) {
+                return response()->json([
+                    'error' => 'This asset is too small for enhanced previews.',
+                ], 422);
+            }
+            $user = $request->user();
+            $tenant = app('tenant');
+            $tenantRole = $user && $tenant ? strtolower((string) $user->getRoleForTenant($tenant)) : '';
+            if (! in_array($tenantRole, ['owner', 'admin', 'agency_admin'], true)) {
+                return response()->json([
+                    'error' => 'Only tenant owners, admins, or agency admins can retry when the source is below the minimum size.',
+                ], 403);
+            }
+        }
+        if (($modesStatus['enhanced'] ?? '') === 'processing' && ! $force) {
+            return response()->json(['error' => 'Enhanced preview generation already in progress'], 409);
+        }
+
+        GenerateEnhancedPreviewJob::dispatch((string) $asset->id, (string) $version->id, $force)
+            ->onQueue(PipelineQueueResolver::imagesQueueForAsset($asset));
+
+        return response()->json([
+            'queued' => true,
+            'message' => 'Enhanced preview job queued',
+        ], 202);
+    }
+
+    /**
+     * Queue AI presentation preview generation (async; preferred thumbnail as input, else original).
+     *
+     * POST /app/assets/{asset}/presentation-preview/generate
+     */
+    public function generatePresentationPreview(Request $request, Asset $asset): \Illuminate\Http\JsonResponse
+    {
+        $this->authorize('retryThumbnails', $asset);
+
+        $tenant = app('tenant');
+        $brand = app('brand');
+        if (! $tenant || ! $brand || $asset->tenant_id !== $tenant->id || $asset->brand_id !== $brand->id) {
+            abort(404);
+        }
+
+        $asset->loadMissing(['storageBucket', 'category', 'currentVersion']);
+        $version = $asset->currentVersion;
+        if (! $version) {
+            return response()->json(['error' => 'Asset has no current version'], 422);
+        }
+
+        $meta = is_array($version->metadata) ? $version->metadata : [];
+        $preferredMode = ThumbnailMode::Preferred->value;
+        $originalMode = ThumbnailMode::Original->value;
+
+        $hasPreferred = ThumbnailMetadata::stylePath($meta, 'medium', $preferredMode) !== null
+            || ThumbnailMetadata::stylePath($meta, 'thumb', $preferredMode) !== null;
+        $hasOriginal = ThumbnailMetadata::stylePath($meta, 'medium', $originalMode) !== null
+            || ThumbnailMetadata::stylePath($meta, 'thumb', $originalMode) !== null;
+
+        if (! $hasPreferred && ! $hasOriginal) {
+            return response()->json([
+                'error' => 'No preferred or original thumbnail available to build a presentation preview.',
+            ], 422);
+        }
+
+        $force = $request->boolean('force');
+        $modesStatus = is_array($meta['thumbnail_modes_status'] ?? null) ? $meta['thumbnail_modes_status'] : [];
+        $modesMetaFull = is_array($meta['thumbnail_modes_meta'] ?? null) ? $meta['thumbnail_modes_meta'] : [];
+        $presMetaGate = is_array($modesMetaFull['presentation'] ?? null) ? $modesMetaFull['presentation'] : [];
+        if (($modesStatus['presentation'] ?? '') === 'skipped'
+            && ($presMetaGate['skip_reason'] ?? '') === ThumbnailEnhancementAiTaskRecorder::SKIP_REASON_TOO_SMALL) {
+            if (! $force) {
+                return response()->json([
+                    'error' => 'This asset is too small for presentation previews.',
+                ], 422);
+            }
+            $user = $request->user();
+            $tenantRole = $user && $tenant ? strtolower((string) $user->getRoleForTenant($tenant)) : '';
+            if (! in_array($tenantRole, ['owner', 'admin', 'agency_admin'], true)) {
+                return response()->json([
+                    'error' => 'Only tenant owners, admins, or agency admins can retry when the source is below the minimum size.',
+                ], 403);
+            }
+        }
+        if (($modesStatus['presentation'] ?? '') === 'processing' && ! $force) {
+            return response()->json(['error' => 'Presentation preview generation already in progress'], 409);
+        }
+
+        GeneratePresentationPreviewJob::dispatch((string) $asset->id, (string) $version->id, $force)
+            ->onQueue(PipelineQueueResolver::imagesQueueForAsset($asset));
+
+        return response()->json([
+            'queued' => true,
+            'message' => 'Presentation preview job queued',
+        ], 202);
+    }
+
+    /**
      * Generate thumbnail for an existing asset that doesn't have one yet.
      *
      * POST /app/assets/{asset}/thumbnails/generate
@@ -729,10 +851,6 @@ class AssetThumbnailController extends Controller
      * - Does not mutate Asset.status (status represents visibility only)
      * - Uses existing job and pipeline without changes
      * - Idempotent: safe to call if thumbnail already exists
-     *
-     * @param Request $request
-     * @param Asset $asset
-     * @return \Illuminate\Http\JsonResponse
      */
     public function generate(Request $request, Asset $asset): \Illuminate\Http\JsonResponse
     {
@@ -793,13 +911,13 @@ class AssetThumbnailController extends Controller
         }
 
         // Check SVG support (rasterized via Imagick)
-        if (!$isSupported && ($mimeType === 'image/svg+xml' || $extension === 'svg')) {
+        if (! $isSupported && ($mimeType === 'image/svg+xml' || $extension === 'svg')) {
             $isSupported = true;
             $supportReason = 'SVG';
         }
 
         // Check TIFF/AVIF/CR2 support (Imagick; CR2 also needs ImageMagick RAW/LibRaw on the server)
-        if (!$isSupported && extension_loaded('imagick')) {
+        if (! $isSupported && extension_loaded('imagick')) {
             if (($mimeType === 'image/tiff' || $mimeType === 'image/tif' || $extension === 'tiff' || $extension === 'tif') ||
                 ($mimeType === 'image/avif' || $extension === 'avif') ||
                 ($mimeType === 'image/x-canon-cr2' || $extension === 'cr2')) {
@@ -810,7 +928,7 @@ class AssetThumbnailController extends Controller
         }
 
         // Check image support (GD library)
-        if (!$isSupported) {
+        if (! $isSupported) {
             $supportedMimeTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
             $supportedExtensions = ['jpg', 'jpeg', 'png', 'gif', 'webp'];
 
@@ -823,7 +941,7 @@ class AssetThumbnailController extends Controller
             }
         }
 
-        if (!$isSupported) {
+        if (! $isSupported) {
             Log::warning('[AssetThumbnailController] Thumbnail generation not supported for file type', [
                 'asset_id' => $asset->id,
                 'user_id' => $user->id,
@@ -837,7 +955,7 @@ class AssetThumbnailController extends Controller
         }
 
         // Check if asset has required storage information
-        if (!$asset->storage_root_path || !$asset->storageBucket) {
+        if (! $asset->storage_root_path || ! $asset->storageBucket) {
             Log::warning('[AssetThumbnailController] Asset missing storage information', [
                 'asset_id' => $asset->id,
                 'user_id' => $user->id,
@@ -906,10 +1024,6 @@ class AssetThumbnailController extends Controller
      *
      * Site roles can regenerate thumbnails for troubleshooting or testing. The job regenerates
      * all configured styles; requested style names are validated for API consistency only.
-     *
-     * @param Request $request
-     * @param Asset $asset
-     * @return \Illuminate\Http\JsonResponse
      */
     public function regenerateStyles(Request $request, Asset $asset): \Illuminate\Http\JsonResponse
     {
@@ -938,11 +1052,12 @@ class AssetThumbnailController extends Controller
             ], 422);
         }
 
-        if (!$asset->storage_root_path || !$asset->storageBucket) {
+        if (! $asset->storage_root_path || ! $asset->storageBucket) {
             Log::warning('[AssetThumbnailController] Asset missing storage information', [
                 'asset_id' => $asset->id,
                 'user_id' => $user->id,
             ]);
+
             return response()->json([
                 'error' => 'Asset storage information is missing',
             ], 422);
@@ -992,10 +1107,6 @@ class AssetThumbnailController extends Controller
      * Removes preview thumbnails from S3 and clears preview_thumbnail_url from metadata.
      * This forces the UI to show the file type icon instead of preview thumbnails.
      * Useful when preview thumbnails are bad/corrupted and need to be removed.
-     *
-     * @param Request $request
-     * @param Asset $asset
-     * @return \Illuminate\Http\JsonResponse
      */
     public function removePreview(Request $request, Asset $asset): \Illuminate\Http\JsonResponse
     {
@@ -1007,17 +1118,16 @@ class AssetThumbnailController extends Controller
 
         try {
             $metadata = $asset->metadata ?? [];
-            $previewThumbnails = $metadata['preview_thumbnails'] ?? [];
-            $finalThumbnails = $metadata['thumbnails'] ?? []; // Final thumbnails are stored in 'thumbnails' key
-            
+            $thumbnailPaths = ThumbnailMetadata::allThumbnailObjectPaths($metadata);
+
             // Check if there are any thumbnails to remove (preview or final)
-            $hasPreviewThumbnails = !empty($previewThumbnails);
-            $hasFinalThumbnails = !empty($finalThumbnails);
+            $hasPreviewThumbnails = ThumbnailMetadata::previewPath($metadata) !== null;
+            $hasFinalThumbnails = ThumbnailMetadata::hasMediumOrThumb($metadata);
             $hasPreviewUrl = $asset->deliveryUrl(\App\Support\AssetVariant::THUMB_PREVIEW, \App\Support\DeliveryContext::AUTHENTICATED) !== '';
             $hasFinalUrl = $asset->deliveryUrl(\App\Support\AssetVariant::THUMB_MEDIUM, \App\Support\DeliveryContext::AUTHENTICATED) !== ''
                 || $asset->deliveryUrl(\App\Support\AssetVariant::THUMB_SMALL, \App\Support\DeliveryContext::AUTHENTICATED) !== '';
-            
-            if (!$hasPreviewThumbnails && !$hasFinalThumbnails && !$hasPreviewUrl && !$hasFinalUrl) {
+
+            if (! $hasPreviewThumbnails && ! $hasFinalThumbnails && ! $hasPreviewUrl && ! $hasFinalUrl) {
                 return response()->json([
                     'success' => true,
                     'message' => 'No thumbnails to remove',
@@ -1025,7 +1135,7 @@ class AssetThumbnailController extends Controller
             }
 
             $bucket = $asset->storageBucket;
-            if (!$bucket) {
+            if (! $bucket) {
                 return response()->json([
                     'error' => 'Asset missing storage bucket',
                 ], 422);
@@ -1035,66 +1145,24 @@ class AssetThumbnailController extends Controller
             $errors = [];
             $deletedStyles = [];
 
-            // Delete preview thumbnail files from S3
-            foreach ($previewThumbnails as $styleName => $thumbnailData) {
-                $thumbnailPath = $thumbnailData['path'] ?? null;
-                if (!$thumbnailPath) {
-                    continue;
-                }
-
+            foreach ($thumbnailPaths as $thumbnailPath) {
                 try {
                     $s3Client->deleteObject([
                         'Bucket' => $bucket->name,
                         'Key' => $thumbnailPath,
                     ]);
                     $deletedPaths[] = $thumbnailPath;
-                    $deletedStyles[] = "preview:{$styleName}";
-                    
-                    Log::info('[AssetThumbnailController] Preview thumbnail deleted from S3', [
+                    $deletedStyles[] = $thumbnailPath;
+
+                    Log::info('[AssetThumbnailController] Thumbnail deleted from S3', [
                         'asset_id' => $asset->id,
-                        'style' => $styleName,
                         's3_path' => $thumbnailPath,
                         'user_id' => $user->id,
                     ]);
                 } catch (S3Exception $e) {
-                    // Log error but continue with other thumbnails
-                    $errors[] = "Failed to delete preview {$styleName}: {$e->getMessage()}";
-                    Log::warning('[AssetThumbnailController] Failed to delete preview thumbnail from S3', [
+                    $errors[] = "Failed to delete {$thumbnailPath}: {$e->getMessage()}";
+                    Log::warning('[AssetThumbnailController] Failed to delete thumbnail from S3', [
                         'asset_id' => $asset->id,
-                        'style' => $styleName,
-                        's3_path' => $thumbnailPath,
-                        'error' => $e->getMessage(),
-                    ]);
-                }
-            }
-
-            // Delete final thumbnail files from S3
-            foreach ($finalThumbnails as $styleName => $thumbnailData) {
-                $thumbnailPath = $thumbnailData['path'] ?? null;
-                if (!$thumbnailPath) {
-                    continue;
-                }
-
-                try {
-                    $s3Client->deleteObject([
-                        'Bucket' => $bucket->name,
-                        'Key' => $thumbnailPath,
-                    ]);
-                    $deletedPaths[] = $thumbnailPath;
-                    $deletedStyles[] = "final:{$styleName}";
-                    
-                    Log::info('[AssetThumbnailController] Final thumbnail deleted from S3', [
-                        'asset_id' => $asset->id,
-                        'style' => $styleName,
-                        's3_path' => $thumbnailPath,
-                        'user_id' => $user->id,
-                    ]);
-                } catch (S3Exception $e) {
-                    // Log error but continue with other thumbnails
-                    $errors[] = "Failed to delete final {$styleName}: {$e->getMessage()}";
-                    Log::warning('[AssetThumbnailController] Failed to delete final thumbnail from S3', [
-                        'asset_id' => $asset->id,
-                        'style' => $styleName,
                         's3_path' => $thumbnailPath,
                         'error' => $e->getMessage(),
                     ]);
@@ -1106,15 +1174,15 @@ class AssetThumbnailController extends Controller
             unset($metadata['thumbnails']); // Remove final thumbnails
             unset($metadata['thumbnails_generated_at']); // Clear generation timestamp
             unset($metadata['thumbnails_generated']); // Clear generation flag
-            
+
             // Also clear preview_thumbnail_url if it exists in metadata (some assets might store it there)
             if (isset($metadata['preview_thumbnail_url'])) {
                 unset($metadata['preview_thumbnail_url']);
             }
-            
+
             // Update asset metadata
             $asset->update(['metadata' => $metadata]);
-            
+
             // Also clear thumbnail_status to allow regeneration
             $asset->update(['thumbnail_status' => \App\Enums\ThumbnailStatus::PENDING]);
 
@@ -1141,8 +1209,8 @@ class AssetThumbnailController extends Controller
             }
 
             $message = 'Thumbnails removed successfully';
-            if (!empty($errors)) {
-                $message .= ' (some files could not be deleted: ' . implode(', ', $errors) . ')';
+            if (! empty($errors)) {
+                $message .= ' (some files could not be deleted: '.implode(', ', $errors).')';
             }
 
             return response()->json([
@@ -1162,17 +1230,13 @@ class AssetThumbnailController extends Controller
             ]);
 
             return response()->json([
-                'error' => 'Failed to remove preview thumbnails: ' . $e->getMessage(),
+                'error' => 'Failed to remove preview thumbnails: '.$e->getMessage(),
             ], 500);
         }
     }
 
     /**
      * Authorize asset access.
-     *
-     * @param Request $request
-     * @param Asset $asset
-     * @return void
      */
     protected function authorizeAsset(Request $request, Asset $asset): void
     {
@@ -1190,7 +1254,7 @@ class AssetThumbnailController extends Controller
             $tenantRole = $user?->getRoleForTenant($tenant);
             $isTenantOwnerOrAdmin = in_array($tenantRole, ['owner', 'admin']);
 
-            if (!$isTenantOwnerOrAdmin && $asset->brand_id !== $brand->id) {
+            if (! $isTenantOwnerOrAdmin && $asset->brand_id !== $brand->id) {
                 abort(403, 'Asset does not belong to active brand');
             }
         }
@@ -1198,14 +1262,11 @@ class AssetThumbnailController extends Controller
 
     /**
      * Validate thumbnail style.
-     *
-     * @param string $style
-     * @return void
      */
     protected function validateStyle(string $style): void
     {
         $styles = config('assets.thumbnail_styles', []);
-        if (!isset($styles[$style])) {
+        if (! isset($styles[$style])) {
             abort(404, 'Invalid thumbnail style');
         }
     }
@@ -1216,14 +1277,13 @@ class AssetThumbnailController extends Controller
      * Downloads thumbnail from S3 and streams it through the response.
      * Does NOT load the entire file into memory.
      *
-     * @param Asset $asset
-     * @param string $thumbnailPath S3 key path to thumbnail
-     * @return \Symfony\Component\HttpFoundation\Response
+     * @param  string  $thumbnailPath  S3 key path to thumbnail
+     *
      * @throws \RuntimeException If streaming fails
      */
     protected function streamThumbnailFromS3(Asset $asset, string $thumbnailPath): \Symfony\Component\HttpFoundation\Response
     {
-        if (!$asset->storageBucket) {
+        if (! $asset->storageBucket) {
             throw new \RuntimeException('Asset missing storage bucket');
         }
 
@@ -1242,7 +1302,7 @@ class AssetThumbnailController extends Controller
             // Small thumbnails are acceptable, especially for small source images or highly compressed formats
             $contentLength = $result['ContentLength'] ?? 0;
             $minValidSize = 50; // Only catch broken/corrupted files
-            
+
             if ($contentLength < $minValidSize) {
                 Log::error('Thumbnail file too small (likely corrupted or empty)', [
                     'asset_id' => $asset->id,
@@ -1251,12 +1311,12 @@ class AssetThumbnailController extends Controller
                     'content_length' => $contentLength,
                     'expected_min' => $minValidSize,
                 ]);
-                
+
                 // Downgrade thumbnail_status to prevent false "completed" state
                 // This ensures UI doesn't expect a thumbnail that doesn't exist
                 $asset->thumbnail_status = \App\Enums\ThumbnailStatus::FAILED;
                 $asset->save();
-                
+
                 throw new \RuntimeException('Thumbnail file is invalid (too small)');
             }
 
@@ -1267,7 +1327,7 @@ class AssetThumbnailController extends Controller
             return response()->stream(function () use ($result) {
                 // Stream the body directly to output
                 $body = $result['Body'];
-                while (!$body->eof()) {
+                while (! $body->eof()) {
                     echo $body->read(8192); // Read in 8KB chunks
                     flush();
                 }
@@ -1285,7 +1345,7 @@ class AssetThumbnailController extends Controller
                     'thumbnail_path' => $thumbnailPath,
                     'bucket' => $bucket->name,
                 ]);
-                
+
                 // Downgrade to PENDING so user can trigger Re-run Analysis to regenerate
                 if ($asset->thumbnail_status === \App\Enums\ThumbnailStatus::COMPLETED) {
                     $meta = $asset->metadata ?? [];
@@ -1295,7 +1355,7 @@ class AssetThumbnailController extends Controller
                         'metadata' => $meta,
                     ]);
                 }
-                
+
                 throw new \RuntimeException('Thumbnail not found in storage');
             }
 
@@ -1334,7 +1394,6 @@ class AssetThumbnailController extends Controller
     /**
      * Infer content type from file path.
      *
-     * @param string $path
      * @return string MIME type
      */
     protected function inferContentType(string $path): string
@@ -1353,13 +1412,11 @@ class AssetThumbnailController extends Controller
 
     /**
      * Get or create S3 client instance.
-     *
-     * @return S3Client
      */
     protected function getS3Client(): S3Client
     {
         if ($this->s3Client === null) {
-            if (!class_exists(S3Client::class)) {
+            if (! class_exists(S3Client::class)) {
                 throw new \RuntimeException('AWS SDK not installed. Install aws/aws-sdk-php.');
             }
 
@@ -1385,10 +1442,6 @@ class AssetThumbnailController extends Controller
      *
      * Regenerates the video poster thumbnail using FFmpeg.
      * Only works for video assets.
-     *
-     * @param Request $request
-     * @param Asset $asset
-     * @return \Illuminate\Http\JsonResponse
      */
     public function regenerateVideoThumbnail(Request $request, Asset $asset): \Illuminate\Http\JsonResponse
     {
@@ -1408,7 +1461,7 @@ class AssetThumbnailController extends Controller
         }
 
         // Check if asset has required storage information
-        if (!$asset->storage_root_path || !$asset->storageBucket) {
+        if (! $asset->storage_root_path || ! $asset->storageBucket) {
             return response()->json([
                 'error' => 'Asset storage information is missing',
             ], 422);
@@ -1462,7 +1515,7 @@ class AssetThumbnailController extends Controller
             ]);
 
             return response()->json([
-                'error' => 'Failed to dispatch video thumbnail regeneration: ' . $e->getMessage(),
+                'error' => 'Failed to dispatch video thumbnail regeneration: '.$e->getMessage(),
             ], 500);
         }
     }
@@ -1474,10 +1527,6 @@ class AssetThumbnailController extends Controller
      *
      * Regenerates the hover preview video using FFmpeg.
      * Only works for video assets.
-     *
-     * @param Request $request
-     * @param Asset $asset
-     * @return \Illuminate\Http\JsonResponse
      */
     public function regenerateVideoPreview(Request $request, Asset $asset): \Illuminate\Http\JsonResponse
     {
@@ -1497,7 +1546,7 @@ class AssetThumbnailController extends Controller
         }
 
         // Check if asset has required storage information
-        if (!$asset->storage_root_path || !$asset->storageBucket) {
+        if (! $asset->storage_root_path || ! $asset->storageBucket) {
             return response()->json([
                 'error' => 'Asset storage information is missing',
             ], 422);
@@ -1507,7 +1556,7 @@ class AssetThumbnailController extends Controller
         // Video preview generation requires the video file to exist, which should have a poster thumbnail
         $hasPosterPath = (bool) ($asset->getRawOriginal('video_poster_url') ?? $asset->attributes['video_poster_url'] ?? null);
         $hasThumbnailPath = (bool) ($asset->thumbnailPathForStyle('thumb') ?? $asset->thumbnailPathForStyle('medium'));
-        if (!$hasPosterPath && !$hasThumbnailPath) {
+        if (! $hasPosterPath && ! $hasThumbnailPath) {
             return response()->json([
                 'error' => 'Cannot generate video preview: Video thumbnail does not exist. Please generate a thumbnail first.',
             ], 422);
@@ -1535,7 +1584,7 @@ class AssetThumbnailController extends Controller
             // Handle database errors (like missing column)
             $errorCode = $e->getCode();
             $errorMessage = $e->getMessage();
-            
+
             // Check if error is about missing column
             if (str_contains($errorMessage, "Unknown column 'video_preview_url'")) {
                 Log::error('[AssetThumbnailController] Video preview column missing (QueryException)', [
@@ -1569,7 +1618,7 @@ class AssetThumbnailController extends Controller
             ]);
 
             return response()->json([
-                'error' => 'Failed to dispatch video preview regeneration: ' . $e->getMessage(),
+                'error' => 'Failed to dispatch video preview regeneration: '.$e->getMessage(),
             ], 500);
         }
     }

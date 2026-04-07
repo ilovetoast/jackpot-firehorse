@@ -6,9 +6,8 @@ use App\Enums\EventType;
 use App\Mail\InviteMember;
 use App\Models\Brand;
 use App\Models\BrandInvitation;
-use App\Models\Category;
-use App\Models\ProstaffMembership;
 use App\Models\CollectionUser;
+use App\Models\ProstaffMembership;
 use App\Models\User;
 use App\Services\ActivityRecorder;
 use App\Services\BrandDNA\BrandLogoVariantAutomationService;
@@ -145,7 +144,7 @@ class BrandController extends Controller
                         'system_version' => $category->system_version,
                     ]),
                     // Phase MI-1: Active memberships (eager-loaded)
-                    'users' => $brand->users->map(function ($user) use ($brand, $userBrandMembershipCount) {
+                    'users' => $brand->users->map(function ($user) use ($userBrandMembershipCount) {
                         $totalBrands = $userBrandMembershipCount[$user->id] ?? 1;
 
                         return [
@@ -420,44 +419,6 @@ class BrandController extends Controller
         // The policy checks for 'manage brands' permission which only admin and owner have
         $this->authorize('update', $brand);
 
-        // Get categories for this brand
-        $categories = $brand->categories()->orderBy('asset_type')->ordered()->orderBy('name')->get();
-
-        $templateExistsByCategoryId = Category::templateExistsLookupForCategories($categories);
-
-        // Get system category templates and find ones that don't exist yet for this brand
-        $systemTemplates = $this->systemCategoryService->getAllTemplates();
-        $availableTemplates = collect();
-
-        foreach ($systemTemplates as $template) {
-            // Check if brand already has a category with this slug and asset_type
-            $exists = $categories->contains(function ($category) use ($template) {
-                return $category->slug === $template->slug &&
-                       $category->asset_type->value === $template->asset_type->value;
-            });
-
-            if (! $exists) {
-                // Add template as available for this brand
-                $availableTemplates->push([
-                    'id' => null, // No ID for templates
-                    'system_category_id' => $template->id,
-                    'name' => $template->name,
-                    'slug' => $template->slug,
-                    'icon' => $template->icon ?? 'folder',
-                    'asset_type' => $template->asset_type->value,
-                    'is_system' => true,
-                    'is_private' => $template->is_private,
-                    'is_locked' => true, // Templates are locked
-                    'is_hidden' => $template->is_hidden,
-                    'is_template' => true, // This is a template, not an existing category
-                    'system_version' => $template->version,
-                ]);
-            }
-        }
-
-        $visibleCategoryLimits = $this->categoryVisibilityLimitService->limitsPayloadForBrand($brand);
-        $currentCategoryCount = $brand->categories()->custom()->count();
-
         // Phase MI-1: Get brand users with active membership only
         $activeCreatorUserIdSet = array_fill_keys(
             ProstaffMembership::query()
@@ -534,11 +495,7 @@ class BrandController extends Controller
         // Show all valid brand roles so they can be assigned even if no users have them yet
         $brandRoles = \App\Models\User::getValidBrandRoles();
 
-        // Get plan info for private categories
         $currentPlan = $this->planService->getCurrentPlan($tenant);
-        $canCreatePrivateCategory = $this->planService->canCreatePrivateCategory($tenant, $brand);
-        $maxPrivateCategories = $this->planService->getMaxPrivateCategories($tenant);
-        $currentPrivateCount = $brand->categories()->custom()->where('is_private', true)->count();
         $brandModel = $brand->brandModel;
         $activeVersion = $brandModel?->activeVersion;
         $modelPayload = self::deepUnwrapPayload($activeVersion?->model_payload ?? []);
@@ -634,65 +591,11 @@ class BrandController extends Controller
                 'background_asset_details' => $this->buildBackgroundAssetDetails($brand),
                 'logo_asset_thumbnail_url' => $this->buildLogoAssetThumbnailUrl($brand),
             ],
-            'categories' => $categories->map(function ($category) use ($templateExistsByCategoryId) {
-                // Get access rules for private categories
-                $accessRules = [];
-                if ($category->is_private && ! $category->is_system) {
-                    $accessRules = $category->accessRules()->get()->map(function ($rule) {
-                        if ($rule->access_type === 'role') {
-                            return ['type' => 'role', 'role' => $rule->role];
-                        } elseif ($rule->access_type === 'user') {
-                            return ['type' => 'user', 'user_id' => $rule->user_id];
-                        }
-
-                        return null;
-                    })->filter()->values()->toArray();
-                }
-
-                $systemTemplateExists = $category->is_system
-                    && ($templateExistsByCategoryId[$category->id] ?? false);
-
-                return [
-                    'id' => $category->id,
-                    'name' => $category->name,
-                    'slug' => $category->slug,
-                    'icon' => $category->icon,
-                    'asset_type' => $category->asset_type->value,
-                    'is_system' => $category->is_system,
-                    'is_private' => $category->is_private,
-                    'is_locked' => $category->is_locked,
-                    'is_hidden' => $category->is_hidden,
-                    'upgrade_available' => $category->upgrade_available ?? false,
-                    'deletion_available' => $category->deletion_available ?? false,
-                    'system_version' => $category->system_version,
-                    'order' => $category->order ?? 0,
-                    'template_exists' => $systemTemplateExists,
-                    'can_be_deleted' => $category->is_system
-                        ? ! $systemTemplateExists
-                        : $category->canBeDeleted(),
-                    'access_rules' => $accessRules,
-                ];
-            }),
-            'available_system_templates' => $availableTemplates->values(),
-            'visible_category_limits' => $visibleCategoryLimits,
-            'category_limits' => [
-                'current' => $currentCategoryCount,
-                'max' => null,
-                'can_create' => true,
-                'visible_by_asset_type' => $visibleCategoryLimits,
-            ],
             'brand_users' => $brandUsers,
             'can_remove_user_from_company' => Auth::user()->canForContext('team.manage', $tenant, null),
             'brand_roles' => $brandRoles,
             'available_users' => $availableUsers,
             'pending_invitations' => $pendingInvitations,
-            'private_category_limits' => [
-                'current' => $currentPrivateCount,
-                'max' => $maxPrivateCategories,
-                'can_create' => $canCreatePrivateCategory,
-                'plan_allows' => in_array($currentPlan, ['pro', 'premium', 'enterprise']),
-            ],
-            'can_edit_system_categories' => true,
             // Phase M-2: Pass tenant settings to check if company metadata approval is enabled
             'tenant_settings' => $tenant->settings ?? [],
             'current_plan' => $currentPlan,

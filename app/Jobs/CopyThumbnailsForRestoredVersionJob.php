@@ -3,9 +3,10 @@
 namespace App\Jobs;
 
 use App\Enums\ThumbnailStatus;
-use App\Models\Asset;
 use App\Jobs\Concerns\QueuesOnImagesChannel;
+use App\Models\Asset;
 use App\Models\AssetVersion;
+use App\Support\ThumbnailMode;
 use Aws\S3\S3Client;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -43,20 +44,22 @@ class CopyThumbnailsForRestoredVersionJob implements ShouldQueue
         $sourceVersion = AssetVersion::withTrashed()->find($this->sourceVersionId);
         $newVersion = AssetVersion::find($this->newVersionId);
 
-        if (!$asset || !$sourceVersion || !$newVersion) {
+        if (! $asset || ! $sourceVersion || ! $newVersion) {
             Log::warning('[CopyThumbnailsForRestoredVersionJob] Missing asset or version', [
                 'asset_id' => $this->assetId,
                 'source_version_id' => $this->sourceVersionId,
                 'new_version_id' => $this->newVersionId,
             ]);
+
             return;
         }
 
         $bucket = $asset->storageBucket;
-        if (!$bucket) {
+        if (! $bucket) {
             Log::warning('[CopyThumbnailsForRestoredVersionJob] Asset has no storage bucket', [
                 'asset_id' => $asset->id,
             ]);
+
             return;
         }
 
@@ -67,7 +70,7 @@ class CopyThumbnailsForRestoredVersionJob implements ShouldQueue
             return;
         }
 
-        $thumbnailsPrefix = $sourceBase . '/thumbnails/';
+        $thumbnailsPrefix = $sourceBase.'/thumbnails/';
         $s3Client = $this->createS3Client();
 
         $files = [];
@@ -92,22 +95,31 @@ class CopyThumbnailsForRestoredVersionJob implements ShouldQueue
             return;
         }
 
-        $copiedThumbnails = [];
-        $copiedPreview = [];
+        $defaultMode = ThumbnailMode::default();
+        $copiedByMode = [];
+        $copiedPreviewByMode = [];
+        $didCopy = false;
 
         foreach ($files as $path) {
             $relPath = substr($path, strlen($thumbnailsPrefix));
-            $parts = explode('/', $relPath, 2);
-            $style = $parts[0] ?? null;
-            if (!$style) {
+            $segments = explode('/', $relPath);
+            $mode = $defaultMode;
+            $style = null;
+            if (count($segments) >= 3 && ThumbnailMode::tryFromLoose($segments[0])) {
+                $mode = ThumbnailMode::normalize($segments[0]);
+                $style = $segments[1] ?? null;
+            } elseif (count($segments) >= 2) {
+                $style = $segments[0];
+            }
+            if (! $style) {
                 continue;
             }
-            $newPath = $newBase . '/thumbnails/' . $relPath;
+            $newPath = $newBase.'/thumbnails/'.$relPath;
 
             try {
                 $s3Client->copyObject([
                     'Bucket' => $bucket->name,
-                    'CopySource' => rawurlencode($bucket->name . '/' . $path),
+                    'CopySource' => rawurlencode($bucket->name.'/'.$path),
                     'Key' => $newPath,
                 ]);
             } catch (\Throwable $e) {
@@ -117,21 +129,49 @@ class CopyThumbnailsForRestoredVersionJob implements ShouldQueue
                     'dest' => $newPath,
                     'error' => $e->getMessage(),
                 ]);
+
                 continue;
             }
 
+            $didCopy = true;
             $entry = ['path' => $newPath];
             if ($style === 'preview') {
-                $copiedPreview[$style] = $entry;
+                if (! isset($copiedPreviewByMode[$mode])) {
+                    $copiedPreviewByMode[$mode] = [];
+                }
+                $copiedPreviewByMode[$mode][$style] = $entry;
             } else {
-                $copiedThumbnails[$style] = $entry;
+                if (! isset($copiedByMode[$mode])) {
+                    $copiedByMode[$mode] = [];
+                }
+                $copiedByMode[$mode][$style] = $entry;
             }
         }
 
-        if (!empty($copiedThumbnails) || !empty($copiedPreview)) {
+        if ($didCopy) {
             $meta = $asset->metadata ?? [];
-            $meta['thumbnails'] = $copiedThumbnails;
-            $meta['preview_thumbnails'] = $copiedPreview;
+            $existingThumbs = is_array($meta['thumbnails'] ?? null) ? $meta['thumbnails'] : [];
+            $existingPreview = is_array($meta['preview_thumbnails'] ?? null) ? $meta['preview_thumbnails'] : [];
+            foreach ($copiedByMode as $m => $styles) {
+                if (! is_array($styles) || $styles === []) {
+                    continue;
+                }
+                if (! isset($existingThumbs[$m]) || ! is_array($existingThumbs[$m])) {
+                    $existingThumbs[$m] = [];
+                }
+                $existingThumbs[$m] = array_merge($existingThumbs[$m], $styles);
+            }
+            foreach ($copiedPreviewByMode as $m => $prev) {
+                if (! is_array($prev) || $prev === []) {
+                    continue;
+                }
+                if (! isset($existingPreview[$m]) || ! is_array($existingPreview[$m])) {
+                    $existingPreview[$m] = [];
+                }
+                $existingPreview[$m] = array_merge($existingPreview[$m], $prev);
+            }
+            $meta['thumbnails'] = $existingThumbs;
+            $meta['preview_thumbnails'] = $existingPreview;
             $meta['thumbnails_generated'] = true;
             $meta['thumbnails_generated_at'] = now()->toIso8601String();
             $asset->update([
@@ -151,6 +191,7 @@ class CopyThumbnailsForRestoredVersionJob implements ShouldQueue
             $config['endpoint'] = config('filesystems.disks.s3.endpoint');
             $config['use_path_style_endpoint'] = config('filesystems.disks.s3.use_path_style_endpoint', false);
         }
+
         return new S3Client($config);
     }
 }

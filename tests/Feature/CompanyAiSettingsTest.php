@@ -83,6 +83,9 @@ class CompanyAiSettingsTest extends TestCase
                 'ai_insights_enabled',
                 'last_insights_run_at',
                 'insights_pending_suggestions_count',
+                'last_insights_manual_queued_at',
+                'insights_manual_run_available_at',
+                'manual_insights_run_cooldown_minutes',
             ],
         ]);
 
@@ -317,6 +320,21 @@ class CompanyAiSettingsTest extends TestCase
         Queue::assertPushed(RunMetadataInsightsJob::class, function (RunMetadataInsightsJob $job) {
             return $job->tenantId === $this->tenant->id && $job->forceBypassCooldown === true;
         });
+    }
+
+    public function test_run_insights_second_click_within_cooldown_returns_429(): void
+    {
+        Queue::fake();
+
+        Auth::login($this->admin);
+        $this->tenant->update(['ai_insights_enabled' => true]);
+
+        $this->postJson('/app/api/companies/ai-settings/run-insights')->assertOk();
+        $second = $this->postJson('/app/api/companies/ai-settings/run-insights');
+
+        $second->assertStatus(429);
+        $second->assertJsonStructure(['error', 'retry_after_seconds', 'settings']);
+        Queue::assertPushed(RunMetadataInsightsJob::class, 1);
     }
 
     public function test_run_insights_now_when_disabled_returns_422(): void

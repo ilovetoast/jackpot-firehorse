@@ -6,6 +6,7 @@ use App\Events\AssetDeleted;
 use App\Models\Asset;
 use App\Models\AssetEvent;
 use App\Models\DeletionError;
+use App\Support\ThumbnailMetadata;
 use Aws\S3\Exception\S3Exception;
 use Aws\S3\S3Client;
 use Illuminate\Bus\Queueable;
@@ -56,10 +57,11 @@ class DeleteAssetJob implements ShouldQueue
         }
 
         // Idempotency: Check if asset was already permanently deleted
-        if (!$asset->trashed()) {
+        if (! $asset->trashed()) {
             Log::info('Asset hard deletion skipped - asset is not soft-deleted', [
                 'asset_id' => $asset->id,
             ]);
+
             return;
         }
 
@@ -83,11 +85,11 @@ class DeleteAssetJob implements ShouldQueue
                 'asset_id' => $asset->id,
                 'user_id' => null, // System event
                 'event_type' => 'asset.hard_deleted',
-                    'metadata' => [
-                        'deletion_type' => 'hard',
-                        'deleted_paths' => $deletedPaths,
-                        'original_filename' => $asset->original_filename,
-                    ],
+                'metadata' => [
+                    'deletion_type' => 'hard',
+                    'deleted_paths' => $deletedPaths,
+                    'original_filename' => $asset->original_filename,
+                ],
                 'created_at' => now(),
             ]);
 
@@ -107,11 +109,11 @@ class DeleteAssetJob implements ShouldQueue
                     'resolved_at' => now(),
                     'resolution_notes' => 'Asset successfully deleted',
                 ]);
-                
+
         } catch (\Throwable $e) {
             // Record detailed error information for user presentation
             $this->recordDeletionError($asset, $e);
-            
+
             // Re-throw to trigger job failure handling
             throw $e;
         }
@@ -120,8 +122,6 @@ class DeleteAssetJob implements ShouldQueue
     /**
      * Verify storage before deletion.
      *
-     * @param Asset $asset
-     * @return void
      * @throws \RuntimeException If verification fails
      */
     protected function verifyStorage(Asset $asset): void
@@ -132,7 +132,7 @@ class DeleteAssetJob implements ShouldQueue
         try {
             // Verify main file exists
             $exists = $s3Client->doesObjectExist($bucket->name, $asset->storage_root_path);
-            if (!$exists) {
+            if (! $exists) {
                 Log::warning('Asset file not found in storage during deletion', [
                     'asset_id' => $asset->id,
                     'storage_root_path' => $asset->storage_root_path,
@@ -142,14 +142,14 @@ class DeleteAssetJob implements ShouldQueue
             }
         } catch (S3Exception $e) {
             $errorType = $this->categorizeS3Error($e);
-            
+
             Log::error('Failed to verify asset storage before deletion', [
                 'asset_id' => $asset->id,
                 'error' => $e->getMessage(),
                 'error_type' => $errorType,
                 'aws_error_code' => $e->getAwsErrorCode(),
             ]);
-            
+
             throw new \RuntimeException("Failed to verify storage: {$e->getMessage()}", 0, $e);
         }
     }
@@ -161,8 +161,8 @@ class DeleteAssetJob implements ShouldQueue
      * so all versions (v1, v2, ...) and thumbnails are removed. Never overwrites; each version
      * lives in its own v{n}/ directory.
      *
-     * @param Asset $asset
      * @return array Array of deleted paths
+     *
      * @throws \RuntimeException If deletion fails
      */
     protected function deleteStorageFiles(Asset $asset): array
@@ -191,8 +191,7 @@ class DeleteAssetJob implements ShouldQueue
                     $deletedPaths[] = $mainPath;
                 }
 
-                foreach (($metadata['thumbnails'] ?? []) as $thumbnail) {
-                    $thumbnailPath = $thumbnail['path'] ?? null;
+                foreach (ThumbnailMetadata::allThumbnailObjectPaths($metadata) as $thumbnailPath) {
                     if ($thumbnailPath && $s3Client->doesObjectExist($bucket->name, $thumbnailPath)) {
                         $s3Client->deleteObject(['Bucket' => $bucket->name, 'Key' => $thumbnailPath]);
                         $deletedPaths[] = $thumbnailPath;
@@ -210,7 +209,7 @@ class DeleteAssetJob implements ShouldQueue
 
                 $folderPath = dirname($asset->storage_root_path ?? '');
                 if ($folderPath !== '.' && $folderPath !== '/') {
-                    $folderDeleted = $this->deleteAllObjectsUnderPrefix($s3Client, $bucket->name, $folderPath . '/');
+                    $folderDeleted = $this->deleteAllObjectsUnderPrefix($s3Client, $bucket->name, $folderPath.'/');
                     $deletedPaths = array_merge($deletedPaths, $folderDeleted);
                 }
             }
@@ -223,7 +222,7 @@ class DeleteAssetJob implements ShouldQueue
             return $deletedPaths;
         } catch (S3Exception $e) {
             $errorType = $this->categorizeS3Error($e);
-            
+
             Log::error('Failed to delete asset storage files', [
                 'asset_id' => $asset->id,
                 'error' => $e->getMessage(),
@@ -231,7 +230,7 @@ class DeleteAssetJob implements ShouldQueue
                 'aws_error_code' => $e->getAwsErrorCode(),
                 'deleted_paths_partial' => $deletedPaths,
             ]);
-            
+
             throw new \RuntimeException("Failed to delete storage files: {$e->getMessage()}", 0, $e);
         }
     }
@@ -271,10 +270,6 @@ class DeleteAssetJob implements ShouldQueue
     /**
      * Confirm removal - verify files are gone from S3 (best-effort).
      * Does not throw exceptions - logs warnings instead.
-     *
-     * @param Asset $asset
-     * @param array $deletedPaths
-     * @return void
      */
     protected function confirmRemoval(Asset $asset, array $deletedPaths): void
     {
@@ -292,6 +287,7 @@ class DeleteAssetJob implements ShouldQueue
                     'path' => $mainPath,
                     'note' => 'Deletion will proceed - file may be deleted asynchronously or verification may be delayed',
                 ]);
+
                 // Don't throw - best-effort verification
                 return;
             }
@@ -320,14 +316,13 @@ class DeleteAssetJob implements ShouldQueue
     /**
      * Create S3 client instance.
      *
-     * @return S3Client
      * @throws \RuntimeException
      */
     protected function createS3Client(): S3Client
     {
-        if (!class_exists(S3Client::class)) {
+        if (! class_exists(S3Client::class)) {
             throw new \RuntimeException(
-                'AWS SDK for PHP is required for asset deletion. ' .
+                'AWS SDK for PHP is required for asset deletion. '.
                 'Install it via: composer require aws/aws-sdk-php'
             );
         }
@@ -452,19 +447,19 @@ class DeleteAssetJob implements ShouldQueue
 
         // Check error message patterns for other exceptions
         $message = strtolower($exception->getMessage());
-        
+
         if (str_contains($message, 'timeout') || str_contains($message, 'timed out')) {
             return 'timeout';
         }
-        
+
         if (str_contains($message, 'permission') || str_contains($message, 'access denied')) {
             return 'permission_denied';
         }
-        
+
         if (str_contains($message, 'network') || str_contains($message, 'connection')) {
             return 'network_error';
         }
-        
+
         if (str_contains($message, 'database') || str_contains($message, 'sql')) {
             return 'database_deletion_failed';
         }
@@ -480,12 +475,12 @@ class DeleteAssetJob implements ShouldQueue
         $awsErrorCode = $exception->getAwsErrorCode();
         $statusCode = $exception->getStatusCode();
 
-        return match($awsErrorCode) {
+        return match ($awsErrorCode) {
             'AccessDenied', 'Forbidden' => 'permission_denied',
             'NoSuchBucket', 'NoSuchKey' => 'storage_verification_failed',
             'RequestTimeout', 'ServiceUnavailable' => 'timeout',
             'NetworkingError' => 'network_error',
-            default => match($statusCode) {
+            default => match ($statusCode) {
                 403 => 'permission_denied',
                 404 => 'storage_verification_failed',
                 408, 503, 504 => 'timeout',

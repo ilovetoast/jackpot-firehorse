@@ -33,8 +33,11 @@ class SvgRasterQualityTest extends TestCase
     use RefreshDatabase;
 
     protected Tenant $tenant;
+
     protected Brand $brand;
+
     protected User $user;
+
     protected StorageBucket $bucket;
 
     protected function setUp(): void
@@ -99,7 +102,7 @@ class SvgRasterQualityTest extends TestCase
      */
     protected function createSvgFile(int $width = 100, int $height = 100): string
     {
-        $tempPath = tempnam(sys_get_temp_dir(), 'svg_test_') . '.svg';
+        $tempPath = tempnam(sys_get_temp_dir(), 'svg_test_').'.svg';
         $content = <<<SVG
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="{$width}" height="{$height}" viewBox="0 0 {$width} {$height}">
@@ -129,7 +132,7 @@ SVG;
 
     public function test_svg_rasterized_at_high_resolution_before_downscale(): void
     {
-        if (!extension_loaded('imagick')) {
+        if (! extension_loaded('imagick')) {
             $this->markTestSkipped('Imagick extension required for SVG rasterization');
         }
 
@@ -139,7 +142,7 @@ SVG;
 
         $service = new ThumbnailGenerationService($mockS3);
         $result = $service->generateThumbnails($asset);
-        $thumbnails = $result['thumbnails'] ?? [];
+        $thumbnails = $result['thumbnails']['original'] ?? [];
 
         $this->assertNotEmpty($thumbnails);
         $medium = $thumbnails['medium'] ?? null;
@@ -154,7 +157,7 @@ SVG;
 
     public function test_medium_dimensions_persisted_correctly(): void
     {
-        if (!extension_loaded('imagick')) {
+        if (! extension_loaded('imagick')) {
             $this->markTestSkipped('Imagick extension required for SVG rasterization');
         }
 
@@ -164,7 +167,7 @@ SVG;
 
         $service = new ThumbnailGenerationService($mockS3);
         $result = $service->generateThumbnails($asset);
-        $dims = $result['thumbnail_dimensions']['medium'] ?? null;
+        $dims = $result['thumbnail_dimensions']['original']['medium'] ?? null;
         $this->assertNotNull($dims);
         $this->assertArrayHasKey('width', $dims);
         $this->assertArrayHasKey('height', $dims);
@@ -176,7 +179,7 @@ SVG;
 
     public function test_thumbnail_dimensions_persisted_for_all_styles(): void
     {
-        if (!extension_loaded('imagick')) {
+        if (! extension_loaded('imagick')) {
             $this->markTestSkipped('Imagick extension required for SVG rasterization');
         }
 
@@ -186,7 +189,7 @@ SVG;
 
         $service = new ThumbnailGenerationService($mockS3);
         $result = $service->generateThumbnails($asset);
-        $dims = $result['thumbnail_dimensions'] ?? [];
+        $dims = $result['thumbnail_dimensions']['original'] ?? [];
         $this->assertNotEmpty($dims);
         foreach (['thumb', 'medium', 'large'] as $style) {
             if (isset($dims[$style])) {

@@ -78,6 +78,9 @@ export default function AssetGridToolbar({
     clearFiltersInertiaOnly = null,
     /** Preserve these query keys when primary metadata filters rebuild the URL (Collections: `collection`, etc.). */
     filterUrlNavigationKeys = [],
+    /** Deliverables: grid thumbnail mode — 'standard' | 'enhanced' | 'presentation' */
+    executionThumbnailViewMode = null,
+    onExecutionThumbnailViewModeChange = null,
 }) {
     const inertiaPage = usePage()
     const pageProps = inertiaPage.props
@@ -100,6 +103,9 @@ export default function AssetGridToolbar({
             urlParams.set('q', trimmed)
         } else {
             urlParams.delete('q')
+            // Drop deep-link params so Index.jsx recovery effect does not re-apply ?q=uuid while ?asset= remains
+            urlParams.delete('asset')
+            urlParams.delete('edit_metadata')
         }
         const onlyKeys = Array.isArray(inertiaSearchOnly) && inertiaSearchOnly.length > 0
             ? inertiaSearchOnly
@@ -407,6 +413,8 @@ export default function AssetGridToolbar({
         showInfo,
         onToggleInfo,
         primaryColor,
+        executionThumbnailViewMode,
+        onExecutionThumbnailViewModeChange,
     }
 
     const mobileResultPanelClass =
@@ -633,9 +641,11 @@ export default function AssetGridToolbar({
                         {displayInPopover ? (
                             <AssetGridViewMenu primaryColor={primaryColor}>{viewPopoverSections}</AssetGridViewMenu>
                         ) : (
-                            <div className="flex min-w-0 shrink-0 items-center gap-2 rounded-xl border border-gray-100 bg-gray-50/80 px-2 py-1">
-                                {sortDesktopControl}
-                                <AssetGridViewOptionsDropdown mode="full" triggerVariant="default" {...viewOptionsProps} />
+                            <div className="flex min-w-0 shrink-0 flex-wrap items-center gap-2">
+                                <div className="flex min-w-0 shrink-0 items-center gap-2 rounded-xl border border-gray-100 bg-gray-50/80 px-2 py-1">
+                                    {sortDesktopControl}
+                                    <AssetGridViewOptionsDropdown mode="full" triggerVariant="default" {...viewOptionsProps} />
+                                </div>
                             </div>
                         )}
                     </div>

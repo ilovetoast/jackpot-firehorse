@@ -56,7 +56,7 @@ class AssetVariantPathResolverTest extends TestCase
             'mime_type' => 'image/jpeg',
             'status' => AssetStatus::VISIBLE,
             'type' => AssetType::ASSET,
-            'storage_root_path' => 'tenants/' . $tenant->uuid . '/assets/' . \Illuminate\Support\Str::uuid() . '/v1/original.jpg',
+            'storage_root_path' => 'tenants/'.$tenant->uuid.'/assets/'.\Illuminate\Support\Str::uuid().'/v1/original.jpg',
             'size_bytes' => 1024,
         ], $overrides));
     }
@@ -95,7 +95,29 @@ class AssetVariantPathResolverTest extends TestCase
         $resolver = app(AssetVariantPathResolver::class);
         $path = $resolver->resolve($asset, AssetVariant::THUMB_SMALL->value);
 
+        // No metadata.thumbnails: on-disk files are usually legacy flat layout (pre–thumbnail-mode).
         $this->assertStringContainsString('thumbnails/thumb/', $path);
+        $this->assertStringNotContainsString('thumbnails/original/', $path);
+        $this->assertStringEndsWith('.webp', $path);
+    }
+
+    public function test_resolve_thumb_small_fallback_uses_canonical_when_thumbnails_metadata_exists(): void
+    {
+        $asset = $this->createAsset([
+            'storage_root_path' => 'tenants/abc/assets/123/v1/original.jpg',
+            'metadata' => [
+                'thumbnails' => [
+                    'original' => [
+                        'medium' => ['path' => 'tenants/abc/assets/123/v1/thumbnails/original/medium/medium.webp'],
+                    ],
+                ],
+            ],
+        ]);
+
+        $resolver = app(AssetVariantPathResolver::class);
+        $path = $resolver->resolve($asset, AssetVariant::THUMB_SMALL->value);
+
+        $this->assertStringContainsString('thumbnails/original/thumb/', $path);
         $this->assertStringEndsWith('.webp', $path);
     }
 
@@ -139,7 +161,7 @@ class AssetVariantPathResolverTest extends TestCase
 
         $path = AssetVariantPathResolver::resolvePdfPagePath($asset, 3, 1);
 
-        $this->assertSame('assets/' . $asset->tenant_id . '/' . $asset->id . '/v1/pdf-pages/page_3.webp', $path);
+        $this->assertSame('assets/'.$asset->tenant_id.'/'.$asset->id.'/v1/pdf-pages/page_3.webp', $path);
     }
 
     public function test_resolve_pdf_page_deterministic_path_includes_version(): void
@@ -148,7 +170,7 @@ class AssetVariantPathResolverTest extends TestCase
 
         $path = AssetVariantPathResolver::resolvePdfPagePath($asset, 1, 2);
 
-        $this->assertSame('assets/' . $asset->tenant_id . '/' . $asset->id . '/v2/pdf-pages/page_1.webp', $path);
+        $this->assertSame('assets/'.$asset->tenant_id.'/'.$asset->id.'/v2/pdf-pages/page_1.webp', $path);
     }
 
     public function test_resolve_pdf_page_fallback_when_no_record(): void
@@ -159,6 +181,6 @@ class AssetVariantPathResolverTest extends TestCase
         $resolver = app(AssetVariantPathResolver::class);
         $path = $resolver->resolve($asset, AssetVariant::PDF_PAGE->value, ['page' => 2]);
 
-        $this->assertSame('assets/' . $asset->tenant_id . '/' . $asset->id . '/v1/pdf-pages/page_2.webp', $path);
+        $this->assertSame('assets/'.$asset->tenant_id.'/'.$asset->id.'/v1/pdf-pages/page_2.webp', $path);
     }
 }

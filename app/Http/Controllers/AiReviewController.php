@@ -11,9 +11,10 @@ use App\Services\AI\Insights\InsightSuggestionReason;
 use App\Services\FeatureGate;
 use App\Services\TenantPermissionResolver;
 use App\Support\AssetVariant;
-use App\Support\Roles\PermissionMap;
 use App\Support\DeliveryContext;
 use App\Support\Metadata\CategoryTypeResolver;
+use App\Support\Roles\PermissionMap;
+use App\Support\ThumbnailMetadata;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -84,6 +85,11 @@ class AiReviewController extends Controller
             $approvalQueue = 'team';
         }
 
+        $reviewTabCounts = null;
+        if ($canViewAi && $tenant && $brand && $user) {
+            $reviewTabCounts = $this->reviewTabCountPayload($tenant, $brand, $user);
+        }
+
         return Inertia::render('Insights/Review', [
             'initialTab' => $tab,
             'initialWorkspace' => $workspace,
@@ -92,6 +98,7 @@ class AiReviewController extends Controller
             'canViewUploadApprovals' => $canViewUploadApprovals,
             'creatorModuleEnabled' => $creatorModuleEnabled,
             'canCreateFieldFromSuggestion' => $canCreateFieldFromSuggestion,
+            'reviewTabCounts' => $reviewTabCounts,
         ]);
     }
 
@@ -165,12 +172,23 @@ class AiReviewController extends Controller
             return response()->json(['message' => 'Permission denied'], 403);
         }
 
-        return response()->json([
+        return response()->json($this->reviewTabCountPayload($tenant, $brand, $user));
+    }
+
+    /**
+     * Pending totals per AI Review sub-tab (tags / categories / values / fields).
+     * Shared by JSON counts endpoint and Inertia Review page for SSR tab badges.
+     *
+     * @return array{tags: int, categories: int, values: int, fields: int}
+     */
+    protected function reviewTabCountPayload($tenant, $brand, $user): array
+    {
+        return [
             'tags' => $this->countTagSuggestions($tenant, $brand, $user),
             'categories' => $this->countCategorySuggestions($tenant, $brand, $user),
             'values' => $this->countValueSuggestionsPending($tenant),
             'fields' => $this->countFieldSuggestionsPending($tenant),
-        ]);
+        ];
     }
 
     /**
@@ -855,8 +873,7 @@ class AiReviewController extends Controller
 
         $preview = $asset->deliveryUrl(AssetVariant::THUMB_PREVIEW, DeliveryContext::AUTHENTICATED) ?: null;
         $final = null;
-        $thumbnails = $metadata['thumbnails'] ?? [];
-        $thumbnailsExist = ! empty($thumbnails) && (isset($thumbnails['thumb']) || isset($thumbnails['medium']));
+        $thumbnailsExist = ThumbnailMetadata::hasMediumOrThumb($metadata);
 
         if ($thumbnailStatus === 'completed' || $thumbnailsExist) {
             $mediumPath = $asset->thumbnailPathForStyle('medium');

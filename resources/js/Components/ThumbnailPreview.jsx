@@ -36,6 +36,8 @@
  * @param {number|null} props.masonryMaxHeight - When set, image sizes to natural aspect ratio up to this max height (masonry grid)
  * @param {number|null} props.masonryMinHeight - Masonry: min height for placeholders / empty states (match grid tile)
  * @param {boolean} props.preferLargeForVector - When true, use 'large' style (4096px) for SVG/vector assets in detail view for crisp rendering
+ * @param {string|null} props.forcedImageUrl - When set, render this URL instead of locked final/preview (drawer preview mode)
+ * @param {boolean} props.forcedImageSpinnerOverlay - Full-area spinner overlay on forced image (e.g. preferred pipeline processing)
  */
 import { useState, useEffect, useRef, useMemo } from 'react'
 import { usePage } from '@inertiajs/react'
@@ -73,13 +75,21 @@ export default function ThumbnailPreview({
     forceObjectFit = null,
     masonryMaxHeight = null,
     masonryMinHeight = null,
-    preferLargeForVector = false
+    preferLargeForVector = false,
+    forcedImageUrl = null,
+    forcedImageSpinnerOverlay = false,
 }) {
     const { auth } = usePage().props
     // Use current brand's primary color, fallback to default if not provided
     const brandPrimaryColor = primaryColor || auth?.activeBrand?.primary_color || '#6366f1'
+    const effectiveForced =
+        typeof forcedImageUrl === 'string' && forcedImageUrl.length > 0 ? forcedImageUrl : null
     const [imageLoaded, setImageLoaded] = useState(false)
     const [imageError, setImageError] = useState(false)
+    /** Last successfully shown forced URL; kept visible while the next URL preloads (mode switch). */
+    const [forcedStableUrl, setForcedStableUrl] = useState(null)
+    const [forcedPendingUrl, setForcedPendingUrl] = useState(null)
+    const forcedFailedOnceRef = useRef(new Set())
     const [isAnimating, setIsAnimating] = useState(false)
     const animationCompletedRef = useRef(false)
     const imgRef = useRef(null)
@@ -301,6 +311,38 @@ export default function ThumbnailPreview({
 
     const contrastBackdropClass = needsContrastBackdrop ? 'bg-neutral-200' : ''
 
+    useEffect(() => {
+        setForcedStableUrl(null)
+        setForcedPendingUrl(null)
+        forcedFailedOnceRef.current.clear()
+    }, [asset?.id])
+
+    useEffect(() => {
+        if (!effectiveForced) {
+            setForcedStableUrl(null)
+            setForcedPendingUrl(null)
+            forcedFailedOnceRef.current.clear()
+        }
+    }, [effectiveForced])
+
+    useEffect(() => {
+        if (!effectiveForced) {
+            return
+        }
+        if (forcedFailedOnceRef.current.has(effectiveForced)) {
+            return
+        }
+        if (forcedStableUrl === null) {
+            setForcedPendingUrl(effectiveForced)
+            return
+        }
+        if (effectiveForced !== forcedStableUrl) {
+            setForcedPendingUrl(effectiveForced)
+        } else {
+            setForcedPendingUrl(null)
+        }
+    }, [effectiveForced, forcedStableUrl])
+
     /* ------------------------------------------------------------
        Animation trigger (only for meaningful transitions)
     ------------------------------------------------------------ */
@@ -352,6 +394,137 @@ export default function ThumbnailPreview({
                 setLockedType(null)
             }
         }
+    }
+
+    /* ------------------------------------------------------------
+       PRIORITY -1 — DRAWER FORCED URL (preview style / pipeline mode)
+       Keeps the previous image visible until the next URL has loaded (no empty flash).
+    ------------------------------------------------------------ */
+    if (effectiveForced) {
+        const isPreparingNext =
+            !!forcedPendingUrl &&
+            (forcedStableUrl === null || forcedPendingUrl !== forcedStableUrl)
+        const forcedShowFatal =
+            !!effectiveForced &&
+            forcedStableUrl === null &&
+            forcedPendingUrl === null &&
+            forcedFailedOnceRef.current.has(effectiveForced)
+        const showForcedOverlaySpinner = isPreparingNext || !!forcedImageSpinnerOverlay
+
+        const handleForcedPendingLoad = (e) => {
+            if (forcedPendingUrl) {
+                setForcedStableUrl(forcedPendingUrl)
+                setForcedPendingUrl(null)
+            }
+            trackImageLoad(e)
+        }
+
+        const handleForcedPendingError = () => {
+            if (!forcedPendingUrl) {
+                return
+            }
+            failedThumbnailUrls.add(forcedPendingUrl)
+            forcedFailedOnceRef.current.add(forcedPendingUrl)
+            setForcedPendingUrl(null)
+        }
+
+        const handleForcedStableLoad = (e) => {
+            trackImageLoad(e)
+        }
+
+        const handleForcedStableError = () => {
+            if (forcedStableUrl) {
+                failedThumbnailUrls.add(forcedStableUrl)
+            }
+        }
+
+        if (forcedShowFatal) {
+            return (
+                <div
+                    className={
+                        isMasonryHeight
+                            ? `relative flex w-full items-center justify-center ${showRichPlaceholder ? '' : 'bg-gray-50'}`
+                            : `flex items-center justify-center ${showRichPlaceholder ? '' : 'bg-gray-50'} ${className}`
+                    }
+                    style={masonryPlaceholderStyle}
+                >
+                    <AssetPlaceholder
+                        asset={asset}
+                        primaryColor={brandPrimaryColor}
+                        brand={auth?.activeBrand}
+                        size={size}
+                        rich={showRichPlaceholder}
+                    />
+                </div>
+            )
+        }
+
+        return (
+            <div
+                className={`relative flex w-full min-h-0 items-center justify-center ${className}`}
+                style={masonryWrapperStyle}
+            >
+                {forcedStableUrl === null && !isAnimating && (
+                    <div className="absolute inset-0 bg-gray-100" />
+                )}
+                {forcedStableUrl ? (
+                    <img
+                        key={forcedStableUrl}
+                        ref={imgRef}
+                        src={forcedStableUrl}
+                        alt={alt}
+                        draggable={false}
+                        onDragStart={(e) => e.preventDefault()}
+                        className={imgFitClasses}
+                        loading="eager"
+                        style={{
+                            opacity: 1,
+                            transition:
+                                isAnimating && forcedStableUrl ? 'opacity 500ms ease-out' : 'none',
+                        }}
+                        onLoad={handleForcedStableLoad}
+                        onError={handleForcedStableError}
+                    />
+                ) : null}
+                {forcedPendingUrl && forcedPendingUrl !== forcedStableUrl ? (
+                    <img
+                        key={`pending-${forcedPendingUrl}`}
+                        src={forcedPendingUrl}
+                        alt=""
+                        aria-hidden
+                        draggable={false}
+                        onDragStart={(e) => e.preventDefault()}
+                        className={`${imgFitClasses} absolute inset-0 opacity-0 pointer-events-none`}
+                        loading="eager"
+                        onLoad={handleForcedPendingLoad}
+                        onError={handleForcedPendingError}
+                    />
+                ) : null}
+                {showForcedOverlaySpinner && (
+                    <div
+                        className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-black/20"
+                        aria-hidden
+                    >
+                        <svg
+                            className="h-10 w-10 animate-spin text-white drop-shadow-md"
+                            style={{ animationDuration: '1.2s' }}
+                            xmlns="http://www.w3.org/2000/svg"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                            aria-hidden
+                        >
+                            <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={2}
+                                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                            />
+                        </svg>
+                    </div>
+                )}
+            </div>
+        )
     }
 
     /* ------------------------------------------------------------

@@ -220,7 +220,10 @@ class AnalyticsOverviewController extends Controller
 
         $aiUsageData = null;
         if ($user->hasPermissionForTenant($tenant, 'ai.usage.view')) {
-            $aiUsageData = ['tagging' => $usageStatusFull['tagging'] ?? [], 'suggestions' => $usageStatusFull['suggestions'] ?? []];
+            $aiUsageData = $this->aiUsageService->augmentAiUsageDashboardPayload([
+                'tagging' => $usageStatusFull['tagging'] ?? [],
+                'suggestions' => $usageStatusFull['suggestions'] ?? [],
+            ], $tenant);
         }
 
         /** Shown when AI tagging or suggestions monthly cap is reached (same audience as insights overview). */

@@ -65,7 +65,13 @@ export default function AiTaggingSettings({
     const [saving, setSaving] = useState(false)
     const [lastSaved, setLastSaved] = useState(null)
     const [runInsightsLoading, setRunInsightsLoading] = useState(false)
-    
+    const [insightsClock, setInsightsClock] = useState(() => Date.now())
+
+    useEffect(() => {
+        const id = window.setInterval(() => setInsightsClock(Date.now()), 15_000)
+        return () => window.clearInterval(id)
+    }, [])
+
     // Get plan tag limits
     const planLimits = {
         free: { max: 1, name: 'Free' },
@@ -188,7 +194,11 @@ export default function AiTaggingSettings({
             }
         } catch (err) {
             console.error('[AiTaggingSettings] Run insights failed:', err)
-            setError(err.response?.data?.error || err.message || 'Could not queue insights sync')
+            const data = err.response?.data
+            if (data?.settings) {
+                setSettings(data.settings)
+            }
+            setError(data?.error || err.message || 'Could not queue insights sync')
         } finally {
             setRunInsightsLoading(false)
         }
@@ -263,6 +273,10 @@ export default function AiTaggingSettings({
     if (!settings) {
         return null
     }
+
+    const manualInsightsInCooldown =
+        Boolean(settings.insights_manual_run_available_at) &&
+        new Date(settings.insights_manual_run_available_at).getTime() > insightsClock
 
     const isAiDisabled = settings.disable_ai_tagging
     const isAutoApplyEnabled = settings.enable_ai_tag_auto_apply
@@ -440,14 +454,32 @@ export default function AiTaggingSettings({
                                     ? settings.insights_pending_suggestions_count
                                     : '—'}
                             </p>
+                            {manualInsightsInCooldown && settings.insights_manual_run_available_at ? (
+                                <p className="text-amber-800">
+                                    Manual runs are limited to once every{' '}
+                                    {typeof settings.manual_insights_run_cooldown_minutes === 'number'
+                                        ? `${settings.manual_insights_run_cooldown_minutes} min`
+                                        : 'a short window'}
+                                    . Next allowed {formatRelativeTime(settings.insights_manual_run_available_at) ?? 'soon'}.
+                                </p>
+                            ) : null}
                         </div>
                         <button
                             type="button"
                             onClick={runInsightsNow}
-                            disabled={!canEdit || !settings.ai_insights_enabled || runInsightsLoading}
+                            disabled={
+                                !canEdit ||
+                                !settings.ai_insights_enabled ||
+                                runInsightsLoading ||
+                                manualInsightsInCooldown
+                            }
                             className="inline-flex shrink-0 items-center justify-center rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                         >
-                            {runInsightsLoading ? 'Queueing…' : 'Run now'}
+                            {runInsightsLoading
+                                ? 'Queueing…'
+                                : manualInsightsInCooldown
+                                  ? 'Cooldown'
+                                  : 'Run now'}
                         </button>
                     </div>
                 </div>

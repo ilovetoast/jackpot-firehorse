@@ -19,6 +19,7 @@ use App\Traits\HandlesFlashMessages;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -1603,7 +1604,8 @@ class CompanyController extends Controller
     }
 
     /**
-     * Queue a metadata insights sync (bypasses 24h cooldown). Admin/owner only.
+     * Queue a metadata insights sync (bypasses the job’s 24h cooldown). Admin/owner only.
+     * Repeat clicks are limited by {@see manualInsightsQueueCacheKey()} + config cooldown.
      */
     public function runMetadataInsightsNow(): JsonResponse
     {
@@ -1622,6 +1624,21 @@ class CompanyController extends Controller
             if (! $tenant->ai_insights_enabled) {
                 return response()->json(['error' => 'Enable Asset Field Intelligence before running a sync.'], 422);
             }
+
+            $gate = $this->insightsManualRunGatePayload((int) $tenant->id);
+            if ($gate['insights_manual_run_available_at'] !== null) {
+                $next = Carbon::parse($gate['insights_manual_run_available_at']);
+                $retryAfter = max(0, $next->getTimestamp() - time());
+
+                return response()->json([
+                    'error' => 'A library pattern scan was queued recently. Please wait before running again.',
+                    'retry_after_seconds' => $retryAfter,
+                    'next_available_at' => $gate['insights_manual_run_available_at'],
+                    'settings' => $this->buildAiSettingsPayload($tenant),
+                ], 429);
+            }
+
+            Cache::forever($this->manualInsightsQueueCacheKey((int) $tenant->id), now()->toIso8601String());
 
             RunMetadataInsightsJob::dispatch($tenant->id, true);
 
@@ -1666,7 +1683,39 @@ class CompanyController extends Controller
                 ->where('status', 'pending')
                 ->count();
 
-        return $settings;
+        return array_merge($settings, $this->insightsManualRunGatePayload((int) $tenant->id));
+    }
+
+    protected function manualInsightsQueueCacheKey(int $tenantId): string
+    {
+        return "tenant:{$tenantId}:metadata_insights:last_manual_queue_at";
+    }
+
+    /**
+     * @return array{
+     *     last_insights_manual_queued_at: ?string,
+     *     insights_manual_run_available_at: ?string,
+     *     manual_insights_run_cooldown_minutes: int
+     * }
+     */
+    protected function insightsManualRunGatePayload(int $tenantId): array
+    {
+        $mins = max(1, (int) config('ai_metadata_field_suggestions.manual_insights_run_cooldown_minutes', 45));
+        $last = Cache::get($this->manualInsightsQueueCacheKey($tenantId));
+        $lastStr = is_string($last) ? $last : null;
+        $availableAt = null;
+        if ($lastStr !== null) {
+            $next = Carbon::parse($lastStr)->addMinutes($mins);
+            if ($next->isFuture()) {
+                $availableAt = $next->toIso8601String();
+            }
+        }
+
+        return [
+            'last_insights_manual_queued_at' => $lastStr,
+            'insights_manual_run_available_at' => $availableAt,
+            'manual_insights_run_cooldown_minutes' => $mins,
+        ];
     }
 
     /**

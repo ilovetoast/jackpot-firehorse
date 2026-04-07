@@ -143,7 +143,7 @@ export default function AnalyticsUsage({
                             AI Usage
                         </h2>
                         <div className="bg-white rounded-lg shadow border border-gray-200 p-6">
-                            <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
+                            <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
                                 <div>
                                     <h3 className="text-sm font-medium text-gray-700">Tagging</h3>
                                     <p className="mt-1 text-xl font-semibold text-gray-900">
@@ -194,6 +194,26 @@ export default function AnalyticsUsage({
                                         </div>
                                     )}
                                 </div>
+                                {ai_usage.thumbnail_enhancement && (
+                                    <div>
+                                        <h3 className="text-sm font-medium text-gray-700">Thumbnail enhancement</h3>
+                                        <p className="mt-1 text-xl font-semibold text-gray-900">
+                                            {(ai_usage.thumbnail_enhancement.count ?? 0).toLocaleString()}
+                                            <span className="text-sm font-normal text-gray-500"> runs (this month)</span>
+                                        </p>
+                                        <p className="mt-1 text-sm text-gray-600">
+                                            {(ai_usage.thumbnail_enhancement.count ?? 0) === 0
+                                                ? 'No completed runs yet'
+                                                : `${ai_usage.thumbnail_enhancement.success_rate ?? '—'}% success · avg ${ai_usage.thumbnail_enhancement.avg_duration_ms != null ? `${Math.round(ai_usage.thumbnail_enhancement.avg_duration_ms)} ms` : '—'}` +
+                                                  (ai_usage.thumbnail_enhancement.p95_duration_ms != null
+                                                      ? ` · p95 ${Math.round(ai_usage.thumbnail_enhancement.p95_duration_ms)} ms`
+                                                      : '') +
+                                                  ((ai_usage.thumbnail_enhancement.skipped_count ?? 0) > 0
+                                                      ? ` · ${ai_usage.thumbnail_enhancement.skipped_count} skipped (guardrails)`
+                                                      : '')}
+                                        </p>
+                                    </div>
+                                )}
                             </div>
                             <div className="mt-4">
                                 <Link

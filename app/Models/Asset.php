@@ -9,6 +9,7 @@ use App\Enums\ThumbnailStatus;
 use App\Jobs\FullPdfExtractionJob;
 use App\Support\AssetVariant;
 use App\Support\DeliveryContext;
+use App\Support\ThumbnailMetadata;
 use DomainException;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
@@ -1170,7 +1171,10 @@ class Asset extends Model
     public function scopeWhereSupportsThumbnailMetadata(\Illuminate\Database\Eloquent\Builder $query): void
     {
         $query->where('thumbnail_status', ThumbnailStatus::COMPLETED)
-            ->whereNotNull('metadata->thumbnails->medium->path')
+            ->where(function ($q) {
+                $q->whereNotNull('metadata->thumbnails->'.ThumbnailMetadata::DEFAULT_MODE.'->medium->path')
+                    ->orWhereNotNull('metadata->thumbnails->medium->path');
+            })
             ->where(function ($q) {
                 $q->where('mime_type', 'like', 'image/%')
                     ->orWhere('mime_type', 'application/pdf')
@@ -1184,11 +1188,21 @@ class Asset extends Model
      */
     public function scopeWhereVisualMetadataInvalid(\Illuminate\Database\Eloquent\Builder $query): void
     {
-        $query->where(function ($q) {
+        $mode = ThumbnailMetadata::DEFAULT_MODE;
+        $query->where(function ($q) use ($mode) {
             $q->where('metadata->thumbnail_timeout', true)
-                ->orWhereNull('metadata->thumbnail_dimensions->medium')
-                ->orWhereRaw('COALESCE(CAST(JSON_UNQUOTE(JSON_EXTRACT(metadata, "$.thumbnail_dimensions.medium.width")) AS UNSIGNED), 0) <= 0')
-                ->orWhereRaw('COALESCE(CAST(JSON_UNQUOTE(JSON_EXTRACT(metadata, "$.thumbnail_dimensions.medium.height")) AS UNSIGNED), 0) <= 0');
+                ->orWhere(function ($q2) use ($mode) {
+                    $q2->whereNull('metadata->thumbnail_dimensions->'.$mode.'->medium')
+                        ->whereNull('metadata->thumbnail_dimensions->medium');
+                })
+                ->orWhereRaw('COALESCE(
+                    CAST(JSON_UNQUOTE(JSON_EXTRACT(metadata, "$.thumbnail_dimensions.'.$mode.'.medium.width")) AS UNSIGNED),
+                    CAST(JSON_UNQUOTE(JSON_EXTRACT(metadata, "$.thumbnail_dimensions.medium.width")) AS UNSIGNED),
+                    0) <= 0')
+                ->orWhereRaw('COALESCE(
+                    CAST(JSON_UNQUOTE(JSON_EXTRACT(metadata, "$.thumbnail_dimensions.'.$mode.'.medium.height")) AS UNSIGNED),
+                    CAST(JSON_UNQUOTE(JSON_EXTRACT(metadata, "$.thumbnail_dimensions.medium.height")) AS UNSIGNED),
+                    0) <= 0');
         });
     }
 
@@ -1217,7 +1231,7 @@ class Asset extends Model
     {
         return $this->hasRasterThumbnail()
             && $this->thumbnail_status === ThumbnailStatus::COMPLETED
-            && isset($this->metadata['thumbnails']['medium']['path']);
+            && ThumbnailMetadata::stylePath($this->metadata ?? [], 'medium') !== null;
     }
 
     /**
@@ -1228,13 +1242,13 @@ class Asset extends Model
      */
     public function thumbnailDimensions(string $style = 'medium'): ?array
     {
-        $dimensions = $this->metadata['thumbnail_dimensions'][$style] ?? null;
+        $dimensions = ThumbnailMetadata::dimensionsForStyle($this->metadata ?? [], $style);
 
         // Fallback: check current version metadata (version-aware uploads)
         if ((! is_array($dimensions) || ! isset($dimensions['width'], $dimensions['height'])) && $this->relationLoaded('currentVersion')) {
             $version = $this->currentVersion;
             if ($version) {
-                $dimensions = ($version->metadata ?? [])['thumbnail_dimensions'][$style] ?? null;
+                $dimensions = ThumbnailMetadata::dimensionsForStyle($version->metadata ?? [], $style);
             }
         }
 
@@ -1322,17 +1336,19 @@ class Asset extends Model
      * Get the S3 thumbnail path for a specific style.
      *
      * Retrieves the thumbnail path from asset metadata.
-     * Thumbnail paths are stored as: metadata['thumbnails'][$style]['path']
+     * Thumbnail paths are stored as: metadata['thumbnails'][mode][style]['path'] (default mode {@see ThumbnailMetadata::DEFAULT_MODE})
+     * with legacy fallback: metadata['thumbnails'][style]['path'].
      *
      * @param  string  $style  Thumbnail style (thumb, medium, large)
      * @return string|null S3 key path to thumbnail, or null if not found
      */
-    public function thumbnailPathForStyle(string $style): ?string
+    public function thumbnailPathForStyle(string $style, ?string $mode = null): ?string
     {
         $metadata = $this->metadata ?? [];
 
-        if (isset($metadata['thumbnails'][$style]['path'])) {
-            return $metadata['thumbnails'][$style]['path'];
+        $path = ThumbnailMetadata::stylePath($metadata, $style, $mode);
+        if ($path !== null) {
+            return $path;
         }
 
         // Fallback: check current version metadata (version-aware uploads store thumbnails on version first)
@@ -1340,9 +1356,9 @@ class Asset extends Model
             ? $this->currentVersion
             : $this->currentVersion()->first();
         if ($version) {
-            $versionMeta = $version->metadata ?? [];
-            if (isset($versionMeta['thumbnails'][$style]['path'])) {
-                return $versionMeta['thumbnails'][$style]['path'];
+            $path = ThumbnailMetadata::stylePath($version->metadata ?? [], $style, $mode);
+            if ($path !== null) {
+                return $path;
             }
         }
 

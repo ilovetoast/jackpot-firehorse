@@ -361,7 +361,11 @@ export default function BrandsIndex({ brands, limits, can_remove_user_from_compa
                                                                     Manage metadata fields and visibility settings for this brand. Configure where fields appear in upload, edit, and filter interfaces.
                                                                 </p>
                                                                 <Link
-                                                                    href="/app/tenant/metadata/registry"
+                                                                    href={
+                                                                        typeof route === 'function'
+                                                                            ? route('manage.categories')
+                                                                            : '/app/manage/categories'
+                                                                    }
                                                                     onClick={(e) => e.stopPropagation()}
                                                                     className="inline-flex items-center rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
                                                                 >

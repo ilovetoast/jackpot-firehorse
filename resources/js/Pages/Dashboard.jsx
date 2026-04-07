@@ -600,6 +600,36 @@ export default function Dashboard({ auth, tenant, brand, plan_limits, plan, stat
                             </div>
                         </div>
                     )}
+
+                    {ai_usage?.thumbnail_enhancement && (
+                        <div className="overflow-hidden rounded-lg bg-white px-4 py-5 shadow sm:p-6 border border-gray-200">
+                            <div className="flex items-center">
+                                <div className="flex-shrink-0">
+                                    <SparklesIcon className="h-6 w-6 text-teal-400" aria-hidden="true" />
+                                </div>
+                                <div className="ml-5 w-0 flex-1">
+                                    <dt className="text-sm font-medium text-gray-500 truncate">Thumbnail enhancement</dt>
+                                    <dd className="mt-1">
+                                        <span className="text-2xl font-semibold tracking-tight text-gray-900">
+                                            {(ai_usage.thumbnail_enhancement.count ?? 0).toLocaleString()}
+                                        </span>
+                                        <span className="ml-2 text-sm text-gray-500">runs this month</span>
+                                        <p className="mt-1 text-xs text-gray-500">
+                                            {(ai_usage.thumbnail_enhancement.count ?? 0) === 0
+                                                ? 'No completed runs yet'
+                                                : `${ai_usage.thumbnail_enhancement.success_rate ?? '—'}% success rate · avg ${ai_usage.thumbnail_enhancement.avg_duration_ms != null ? `${Math.round(ai_usage.thumbnail_enhancement.avg_duration_ms)} ms` : '—'}` +
+                                                  (ai_usage.thumbnail_enhancement.p95_duration_ms != null
+                                                      ? ` · p95 ${Math.round(ai_usage.thumbnail_enhancement.p95_duration_ms)} ms`
+                                                      : '') +
+                                                  ((ai_usage.thumbnail_enhancement.skipped_count ?? 0) > 0
+                                                      ? ` · ${ai_usage.thumbnail_enhancement.skipped_count} skipped (guardrails)`
+                                                      : '')}
+                                        </p>
+                                    </dd>
+                                </div>
+                            </div>
+                        </div>
+                    )}
                 </div>
 
                 {/* Combined Most Viewed / Most Downloaded with Tabs */}

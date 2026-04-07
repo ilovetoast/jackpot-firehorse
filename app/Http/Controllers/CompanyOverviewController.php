@@ -13,8 +13,8 @@ use App\Models\User;
 use App\Services\AgencyBrandAccessService;
 use App\Services\AiUsageService;
 use App\Services\BrandService;
-use App\Support\DashboardLinks;
 use App\Services\PlanService;
+use App\Support\DashboardLinks;
 use Carbon\Carbon;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -286,6 +286,7 @@ class CompanyOverviewController extends Controller
                     'percentage' => $usageStatus['suggestions']['percentage'] ?? 0,
                 ],
             ];
+            $aiUsageData = $this->aiUsageService->augmentAiUsageDashboardPayload($aiUsageData, $tenant);
         }
 
         $tenant->loadMissing('defaultBrand');

@@ -5,6 +5,8 @@ namespace App\Services;
 use App\Models\Asset;
 use App\Models\AssetPdfPage;
 use App\Support\AssetVariant;
+use App\Support\ThumbnailMetadata;
+use App\Support\ThumbnailMode;
 
 /**
  * Resolves canonical storage paths for asset variants.
@@ -30,9 +32,8 @@ class AssetVariantPathResolver
      * Prefers metadata paths when available (e.g. thumbnails from metadata).
      * Returns fallback placeholder path for stub variants (VIDEO_PREVIEW, PDF_PAGE) if file may not exist.
      *
-     * @param Asset $asset
-     * @param string $variant AssetVariant enum value (e.g. AssetVariant::ORIGINAL->value)
-     * @param array $options Optional options (e.g. ['page' => 1] for PDF_PAGE)
+     * @param  string  $variant  AssetVariant enum value (e.g. AssetVariant::ORIGINAL->value)
+     * @param  array  $options  Optional options (e.g. ['page' => 1] for PDF_PAGE)
      * @return string Storage path (S3 key). Returns fallback placeholder path if file may not exist (stub variants).
      */
     public function resolve(Asset $asset, string $variant, array $options = []): string
@@ -42,13 +43,10 @@ class AssetVariantPathResolver
 
         return match ($variantEnum) {
             AssetVariant::ORIGINAL => $asset->storage_root_path ?? '',
-            AssetVariant::THUMB_SMALL => $asset->thumbnailPathForStyle('thumb')
-                ?? ($basePath !== '' ? $basePath . 'thumbnails/thumb/thumb.' . $this->thumbnailExtension() : ''),
-            AssetVariant::THUMB_MEDIUM => $asset->thumbnailPathForStyle('medium')
-                ?? ($basePath !== '' ? $basePath . 'thumbnails/medium/medium.' . $this->thumbnailExtension() : ''),
-            AssetVariant::THUMB_LARGE => $asset->thumbnailPathForStyle('large')
-                ?? ($basePath !== '' ? $basePath . 'thumbnails/large/large.' . $this->thumbnailExtension() : ''),
-            AssetVariant::THUMB_PREVIEW => $asset->metadata['preview_thumbnails']['preview']['path'] ?? '',
+            AssetVariant::THUMB_SMALL => $this->resolveRasterThumbnailPath($asset, $basePath, 'thumb', $options),
+            AssetVariant::THUMB_MEDIUM => $this->resolveRasterThumbnailPath($asset, $basePath, 'medium', $options),
+            AssetVariant::THUMB_LARGE => $this->resolveRasterThumbnailPath($asset, $basePath, 'large', $options),
+            AssetVariant::THUMB_PREVIEW => $this->resolvePreviewThumbnailPath($asset, $basePath),
             AssetVariant::VIDEO_PREVIEW => $this->resolveVideoPreviewPath($asset, $basePath),
             AssetVariant::VIDEO_POSTER => $this->resolveVideoPosterPath($asset, $basePath),
             AssetVariant::PDF_PAGE => $this->resolvePdfPagePathFromVariant($asset, $options),
@@ -70,16 +68,16 @@ class AssetVariantPathResolver
         $path = $asset->getRawOriginal('video_preview_url')
             ?? ($asset->attributes['video_preview_url'] ?? null);
 
-        if ($path && is_string($path) && !str_starts_with($path, 'http')) {
+        if ($path && is_string($path) && ! str_starts_with($path, 'http')) {
             return $path;
         }
 
         $metadataPath = $asset->metadata['video_preview']['path'] ?? null;
-        if ($metadataPath && is_string($metadataPath) && !str_starts_with($metadataPath, 'http')) {
+        if ($metadataPath && is_string($metadataPath) && ! str_starts_with($metadataPath, 'http')) {
             return $metadataPath;
         }
 
-        return $basePath !== '' ? $basePath . 'previews/video_preview.mp4' : '';
+        return $basePath !== '' ? $basePath.'previews/video_preview.mp4' : '';
     }
 
     /**
@@ -90,11 +88,88 @@ class AssetVariantPathResolver
         $path = $asset->getRawOriginal('video_poster_url')
             ?? ($asset->attributes['video_poster_url'] ?? null);
 
-        if ($path && is_string($path) && !str_starts_with($path, 'http')) {
+        if ($path && is_string($path) && ! str_starts_with($path, 'http')) {
             return $path;
         }
 
-        return $basePath !== '' ? $basePath . 'thumbnails/medium/medium.webp' : '';
+        if ($basePath === '') {
+            return '';
+        }
+
+        $meta = $asset->metadata ?? [];
+        $mode = ThumbnailMode::default();
+        $canonical = $basePath.'thumbnails/'.$mode.'/medium/medium.webp';
+        $legacy = $basePath.'thumbnails/medium/medium.webp';
+
+        return $this->guessThumbnailDiskPathWithoutMetadataPath($meta, $canonical, $legacy);
+    }
+
+    /**
+     * True when there is no thumbnails bucket in metadata (null or empty array).
+     * Old assets may have files on disk under legacy flat keys only; new pipeline always writes nested metadata.
+     */
+    protected function lacksThumbnailMetadataRoot(array $metadata): bool
+    {
+        $root = $metadata['thumbnails'] ?? null;
+
+        return $root === null || $root === [];
+    }
+
+    /**
+     * Single-URL fallback when no stored path: prefer legacy layout if thumbnails metadata is wholly absent,
+     * else prefer canonical thumbnails/{mode}/… (partial pipeline / new-only-on-disk edge cases).
+     *
+     * @param  string  $canonical  e.g. …/thumbnails/original/thumb/thumb.webp
+     * @param  string  $legacy  e.g. …/thumbnails/thumb/thumb.webp
+     */
+    protected function guessThumbnailDiskPathWithoutMetadataPath(array $metadata, string $canonical, string $legacy): string
+    {
+        if ($this->lacksThumbnailMetadataRoot($metadata)) {
+            return $legacy;
+        }
+
+        return $canonical;
+    }
+
+    /**
+     * Metadata path, else deterministic guess: canonical mode path when thumbnails metadata exists,
+     * legacy flat path when metadata.thumbnails is missing (pre-mode on-disk layout).
+     */
+    protected function resolveRasterThumbnailPath(Asset $asset, string $basePath, string $style, array $options = []): string
+    {
+        $modeOpt = $options['thumbnail_mode'] ?? null;
+        $modeFilter = is_string($modeOpt) && $modeOpt !== '' ? $modeOpt : null;
+
+        $fromMeta = $asset->thumbnailPathForStyle($style, $modeFilter);
+        if ($fromMeta !== null && $fromMeta !== '') {
+            return $fromMeta;
+        }
+        if ($basePath === '') {
+            return '';
+        }
+        $modeSeg = $modeFilter ?? ThumbnailMode::default();
+        $ext = $this->thumbnailExtension();
+        $canonical = $basePath.'thumbnails/'.$modeSeg.'/'.$style.'/'.$style.'.'.$ext;
+        $legacy = $basePath.'thumbnails/'.$style.'/'.$style.'.'.$ext;
+
+        return $this->guessThumbnailDiskPathWithoutMetadataPath($asset->metadata ?? [], $canonical, $legacy);
+    }
+
+    protected function resolvePreviewThumbnailPath(Asset $asset, string $basePath): string
+    {
+        $fromMeta = ThumbnailMetadata::previewPath($asset->metadata ?? []);
+        if ($fromMeta !== null && $fromMeta !== '') {
+            return $fromMeta;
+        }
+        if ($basePath === '') {
+            return '';
+        }
+        $mode = ThumbnailMode::default();
+        $ext = $this->thumbnailExtension();
+        $canonical = $basePath.'thumbnails/'.$mode.'/preview/preview.'.$ext;
+        $legacy = $basePath.'thumbnails/preview/preview.'.$ext;
+
+        return $this->guessThumbnailDiskPathWithoutMetadataPath($asset->metadata ?? [], $canonical, $legacy);
     }
 
     /**
@@ -109,7 +184,7 @@ class AssetVariantPathResolver
 
         $dir = dirname($path);
 
-        return $dir === '.' ? '' : rtrim($dir, '/') . '/';
+        return $dir === '.' ? '' : rtrim($dir, '/').'/';
     }
 
     /**
@@ -128,7 +203,7 @@ class AssetVariantPathResolver
                 : (int) ($asset->currentVersion()->value('version_number') ?? 1)
         );
 
-        return 'assets/' . $asset->tenant_id . '/' . $asset->id . '/v' . $version . '/pdf-pages/page_' . $page . '.webp';
+        return 'assets/'.$asset->tenant_id.'/'.$asset->id.'/v'.$version.'/pdf-pages/page_'.$page.'.webp';
     }
 
     /**

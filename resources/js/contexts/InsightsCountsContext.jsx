@@ -4,7 +4,7 @@ import { usePage } from '@inertiajs/react'
 const InsightsCountsContext = createContext(null)
 
 export function useInsightsCounts() {
-    return useContext(InsightsCountsContext)
+    return useContext(InsightsCountsContext) ?? fallbackInsightsCounts
 }
 
 const emptyCounts = {
@@ -15,6 +15,28 @@ const emptyCounts = {
     uploadTeam: 0,
     uploadCreator: 0,
     loaded: false,
+}
+
+/** When no provider (should not happen on Insights pages); keeps consumers from seeing null. */
+const fallbackInsightsCounts = {
+    ...emptyCounts,
+    aiTotal: 0,
+    uploadTotal: 0,
+    reviewNavTotal: 0,
+    reload: () => {},
+}
+
+function seedAiCountsFromPayload(base, initialReviewTabCounts) {
+    if (!initialReviewTabCounts || typeof initialReviewTabCounts !== 'object') {
+        return base
+    }
+    return {
+        ...base,
+        tags: Number(initialReviewTabCounts.tags) || 0,
+        categories: Number(initialReviewTabCounts.categories) || 0,
+        values: Number(initialReviewTabCounts.values) || 0,
+        fields: Number(initialReviewTabCounts.fields) || 0,
+    }
 }
 
 function formatBadgeCount(n) {
@@ -28,17 +50,35 @@ export function InsightsBadge({ count, className = '' }) {
     if (!label) return null
     return (
         <span
-            className={`inline-flex min-h-[1.25rem] min-w-[1.25rem] items-center justify-center rounded-full bg-indigo-600 px-1.5 text-xs font-semibold text-white ${className}`}
+            className={`inline-flex min-h-[1.25rem] min-w-[1.25rem] shrink-0 items-center justify-center rounded-full bg-indigo-600 px-1.5 text-xs font-semibold text-white ${className}`}
         >
             {label}
         </span>
     )
 }
 
-export function InsightsCountsProvider({ children }) {
+export function InsightsCountsProvider({ children, initialReviewTabCounts = null }) {
     const { auth } = usePage().props
     const brandId = auth?.activeBrand?.id
-    const [counts, setCounts] = useState(emptyCounts)
+    const [counts, setCounts] = useState(() => seedAiCountsFromPayload(emptyCounts, initialReviewTabCounts))
+
+    useEffect(() => {
+        if (!initialReviewTabCounts) {
+            return
+        }
+        setCounts((prev) => ({
+            ...prev,
+            tags: Number(initialReviewTabCounts.tags) || 0,
+            categories: Number(initialReviewTabCounts.categories) || 0,
+            values: Number(initialReviewTabCounts.values) || 0,
+            fields: Number(initialReviewTabCounts.fields) || 0,
+        }))
+    }, [
+        initialReviewTabCounts?.tags,
+        initialReviewTabCounts?.categories,
+        initialReviewTabCounts?.values,
+        initialReviewTabCounts?.fields,
+    ])
 
     const reload = useCallback(async () => {
         if (!brandId) {
@@ -51,22 +91,33 @@ export function InsightsCountsProvider({ children }) {
                 fetch('/app/api/ai/review/counts', { credentials: 'same-origin', headers }),
                 fetch(`/app/api/brands/${brandId}/approvals?count_only=1`, { credentials: 'same-origin', headers }),
             ])
-            const next = { ...emptyCounts, loaded: true }
+            let aiPayload = null
             if (aiRes.ok) {
-                const j = await aiRes.json()
-                next.tags = Number(j.tags) || 0
-                next.categories = Number(j.categories) || 0
-                next.values = Number(j.values) || 0
-                next.fields = Number(j.fields) || 0
+                aiPayload = await aiRes.json()
             }
+            let upPayload = null
             if (upRes.ok) {
-                const j = await upRes.json()
-                next.uploadTeam = Number(j.team) || 0
-                next.uploadCreator = Number(j.creator) || 0
+                upPayload = await upRes.json()
             }
-            setCounts(next)
+            setCounts((prev) => {
+                const next = {
+                    ...prev,
+                    loaded: true,
+                }
+                if (aiPayload) {
+                    next.tags = Number(aiPayload.tags) || 0
+                    next.categories = Number(aiPayload.categories) || 0
+                    next.values = Number(aiPayload.values) || 0
+                    next.fields = Number(aiPayload.fields) || 0
+                }
+                if (upPayload) {
+                    next.uploadTeam = Number(upPayload.team) || 0
+                    next.uploadCreator = Number(upPayload.creator) || 0
+                }
+                return next
+            })
         } catch {
-            setCounts({ ...emptyCounts, loaded: true })
+            setCounts((prev) => ({ ...prev, loaded: true }))
         }
     }, [brandId])
 
