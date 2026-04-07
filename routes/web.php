@@ -642,6 +642,7 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
             Route::get('/api/pending-ai-suggestions', [\App\Http\Controllers\AssetMetadataController::class, 'getAllPendingSuggestions'])->name('api.pending-ai-suggestions');
             // AI Review Workspace (tags / categories / value & field suggestions from insights tables)
             Route::get('/api/ai/review', [\App\Http\Controllers\AiReviewController::class, 'data'])->name('api.ai.review');
+            Route::get('/api/ai/review/counts', [\App\Http\Controllers\AiReviewController::class, 'counts'])->name('api.ai.review.counts');
             Route::post('/api/ai/review/value-suggestions/{id}/accept', [\App\Http\Controllers\AiReviewController::class, 'acceptValueSuggestion'])->whereNumber('id')->name('api.ai.review.value-suggestions.accept');
             Route::post('/api/ai/review/value-suggestions/{id}/reject', [\App\Http\Controllers\AiReviewController::class, 'rejectValueSuggestion'])->whereNumber('id')->name('api.ai.review.value-suggestions.reject');
             Route::post('/api/ai/review/field-suggestions/{id}/accept', [\App\Http\Controllers\AiReviewController::class, 'acceptFieldSuggestion'])->whereNumber('id')->name('api.ai.review.field-suggestions.accept');

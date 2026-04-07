@@ -208,6 +208,26 @@ class AssetApprovalController extends Controller
             ], 403);
         }
 
+        if ($request->boolean('count_only')) {
+            $base = Asset::where('tenant_id', $tenant->id)
+                ->where('brand_id', $brand->id)
+                ->where('type', AssetType::ASSET)
+                ->where('approval_status', ApprovalStatus::PENDING)
+                ->whereNull('deleted_at');
+
+            $teamCount = (clone $base)->where(function ($q) {
+                $q->whereNull('submitted_by_prostaff')
+                    ->orWhere('submitted_by_prostaff', false);
+            })->count();
+
+            $creatorCount = (clone $base)->where('submitted_by_prostaff', true)->count();
+
+            return response()->json([
+                'team' => (int) $teamCount,
+                'creator' => (int) $creatorCount,
+            ]);
+        }
+
         // Phase AF-4: Get pending assets with aging metrics
         $agingService = app(ApprovalAgingService::class);
 

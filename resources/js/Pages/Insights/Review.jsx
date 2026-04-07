@@ -16,6 +16,7 @@ import {
     CloudArrowUpIcon,
 } from '@heroicons/react/24/outline'
 import { usePermission } from '../../hooks/usePermission'
+import { InsightsBadge, useInsightsCounts } from '../../contexts/InsightsCountsContext'
 
 const VALID_TABS = ['tags', 'categories', 'values', 'fields']
 const PER_PAGE = 50
@@ -164,6 +165,7 @@ export default function AnalyticsReview({
         canCreateFieldFromSuggestion ||
         can('metadata.tenant.field.create') ||
         can('metadata.tenant.field.manage')
+    const insightsCounts = useInsightsCounts()
 
     useEffect(() => {
         if (VALID_TABS.includes(initialTab)) {
@@ -346,8 +348,10 @@ export default function AnalyticsReview({
                 },
                 credentials: 'same-origin',
             })
-            if (res.ok) setItems((prev) => prev.filter((i) => processingKey(i) !== pk))
-            else if (res.status === 403 || res.status === 422) {
+            if (res.ok) {
+                setItems((prev) => prev.filter((i) => processingKey(i) !== pk))
+                insightsCounts?.reload?.()
+            } else if (res.status === 403 || res.status === 422) {
                 const body = await res.json().catch(() => ({}))
                 const msg = body.message || body.errors?.[Object.keys(body.errors || {})[0]]?.[0] || 'Action failed'
                 window.alert(msg)
@@ -386,7 +390,10 @@ export default function AnalyticsReview({
                 },
                 credentials: 'same-origin',
             })
-            if (res.ok) setItems((prev) => prev.filter((i) => processingKey(i) !== pk))
+            if (res.ok) {
+                setItems((prev) => prev.filter((i) => processingKey(i) !== pk))
+                insightsCounts?.reload?.()
+            }
         } finally {
             setProcessing((p) => {
                 const next = new Set(p)
@@ -493,7 +500,7 @@ export default function AnalyticsReview({
                         </>
                     )}
                     <Link
-                        href={`/app/assets?asset=${item.asset_id}`}
+                        href={`/app/assets?q=${encodeURIComponent(item.asset_id)}&asset=${encodeURIComponent(item.asset_id)}`}
                         className="text-gray-400 hover:text-indigo-600"
                         title="Open in grid"
                     >
@@ -539,6 +546,9 @@ export default function AnalyticsReview({
                         >
                             <SparklesIcon className="h-5 w-5" />
                             AI suggestions
+                            {insightsCounts && insightsCounts.aiTotal > 0 && (
+                                <InsightsBadge count={insightsCounts.aiTotal} />
+                            )}
                         </button>
                         <button
                             type="button"
@@ -551,6 +561,9 @@ export default function AnalyticsReview({
                         >
                             <CloudArrowUpIcon className="h-5 w-5" />
                             Upload approvals
+                            {insightsCounts && insightsCounts.uploadTotal > 0 && (
+                                <InsightsBadge count={insightsCounts.uploadTotal} />
+                            )}
                         </button>
                     </div>
                 ) : null}
@@ -568,6 +581,9 @@ export default function AnalyticsReview({
                         >
                             <CloudArrowUpIcon className="h-5 w-5" />
                             Team uploads
+                            {insightsCounts && insightsCounts.uploadTeam > 0 && (
+                                <InsightsBadge count={insightsCounts.uploadTeam} />
+                            )}
                         </button>
                         <button
                             type="button"
@@ -580,6 +596,9 @@ export default function AnalyticsReview({
                         >
                             <CloudArrowUpIcon className="h-5 w-5" />
                             Creator uploads
+                            {insightsCounts && insightsCounts.uploadCreator > 0 && (
+                                <InsightsBadge count={insightsCounts.uploadCreator} />
+                            )}
                         </button>
                     </div>
                 ) : null}
@@ -596,6 +615,7 @@ export default function AnalyticsReview({
                         </div>
                         <UploadApprovalsPanel
                             queue={creatorModuleEnabled && approvalQueue === 'creator' ? 'creator' : 'team'}
+                            onQueueChanged={() => insightsCounts?.reload?.()}
                         />
                     </div>
                 ) : null}
@@ -615,6 +635,9 @@ export default function AnalyticsReview({
                         >
                             <TagIcon className="h-5 w-5" />
                             Tags
+                            {insightsCounts && insightsCounts.tags > 0 && (
+                                <InsightsBadge count={insightsCounts.tags} />
+                            )}
                         </button>
                         <button
                             type="button"
@@ -627,6 +650,9 @@ export default function AnalyticsReview({
                         >
                             <FolderIcon className="h-5 w-5" />
                             Categories
+                            {insightsCounts && insightsCounts.categories > 0 && (
+                                <InsightsBadge count={insightsCounts.categories} />
+                            )}
                         </button>
                         <button
                             type="button"
@@ -639,6 +665,9 @@ export default function AnalyticsReview({
                         >
                             <ListBulletIcon className="h-5 w-5" />
                             Values
+                            {insightsCounts && insightsCounts.values > 0 && (
+                                <InsightsBadge count={insightsCounts.values} />
+                            )}
                         </button>
                         <button
                             type="button"
@@ -651,6 +680,9 @@ export default function AnalyticsReview({
                         >
                             <RectangleStackIcon className="h-5 w-5" />
                             Fields
+                            {insightsCounts && insightsCounts.fields > 0 && (
+                                <InsightsBadge count={insightsCounts.fields} />
+                            )}
                         </button>
                     </nav>
                 </div>

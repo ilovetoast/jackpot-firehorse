@@ -340,7 +340,7 @@ export default function PendingAiSuggestionsModal({ isOpen, onClose }) {
                                                             {currentItem.asset_title || currentItem.asset_filename || `Asset #${currentItem.asset_id?.substring(0, 8)}`}
                                                         </span>
                                                         <Link
-                                                            href={`/app/assets?pending_suggestions=1&asset=${currentItem.asset_id}`}
+                                                            href={`/app/assets?pending_suggestions=1&q=${encodeURIComponent(currentItem.asset_id)}&asset=${encodeURIComponent(currentItem.asset_id)}`}
                                                             className="text-xs text-indigo-600 hover:text-indigo-800 flex items-center gap-0.5 shrink-0"
                                                             onClick={() => onClose()}
                                                         >

@@ -145,6 +145,35 @@ class AiReviewController extends Controller
     }
 
     /**
+     * GET /app/api/ai/review/counts
+     * Pending totals per Review tab (same visibility and suppression rules as list endpoints).
+     */
+    public function counts(Request $request, TenantPermissionResolver $resolver): JsonResponse
+    {
+        $tenant = app('tenant');
+        $brand = app('brand');
+        $user = Auth::user();
+
+        if (! $tenant || ! $brand) {
+            return response()->json(['message' => 'Tenant and brand must be selected'], 403);
+        }
+
+        $isContributor = strtolower((string) $user->getRoleForBrand($brand)) === 'contributor';
+        $canViewAll = ! $isContributor && $resolver->hasForBrand($user, $brand, 'metadata.suggestions.view');
+        $canReviewOthers = $isContributor && $resolver->hasForBrand($user, $brand, 'metadata.review_candidates');
+        if (! $canViewAll && ! $canReviewOthers) {
+            return response()->json(['message' => 'Permission denied'], 403);
+        }
+
+        return response()->json([
+            'tags' => $this->countTagSuggestions($tenant, $brand, $user),
+            'categories' => $this->countCategorySuggestions($tenant, $brand, $user),
+            'values' => $this->countValueSuggestionsPending($tenant),
+            'fields' => $this->countFieldSuggestionsPending($tenant),
+        ]);
+    }
+
+    /**
      * POST /app/api/ai/review/value-suggestions/{id}/accept
      */
     public function acceptValueSuggestion(
@@ -506,7 +535,46 @@ class AiReviewController extends Controller
         return $out;
     }
 
-    protected function getTagSuggestions($tenant, $brand, $user): JsonResponse
+    /**
+     * Human-readable tag label when DB stored JSON (e.g. '["high_rise_leggings"]') as plain text.
+     */
+    protected function normalizeTagCandidateLabel(?string $raw): string
+    {
+        if ($raw === null) {
+            return '';
+        }
+        $trimmed = trim($raw);
+        if ($trimmed === '') {
+            return '';
+        }
+        $first = $trimmed[0] ?? '';
+        if ($first !== '[' && $first !== '{') {
+            return $raw;
+        }
+        $decoded = json_decode($trimmed, true);
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            return $raw;
+        }
+        if (is_array($decoded)) {
+            $parts = [];
+            foreach ($decoded as $v) {
+                if (is_string($v)) {
+                    $parts[] = $v;
+                } elseif (is_scalar($v)) {
+                    $parts[] = (string) $v;
+                }
+            }
+
+            return $parts !== [] ? implode(', ', $parts) : $raw;
+        }
+        if (is_string($decoded)) {
+            return $decoded;
+        }
+
+        return $raw;
+    }
+
+    protected function buildTagSuggestionsBaseQuery($tenant, $brand, $user)
     {
         $q = DB::table('asset_tag_candidates')
             ->join('assets', 'asset_tag_candidates.asset_id', '=', 'assets.id')
@@ -529,19 +597,10 @@ class AiReviewController extends Controller
             );
         app(\App\Services\AiReviewSuggestionScopeService::class)->scopeQueryToAiReviewAssetVisibility($q, $user, $brand);
 
-        [$perPage, $page] = $this->reviewPaginationParams(request());
-        $total = (clone $q)->count();
-        $candidates = $q
-            ->orderByDesc('asset_tag_candidates.confidence')
-            ->orderByDesc('asset_tag_candidates.created_at')
-            ->offset(($page - 1) * $perPage)
-            ->limit($perPage)
-            ->get();
-
-        return $this->formatTagResponse($candidates, $this->paginationMeta($total, $perPage, $page));
+        return $q;
     }
 
-    protected function getCategorySuggestions($tenant, $brand, $user): JsonResponse
+    protected function buildCategorySuggestionsBaseQuery($tenant, $brand, $user)
     {
         $q = DB::table('asset_metadata_candidates')
             ->join('assets', 'asset_metadata_candidates.asset_id', '=', 'assets.id')
@@ -568,6 +627,98 @@ class AiReviewController extends Controller
                 'assets.metadata'
             );
         app(\App\Services\AiReviewSuggestionScopeService::class)->scopeQueryToAiReviewAssetVisibility($q, $user, $brand);
+
+        return $q;
+    }
+
+    protected function countTagSuggestions($tenant, $brand, $user): int
+    {
+        $q = $this->buildTagSuggestionsBaseQuery($tenant, $brand, $user);
+
+        return (int) (clone $q)->count();
+    }
+
+    protected function countCategorySuggestions($tenant, $brand, $user): int
+    {
+        $q = $this->buildCategorySuggestionsBaseQuery($tenant, $brand, $user);
+
+        return (int) (clone $q)->count();
+    }
+
+    protected function countValueSuggestionsPending($tenant): int
+    {
+        $sqlLimit = 20000;
+        $rows = DB::table('ai_metadata_value_suggestions as amvs')
+            ->where('amvs.tenant_id', $tenant->id)
+            ->where('amvs.status', 'pending')
+            ->orderByDesc('amvs.priority_score')
+            ->orderByDesc('amvs.confidence')
+            ->orderByDesc('amvs.supporting_asset_count')
+            ->select(
+                'amvs.field_key',
+                'amvs.suggested_value'
+            )
+            ->limit($sqlLimit)
+            ->get();
+
+        $suppressed = $this->suppressedNormalizedKeys($tenant->id, 'value');
+
+        return (int) $rows->filter(function ($r) use ($suppressed) {
+            $k = AiSuggestionSuppressionService::normalizeValueKey((string) $r->field_key, (string) $r->suggested_value);
+
+            return ! isset($suppressed[$k]);
+        })->count();
+    }
+
+    protected function countFieldSuggestionsPending($tenant): int
+    {
+        $sqlLimit = 20000;
+        $rows = DB::table('ai_metadata_field_suggestions as amfs')
+            ->where('amfs.tenant_id', $tenant->id)
+            ->where('amfs.status', 'pending')
+            ->orderByDesc('amfs.priority_score')
+            ->orderByDesc('amfs.confidence')
+            ->orderByDesc('amfs.supporting_asset_count')
+            ->select(
+                'amfs.category_slug',
+                'amfs.field_key',
+                'amfs.source_cluster'
+            )
+            ->limit($sqlLimit)
+            ->get();
+
+        $suppressed = $this->suppressedNormalizedKeys($tenant->id, 'field');
+
+        return (int) $rows->filter(function ($r) use ($suppressed) {
+            $k = AiSuggestionSuppressionService::normalizeFieldKey(
+                (string) $r->category_slug,
+                (string) $r->field_key,
+                (string) $r->source_cluster
+            );
+
+            return ! isset($suppressed[$k]);
+        })->count();
+    }
+
+    protected function getTagSuggestions($tenant, $brand, $user): JsonResponse
+    {
+        $q = $this->buildTagSuggestionsBaseQuery($tenant, $brand, $user);
+
+        [$perPage, $page] = $this->reviewPaginationParams(request());
+        $total = (clone $q)->count();
+        $candidates = $q
+            ->orderByDesc('asset_tag_candidates.confidence')
+            ->orderByDesc('asset_tag_candidates.created_at')
+            ->offset(($page - 1) * $perPage)
+            ->limit($perPage)
+            ->get();
+
+        return $this->formatTagResponse($candidates, $this->paginationMeta($total, $perPage, $page));
+    }
+
+    protected function getCategorySuggestions($tenant, $brand, $user): JsonResponse
+    {
+        $q = $this->buildCategorySuggestionsBaseQuery($tenant, $brand, $user);
 
         [$perPage, $page] = $this->reviewPaginationParams(request());
         $total = (clone $q)->count();
@@ -610,12 +761,13 @@ class AiReviewController extends Controller
             $thumbnailUrls = $this->getThumbnailUrls($asset);
             $metadata = $asset ? ($asset->metadata ?? []) : [];
             $categoryId = $metadata['category_id'] ?? null;
+            $tagLabel = $this->normalizeTagCandidateLabel((string) $c->value);
 
             $items[] = [
                 'id' => $c->id,
                 'asset_id' => $c->asset_id,
                 'type' => 'tag',
-                'suggestion' => $c->value,
+                'suggestion' => $tagLabel,
                 'value' => $c->value,
                 'confidence' => $c->confidence ? (float) $c->confidence : null,
                 'asset_title' => $c->asset_title,

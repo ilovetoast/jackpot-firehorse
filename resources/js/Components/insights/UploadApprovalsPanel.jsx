@@ -4,9 +4,9 @@ import { CheckCircleIcon, XCircleIcon, ClockIcon } from '@heroicons/react/24/out
 
 /**
  * Pending team or creator uploads (requires active brand + approvals on plan + approver role).
- * @param {{ queue?: 'team' | 'creator' }} props
+ * @param {{ queue?: 'team' | 'creator', onQueueChanged?: () => void }} props
  */
-export default function UploadApprovalsPanel({ queue = 'team' }) {
+export default function UploadApprovalsPanel({ queue = 'team', onQueueChanged }) {
     const { auth } = usePage().props
     const brand = auth?.activeBrand
     const [assets, setAssets] = useState([])
@@ -39,7 +39,10 @@ export default function UploadApprovalsPanel({ queue = 'team' }) {
         if (!brand?.id) return
         router.post(`/app/brands/${brand.id}/assets/${assetId}/approve`, {}, {
             preserveScroll: true,
-            onSuccess: () => setAssets((prev) => prev.filter((a) => a.id !== assetId)),
+            onSuccess: () => {
+                setAssets((prev) => prev.filter((a) => a.id !== assetId))
+                onQueueChanged?.()
+            },
         })
     }
 
@@ -55,6 +58,7 @@ export default function UploadApprovalsPanel({ queue = 'team' }) {
                 setShowRejectModal(null)
                 setRejectionReason('')
                 setRejecting(null)
+                onQueueChanged?.()
             },
             onError: () => setRejecting(null),
         })

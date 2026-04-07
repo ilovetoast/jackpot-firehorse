@@ -157,6 +157,8 @@ export default function AssetsIndex({ categories, bulk_categories_by_asset_type 
     // Prevent URL/search effect from re-opening drawer after user explicitly closes it
     const userClosedDrawerRef = useRef(false)
     const lastOpenedFromUrlRef = useRef(null)
+    /** When ?asset= is not in the current grid (wrong category / filters / page), narrow search to UUID once. */
+    const deepLinkRecoveryAttemptRef = useRef(null)
     
     // Phase 2 – Step 7: Bulk selection state
     const [bulkSelectedAssetIds, setBulkSelectedAssetIds] = useState([])
@@ -256,6 +258,52 @@ export default function AssetsIndex({ categories, bulk_categories_by_asset_type 
             }
         }
     }, [safeAssetsList, searchQuery, activeAssetId])
+
+    useEffect(() => {
+        if (typeof window === 'undefined') return
+        const urlParams = new URLSearchParams(window.location.search)
+        const assetId = urlParams.get('asset')
+        if (!assetId) {
+            deepLinkRecoveryAttemptRef.current = null
+            return
+        }
+        const uuidRegex = /^[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}$/i
+        if (!uuidRegex.test(assetId)) return
+
+        const qFromUrl = (urlParams.get('q') || '').trim()
+        const qNormalized = qFromUrl.replace(/^(?:id|asset):\s*/i, '').trim()
+        if (qNormalized === assetId || qFromUrl === assetId) {
+            return
+        }
+
+        if (safeAssetsList.length === 0) return
+
+        const inList = safeAssetsList.some((a) => a?.id === assetId)
+        if (inList) return
+
+        if (deepLinkRecoveryAttemptRef.current === assetId) return
+        deepLinkRecoveryAttemptRef.current = assetId
+
+        router.get(
+            '/app/assets',
+            { q: assetId, asset: assetId },
+            {
+                replace: true,
+                preserveState: true,
+                preserveScroll: true,
+                only: [
+                    'filterable_schema',
+                    'available_values',
+                    ...ASSET_GRID_QUERY_KEYS,
+                    'selected_category',
+                    'selected_category_slug',
+                    'source',
+                    'q',
+                    ...ASSET_INDEX_SIDEBAR_COUNT_PROPS,
+                ],
+            }
+        )
+    }, [safeAssetsList, searchQuery])
     
     // Category-switch filter cleanup (query pruning)
     // Uses filterQueryOwnership and filterScopeRules to determine which filters to purge
