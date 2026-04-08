@@ -602,18 +602,28 @@ export default function AssetCard({
                     <>
                         {/* Phase V-1: Video hover preview (desktop only, lazy load) */}
                         {isVideo && isHovering && asset.video_preview_url && !isMobile && !videoPreviewFailed && (
-                            <video
-                                ref={videoPreviewRef}
-                                src={asset.video_preview_url}
-                                className="absolute inset-0 z-10 h-full w-full bg-black object-cover"
-                                autoPlay
-                                muted
-                                loop
-                                playsInline
-                                onLoadedData={() => setPreviewLoaded(true)}
-                                onError={() => setVideoPreviewFailed(true)}
-                                style={{ opacity: previewLoaded ? 1 : 0, transition: 'opacity 0.2s' }}
-                            />
+                            <div className="absolute inset-0 z-10 flex items-center justify-center bg-black">
+                                <video
+                                    ref={videoPreviewRef}
+                                    src={asset.video_preview_url}
+                                    className="max-h-full max-w-full object-contain"
+                                    autoPlay
+                                    muted
+                                    loop
+                                    playsInline
+                                    onLoadedData={() => setPreviewLoaded(true)}
+                                    onError={() => setVideoPreviewFailed(true)}
+                                    style={{
+                                        ...(Number(asset.video_width) > 0 && Number(asset.video_height) > 0
+                                            ? {
+                                                  aspectRatio: `${Number(asset.video_width)} / ${Number(asset.video_height)}`,
+                                              }
+                                            : {}),
+                                        opacity: previewLoaded ? 1 : 0,
+                                        transition: 'opacity 0.2s',
+                                    }}
+                                />
+                            </div>
                         )}
 
                         {showExecutionDualThumb || showExecutionSingleThumb ? (

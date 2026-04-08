@@ -407,7 +407,7 @@ export default function Overview() {
 
     return (
         <div className="relative h-[100dvh] max-h-[100dvh] overflow-hidden overscroll-none bg-[#0B0B0D]">
-            <AppHead title="Overview" />
+            <AppHead title="Tasks" />
 
             <div className="absolute top-0 left-0 right-0 z-50 overflow-visible">
                 <AppNav
@@ -496,7 +496,7 @@ export default function Overview() {
                                     </div>
 
                                     <h1 className="animate-fadeInUp-d2 break-words text-3xl font-semibold leading-tight tracking-tight text-white md:text-4xl">
-                                        {theme.name || activeBrand?.name || 'Overview'}
+                                        Tasks
                                     </h1>
 
                                     {(prostaffMeLoading || prostaffMe) && (

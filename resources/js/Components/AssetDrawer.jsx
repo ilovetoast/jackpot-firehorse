@@ -2753,18 +2753,29 @@ export default function AssetDrawer({
                                 >
                                     {/* Hover video preview (auto-play loop, no controls, no audio) */}
                                     {isHoveringVideo && displayAsset.video_preview_url && !isMobile && !videoPreviewFailed && (
-<video
-                                            ref={videoPreviewRef}
-                                            src={displayAsset.video_preview_url}
-                                            className="absolute inset-0 z-10 h-full w-full bg-black object-cover"
-                                            autoPlay
-                                            muted
-                                            loop
-                                            playsInline
-                                            onLoadedData={() => setVideoPreviewLoaded(true)}
-                                            onError={() => setVideoPreviewFailed(true)}
-                                            style={{ opacity: videoPreviewLoaded ? 1 : 0, transition: 'opacity 0.2s' }}
-                                        />
+                                        <div className="absolute inset-0 z-10 flex items-center justify-center bg-black">
+                                            <video
+                                                ref={videoPreviewRef}
+                                                src={displayAsset.video_preview_url}
+                                                className="max-h-full max-w-full object-contain"
+                                                autoPlay
+                                                muted
+                                                loop
+                                                playsInline
+                                                onLoadedData={() => setVideoPreviewLoaded(true)}
+                                                onError={() => setVideoPreviewFailed(true)}
+                                                style={{
+                                                    ...(Number(displayAsset.video_width) > 0 &&
+                                                    Number(displayAsset.video_height) > 0
+                                                        ? {
+                                                              aspectRatio: `${Number(displayAsset.video_width)} / ${Number(displayAsset.video_height)}`,
+                                                          }
+                                                        : {}),
+                                                    opacity: videoPreviewLoaded ? 1 : 0,
+                                                    transition: 'opacity 0.2s',
+                                                }}
+                                            />
+                                        </div>
                                     )}
                                     
                                     {/* Thumbnail preview (same as other assets) */}

@@ -13,6 +13,7 @@ import {
     ChartBarIcon,
     ChevronDownIcon,
     ChevronRightIcon,
+    ClipboardDocumentListIcon,
     Cog6ToothIcon,
     FolderIcon,
     HomeIcon,
@@ -429,7 +430,7 @@ export default function AppNav({
         }, 160)
     }
 
-    /** Desktop workspace nav: Overview + hover panel (Insights, Manage, Settings, Creators) when a brand is active. */
+    /** Desktop workspace nav: Overview + hover panel (Tasks → overview route, then Insights, Manage, Settings, Creators). */
     const renderDesktopOverviewNav = () => {
         const overviewPathActive =
             currentUrl === '/app/overview' || currentUrl.startsWith('/app/overview')
@@ -472,17 +473,6 @@ export default function AppNav({
             can('metadata.registry.view') || can('metadata.tenant.visibility.manage')
         const canViewCreatorsDashboard = Boolean(auth?.permissions?.can_view_creators_dashboard)
         const showCreatorsNav = Boolean(activeBrand?.id) && canViewCreatorsDashboard
-        const showOverviewDropdown =
-            showInsightsNav || showBrandSettings || showCreatorsNav || showManageNav
-
-        if (!showOverviewDropdown) {
-            return (
-                <Link href="/app/overview" title={overviewNavTitle} className={overviewLinkClass} style={linkStyle}>
-                    <HomeIcon className="h-4 w-4 shrink-0" aria-hidden="true" />
-                    Overview
-                </Link>
-            )
-        }
 
         const subLinkBase =
             'block border-l-[3px] px-3 py-2 text-sm font-medium leading-snug transition-[border-color,background-color,color] duration-150 ease-out'
@@ -530,6 +520,16 @@ export default function AppNav({
                         }
                         style={{ '--overview-dd-accent': accent }}
                     >
+                        <Link
+                            href="/app/overview"
+                            className={`${subLinkBase} ${overviewPathActive ? subLinkActive : subLinkInactive}`}
+                            style={overviewPathActive ? { borderLeftColor: accent } : undefined}
+                        >
+                            <span className="inline-flex items-center gap-2">
+                                <ClipboardDocumentListIcon className="h-4 w-4 shrink-0 opacity-70" aria-hidden="true" />
+                                Tasks
+                            </span>
+                        </Link>
                         {showCreatorsNav ? (
                             <Link
                                 href={route('brands.creators', { brand: activeBrand.id })}
@@ -924,7 +924,7 @@ export default function AppNav({
                             )}
                         </div>
 
-                        {/* Main menu: Overview (dropdown: Insights, Manage, Settings…), Assets, Executions, Collections, Generative */}
+                        {/* Main menu: Overview (dropdown: Tasks, Insights, Manage, Settings…), Assets, Executions, Collections, Generative */}
                         {isAppPage ? (isExternalCollectionChrome ? (
                             <div className="hidden min-w-0 flex-1 sm:flex sm:min-w-0 sm:items-center sm:gap-6 lg:gap-8 sm:pl-4 lg:pl-6 overflow-x-auto" data-collection-only="true">
                                 {(() => {
