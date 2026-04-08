@@ -737,6 +737,7 @@ class AssetThumbnailController extends Controller
         }
 
         $force = $request->boolean('force');
+        $debugBbox = $request->boolean('debug_bbox');
         $modesStatus = is_array($meta['thumbnail_modes_status'] ?? null) ? $meta['thumbnail_modes_status'] : [];
         $modesMetaFull = is_array($meta['thumbnail_modes_meta'] ?? null) ? $meta['thumbnail_modes_meta'] : [];
         $enhMetaGate = is_array($modesMetaFull['enhanced'] ?? null) ? $modesMetaFull['enhanced'] : [];
@@ -760,12 +761,15 @@ class AssetThumbnailController extends Controller
             return response()->json(['error' => 'Enhanced preview generation already in progress'], 409);
         }
 
-        GenerateEnhancedPreviewJob::dispatch((string) $asset->id, (string) $version->id, $force)
+        GenerateEnhancedPreviewJob::dispatch((string) $asset->id, (string) $version->id, $force, $debugBbox)
             ->onQueue(PipelineQueueResolver::imagesQueueForAsset($asset));
 
         return response()->json([
             'queued' => true,
-            'message' => 'Enhanced preview job queued',
+            'message' => $debugBbox
+                ? 'Enhanced preview queued — red print-bbox will be drawn on the source image in the output.'
+                : 'Enhanced preview job queued',
+            'debug_bbox' => $debugBbox,
         ], 202);
     }
 

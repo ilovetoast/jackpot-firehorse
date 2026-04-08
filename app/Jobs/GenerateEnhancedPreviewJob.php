@@ -5,6 +5,7 @@ namespace App\Jobs;
 use App\Models\AIAgentRun;
 use App\Models\Asset;
 use App\Models\AssetVersion;
+use App\Services\PrintLayoutCropService;
 use App\Services\TemplateRenderer;
 use App\Services\ThumbnailEnhancementAiTaskRecorder;
 use App\Services\ThumbnailGenerationService;
@@ -36,6 +37,7 @@ class GenerateEnhancedPreviewJob implements ShouldQueue
         public readonly string $assetId,
         public readonly string $versionId,
         public readonly bool $force = false,
+        public readonly bool $debugBboxOverlay = false,
     ) {
         $this->timeout = max(120, (int) config('assets.thumbnail.job_timeout_seconds', 900));
     }
@@ -189,11 +191,27 @@ class GenerateEnhancedPreviewJob implements ShouldQueue
         $inputHash = EnhancedPreviewFingerprint::computeInputHash($thumbnailService, $bucket, $sourcePath);
         $aiRecorder->mergeMetadata($aiRun, ['input_hash' => $inputHash]);
 
+        $rasterForGen = $localRaster;
+        $overlayTemp = null;
+        if ($this->debugBboxOverlay) {
+            $overlayTemp = app(PrintLayoutCropService::class)->renderFullImageWithBboxOverlayPng($localRaster);
+            if ($overlayTemp !== null && is_file($overlayTemp)) {
+                $rasterForGen = $overlayTemp;
+                Log::info('[GenerateEnhancedPreviewJob] Using source raster with red print-bbox overlay for enhanced preview', [
+                    'asset_id' => $asset->id,
+                ]);
+            } else {
+                Log::warning('[GenerateEnhancedPreviewJob] debug_bbox requested but bbox overlay could not be rendered; using plain source', [
+                    'asset_id' => $asset->id,
+                ]);
+            }
+        }
+
         try {
             $result = $thumbnailService->generateEnhancedPreviewsFromLocalRaster(
                 $asset,
                 $version,
-                $localRaster,
+                $rasterForGen,
                 $templateId,
                 $sourceMode
             );
@@ -206,6 +224,9 @@ class GenerateEnhancedPreviewJob implements ShouldQueue
 
             return;
         } finally {
+            if ($overlayTemp !== null && is_string($overlayTemp) && is_file($overlayTemp) && $overlayTemp !== $localRaster) {
+                @unlink($overlayTemp);
+            }
             if (is_string($localRaster) && is_file($localRaster)) {
                 @unlink($localRaster);
             }
@@ -224,7 +245,8 @@ class GenerateEnhancedPreviewJob implements ShouldQueue
             $sourceMode,
             $inputHash,
             $attemptsNext,
-            $aiRun->id
+            $aiRun->id,
+            $this->debugBboxOverlay
         );
     }
 
@@ -240,13 +262,14 @@ class GenerateEnhancedPreviewJob implements ShouldQueue
         string $sourceMode,
         string $inputHash,
         int $attemptsDone,
-        int $aiTaskId
+        int $aiTaskId,
+        bool $debugBboxOverlay = false,
     ): void {
         $mode = ThumbnailMode::Enhanced->value;
         $finalThumbnails = $result['thumbnails'][$mode] ?? [];
         $thumbnailDimensions = $result['thumbnail_dimensions'][$mode] ?? [];
 
-        $merge = function (array $base) use ($mode, $finalThumbnails, $thumbnailDimensions, $templateId, $templateVersion, $sourceMode, $inputHash, $attemptsDone, $aiTaskId): array {
+        $merge = function (array $base) use ($mode, $finalThumbnails, $thumbnailDimensions, $templateId, $templateVersion, $sourceMode, $inputHash, $attemptsDone, $aiTaskId, $debugBboxOverlay): array {
             $thumbs = $base['thumbnails'] ?? [];
             if (! is_array($thumbs)) {
                 $thumbs = [];
@@ -282,6 +305,7 @@ class GenerateEnhancedPreviewJob implements ShouldQueue
                 'ai_task_id' => $aiTaskId,
                 'attempts' => $attemptsDone,
                 'last_attempt_at' => now()->toIso8601String(),
+                'debug_bbox_overlay' => $debugBboxOverlay,
             ]);
             $base['thumbnail_modes_meta'] = $mm;
 

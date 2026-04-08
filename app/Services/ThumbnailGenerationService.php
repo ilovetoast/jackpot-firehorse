@@ -65,7 +65,15 @@ class ThumbnailGenerationService
     protected string $generationMode = 'original';
 
     /**
-     * @var array{path: string, applied: bool, confidence: float, skip_reason?: string}|null
+     * @var array{
+     *   path: string,
+     *   applied: bool,
+     *   confidence: float,
+     *   skip_reason?: string,
+     *   crop_type?: string,
+     *   detection_confidence?: float,
+     *   signals?: array<string, mixed>
+     * }|null
      */
     protected ?array $preferredCropSummary = null;
 
@@ -481,7 +489,7 @@ class ThumbnailGenerationService
         if ($mode === ThumbnailMode::Preferred->value
             && in_array($fileType, ['image', 'tiff', 'avif', 'cr2'], true)
         ) {
-            $crop = app(ThumbnailSmartCropService::class)->smartCrop($tempPath);
+            $crop = $this->applyPreferredSmartOrPrintCrop($tempPath);
             $this->preferredCropSummary = $crop;
             if (($crop['applied'] ?? false)
                 && ($crop['path'] ?? '') !== ''
@@ -745,6 +753,76 @@ class ThumbnailGenerationService
     }
 
     /**
+     * Preferred pipeline: dominant-ink bounding box crop when valid, else smart trim.
+     * No print-layout detection gate — see {@see PrintLayoutCropService}.
+     *
+     * @return array{
+     *   path: string,
+     *   applied: bool,
+     *   confidence: float,
+     *   skip_reason?: string|null,
+     *   crop_type?: string,
+     *   detection_confidence?: float,
+     *   signals?: array<string, mixed>
+     * }
+     */
+    protected function applyPreferredSmartOrPrintCrop(string $imagePath): array
+    {
+        $print = app(PrintLayoutCropService::class)->cropPrintLayout($imagePath);
+
+        if (($print['applied'] ?? false) === true
+            && ($print['path'] ?? '') !== ''
+            && $print['path'] !== $imagePath
+            && is_file((string) $print['path'])) {
+            return [
+                'path' => $print['path'],
+                'applied' => true,
+                'confidence' => min(1.0, max((float) ($print['confidence'] ?? 0.65), 0.55)),
+                'crop_type' => 'print_ready_bbox',
+                'detection_confidence' => 0.0,
+                'signals' => [
+                    'trim_ratio' => null,
+                    'edge_density' => null,
+                    'padding_applied' => true,
+                    'print_layout' => [],
+                ],
+                'skip_reason' => null,
+            ];
+        }
+
+        if (! (bool) config('assets.print_layout.fallback_to_smart_crop', true)) {
+            return [
+                'path' => $imagePath,
+                'applied' => false,
+                'confidence' => 0.0,
+                'crop_type' => 'print_ready_bbox',
+                'detection_confidence' => 0.0,
+                'signals' => [
+                    'trim_ratio' => null,
+                    'edge_density' => null,
+                    'padding_applied' => false,
+                    'print_layout' => [
+                        'skipped' => true,
+                        'skip_reason' => (string) ($print['skip_reason'] ?? 'unknown'),
+                    ],
+                ],
+                'skip_reason' => (string) ($print['skip_reason'] ?? 'print_crop_skipped'),
+            ];
+        }
+
+        $smart = app(ThumbnailSmartCropService::class);
+        $crop = $smart->smartCrop($imagePath);
+        $crop['crop_type'] = ($crop['applied'] ?? false) ? 'smart' : 'none';
+        $crop['detection_confidence'] = 0.0;
+        if (! isset($crop['signals']) || ! is_array($crop['signals'])) {
+            $crop['signals'] = [];
+        }
+        $crop['signals']['print_layout'] = [];
+
+        return $crop;
+    }
+
+    /**
      * @return array<string, array<string, mixed>>
      */
     protected function buildThumbnailModesMetaPayload(): array
@@ -768,16 +846,24 @@ class ThumbnailGenerationService
             ];
         }
 
+        $printLayoutSignals = $signals['print_layout'] ?? null;
+        if (! is_array($printLayoutSignals)) {
+            $printLayoutSignals = null;
+        }
+
         return [
             'preferred' => [
                 'applied' => $applied,
                 'crop_applied' => $applied,
                 'confidence' => (float) ($s['confidence'] ?? 0.0),
+                'crop_type' => (string) ($s['crop_type'] ?? ($applied ? 'smart' : 'none')),
+                'detection_confidence' => (float) ($s['detection_confidence'] ?? 0.0),
                 'skip_reason' => $s['skip_reason'] ?? null,
                 'signals' => [
                     'trim_ratio' => $signals['trim_ratio'] ?? null,
                     'edge_density' => $signals['edge_density'] ?? null,
                     'padding_applied' => (bool) ($signals['padding_applied'] ?? false),
+                    'print_layout' => $printLayoutSignals,
                 ],
             ],
         ];
@@ -1198,7 +1284,7 @@ class ThumbnailGenerationService
         $pngPath = $this->renderSvgViaRsvg($sourcePath, $targetWidth);
 
         if ($this->generationMode === ThumbnailMode::Preferred->value) {
-            $svgCrop = app(ThumbnailSmartCropService::class)->smartCrop($pngPath);
+            $svgCrop = $this->applyPreferredSmartOrPrintCrop($pngPath);
             $this->preferredCropSummary = $svgCrop;
             if (($svgCrop['path'] ?? $pngPath) !== $pngPath && is_file((string) $svgCrop['path'])) {
                 if (file_exists($pngPath)) {
@@ -2197,7 +2283,7 @@ class ThumbnailGenerationService
                     @unlink($tempImagePath);
                     $tempImagePath = $this->copyRasterToTemp($this->preferredPdfRasterCachePath);
                 } else {
-                    $cropResult = app(ThumbnailSmartCropService::class)->smartCrop($tempImagePath);
+                    $cropResult = $this->applyPreferredSmartOrPrintCrop($tempImagePath);
                     $this->preferredCropSummary = $cropResult;
                     if (($cropResult['path'] ?? $tempImagePath) !== $tempImagePath && is_file((string) $cropResult['path'])) {
                         @unlink($tempImagePath);
@@ -2884,7 +2970,7 @@ class ThumbnailGenerationService
                     @unlink($tempImagePath);
                     $tempImagePath = $this->copyRasterToTemp($this->preferredVideoRasterCachePath);
                 } else {
-                    $videoCrop = app(ThumbnailSmartCropService::class)->smartCrop($tempImagePath);
+                    $videoCrop = $this->applyPreferredSmartOrPrintCrop($tempImagePath);
                     $this->preferredCropSummary = $videoCrop;
                     if (($videoCrop['path'] ?? $tempImagePath) !== $tempImagePath && is_file((string) $videoCrop['path'])) {
                         @unlink($tempImagePath);

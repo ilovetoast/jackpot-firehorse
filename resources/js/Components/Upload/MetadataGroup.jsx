@@ -48,16 +48,16 @@ export default function MetadataGroup({ group, values = {}, onChange, disabled =
     }
 
     return (
-        <div>
+        <div className="space-y-2">
             {/* Flat collapsible header — chevron only, small text, no card */}
             <button
                 type="button"
                 onClick={() => setIsExpanded(!isExpanded)}
-                className="w-full flex items-center justify-between text-left py-1.5 text-xs font-medium text-gray-700 hover:text-gray-900"
+                className="w-full flex items-center justify-between gap-2 text-left py-1.5 hover:text-gray-900"
                 aria-expanded={isExpanded}
                 aria-controls={`metadata-group-${group.key}`}
             >
-                <span>{group.label}</span>
+                <h4 className="text-sm font-semibold text-gray-700">{group.label}</h4>
                 {isExpanded ? (
                     <ChevronUpIcon className="h-4 w-4 text-gray-400 flex-shrink-0" />
                 ) : (

@@ -26,7 +26,9 @@ export default function ManageLayout({ children, title = 'Manage', activeSection
                     <div className="mb-6">
                         <h1 className="text-3xl font-bold text-gray-900">Manage</h1>
                         <p className="mt-2 text-sm text-gray-600">
-                            Configure categories, tags, and controlled values for your brand library.
+                            Configure categories, tags, and controlled values for your brand library. On Categories,
+                            folder order and field switches save as you change them; dialogs that edit definitions have
+                            their own Save. Tags and Values use confirm for removals.
                         </p>
                     </div>
 

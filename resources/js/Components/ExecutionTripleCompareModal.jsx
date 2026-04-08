@@ -4,6 +4,10 @@
 import { Dialog, DialogPanel, DialogTitle } from '@headlessui/react'
 import { ArrowPathIcon, XMarkIcon } from '@heroicons/react/24/outline'
 import { EXECUTION_VERSION_DETAIL_BULLETS } from '../utils/executionVersionPreviewCopy'
+import {
+    formatIsoDateTimeLocal,
+    formatThumbnailPipelineAttemptLabel,
+} from '../utils/thumbnailModes'
 
 /**
  * @param {Object} props
@@ -13,6 +17,9 @@ import { EXECUTION_VERSION_DETAIL_BULLETS } from '../utils/executionVersionPrevi
  * @param {string|null|undefined} props.originalUrl
  * @param {string|null|undefined} props.enhancedUrl
  * @param {string|null|undefined} props.presentationUrl
+ * @param {string|null|undefined} [props.originalLastGeneratedAt]
+ * @param {string|null|undefined} [props.enhancedLastAttemptAt]
+ * @param {string|null|undefined} [props.presentationLastAttemptAt]
  * @param {string|null|undefined} props.templateLabelEnhanced
  * @param {boolean} props.preferredPipelineFailed
  * @param {boolean} props.canRetryCleanPreferred
@@ -25,6 +32,8 @@ import { EXECUTION_VERSION_DETAIL_BULLETS } from '../utils/executionVersionPrevi
  * @param {() => void} [props.onEnhancedGenerate]
  * @param {boolean} props.enhancedGenerateLoading
  * @param {boolean} props.enhancedGenerateDisabled
+ * @param {boolean} [props.enhancedDebugBboxOverlay]
+ * @param {(v: boolean) => void} [props.onEnhancedDebugBboxOverlayChange]
  * @param {string} props.presentationPipelineStatus
  * @param {boolean} props.showPresentationGenerate
  * @param {string} props.presentationGenerateLabel
@@ -51,21 +60,40 @@ export default function ExecutionTripleCompareModal({
     onEnhancedGenerate = null,
     enhancedGenerateLoading = false,
     enhancedGenerateDisabled = false,
+    enhancedDebugBboxOverlay = false,
+    onEnhancedDebugBboxOverlayChange = null,
     presentationPipelineStatus = '',
     showPresentationGenerate = false,
     presentationGenerateLabel = 'Generate',
     onPresentationGenerate = null,
     presentationGenerateLoading = false,
     presentationGenerateDisabled = false,
+    originalLastGeneratedAt = null,
+    enhancedLastAttemptAt = null,
+    presentationLastAttemptAt = null,
 }) {
     const enhSt = String(enhancedPipelineStatus || '').toLowerCase()
     const presSt = String(presentationPipelineStatus || '').toLowerCase()
 
-    const col = (title, sub, url, bullets, footer) => (
+    const originalTimeLine = (() => {
+        const t = formatIsoDateTimeLocal(originalLastGeneratedAt)
+        return t ? `Last generated ${t}` : null
+    })()
+    const enhancedTimeLine = formatThumbnailPipelineAttemptLabel(
+        enhancedPipelineStatus,
+        enhancedLastAttemptAt,
+    )
+    const presentationTimeLine = formatThumbnailPipelineAttemptLabel(
+        presentationPipelineStatus,
+        presentationLastAttemptAt,
+    )
+
+    const col = (title, sub, timeLine, url, bullets, footer) => (
         <div className="flex min-w-0 flex-col gap-2">
             <div>
                 <p className="text-sm font-semibold text-gray-900">{title}</p>
                 {sub ? <p className="text-xs text-gray-500">{sub}</p> : null}
+                {timeLine ? <p className="text-[11px] text-gray-500">{timeLine}</p> : null}
             </div>
             <div className="relative flex min-h-[140px] flex-1 items-center justify-center overflow-hidden rounded-lg border border-gray-200 bg-gray-50 sm:min-h-[180px]">
                 {url ? (
@@ -112,6 +140,7 @@ export default function ExecutionTripleCompareModal({
                         {col(
                             'Original',
                             'Source thumbnail',
+                            originalTimeLine,
                             originalUrl,
                             EXECUTION_VERSION_DETAIL_BULLETS.original,
                             preferredPipelineFailed && canRetryCleanPreferred && onRetryCleanPreferred ? (
@@ -128,6 +157,7 @@ export default function ExecutionTripleCompareModal({
                         {col(
                             'Enhanced',
                             templateLabelEnhanced ? `Template: ${templateLabelEnhanced}` : 'Studio framing when available',
+                            enhancedTimeLine,
                             enhancedUrl,
                             EXECUTION_VERSION_DETAIL_BULLETS.enhanced,
                             enhSt === 'processing' ? (
@@ -136,20 +166,34 @@ export default function ExecutionTripleCompareModal({
                                     <span>Generating…</span>
                                 </div>
                             ) : showEnhancedGenerate && onEnhancedGenerate ? (
-                                <button
-                                    type="button"
-                                    onClick={onEnhancedGenerate}
-                                    disabled={enhancedGenerateDisabled || enhancedGenerateLoading}
-                                    className="w-full rounded-md px-2 py-1.5 text-[10px] font-semibold text-white shadow-sm disabled:cursor-not-allowed disabled:opacity-50"
-                                    style={{ backgroundColor: primaryColor }}
-                                >
-                                    {enhancedGenerateLoading ? 'Queueing…' : enhancedGenerateLabel}
-                                </button>
+                                <div className="flex flex-col gap-1.5">
+                                    {typeof onEnhancedDebugBboxOverlayChange === 'function' ? (
+                                        <label className="flex cursor-pointer items-center gap-2 text-[10px] text-gray-600">
+                                            <input
+                                                type="checkbox"
+                                                checked={enhancedDebugBboxOverlay}
+                                                onChange={(e) => onEnhancedDebugBboxOverlayChange(e.target.checked)}
+                                                className="rounded border-gray-300"
+                                            />
+                                            Draw print bbox (red) on source in the saved enhanced image
+                                        </label>
+                                    ) : null}
+                                    <button
+                                        type="button"
+                                        onClick={onEnhancedGenerate}
+                                        disabled={enhancedGenerateDisabled || enhancedGenerateLoading}
+                                        className="w-full rounded-md px-2 py-1.5 text-[10px] font-semibold text-white shadow-sm disabled:cursor-not-allowed disabled:opacity-50"
+                                        style={{ backgroundColor: primaryColor }}
+                                    >
+                                        {enhancedGenerateLoading ? 'Queueing…' : enhancedGenerateLabel}
+                                    </button>
+                                </div>
                             ) : null,
                         )}
                         {col(
                             'Presentation',
                             'AI treatment',
+                            presentationTimeLine,
                             presentationUrl,
                             EXECUTION_VERSION_DETAIL_BULLETS.presentation,
                             presSt === 'processing' ? (

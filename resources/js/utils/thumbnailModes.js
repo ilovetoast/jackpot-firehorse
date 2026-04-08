@@ -234,3 +234,40 @@ export function shouldShowPresentationPreviewRadio(asset) {
     const st = String(getThumbnailModesStatus(asset).presentation || '').toLowerCase()
     return st === 'processing' || st === 'complete' || st === 'failed' || st === 'skipped'
 }
+
+/**
+ * @param {unknown} iso
+ * @returns {string|null}
+ */
+export function formatIsoDateTimeLocal(iso) {
+    if (iso == null || iso === '') {
+        return null
+    }
+    const d = new Date(typeof iso === 'string' ? iso : String(iso))
+    if (Number.isNaN(d.getTime())) {
+        return null
+    }
+    return d.toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' })
+}
+
+/**
+ * Label for async preview jobs (enhanced / presentation) using `last_attempt_at`.
+ *
+ * @param {string} status - thumbnail_modes_status for that mode
+ * @param {unknown} iso - last_attempt_at
+ * @returns {string|null}
+ */
+export function formatThumbnailPipelineAttemptLabel(status, iso) {
+    const t = formatIsoDateTimeLocal(iso)
+    if (!t) {
+        return null
+    }
+    const s = String(status || '').toLowerCase()
+    if (s === 'processing') {
+        return `Started ${t}`
+    }
+    if (s === 'complete') {
+        return `Last generated ${t}`
+    }
+    return `Last attempt ${t}`
+}

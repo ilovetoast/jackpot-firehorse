@@ -71,6 +71,8 @@ import {
 } from '../utils/thumbnailUtils'
 import {
     ENHANCED_SKIP_REASON_TOO_SMALL,
+    formatIsoDateTimeLocal,
+    formatThumbnailPipelineAttemptLabel,
     getThumbnailModesModeMeta,
     getThumbnailModesStatus,
     isEnhancedOutputStale,
@@ -229,6 +231,8 @@ export default function AssetDrawer({
     /** Drawer preview pipeline mode: original | preferred (clean) | enhanced | presentation */
     const [previewStyleMode, setPreviewStyleMode] = useState('original')
     const [enhancedPreviewLoading, setEnhancedPreviewLoading] = useState(false)
+    /** When true, next enhanced generate draws print-layout bbox (red) on source before compositing — visible in saved thumbnails */
+    const [enhancedDebugBboxOverlay, setEnhancedDebugBboxOverlay] = useState(false)
     const [presentationPreviewLoading, setPresentationPreviewLoading] = useState(false)
     /** Deliverables: collapsible “Preview options” (enhanced controls) */
     const [previewOptionsExpanded, setPreviewOptionsExpanded] = useState(false)
@@ -1317,8 +1321,16 @@ export default function AssetDrawer({
         !isVirtualGoogleFont &&
         !externalCollectionGuest
 
+    const canRetryThumbnails = can('assets.retry_thumbnails')
+    const canOfferEnhancedPreviewGenerate = useMemo(
+        () => canRetryThumbnails && showExecutionPreviewChrome,
+        [canRetryThumbnails, showExecutionPreviewChrome],
+    )
+
     const showEnhancedPreviewRadio = useMemo(
-        () => (isExecutionDrawer ? shouldShowEnhancedPreviewRadio(displayAsset) : false),
+        () =>
+            isExecutionDrawer &&
+            (shouldShowEnhancedPreviewRadio(displayAsset) || canOfferEnhancedPreviewGenerate),
         [
             isExecutionDrawer,
             displayAsset,
@@ -1326,6 +1338,7 @@ export default function AssetDrawer({
             displayAsset?.thumbnail_mode_urls,
             displayAsset?.thumbnail_modes_status,
             displayAsset?.metadata?.thumbnail_modes_status,
+            canOfferEnhancedPreviewGenerate,
         ],
     )
 
@@ -1353,7 +1366,9 @@ export default function AssetDrawer({
         displayPresentationMeta.skip_reason === ENHANCED_SKIP_REASON_TOO_SMALL
 
     const showPresentationPreviewRadio = useMemo(
-        () => (isExecutionDrawer ? shouldShowPresentationPreviewRadio(displayAsset) : false),
+        () =>
+            isExecutionDrawer &&
+            (shouldShowPresentationPreviewRadio(displayAsset) || canOfferEnhancedPreviewGenerate),
         [
             isExecutionDrawer,
             displayAsset,
@@ -1361,7 +1376,29 @@ export default function AssetDrawer({
             displayAsset?.thumbnail_mode_urls,
             displayAsset?.thumbnail_modes_status,
             displayAsset?.metadata?.thumbnail_modes_status,
+            canOfferEnhancedPreviewGenerate,
         ],
+    )
+
+    const previewOptsOriginalGeneratedLabel = useMemo(
+        () => formatIsoDateTimeLocal(displayAsset?.thumbnails_generated_at),
+        [displayAsset?.thumbnails_generated_at],
+    )
+    const previewOptsEnhancedAttemptLabel = useMemo(
+        () =>
+            formatThumbnailPipelineAttemptLabel(
+                enhancedPipelineStatus,
+                displayEnhancedMeta.last_attempt_at,
+            ),
+        [enhancedPipelineStatus, displayEnhancedMeta.last_attempt_at],
+    )
+    const previewOptsPresentationAttemptLabel = useMemo(
+        () =>
+            formatThumbnailPipelineAttemptLabel(
+                presentationPipelineStatus,
+                displayPresentationMeta.last_attempt_at,
+            ),
+        [presentationPipelineStatus, displayPresentationMeta.last_attempt_at],
     )
 
     const isDrawerSvgRasterPreview =
@@ -1382,7 +1419,14 @@ export default function AssetDrawer({
             return null
         }
         const style = isDrawerSvgRasterPreview ? 'large' : 'medium'
-        return getThumbnailUrl(displayAsset, style, previewStyleMode)
+        const primary = getThumbnailUrl(displayAsset, style, previewStyleMode)
+        if (primary) {
+            return primary
+        }
+        if (showExecutionPreviewChrome && previewStyleMode !== 'original') {
+            return getThumbnailUrl(displayAsset, style, 'original')
+        }
+        return null
     }, [
         useDrawerThumbnailModeOverride,
         displayAsset,
@@ -1393,6 +1437,7 @@ export default function AssetDrawer({
         displayAsset?.thumbnail_url,
         previewStyleMode,
         isDrawerSvgRasterPreview,
+        showExecutionPreviewChrome,
     ])
 
     const drawerForcedModeSpinnerOverlay =
@@ -1410,7 +1455,7 @@ export default function AssetDrawer({
         return getThumbnailUrl(displayAsset, executionDrawerThumbStyle, 'original')
     }, [displayAsset, displayAsset?.id, showExecutionPreviewChrome, executionDrawerThumbStyle])
 
-    /** Drawer tiles + version modal: resolve URL even if primary style key is missing from a mode bucket. */
+    /** Drawer tiles + Compare enhanced column: prefer composited `enhanced` URLs over `preferred` when both exist (parity with main preview). */
     const executionDrawerEnhancedDisplayUrl = useMemo(() => {
         if (!displayAsset?.id || !showExecutionPreviewChrome) {
             return null
@@ -1422,10 +1467,13 @@ export default function AssetDrawer({
             getThumbnailUrlModeOnly(a, 'medium', mode) ||
             getThumbnailUrlModeOnly(a, 'large', mode) ||
             getThumbnailUrlModeOnly(a, 'thumb', mode)
-        const preferred = pick('preferred')
         const enhanced = pick('enhanced')
-        if (preferred || enhanced) {
-            return preferred || enhanced
+        if (enhanced) {
+            return enhanced
+        }
+        const preferred = pick('preferred')
+        if (preferred) {
+            return preferred
         }
         const gEnh = getThumbnailUrl(a, s, 'enhanced')
         const gOrig = getThumbnailUrl(a, s, 'original')
@@ -1699,20 +1747,10 @@ export default function AssetDrawer({
     // Use displayAsset (with live updates) instead of prop asset
     const categoryName = displayAsset.category?.name || 'Uncategorized'
 
-    // Check if user has permission to generate/retry thumbnails (can from usePermission at top of drawer)
-    const canRetryThumbnails = can('assets.retry_thumbnails')
-
     const canBypassTooSmallEnhanced = useMemo(() => {
         const tr = String(auth?.tenant_role || auth?.user?.tenant_role || '').toLowerCase()
         return ['owner', 'admin', 'agency_admin'].includes(tr)
     }, [auth?.tenant_role, auth?.user?.tenant_role])
-
-    const canOfferEnhancedPreviewGenerate =
-        canRetryThumbnails &&
-        hasThumbnailSupport &&
-        !isVideo &&
-        !isVirtualGoogleFont &&
-        !externalCollectionGuest
 
     const enhancedPrimaryActionBlocked = enhancedSkipTooSmall && !canBypassTooSmallEnhanced
 
@@ -1749,6 +1787,7 @@ export default function AssetDrawer({
 
     const handleGenerateEnhancedPreview = async (opts = {}) => {
         const force = Boolean(opts.force)
+        const debugBbox = Boolean(opts.debugBbox)
         if (!displayAsset?.id || !canRetryThumbnails) return
         setEnhancedPreviewLoading(true)
         try {
@@ -1756,7 +1795,10 @@ export default function AssetDrawer({
                 `/app/assets/${displayAsset.id}/enhanced-preview/generate`,
                 null,
                 {
-                    params: { force: force ? 1 : 0 },
+                    params: {
+                        force: force ? 1 : 0,
+                        debug_bbox: debugBbox ? 1 : 0,
+                    },
                     validateStatus: (s) => s >= 200 && s < 500,
                 },
             )
@@ -3610,22 +3652,19 @@ export default function AssetDrawer({
                                                                             </span>
                                                                         </button>
                                                                         {tier === 'original' &&
-                                                                            preferredPipelineStatus === 'failed' &&
-                                                                            canRetryThumbnails && (
-                                                                                <button
-                                                                                    type="button"
-                                                                                    onClick={() => handleRetryThumbnail()}
-                                                                                    disabled={
-                                                                                        retryLoading ||
-                                                                                        thumbnailStatus === 'processing'
-                                                                                    }
-                                                                                    className="w-full rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-[10px] font-medium text-amber-900 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50"
-                                                                                >
-                                                                                    Retry clean thumbnail
-                                                                                </button>
+                                                                            previewOptsOriginalGeneratedLabel && (
+                                                                                <p className="text-center text-[10px] text-gray-500">
+                                                                                    Last generated{' '}
+                                                                                    {previewOptsOriginalGeneratedLabel}
+                                                                                </p>
                                                                             )}
                                                                         {tier === 'enhanced' && (
                                                                             <div className="flex min-h-[2.5rem] flex-col gap-1">
+                                                                                {previewOptsEnhancedAttemptLabel && (
+                                                                                    <p className="text-center text-[10px] text-gray-500">
+                                                                                        {previewOptsEnhancedAttemptLabel}
+                                                                                    </p>
+                                                                                )}
                                                                                 {enhancedPipelineStatus === 'processing' && (
                                                                                     <div className="flex items-center gap-1 text-[10px] text-gray-600">
                                                                                         <ArrowPathIcon className="h-3 w-3 shrink-0 animate-spin text-gray-500" />
@@ -3684,23 +3723,40 @@ export default function AssetDrawer({
                                                                                             Use Compare to regenerate.
                                                                                         </p>
                                                                                     ) : (
-                                                                                        <button
-                                                                                            type="button"
-                                                                                            onClick={() =>
-                                                                                                handleGenerateEnhancedPreview({
-                                                                                                    force: enhancedPreviewForce,
-                                                                                                })
-                                                                                            }
-                                                                                            disabled={enhancedPreviewLoading}
-                                                                                            className="w-full rounded-md px-2 py-1.5 text-[10px] font-semibold text-white shadow-sm disabled:cursor-not-allowed disabled:opacity-50"
-                                                                                            style={{
-                                                                                                backgroundColor: brandPrimary,
-                                                                                            }}
-                                                                                        >
-                                                                                            {enhancedPreviewLoading
-                                                                                                ? 'Queueing…'
-                                                                                                : enhancedPreviewPrimaryLabel}
-                                                                                        </button>
+                                                                                        <div className="flex flex-col gap-1.5">
+                                                                                            <label className="flex cursor-pointer items-center gap-1.5 text-[10px] text-gray-600">
+                                                                                                <input
+                                                                                                    type="checkbox"
+                                                                                                    checked={enhancedDebugBboxOverlay}
+                                                                                                    onChange={(e) =>
+                                                                                                        setEnhancedDebugBboxOverlay(
+                                                                                                            e.target.checked,
+                                                                                                        )
+                                                                                                    }
+                                                                                                    className="rounded border-gray-300"
+                                                                                                />
+                                                                                                Debug: draw print bbox (red) on output
+                                                                                            </label>
+                                                                                            <button
+                                                                                                type="button"
+                                                                                                onClick={() =>
+                                                                                                    handleGenerateEnhancedPreview({
+                                                                                                        force: enhancedPreviewForce,
+                                                                                                        debugBbox:
+                                                                                                            enhancedDebugBboxOverlay,
+                                                                                                    })
+                                                                                                }
+                                                                                                disabled={enhancedPreviewLoading}
+                                                                                                className="w-full rounded-md px-2 py-1.5 text-[10px] font-semibold text-white shadow-sm disabled:cursor-not-allowed disabled:opacity-50"
+                                                                                                style={{
+                                                                                                    backgroundColor: brandPrimary,
+                                                                                                }}
+                                                                                            >
+                                                                                                {enhancedPreviewLoading
+                                                                                                    ? 'Queueing…'
+                                                                                                    : enhancedPreviewPrimaryLabel}
+                                                                                            </button>
+                                                                                        </div>
                                                                                     )
                                                                                 ) : (
                                                                                     <p className="text-[10px] text-gray-400">
@@ -3711,6 +3767,11 @@ export default function AssetDrawer({
                                                                         )}
                                                                         {tier === 'presentation' && (
                                                                             <div className="flex min-h-[2.5rem] flex-col gap-1">
+                                                                                {previewOptsPresentationAttemptLabel && (
+                                                                                    <p className="text-center text-[10px] text-gray-500">
+                                                                                        {previewOptsPresentationAttemptLabel}
+                                                                                    </p>
+                                                                                )}
                                                                                 {presentationPipelineStatus === 'processing' && (
                                                                                     <div className="flex items-center gap-1 text-[10px] text-gray-600">
                                                                                         <ArrowPathIcon className="h-3 w-3 shrink-0 animate-spin text-gray-500" />
@@ -4803,6 +4864,9 @@ export default function AssetDrawer({
                 originalUrl={executionDrawerOriginalUrl}
                 enhancedUrl={executionDrawerEnhancedDisplayUrl}
                 presentationUrl={executionDrawerPresentationDisplayUrl}
+                originalLastGeneratedAt={displayAsset?.thumbnails_generated_at ?? null}
+                enhancedLastAttemptAt={displayEnhancedMeta?.last_attempt_at ?? null}
+                presentationLastAttemptAt={displayPresentationMeta?.last_attempt_at ?? null}
                 templateLabelEnhanced={
                     displayEnhancedMeta?.template_label != null
                         ? String(displayEnhancedMeta.template_label)
@@ -4816,9 +4880,12 @@ export default function AssetDrawer({
                 enhancedPipelineStatus={enhancedPipelineStatus}
                 showEnhancedGenerate={compareModalShowEnhancedGenerate}
                 enhancedGenerateLabel={enhancedPreviewPrimaryLabel}
+                enhancedDebugBboxOverlay={enhancedDebugBboxOverlay}
+                onEnhancedDebugBboxOverlayChange={setEnhancedDebugBboxOverlay}
                 onEnhancedGenerate={() =>
                     handleGenerateEnhancedPreview({
                         force: enhancedPreviewForce || enhancedOutputStale,
+                        debugBbox: enhancedDebugBboxOverlay,
                     })
                 }
                 enhancedGenerateLoading={enhancedPreviewLoading}

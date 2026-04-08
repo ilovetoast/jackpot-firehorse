@@ -10,7 +10,7 @@ Processing (thumbnails, PDF text, SVG, video frames) depends on **CLI tools** in
 
 | Role | Typical processes | Required packages (summary) |
 |------|-------------------|------------------------------|
-| **Worker** | `queue:work`, `ProcessAssetJob`, thumbnail generation | ImageMagick, Poppler (`pdftotext`, etc.), `librsvg`, FFmpeg — see [Packages](#packages) |
+| **Worker** | `queue:work`, `ProcessAssetJob`, thumbnail generation | ImageMagick, Poppler (`pdftotext`, etc.), `librsvg`, FFmpeg, `python3-opencv` (if Python uses OpenCV) — see [Packages](#packages) |
 | **Web** | PHP-FPM, HTTP | Often same image as worker; if split, web still benefits from matching versions for any inline processing |
 | **Local (Sail)** | Docker Compose services | Uses Dockerfile above |
 
@@ -31,13 +31,17 @@ Ubuntu/Debian-style install examples. Adjust for your distribution.
 | **librsvg2-bin** | SVG rasterization (`rsvg-convert`) |
 | **librsvg2-dev** | Only if building extensions or compiling against librsvg on bare metal |
 | **ffmpeg** | Video thumbnails and preview generation |
+| **python3-opencv** | OpenCV Python bindings (`import cv2`) for computer-vision or image-processing scripts run on workers (Sail installs this in `docker/8.5/Dockerfile`) |
+
 
 Example:
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y imagemagick poppler-utils librsvg2-bin librsvg2-dev ffmpeg
+sudo apt-get install -y imagemagick poppler-utils librsvg2-bin librsvg2-dev ffmpeg python3-opencv
 ```
+
+Omit `python3-opencv` on hosts that never run Python code using OpenCV; local Sail matches `docker/8.5/Dockerfile`, which includes it.
 
 ### Web
 
@@ -52,6 +56,7 @@ After deploy, confirm binaries are on `PATH` for the user that runs workers:
 ```bash
 which convert magick pdftotext rsvg-convert ffmpeg
 ffmpeg -version
+python3 -c "import cv2; print(cv2.__version__)"
 ```
 
 ---

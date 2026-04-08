@@ -308,6 +308,62 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Print-ready layout (preferred thumbnails)
+    |--------------------------------------------------------------------------
+    |
+    | Preferred crop: projection-based content bounds — {@see PrintLayoutCropService}.
+    | Edge/corner/bar heuristics below are unused for cropping; kept for optional tooling/tests.
+    |
+    */
+    'print_layout' => [
+        'edge_threshold' => (float) env('PRINT_LAYOUT_EDGE_THRESHOLD', 0.15),
+        'corner_threshold' => (float) env('PRINT_LAYOUT_CORNER_THRESHOLD', 0.2),
+        'min_confidence' => (float) env('PRINT_LAYOUT_MIN_CONFIDENCE', 0.5),
+        /* Strip this fraction of min(width,height) on each side before projection (ignore outer printer marks). */
+        'margin_ignore_percent' => (float) env('PRINT_LAYOUT_MARGIN_IGNORE_PERCENT', 0.20),
+        'analysis_max_side' => (int) env('PRINT_LAYOUT_ANALYSIS_MAX_SIDE', 512),
+        'edge_strip_fraction' => (float) env('PRINT_LAYOUT_EDGE_STRIP_FRACTION', 0.075),
+        'crop_padding_fraction' => (float) env('PRINT_LAYOUT_CROP_PADDING_FRACTION', 0.04),
+        /* Legacy keys; unused by PrintLayoutCropService — kept for env stability. */
+        'bbox_threshold_fraction' => (float) env('PRINT_LAYOUT_BBOX_THRESHOLD_FRACTION', 0.92),
+        'bbox_morphology_dilate_iterations' => (int) env('PRINT_LAYOUT_BBOX_MORPH_DILATE_ITERATIONS', 2),
+        'bbox_max_inner_coverage' => (float) env('PRINT_LAYOUT_BBOX_MAX_INNER_COVERAGE', 0.97),
+        'bbox_edge_radius' => (float) env('PRINT_LAYOUT_BBOX_EDGE_RADIUS', 1.0),
+        'bbox_edge_threshold_fraction' => (float) env('PRINT_LAYOUT_BBOX_EDGE_THRESHOLD', 0.2),
+        'bbox_close_morphology_iterations' => (int) env('PRINT_LAYOUT_BBOX_CLOSE_ITERATIONS', 2),
+        'bbox_min_component_area' => (int) env('PRINT_LAYOUT_BBOX_MIN_COMPONENT_AREA', 64),
+        /* After normalizing column/row sums to [0,1], keep pixels where value > this × peak (default 0.15). */
+        'projection_density_threshold_fraction' => (float) env('PRINT_LAYOUT_PROJECTION_THRESHOLD', 0.15),
+        /* Expand detected bounds by this fraction of analysis width/height (3–5%). */
+        'projection_expand_fraction' => (float) env('PRINT_LAYOUT_PROJECTION_EXPAND', 0.04),
+        'bbox_padding_fraction' => (float) env('PRINT_LAYOUT_BBOX_PADDING_FRACTION', 0.05),
+        /* Reject bbox if either dimension exceeds this fraction of full image (likely still includes trim marks). */
+        'bbox_strict_max_full_dimension_ratio' => (float) (env('PRINT_LAYOUT_BBOX_STRICT_MAX_DIM')
+            ?? env('PRINT_LAYOUT_MAX_CONTENT_BBOX_RATIO', 0.85)),
+        /* Reject if mapped bbox width or height is below this fraction of full image (default 40%). */
+        'min_content_bbox_dimension_ratio' => (float) env('PRINT_LAYOUT_MIN_CONTENT_BBOX_RATIO', 0.4),
+        'min_cropped_dimension_ratio' => (float) env('PRINT_LAYOUT_MIN_CROPPED_RATIO', 0.5),
+        'max_aspect_ratio' => (float) env('PRINT_LAYOUT_MAX_ASPECT_RATIO', 6.0),
+        'header_ink_fraction' => (float) env('PRINT_LAYOUT_HEADER_INK_FRACTION', 0.08),
+        'color_bar_strip_fraction' => (float) env('PRINT_LAYOUT_COLOR_BAR_STRIP_FRACTION', 0.06),
+        'crop_luma_cutoff' => (int) env('PRINT_LAYOUT_CROP_LUMA_CUTOFF', 235),
+
+        /*
+         * When false, preferred pipeline does not fall back to smart trim if print crop is skipped (debug only).
+         */
+        'fallback_to_smart_crop' => (bool) env('PRINT_LAYOUT_FALLBACK_SMART_CROP', true),
+
+        /*
+         * Temporary diagnostics (local / staging only). Do not enable in production.
+         * PRINT_LAYOUT_DEBUG_CROP: writes /tmp/debug-crop*.png with red bbox on full-res source.
+         * PRINT_LAYOUT_FORCE_PRINT_CROP: skip validation and always apply crop when a bbox exists.
+         */
+        'debug_print_crop_overlay' => (bool) env('PRINT_LAYOUT_DEBUG_CROP', false),
+        'debug_print_crop_force' => (bool) env('PRINT_LAYOUT_FORCE_PRINT_CROP', false),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Asset processing pipeline (ProcessAssetJob)
     |--------------------------------------------------------------------------
     |

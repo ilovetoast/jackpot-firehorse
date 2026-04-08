@@ -50,7 +50,10 @@ const TagInputUnified = forwardRef(function TagInputUnified({
     inline = false, // For filter mode - pills inline with input
     
     // Accessibility
-    ariaLabel = "Tag input"
+    ariaLabel = "Tag input",
+
+    /** Optional quick-pick tags (e.g. from schema); shown above the input in upload mode */
+    suggestedTags = null,
 }, ref) {
     const [inputValue, setInputValue] = useState('')
     const [suggestions, setSuggestions] = useState([])
@@ -348,6 +351,24 @@ const TagInputUnified = forwardRef(function TagInputUnified({
 
             {/* Tag display and input container */}
             <div className={`${inline ? 'flex flex-wrap items-center gap-2' : ''}`}>
+                {mode === 'upload' && Array.isArray(suggestedTags) && suggestedTags.length > 0 && (
+                    <div className="mb-2 flex flex-wrap gap-2">
+                        {suggestedTags
+                            .map((tag) => normalizeTagString(String(tag)))
+                            .filter((normalized) => normalized && !localTags.includes(normalized))
+                            .map((normalized) => (
+                                <button
+                                    key={normalized}
+                                    type="button"
+                                    onClick={() => addTag(normalized)}
+                                    disabled={disabled || loading || isAtMaxTags}
+                                    className="rounded-full bg-gray-100 px-2 py-1 text-xs text-gray-800 hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                    {normalized}
+                                </button>
+                            ))}
+                    </div>
+                )}
                 {/* Existing tags (for upload/filter mode) */}
                 {displayTags.length > 0 && (
                     <div className={`flex flex-wrap gap-2 ${inline ? '' : 'mb-2'}`}>

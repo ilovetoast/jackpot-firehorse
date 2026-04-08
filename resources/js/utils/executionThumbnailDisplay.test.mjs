@@ -26,8 +26,8 @@ test('getExecutionGridDisplayUrl original uses original only', () => {
     assert.equal(getExecutionGridDisplayUrl(asset, 'original', 'medium'), 'https://example.com/o.webp')
 })
 
-test('getExecutionGridDisplayUrl enhanced prefers preferred then enhanced then original', () => {
-    assert.equal(getExecutionGridDisplayUrl(asset, 'enhanced', 'medium'), 'https://example.com/p.webp')
+test('getExecutionGridDisplayUrl enhanced prefers enhanced then preferred then original', () => {
+    assert.equal(getExecutionGridDisplayUrl(asset, 'enhanced', 'medium'), 'https://example.com/e.webp')
     const noPreferred = {
         thumbnail_mode_urls: {
             original: { medium: 'https://example.com/o.webp' },
@@ -75,7 +75,7 @@ test('per-asset preferred tier applies only in Standard mode; global Pres. ignor
     lsStore.jackpot_execution_preferred_thumbnail_tier_by_asset = JSON.stringify({
         [id]: 'presentation',
     })
-    assert.equal(getExecutionGridDisplayUrl(a, 'enhanced', 'medium'), 'https://example.com/p.webp')
+    assert.equal(getExecutionGridDisplayUrl(a, 'enhanced', 'medium'), 'https://example.com/e.webp')
     assert.equal(getExecutionGridDisplayUrl(a, 'presentation', 'medium'), 'https://example.com/pr.webp')
     delete lsStore.jackpot_execution_preferred_thumbnail_tier_by_asset
 })
@@ -90,7 +90,7 @@ test('getExecutionGridDisplayUrl standard uses preferred tier from localStorage'
     lsStore.jackpot_execution_preferred_thumbnail_tier_by_asset = JSON.stringify({
         [id]: 'enhanced',
     })
-    assert.equal(getExecutionGridDisplayUrl(a, 'standard', 'medium'), 'https://example.com/p.webp')
+    assert.equal(getExecutionGridDisplayUrl(a, 'standard', 'medium'), 'https://example.com/e.webp')
     lsStore.jackpot_execution_preferred_thumbnail_tier_by_asset = JSON.stringify({})
     assert.equal(getExecutionGridDisplayUrl(a, 'standard', 'medium'), 'https://example.com/o.webp')
 })

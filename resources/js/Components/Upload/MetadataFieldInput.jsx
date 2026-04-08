@@ -97,6 +97,13 @@ const MetadataFieldInput = forwardRef(function MetadataFieldInput(
                         compact={false}
                         className="w-full"
                         ariaLabel={`${field.display_label} input`}
+                        suggestedTags={
+                            Array.isArray(field.suggested_tags)
+                                ? field.suggested_tags
+                                : Array.isArray(field.suggested_values)
+                                  ? field.suggested_values
+                                  : null
+                        }
                     />
                 </div>
                 {hasError && <span className="flex-shrink-0 text-xs text-red-600">Required</span>}

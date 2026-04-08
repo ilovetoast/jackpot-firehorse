@@ -67,8 +67,7 @@ class AssetUrlService
         protected AssetVariantPathResolver $pathResolver,
         protected CloudFrontSignedUrlService $signedUrlService,
         protected TenantBucketService $tenantBucketService
-    ) {
-    }
+    ) {}
 
     /**
      * Generate a CloudFront signed URL for an arbitrary storage path (canned policy).
@@ -79,8 +78,8 @@ class AssetUrlService
      * full CDN URL here; for admin thumbnails we do NOT append ?v= (cache busting is
      * unnecessary — signed URLs are short-lived and unique).
      *
-     * @param string $path Storage path relative to CDN root (e.g. tenants/{uuid}/assets/.../thumb.webp)
-     * @param int|null $ttlSeconds URL validity in seconds (default from config cloudfront.admin_signed_url_ttl, fallback 300)
+     * @param  string  $path  Storage path relative to CDN root (e.g. tenants/{uuid}/assets/.../thumb.webp)
+     * @param  int|null  $ttlSeconds  URL validity in seconds (default from config cloudfront.admin_signed_url_ttl, fallback 300)
      * @return string Full signed URL: https://cdn-domain/path?Expires=...&Signature=...&Key-Pair-Id=...
      */
     public function getSignedCloudFrontUrl(string $path, ?int $ttlSeconds = null): string
@@ -103,6 +102,7 @@ class AssetUrlService
         // Sign the exact URL (no ?v= or other params for admin; add any before this call if ever needed).
         // Expires must be UNIX seconds (not milliseconds); now()->timestamp is already in seconds.
         $expiresAt = now()->addSeconds($ttlSeconds)->timestamp;
+
         return $this->signedUrlService->sign($cdnUrl, $expiresAt);
     }
 
@@ -280,6 +280,7 @@ class AssetUrlService
                 'error' => $e->getMessage(),
                 'exception' => get_class($e),
             ]);
+
             return null;
         } finally {
             $this->recordTimedCall($start, 'admin_thumbnail_calls');
@@ -288,7 +289,7 @@ class AssetUrlService
 
     /**
      * Admin helper for explicit thumbnail style links in detail view.
-     * Supported styles: thumb, medium, large.
+     * Supported styles: preview (LQIP), thumb, medium, large.
      */
     public function getAdminThumbnailUrlForStyle(Asset $asset, string $style): ?string
     {
@@ -299,6 +300,7 @@ class AssetUrlService
 
         try {
             $variant = match ($style) {
+                'preview' => AssetVariant::THUMB_PREVIEW,
                 'thumb' => AssetVariant::THUMB_SMALL,
                 'medium' => AssetVariant::THUMB_MEDIUM,
                 'large' => AssetVariant::THUMB_LARGE,
@@ -325,6 +327,67 @@ class AssetUrlService
                 'style' => $style,
                 'error' => $e->getMessage(),
             ]);
+
+            return null;
+        } finally {
+            $this->recordTimedCall($start, 'admin_thumbnail_calls');
+        }
+    }
+
+    /**
+     * Presigned admin URL for a raster thumbnail style under an explicit pipeline mode (preferred, enhanced, presentation).
+     * Uses metadata paths when present; does not reuse {@see shouldAttemptVariant()} (it is original-mode biased).
+     */
+    public function getAdminThumbnailUrlForStyleAndMode(Asset $asset, string $style, string $mode): ?string
+    {
+        $start = null;
+        if ($this->metricsEnabled()) {
+            $start = microtime(true);
+        }
+
+        try {
+            $variant = match ($style) {
+                'thumb' => AssetVariant::THUMB_SMALL,
+                'medium' => AssetVariant::THUMB_MEDIUM,
+                'large' => AssetVariant::THUMB_LARGE,
+                default => null,
+            };
+
+            if ($variant === null || $mode === '') {
+                return null;
+            }
+
+            $tenant = $this->resolveTenantForAsset($asset);
+            if ($tenant === null) {
+                return null;
+            }
+
+            $requireExists = ! app()->environment('staging');
+
+            return $this->runInTenantContext($tenant, function () use ($asset, $variant, $tenant, $mode, $requireExists) {
+                $path = $this->pathResolver->resolve($asset, $variant->value, ['thumbnail_mode' => $mode]);
+                if ($path === '') {
+                    return null;
+                }
+
+                if ($requireExists) {
+                    $bucket = $this->resolveBucketForAsset($asset, $tenant);
+                    if ($bucket === null || ! $this->objectExists($bucket, $path)) {
+                        return null;
+                    }
+                }
+
+                return $this->buildSignedCdnUrl($path, self::ADMIN_TTL_SECONDS, $asset, $variant);
+            });
+        } catch (\Throwable $e) {
+            Log::error('[AssetUrlService] getAdminThumbnailUrlForStyleAndMode failed', [
+                'asset_id' => $asset->id,
+                'tenant_id' => $asset->tenant_id,
+                'style' => $style,
+                'mode' => $mode,
+                'error' => $e->getMessage(),
+            ]);
+
             return null;
         } finally {
             $this->recordTimedCall($start, 'admin_thumbnail_calls');
@@ -395,6 +458,7 @@ class AssetUrlService
                 'error' => $e->getMessage(),
                 'exception' => get_class($e),
             ]);
+
             return null;
         } finally {
             $this->recordTimedCall($start, 'admin_download_calls');
@@ -440,7 +504,7 @@ class AssetUrlService
     /**
      * Try variants in order, returning the first URL that can be generated.
      *
-     * @param array<int, AssetVariant> $variants
+     * @param  array<int, AssetVariant>  $variants
      */
     protected function firstAvailableVariantUrl(
         Asset $asset,
@@ -550,6 +614,7 @@ class AssetUrlService
             Log::warning('[AssetUrlService] resolveTenantForAsset: asset has no tenant_id', [
                 'asset_id' => $asset->id,
             ]);
+
             return null;
         }
 
@@ -586,7 +651,7 @@ class AssetUrlService
      */
     protected function resolveBucketForAsset(Asset $asset, Tenant $tenant): ?StorageBucket
     {
-        $cacheKey = $tenant->id . ':' . ($asset->storage_bucket_id ?: 'active');
+        $cacheKey = $tenant->id.':'.($asset->storage_bucket_id ?: 'active');
         if (array_key_exists($cacheKey, $this->bucketCache)) {
             if ($this->metricsEnabled()) {
                 $this->metrics['bucket_cache_hits']++;
@@ -649,7 +714,7 @@ class AssetUrlService
             $this->metrics['existence_checks']++;
         }
 
-        $cacheKey = $bucket->name . ':' . ltrim($path, '/');
+        $cacheKey = $bucket->name.':'.ltrim($path, '/');
         if (array_key_exists($cacheKey, $this->objectExistenceCache)) {
             if ($this->metricsEnabled()) {
                 $this->metrics['existence_cache_hits']++;
@@ -702,6 +767,7 @@ class AssetUrlService
         try {
             // UNIX timestamp in seconds (not milliseconds); CloudFront expects seconds
             $expiresAt = now()->addSeconds($ttlSeconds)->timestamp;
+
             return $this->signedUrlService->sign($cdnUrl, $expiresAt);
         } catch (\Throwable $e) {
             Log::error('[AssetUrlService] Failed to sign CloudFront URL', [

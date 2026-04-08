@@ -24,14 +24,13 @@ import { usePermission } from '../hooks/usePermission'
 import { Switch } from '@headlessui/react'
 import {
     XMarkIcon,
-    CloudArrowUpIcon,
     ArrowPathIcon,
-    CheckCircleIcon,
-    ChevronDownIcon,
-    ChevronUpIcon,
     ChevronRightIcon,
     TagIcon,
     SparklesIcon,
+    ArrowUpTrayIcon,
+    ExclamationTriangleIcon,
+    CheckIcon,
 } from '@heroicons/react/24/outline'
 import { usePhase3UploadManager } from '../hooks/usePhase3UploadManager'
 import GlobalMetadataPanel from './GlobalMetadataPanel'
@@ -47,10 +46,69 @@ import { refreshCsrfToken, isCsrfTokenMismatch } from '../utils/csrfTokenRefresh
 import CreateCollectionModal from './Collections/CreateCollectionModal' // C9
 import StorageUpgradeModal from './StorageUpgradeModal'
 import CollectionSelector from './Collections/CollectionSelector' // C9.1
-import { DELIVERABLES_PAGE_LABEL_SINGULAR } from '../utils/uiLabels'
+import { DELIVERABLES_PAGE_LABEL, DELIVERABLES_PAGE_LABEL_SINGULAR } from '../utils/uiLabels'
 import { supportsThumbnail } from '../utils/thumbnailUtils'
 import { getUploadAcceptAttribute } from '../utils/damFileTypes'
 import BatchNamingBar from './Upload/BatchNamingBar'
+import { FloatingUploadProgressTray } from './FloatingUploadProgressTray'
+
+/** Tailwind class merge (additive; avoids new dependencies) */
+function cn(...parts) {
+    return parts.filter(Boolean).join(' ')
+}
+
+const UPLOAD_DIALOG_MINIMIZED_KEY = 'uploadAssetDialogMinimized'
+
+function MinimizedTrayFooter({
+    batchStatus,
+    trayCompleted,
+    trayTotal,
+    trayFailed,
+    hasUploadingItems,
+    canFinalizeV2,
+    isFinalizeSuccess,
+    brandPrimary,
+    onFinalize,
+    onCloseTray,
+}) {
+    return (
+        <div className="space-y-2">
+            {batchStatus === 'finalizing' ? (
+                <p className="text-xs text-gray-600">Finalizing uploads…</p>
+            ) : batchStatus === 'ready' ? (
+                <p className="text-xs font-medium text-green-600">
+                    Ready to finalize ({trayCompleted} / {trayTotal})
+                </p>
+            ) : batchStatus === 'partial_success' ? (
+                <p className="text-xs font-medium text-amber-600">
+                    {trayCompleted} succeeded, {trayFailed} failed
+                </p>
+            ) : null}
+            <div className="flex flex-wrap items-center justify-end gap-2">
+                {canFinalizeV2 && batchStatus !== 'finalizing' && !isFinalizeSuccess && (
+                    <button
+                        type="button"
+                        onClick={onFinalize}
+                        className="rounded-md px-3 py-1.5 text-sm font-medium text-white"
+                        style={{ backgroundColor: brandPrimary }}
+                    >
+                        Finalize now
+                    </button>
+                )}
+                {!hasUploadingItems && batchStatus !== 'finalizing' && (
+                    <button
+                        type="button"
+                        onClick={onCloseTray}
+                        className="rounded-md p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+                        title="Close"
+                    >
+                        <XMarkIcon className="h-5 w-5" />
+                    </button>
+                )}
+            </div>
+        </div>
+    )
+}
 
 /**
  * ⚠️ LEGACY UPLOADER FREEZE — STEP 0
@@ -283,6 +341,38 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
     // Minimize to tray: compact bar at bottom so user can browse while uploads run in background
     const [isMinimized, setIsMinimized] = useState(false)
     const autoFinalizeTriggeredRef = useRef(false)
+
+    const handleMinimize = useCallback(() => {
+        try {
+            if (typeof sessionStorage !== 'undefined') {
+                sessionStorage.setItem(UPLOAD_DIALOG_MINIMIZED_KEY, '1')
+            }
+        } catch (_) {
+            /* ignore quota / private mode */
+        }
+        setIsMinimized(true)
+    }, [])
+
+    const handleExpandFromTray = useCallback(() => {
+        try {
+            if (typeof sessionStorage !== 'undefined') {
+                sessionStorage.removeItem(UPLOAD_DIALOG_MINIMIZED_KEY)
+            }
+        } catch (_) {
+            /* ignore */
+        }
+        setIsMinimized(false)
+    }, [])
+
+    useEffect(() => {
+        try {
+            if (typeof sessionStorage !== 'undefined' && sessionStorage.getItem(UPLOAD_DIALOG_MINIMIZED_KEY) === '1') {
+                setIsMinimized(true)
+            }
+        } catch (_) {
+            /* ignore */
+        }
+    }, [])
     
     // TASK 1: Track approval info from finalize response (UI-only, read-only)
     const [approvalInfo, setApprovalInfo] = useState({ approvalRequired: false, pendingMetadataCount: 0 })
@@ -3800,6 +3890,14 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
         setGlobalMetadataDraft({}) // Reset global metadata
         // FINAL FIX: Clear mapping when resetting state
         v2ToUploadManagerMapRef.current.clear()
+        try {
+            if (typeof sessionStorage !== 'undefined') {
+                sessionStorage.removeItem(UPLOAD_DIALOG_MINIMIZED_KEY)
+            }
+        } catch (_) {
+            /* ignore */
+        }
+        setIsMinimized(false)
         // Note: batchStatus is now computed from v2Files, will be 'idle' when v2Files is empty
     }, [initialCategoryId])
 
@@ -3831,9 +3929,13 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
         }
 
         // FINAL FIX: Use derived state directly from v2Files (not batchStatus)
-        // This ensures we read committed state, not stale state
         const finalizedCount = v2Files.filter((f) => f.status === 'finalized').length
         const failedCount = v2Files.filter((f) => f.status === 'failed').length
+        const activeV2Files = v2Files.filter((f) => f.status !== 'cancelled')
+        const allFinalizedOk =
+            activeV2Files.length > 0 &&
+            failedCount === 0 &&
+            activeV2Files.every((f) => f.status === 'finalized')
 
         // CRITICAL: Reset auto-closed flag if there are failures (allow user to retry)
         if (failedCount > 0) {
@@ -3842,36 +3944,15 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
         }
 
         if (finalizedCount === 0) {
-            // Conditions not met - don't auto-close
             return
         }
 
-        // FINAL FIX: Mark as auto-closed BEFORE setting timeout to prevent double execution
-        autoClosedRef.current = true
-
-        // Delay 400-700ms for perceived completion
-        const delay = 400 + Math.random() * 300 // 400-700ms
-        const timeoutId = setTimeout(() => {
-            // Trigger refresh callback if provided (e.g., to refresh asset grid)
-            if (onFinalizeComplete) {
-                try {
-                    onFinalizeComplete()
-                } catch (error) {
-                    console.error('[AUTO_CLOSE_V2] Error calling onFinalizeComplete:', error)
-                }
-            }
-            
-            resetV2State()
-            onClose()
-        }, delay)
-
-        return () => {
-            // CRITICAL FIX: Only clear timeout if we haven't already marked as auto-closed
-            // If autoClosedRef is true, the timeout is about to fire - don't clear it
-            if (!autoClosedRef.current) {
-                clearTimeout(timeoutId)
-            }
+        // Full success: success overlay + explicit actions (View assets / Upload more) replace auto-close
+        if (allFinalizedOk) {
+            return
         }
+
+        // Other in-progress or mixed states: do not auto-close from this effect
     }, [v2Files, uploadManagerStateVersion, open, onClose, resetV2State, onFinalizeComplete])
 
     // CLEAN UPLOADER V2: Helper function to update title in v2Files
@@ -4076,18 +4157,79 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
     const hasFiles = v2UploadManager.hasItems
     const hasUploadingItems = v2Files.some(f => f.status === 'uploading')
 
+    const hasActiveUploads = useMemo(
+        () =>
+            hasUploadingItems ||
+            batchStatus === 'finalizing' ||
+            batchStatus === 'uploading',
+        [hasUploadingItems, batchStatus]
+    )
+
+    // Include `complete`: batchStatus uses that when all bytes are uploaded (and when all finalized);
+    // exclude finalize success overlay so we do not offer “background” after the batch is done.
+    const canMinimize = useMemo(
+        () =>
+            hasFiles &&
+            !isFinalizeSuccess &&
+            (hasUploadingItems ||
+                batchStatus === 'ready' ||
+                batchStatus === 'partial_success' ||
+                batchStatus === 'uploading' ||
+                batchStatus === 'finalizing' ||
+                batchStatus === 'complete'),
+        [hasFiles, hasUploadingItems, batchStatus, isFinalizeSuccess]
+    )
+
     // Warn before closing tab/browser when uploads are in progress
     useEffect(() => {
-        const shouldWarn = hasFiles && (hasUploadingItems || batchStatus === 'finalizing')
         const handler = (e) => {
-            if (shouldWarn) {
+            if (hasActiveUploads) {
                 e.preventDefault()
                 e.returnValue = ''
             }
         }
         window.addEventListener('beforeunload', handler)
         return () => window.removeEventListener('beforeunload', handler)
-    }, [hasFiles, hasUploadingItems, batchStatus])
+    }, [hasActiveUploads])
+
+    const floatingTrayUploads = useMemo(
+        () =>
+            v2UploadManager.items.map((item) => ({
+                id: item.clientId,
+                name: item.originalFilename || item.file?.name || 'File',
+                progress:
+                    item.uploadStatus === 'complete'
+                        ? 100
+                        : Math.min(100, Math.round(Number(item.progress) || 0)),
+            })),
+        [v2UploadManager.items]
+    )
+
+    const handleSuccessViewAssets = useCallback(() => {
+        try {
+            if (onFinalizeComplete) {
+                onFinalizeComplete()
+            } else {
+                resetV2State()
+                setIsFinalizeSuccess(false)
+                onClose()
+                router.visit(defaultAssetType === 'asset' ? '/app/assets' : '/app/executions')
+            }
+        } catch (error) {
+            console.error('[UploadAssetDialog] View assets after success:', error)
+        }
+    }, [onFinalizeComplete, resetV2State, onClose, defaultAssetType])
+
+    const handleSuccessUploadMore = useCallback(() => {
+        try {
+            router.reload({ preserveScroll: true, preserveState: true })
+        } catch (error) {
+            console.error('[UploadAssetDialog] Upload more refresh:', error)
+        }
+        autoClosedRef.current = false
+        setIsFinalizeSuccess(false)
+        resetV2State()
+    }, [resetV2State])
 
     // Auto-finalize when minimized and all uploads complete (no errors, metadata valid)
     useEffect(() => {
@@ -4117,59 +4259,62 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
     return (
         <>
         {isMinimized ? (
-            /* Minimized tray — compact bar at bottom, user can browse while uploads run */
             <div
                 data-upload-dialog-root
                 className="fixed bottom-4 right-4 z-50"
                 role="dialog"
                 aria-label="Upload progress"
             >
-                <div
-                    className="flex items-center gap-4 rounded-lg border border-gray-200 bg-white px-4 py-3 shadow-lg"
-                    style={{ minWidth: '320px' }}
-                >
-                    <button
-                        type="button"
-                        onClick={() => setIsMinimized(false)}
-                        className="flex items-center gap-2 text-left flex-1 min-w-0"
-                        title="Expand to view and edit files"
+                {floatingTrayUploads.length > 0 ? (
+                    <FloatingUploadProgressTray
+                        uploads={floatingTrayUploads}
+                        onExpand={handleExpandFromTray}
                     >
-                        <ChevronUpIcon className="h-5 w-5 text-gray-500 flex-shrink-0" />
-                        <div className="min-w-0">
-                            {batchStatus === 'finalizing' ? (
-                                <span className="text-sm font-medium text-gray-900">Finalizing uploads…</span>
-                            ) : batchStatus === 'ready' ? (
-                                <span className="text-sm font-medium text-green-600">Ready to finalize ({trayCompleted} / {trayTotal})</span>
-                            ) : batchStatus === 'partial_success' ? (
-                                <span className="text-sm font-medium text-amber-600">{trayCompleted} succeeded, {trayFailed} failed</span>
-                            ) : (
-                                <span className="text-sm font-medium text-gray-900">
-                                    {hasUploadingItems ? 'Uploading…' : ''} {trayCompleted} / {trayTotal} uploads
-                                </span>
-                            )}
+                        <MinimizedTrayFooter
+                            batchStatus={batchStatus}
+                            trayCompleted={trayCompleted}
+                            trayTotal={trayTotal}
+                            trayFailed={trayFailed}
+                            hasUploadingItems={hasUploadingItems}
+                            canFinalizeV2={canFinalizeV2}
+                            isFinalizeSuccess={isFinalizeSuccess}
+                            brandPrimary={brandPrimary}
+                            onFinalize={handleFinalizeV2}
+                            onCloseTray={() => {
+                                resetV2State()
+                                onClose()
+                            }}
+                        />
+                    </FloatingUploadProgressTray>
+                ) : (
+                    <div className="flex w-80 flex-col gap-3 rounded-xl border border-gray-200 bg-white p-4 shadow-xl">
+                        <div className="flex items-center justify-between gap-2">
+                            <p className="text-sm font-medium text-gray-900">Uploads</p>
+                            <button
+                                type="button"
+                                onClick={handleExpandFromTray}
+                                className="text-xs font-medium text-primary hover:underline"
+                            >
+                                Expand
+                            </button>
                         </div>
-                    </button>
-                    {canFinalizeV2 && batchStatus !== 'finalizing' && !isFinalizeSuccess && (
-                        <button
-                            type="button"
-                            onClick={handleFinalizeV2}
-                            className="rounded-md px-3 py-1.5 text-sm font-medium text-white flex-shrink-0"
-                            style={{ backgroundColor: brandPrimary }}
-                        >
-                            Finalize now
-                        </button>
-                    )}
-                    {!hasUploadingItems && batchStatus !== 'finalizing' && (
-                        <button
-                            type="button"
-                            onClick={() => { resetV2State(); onClose() }}
-                            className="rounded-md p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100"
-                            title="Close"
-                        >
-                            <XMarkIcon className="h-5 w-5" />
-                        </button>
-                    )}
-                </div>
+                        <MinimizedTrayFooter
+                            batchStatus={batchStatus}
+                            trayCompleted={trayCompleted}
+                            trayTotal={trayTotal}
+                            trayFailed={trayFailed}
+                            hasUploadingItems={hasUploadingItems}
+                            canFinalizeV2={canFinalizeV2}
+                            isFinalizeSuccess={isFinalizeSuccess}
+                            brandPrimary={brandPrimary}
+                            onFinalize={handleFinalizeV2}
+                            onCloseTray={() => {
+                                resetV2State()
+                                onClose()
+                            }}
+                        />
+                    </div>
+                )}
             </div>
         ) : (
         <div
@@ -4195,12 +4340,12 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                                 Add {defaultAssetType === 'asset' ? 'Asset' : DELIVERABLES_PAGE_LABEL_SINGULAR}
                             </h3>
                             <div className="flex items-center gap-2">
-                                {hasFiles && (hasUploadingItems || batchStatus === 'ready' || batchStatus === 'partial_success' || batchStatus === 'uploading') && (
+                                {canMinimize && (
                                     <button
                                         type="button"
-                                        onClick={() => setIsMinimized(true)}
+                                        onClick={handleMinimize}
                                         className="rounded-md p-1.5 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
-                                        title="Minimize to tray — continue browsing while uploads run"
+                                        title="Continue in background — browse while uploads run"
                                     >
                                         <ChevronRightIcon className="h-5 w-5" />
                                     </button>
@@ -4242,20 +4387,31 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                                     onDragLeave={isFinalizeSuccess ? undefined : handleDragLeave}
                                     onDragOver={isFinalizeSuccess ? undefined : handleDragOver}
                                     onDrop={isFinalizeSuccess ? undefined : handleDrop}
-                                    className={`border-2 border-dashed rounded-lg text-center transition-colors p-6 ${
+                                    className={cn(
+                                        'relative rounded-2xl border border-dashed text-center transition-all duration-200 p-10',
                                         isFinalizeSuccess
                                             ? 'border-gray-200 bg-gray-50 cursor-not-allowed opacity-50'
                                             : isDragging
-                                                ? 'border-indigo-500 bg-indigo-50 cursor-pointer'
-                                                : 'border-gray-300 hover:border-gray-400 cursor-pointer'
-                                    }`}
+                                                ? 'border-indigo-500 bg-gradient-to-b from-indigo-50 to-white cursor-pointer shadow-lg'
+                                                : 'border-gray-300 bg-gradient-to-b from-gray-50 to-white hover:border-gray-400 hover:shadow-lg cursor-pointer'
+                                    )}
                                     onClick={isFinalizeSuccess ? undefined : () => fileInputRef.current?.click()}
                                 >
-                                    <CloudArrowUpIcon className="mx-auto h-12 w-12 text-gray-400" />
-                                    <p className="mt-2 text-sm text-gray-600">
-                                        {isDragging
-                                            ? 'Drop files here'
-                                            : 'Drag and drop files here, or click to select'}
+                                    <div className="pointer-events-none flex flex-col items-center gap-4">
+                                        <div className="flex h-14 w-14 items-center justify-center rounded-full bg-primary/10">
+                                            <ArrowUpTrayIcon className="h-6 w-6 text-primary" aria-hidden />
+                                        </div>
+                                        <div>
+                                            <h3 className="text-lg font-semibold text-gray-900">
+                                                Upload your assets
+                                            </h3>
+                                            <p className="text-sm text-gray-500">
+                                                Drag &amp; drop or select files to start organizing your content
+                                            </p>
+                                        </div>
+                                    </div>
+                                    <p className="pointer-events-none mt-4 text-xs text-gray-400">
+                                        Supports JPG, PNG, MP4, PSD
                                     </p>
                                     <input
                                         ref={fileInputRef}
@@ -4278,13 +4434,14 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                                     onDragLeave={isFinalizeSuccess ? undefined : handleDragLeave}
                                     onDragOver={isFinalizeSuccess ? undefined : handleDragOver}
                                     onDrop={isFinalizeSuccess ? undefined : handleDrop}
-                                    className={`border-2 border-dashed rounded-lg text-center transition-colors p-3 border-gray-300 bg-gray-50 ${
+                                    className={cn(
+                                        'relative rounded-2xl border border-dashed text-center transition-all duration-200 p-4',
                                         isFinalizeSuccess
-                                            ? 'cursor-not-allowed opacity-50'
+                                            ? 'cursor-not-allowed border-gray-200 bg-gray-50 opacity-50'
                                             : isDragging
-                                                ? 'border-indigo-400 bg-indigo-50 cursor-pointer hover:bg-gray-100'
-                                                : 'cursor-pointer hover:bg-gray-100'
-                                    }`}
+                                                ? 'cursor-pointer border-indigo-400 bg-gradient-to-b from-indigo-50 to-white shadow-md'
+                                                : 'cursor-pointer border-gray-300 bg-gradient-to-b from-gray-50 to-white hover:border-gray-400 hover:shadow-md'
+                                    )}
                                     onClick={isFinalizeSuccess ? undefined : () => fileInputRef.current?.click()}
                                 >
                                         <p className="text-sm text-gray-600">
@@ -4368,7 +4525,7 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
 
                                 {/* Dynamic Metadata Fields (Creative, General, Legal/Rights) — below uploads */}
                                 {selectedCategoryId && (
-                                    <div>
+                                    <div className="space-y-6">
                                             {isLoadingMetadataSchema ? (
                                                 <div className="text-center py-4">
                                                     <ArrowPathIcon className="h-5 w-5 text-gray-400 animate-spin mx-auto" />
@@ -4418,21 +4575,16 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                         <div className="mt-6">
                             {/* CLEAN UPLOADER V2 — Warnings for missing required fields */}
                             {v2Files.length > 0 && v2Warnings.length > 0 && (
-                                <div className="mb-4 rounded-md bg-yellow-50 border border-yellow-200 p-3">
-                                    <div className="flex">
-                                        <div className="flex-shrink-0">
-                                            <svg className="h-5 w-5 text-yellow-400" viewBox="0 0 20 20" fill="currentColor">
-                                                <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
-                                            </svg>
+                                <div className="mb-4 space-y-2">
+                                    {v2Warnings.map((warning, index) => (
+                                        <div
+                                            key={index}
+                                            className="flex items-center gap-2 rounded-lg border border-yellow-300 bg-yellow-50 px-3 py-2 text-sm text-yellow-800"
+                                        >
+                                            <ExclamationTriangleIcon className="h-4 w-4 shrink-0" aria-hidden />
+                                            <span>{warning}</span>
                                         </div>
-                                        <div className="ml-3">
-                                            <div className="text-sm text-yellow-800">
-                                                {v2Warnings.map((warning, index) => (
-                                                    <p key={index}>{warning}</p>
-                                                ))}
-                                            </div>
-                                        </div>
-                                    </div>
+                                    ))}
                                 </div>
                             )}
 
@@ -4451,7 +4603,7 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                                 <div className="mb-4 rounded-xl border border-gray-100 bg-white shadow-sm overflow-hidden">
                                     <div className="px-3 py-2 border-b border-gray-100 bg-gradient-to-r from-gray-50/90 to-white">
                                         <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                                            AI processing
+                                            Enhancements (after upload)
                                         </h4>
                                         <p className="text-[11px] text-gray-400 mt-0.5 leading-snug">
                                             Runs after finalize. Tag and field suggestions are independent — you can use one, both, or neither.
@@ -4608,16 +4760,14 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                                     </div>
                                 ) : null}
                                 
-                                {/* Minimize to tray — continue browsing while uploads run */}
-                                {hasFiles && (hasUploadingItems || batchStatus === 'ready' || batchStatus === 'partial_success' || batchStatus === 'uploading') && (
+                                {canMinimize && (
                                     <button
                                         type="button"
-                                        onClick={() => setIsMinimized(true)}
-                                        className="rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 flex items-center gap-1.5"
-                                        title="Minimize to tray — continue browsing while uploads run"
+                                        onClick={handleMinimize}
+                                        className="text-sm text-gray-500 hover:text-gray-700"
+                                        title="Continue in background — browse while uploads run"
                                     >
-                                        <ChevronDownIcon className="h-4 w-4" />
-                                        Minimize
+                                        Continue in background
                                     </button>
                                 )}
                                 
@@ -4677,15 +4827,34 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                     
                     {/* Success overlay - shown after finalize succeeds, before auto-close */}
                     {isFinalizeSuccess && (
-                        <div className="absolute inset-0 bg-white bg-opacity-95 flex items-center justify-center z-50 rounded-lg">
-                            <div className="text-center">
-                                <CheckCircleIcon className="mx-auto h-16 w-16 text-green-500 mb-4" />
-                                <h3 className="text-lg font-semibold text-gray-900 mb-2">
-                                    Assets created successfully!
-                                </h3>
-                                <p className="text-sm text-gray-600">
-                                    The dialog will close automatically...
+                        <div className="absolute inset-0 z-50 flex items-center justify-center rounded-lg bg-white/95 px-4">
+                            <div className="flex max-w-md flex-col items-center justify-center py-10 text-center">
+                                <div className="mb-4 rounded-full bg-green-100 p-3">
+                                    <CheckIcon className="h-6 w-6 text-green-600" aria-hidden />
+                                </div>
+                                <h3 className="text-lg font-semibold text-gray-900">Upload complete</h3>
+                                <p className="mt-1 text-sm text-gray-500">
+                                    Your assets are ready. AI enhancements will continue in the background.
                                 </p>
+                                <div className="mt-6 flex flex-wrap justify-center gap-3">
+                                    <button
+                                        type="button"
+                                        onClick={handleSuccessViewAssets}
+                                        className="rounded-md px-4 py-2 text-sm font-medium text-white hover:opacity-90"
+                                        style={{ backgroundColor: brandPrimary }}
+                                    >
+                                        {defaultAssetType === 'asset'
+                                            ? 'View assets'
+                                            : `View ${DELIVERABLES_PAGE_LABEL}`}
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={handleSuccessUploadMore}
+                                        className="rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                                    >
+                                        Upload more
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     )}

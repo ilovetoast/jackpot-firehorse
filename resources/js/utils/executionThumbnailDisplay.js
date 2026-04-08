@@ -20,13 +20,13 @@ function executionGridUrlForTier(asset, tier, style) {
         return getThumbnailUrl(asset, style, 'original')
     }
     if (tier === 'enhanced') {
-        const p = getThumbnailUrlModeOnly(asset, style, 'preferred')
-        if (p) {
-            return p
-        }
         const e = getThumbnailUrlModeOnly(asset, style, 'enhanced')
         if (e) {
             return e
+        }
+        const p = getThumbnailUrlModeOnly(asset, style, 'preferred')
+        if (p) {
+            return p
         }
         return getThumbnailUrl(asset, style, 'original')
     }

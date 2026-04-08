@@ -695,7 +695,13 @@ export default function ManageFieldsWorkspace({
                     </h3>
                     <p className="mt-1 text-sm text-gray-500">
                         Turn fields on or off for this folder. Expand a row to tune upload, quick view, filters, and
-                        more.
+                        more.{' '}
+                        <span className="text-gray-700">
+                            Each switch saves immediately—a brief message appears above when it succeeds.
+                        </span>{' '}
+                        Use <span className="font-medium text-gray-800">Field definition</span> or{' '}
+                        <span className="font-medium text-gray-800">Edit</span> for label and option changes; those
+                        screens have a Save button.
                     </p>
                 </div>
                 {canManageFields && (

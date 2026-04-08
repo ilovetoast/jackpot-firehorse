@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Admin;
 
+use App\Assets\Metadata\EmbeddedMetadataDebugPayload;
 use App\Enums\AssetStatus;
 use App\Enums\AssetType;
 use App\Enums\EventType;
@@ -21,7 +22,6 @@ use App\Models\Composition;
 use App\Models\SystemIncident;
 use App\Models\Tenant;
 use App\Services\Assets\AssetStateReconciliationService;
-use App\Assets\Metadata\EmbeddedMetadataDebugPayload;
 use App\Services\AssetUrlService;
 use App\Services\Reliability\ReliabilityEngine;
 use App\Services\SystemIncidentRecoveryService;
@@ -1414,17 +1414,23 @@ class AdminAssetController extends Controller
     }
 
     /**
-     * URLs for viewing thumb, medium, large thumbnails in new window (admin only).
-     * Only includes styles that exist when thumbnail_status is completed.
+     * URLs for viewing thumbnails in a new window (admin only): original-mode styles plus per-pipeline medium when present.
      */
     protected function adminThumbnailViewUrls(Asset $asset): array
     {
         $urls = [];
 
-        foreach (['thumb', 'medium', 'large'] as $style) {
+        foreach (['preview', 'thumb', 'medium', 'large'] as $style) {
             $url = $this->assetUrlService->getAdminThumbnailUrlForStyle($asset, $style);
             if ($url) {
                 $urls[$style] = $url;
+            }
+        }
+
+        foreach (['preferred', 'enhanced', 'presentation'] as $mode) {
+            $url = $this->assetUrlService->getAdminThumbnailUrlForStyleAndMode($asset, 'medium', $mode);
+            if ($url) {
+                $urls[$mode.'_medium'] = $url;
             }
         }
 

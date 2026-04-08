@@ -25,6 +25,16 @@ import {
 } from '@heroicons/react/24/outline'
 import { getPipelineStageTooltip } from '../../utils/pipelineStatusUtils'
 
+const ADMIN_THUMBNAIL_VIEW_LINK_ORDER = [
+    ['preview', 'Preview'],
+    ['thumb', 'Thumb'],
+    ['medium', 'Medium'],
+    ['large', 'Large'],
+    ['preferred_medium', 'Preferred · medium'],
+    ['enhanced_medium', 'Enhanced · medium'],
+    ['presentation_medium', 'Presentation · medium'],
+]
+
 // Pipeline flags: 'good' = green when value matches expected, 'bad' = red when value is problematic, 'invert' = good when false
 const PIPELINE_FLAG_SEMANTICS = {
     visible_in_grid: 'good',         // true = good
@@ -429,16 +439,16 @@ export default function AssetDetailModal({ data, onClose, onAction, onRefresh, s
                             {asset?.thumbnail_view_urls && Object.keys(asset.thumbnail_view_urls).length > 0 && (
                                 <div className="flex flex-wrap gap-3 text-sm">
                                     <span className="text-slate-500">View in new window:</span>
-                                    {['thumb', 'medium', 'large'].map((style) =>
-                                        asset.thumbnail_view_urls[style] ? (
+                                    {ADMIN_THUMBNAIL_VIEW_LINK_ORDER.map(([key, label]) =>
+                                        asset.thumbnail_view_urls[key] ? (
                                             <a
-                                                key={style}
-                                                href={asset.thumbnail_view_urls[style]}
+                                                key={key}
+                                                href={asset.thumbnail_view_urls[key]}
                                                 target="_blank"
                                                 rel="noopener noreferrer"
-                                                className="text-indigo-600 hover:text-indigo-800 hover:underline capitalize"
+                                                className="text-indigo-600 hover:text-indigo-800 hover:underline"
                                             >
-                                                {style}
+                                                {label}
                                             </a>
                                         ) : null
                                     )}
