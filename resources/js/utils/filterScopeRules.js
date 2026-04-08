@@ -55,6 +55,33 @@ export const LIBRARY_TECHNICAL_FILTER_KEYS_ALWAYS_SHOWN = new Set([
     'dominant_hue_group',
 ]);
 
+/** Values from metadata `applies_to` / filter `asset_types` (not organizational grid `asset` / `deliverable`). */
+export const METADATA_FILE_TYPE_KINDS = new Set(['image', 'video', 'document']);
+
+/** Library grid modes that may contain mixed file kinds; metadata filters scoped only to file kinds stay visible. */
+export const LIBRARY_ORGANIZATIONAL_ASSET_TYPES = new Set(['asset', 'deliverable']);
+
+/**
+ * Choose `asset_type` for filter scope checks: honor `file_type` query when set to a file kind, else config.
+ *
+ * @param {string|null|undefined} urlFileType - `file_type` query (e.g. image, video, document, all)
+ * @param {string} [normalizedAssetType='asset'] - From normalizeFilterConfig / props
+ * @returns {string}
+ */
+export function resolveVisibilityAssetType(urlFileType, normalizedAssetType = 'asset') {
+    const raw = urlFileType != null && String(urlFileType).trim() !== '' && String(urlFileType).toLowerCase() !== 'all'
+        ? String(urlFileType).trim().toLowerCase()
+        : '';
+    if (raw && METADATA_FILE_TYPE_KINDS.has(raw)) {
+        return raw;
+    }
+    const norm = normalizedAssetType && typeof normalizedAssetType === 'string' ? normalizedAssetType : 'asset';
+    if (METADATA_FILE_TYPE_KINDS.has(norm)) {
+        return norm;
+    }
+    return norm;
+}
+
 /**
  * Filter descriptor (from FilterDescriptor contract)
  * 
@@ -280,7 +307,16 @@ export function isAssetTypeCompatible(filter, asset_type) {
     if (filter.asset_types.length === 0) {
         return false;
     }
-    
+
+    // Organizational library views (`asset`, `deliverable`) are not file kinds; metadata uses image/video/document.
+    // When not narrowed by URL `file_type`, show filters scoped only to those kinds (mixed grids).
+    if (LIBRARY_ORGANIZATIONAL_ASSET_TYPES.has(asset_type)) {
+        const scopedOnlyToFileKinds = filter.asset_types.every((t) => METADATA_FILE_TYPE_KINDS.has(t));
+        if (scopedOnlyToFileKinds) {
+            return true;
+        }
+    }
+
     // Check if asset_type is included in filter.asset_types
     return filter.asset_types.includes(asset_type);
 }

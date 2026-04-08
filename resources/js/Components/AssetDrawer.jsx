@@ -44,7 +44,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense } from 'react'
 import { createPortal } from 'react-dom'
-import { XMarkIcon, ArrowPathIcon, ChevronLeftIcon, ChevronRightIcon, ChevronDownIcon, ExclamationTriangleIcon, EyeIcon, ArrowDownTrayIcon, CheckCircleIcon, CheckIcon, ArrowUturnLeftIcon, ClockIcon, XCircleIcon, CloudArrowUpIcon, RectangleStackIcon, TicketIcon, InformationCircleIcon, PhotoIcon } from '@heroicons/react/24/outline'
+import { XMarkIcon, ArrowPathIcon, ChevronLeftIcon, ChevronRightIcon, ChevronDownIcon, ExclamationTriangleIcon, EyeIcon, ArrowDownTrayIcon, CheckCircleIcon, CheckIcon, ArrowUturnLeftIcon, ClockIcon, XCircleIcon, CloudArrowUpIcon, RectangleStackIcon, TicketIcon, InformationCircleIcon, PhotoIcon, SpeakerWaveIcon, SpeakerXMarkIcon } from '@heroicons/react/24/outline'
 import { usePage, router, Link } from '@inertiajs/react'
 import AssetImage from './AssetImage'
 import AssetTimeline from './AssetTimeline'
@@ -843,6 +843,7 @@ export default function AssetDrawer({
     const [isHoveringVideo, setIsHoveringVideo] = useState(false)
     const [videoPreviewLoaded, setVideoPreviewLoaded] = useState(false)
     const [videoPreviewFailed, setVideoPreviewFailed] = useState(false)
+    const [videoPreviewAudioOn, setVideoPreviewAudioOn] = useState(false)
     const videoPreviewRef = useRef(null)
     const isMobile = typeof window !== 'undefined' ? window.innerWidth < 768 : false
     const [pdfCurrentPage, setPdfCurrentPage] = useState(1)
@@ -2650,7 +2651,24 @@ export default function AssetDrawer({
                 <div className="space-y-3">                    
                     
                     {/* Phase 3.0C: Thumbnail preview with state machine and fade-in — responsive width */}
-                    <div className="w-full max-w-full min-w-0 bg-gray-50 rounded-lg overflow-hidden border border-gray-200 relative aspect-video">
+                    <div
+                        className={`w-full max-w-full min-w-0 bg-gray-50 rounded-lg overflow-hidden border border-gray-200 relative ${
+                            isVideo &&
+                            Number(displayAsset?.video_width) > 0 &&
+                            Number(displayAsset?.video_height) > 0
+                                ? ''
+                                : 'aspect-video'
+                        }`}
+                        style={
+                            isVideo &&
+                            Number(displayAsset?.video_width) > 0 &&
+                            Number(displayAsset?.video_height) > 0
+                                ? {
+                                      aspectRatio: `${Number(displayAsset.video_width)} / ${Number(displayAsset.video_height)}`,
+                                  }
+                                : undefined
+                        }
+                    >
                         {ebiEnabledForAsset && displayAsset?.brand_intelligence && (
                             <button
                                 type="button"
@@ -2743,6 +2761,7 @@ export default function AssetDrawer({
                                     onMouseLeave={() => {
                                         setIsHoveringVideo(false)
                                         setVideoPreviewFailed(false)
+                                        setVideoPreviewAudioOn(false)
                                         // Pause and reset video on mouse leave
                                         if (videoPreviewRef.current) {
                                             videoPreviewRef.current.pause()
@@ -2751,30 +2770,58 @@ export default function AssetDrawer({
                                         setVideoPreviewLoaded(false)
                                     }}
                                 >
-                                    {/* Hover video preview (auto-play loop, no controls, no audio) */}
+                                    {/* Hover preview: native aspect box, cover crop, optional audio (click speaker) */}
                                     {isHoveringVideo && displayAsset.video_preview_url && !isMobile && !videoPreviewFailed && (
                                         <div className="absolute inset-0 z-10 flex items-center justify-center bg-black">
-                                            <video
-                                                ref={videoPreviewRef}
-                                                src={displayAsset.video_preview_url}
-                                                className="max-h-full max-w-full object-contain"
-                                                autoPlay
-                                                muted
-                                                loop
-                                                playsInline
-                                                onLoadedData={() => setVideoPreviewLoaded(true)}
-                                                onError={() => setVideoPreviewFailed(true)}
-                                                style={{
-                                                    ...(Number(displayAsset.video_width) > 0 &&
-                                                    Number(displayAsset.video_height) > 0
-                                                        ? {
-                                                              aspectRatio: `${Number(displayAsset.video_width)} / ${Number(displayAsset.video_height)}`,
-                                                          }
-                                                        : {}),
-                                                    opacity: videoPreviewLoaded ? 1 : 0,
-                                                    transition: 'opacity 0.2s',
-                                                }}
-                                            />
+                                            {(() => {
+                                                const vw = Number(displayAsset.video_width)
+                                                const vh = Number(displayAsset.video_height)
+                                                const hasDims = vw > 0 && vh > 0
+                                                const landscape = !hasDims || vw >= vh
+                                                return (
+                                                    <div
+                                                        className={`relative z-10 overflow-hidden ${
+                                                            landscape ? 'h-auto w-full max-h-full' : 'h-full w-auto max-w-full'
+                                                        }`}
+                                                        style={{
+                                                            aspectRatio: hasDims ? `${vw} / ${vh}` : '16 / 9',
+                                                        }}
+                                                    >
+                                                        <video
+                                                            ref={videoPreviewRef}
+                                                            src={displayAsset.video_preview_url}
+                                                            className="h-full w-full object-cover"
+                                                            autoPlay
+                                                            muted={!videoPreviewAudioOn}
+                                                            loop
+                                                            playsInline
+                                                            onLoadedData={() => setVideoPreviewLoaded(true)}
+                                                            onError={() => setVideoPreviewFailed(true)}
+                                                            style={{
+                                                                opacity: videoPreviewLoaded ? 1 : 0,
+                                                                transition: 'opacity 0.2s',
+                                                            }}
+                                                        />
+                                                        <button
+                                                            type="button"
+                                                            className="absolute bottom-2 right-2 z-30 flex h-8 w-8 items-center justify-center rounded-full bg-black/65 text-white shadow-sm backdrop-blur-sm pointer-events-auto hover:bg-black/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/80"
+                                                            aria-label={videoPreviewAudioOn ? 'Mute preview' : 'Unmute preview'}
+                                                            aria-pressed={videoPreviewAudioOn}
+                                                            onClick={(e) => {
+                                                                e.stopPropagation()
+                                                                e.preventDefault()
+                                                                setVideoPreviewAudioOn((v) => !v)
+                                                            }}
+                                                        >
+                                                            {videoPreviewAudioOn ? (
+                                                                <SpeakerWaveIcon className="h-4 w-4" aria-hidden />
+                                                            ) : (
+                                                                <SpeakerXMarkIcon className="h-4 w-4" aria-hidden />
+                                                            )}
+                                                        </button>
+                                                    </div>
+                                                )
+                                            })()}
                                         </div>
                                     )}
                                     

@@ -27,6 +27,7 @@
  * @param {React.ReactNode} props.moreFiltersContent - Optional more filters section content
  * @param {boolean} props.showMoreFilters - Whether to show the more filters section
  * @param {React.ReactNode} props.beforeSearchSlot - Optional controls rendered before the search field (e.g. collections type/category)
+ * @param {string} [props.primaryMetadataFiltersAssetType='image'] - Inline primary metadata filters: use `deliverable` on Deliverables.
  */
 import { useState, useEffect, useRef, useCallback, useMemo, cloneElement, isValidElement } from 'react'
 import { usePage, router } from '@inertiajs/react'
@@ -78,6 +79,7 @@ export default function AssetGridToolbar({
     clearFiltersInertiaOnly = null,
     /** Preserve these query keys when primary metadata filters rebuild the URL (Collections: `collection`, etc.). */
     filterUrlNavigationKeys = [],
+    primaryMetadataFiltersAssetType = 'image',
     /** Deliverables: grid thumbnail mode — 'standard' | 'enhanced' | 'presentation' */
     executionThumbnailViewMode = null,
     onExecutionThumbnailViewModeChange = null,
@@ -582,7 +584,7 @@ export default function AssetGridToolbar({
                                         filterable_schema={filterable_schema}
                                         selectedCategoryId={selectedCategoryId}
                                         available_values={available_values}
-                                        assetType="image"
+                                        assetType={primaryMetadataFiltersAssetType}
                                         compact={true}
                                         primaryColor={primaryColor}
                                         filterUrlNavigationKeys={filterUrlNavigationKeys}

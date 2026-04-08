@@ -15,7 +15,7 @@
 import { useMemo, useState, useEffect, useRef } from 'react'
 import { usePage } from '@inertiajs/react'
 import { useSelectionOptional } from '../contexts/SelectionContext'
-import { TrashIcon } from '@heroicons/react/24/outline'
+import { TrashIcon, SpeakerWaveIcon, SpeakerXMarkIcon } from '@heroicons/react/24/outline'
 import { StarIcon } from '@heroicons/react/24/solid'
 import ThumbnailPreview from './ThumbnailPreview'
 import { isImageLikeForAssetCard } from '../utils/damFileTypes'
@@ -171,6 +171,8 @@ export default function AssetCard({
     const [executionThumbHover, setExecutionThumbHover] = useState(false)
     /** Hover preview URL failed (e.g. unsupported format) — keep showing poster */
     const [videoPreviewFailed, setVideoPreviewFailed] = useState(false)
+    /** Unmute requires a click (browser policy); reset when hover ends */
+    const [videoPreviewAudioOn, setVideoPreviewAudioOn] = useState(false)
     const videoPreviewRef = useRef(null)
     const isMobile = typeof window !== 'undefined' ? window.innerWidth < 768 : false
     /** Ignore synthetic click after a touch scroll/drag on the card */
@@ -549,6 +551,7 @@ export default function AssetCard({
                     setIsHovering(false)
                     setPreviewLoaded(false)
                     setVideoPreviewFailed(false)
+                    setVideoPreviewAudioOn(false)
                     setExecutionThumbHover(false)
                     // Pause and unload preview on mouse leave
                     if (videoPreviewRef.current) {
@@ -603,26 +606,55 @@ export default function AssetCard({
                         {/* Phase V-1: Video hover preview (desktop only, lazy load) */}
                         {isVideo && isHovering && asset.video_preview_url && !isMobile && !videoPreviewFailed && (
                             <div className="absolute inset-0 z-10 flex items-center justify-center bg-black">
-                                <video
-                                    ref={videoPreviewRef}
-                                    src={asset.video_preview_url}
-                                    className="max-h-full max-w-full object-contain"
-                                    autoPlay
-                                    muted
-                                    loop
-                                    playsInline
-                                    onLoadedData={() => setPreviewLoaded(true)}
-                                    onError={() => setVideoPreviewFailed(true)}
-                                    style={{
-                                        ...(Number(asset.video_width) > 0 && Number(asset.video_height) > 0
-                                            ? {
-                                                  aspectRatio: `${Number(asset.video_width)} / ${Number(asset.video_height)}`,
-                                              }
-                                            : {}),
-                                        opacity: previewLoaded ? 1 : 0,
-                                        transition: 'opacity 0.2s',
-                                    }}
-                                />
+                                {(() => {
+                                    const vw = Number(asset.video_width)
+                                    const vh = Number(asset.video_height)
+                                    const hasDims = vw > 0 && vh > 0
+                                    const landscape = !hasDims || vw >= vh
+                                    return (
+                                        <div
+                                            className={`relative z-10 overflow-hidden ${
+                                                landscape ? 'h-auto w-full max-h-full' : 'h-full w-auto max-w-full'
+                                            }`}
+                                            style={{
+                                                aspectRatio: hasDims ? `${vw} / ${vh}` : '16 / 9',
+                                            }}
+                                        >
+                                            <video
+                                                ref={videoPreviewRef}
+                                                src={asset.video_preview_url}
+                                                className="h-full w-full object-cover"
+                                                autoPlay
+                                                muted={!videoPreviewAudioOn}
+                                                loop
+                                                playsInline
+                                                onLoadedData={() => setPreviewLoaded(true)}
+                                                onError={() => setVideoPreviewFailed(true)}
+                                                style={{
+                                                    opacity: previewLoaded ? 1 : 0,
+                                                    transition: 'opacity 0.2s',
+                                                }}
+                                            />
+                                            <button
+                                                type="button"
+                                                className="absolute bottom-2 right-2 z-30 flex h-8 w-8 items-center justify-center rounded-full bg-black/65 text-white shadow-sm backdrop-blur-sm pointer-events-auto hover:bg-black/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/80"
+                                                aria-label={videoPreviewAudioOn ? 'Mute preview' : 'Unmute preview'}
+                                                aria-pressed={videoPreviewAudioOn}
+                                                onClick={(e) => {
+                                                    e.stopPropagation()
+                                                    e.preventDefault()
+                                                    setVideoPreviewAudioOn((v) => !v)
+                                                }}
+                                            >
+                                                {videoPreviewAudioOn ? (
+                                                    <SpeakerWaveIcon className="h-4 w-4" aria-hidden />
+                                                ) : (
+                                                    <SpeakerXMarkIcon className="h-4 w-4" aria-hidden />
+                                                )}
+                                            </button>
+                                        </div>
+                                    )
+                                })()}
                             </div>
                         )}
 

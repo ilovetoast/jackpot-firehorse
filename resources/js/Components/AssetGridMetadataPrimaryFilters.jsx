@@ -31,12 +31,11 @@
  * - Primary metadata filters are visible only if:
  *   1. Field has is_primary === true (explicit check, no fallthrough)
  *   2. Field is category-compatible (filterScopeRules.isFilterCompatible)
- *   3. Field is asset_type-compatible (filterScopeRules.isFilterCompatible)
- *   4. Field has available_values[field.key].length > 0 (primary filters require values)
+ *   3. Field is asset_type-compatible (URL `file_type` narrows image/video/document; library views use organizational types)
+ *   4. Field has facet values in available_values, except primary boolean toggles (always operable)
  * - Hidden otherwise (no disabled states)
  * 
- * NOTE: Primary filters require available_values because they're always visible inline.
- * If a primary filter has no values, it shouldn't be shown (empty dropdown is UX-hostile).
+ * NOTE: Non-toggle primary filters still require available_values so inline dropdowns are not empty.
  * 
  * FILTER ROUTING:
  * - PRIMARY filters: is_primary === true → rendered here
@@ -58,6 +57,7 @@ import { parseFiltersFromUrl, buildUrlParamsWithFlatFilters, normalizeFilterPara
 import { updateFilterDebug } from '../utils/assetFilterDebug'
 import { FilterFieldInput } from './FilterFieldInput'
 import { resolve, CONTEXT, WIDGET } from '../utils/widgetResolver'
+import { resolveVisibilityAssetType } from '../utils/filterScopeRules'
 import { XMarkIcon } from '@heroicons/react/24/outline'
 
 /**
@@ -83,7 +83,8 @@ export default function AssetGridMetadataPrimaryFilters({
     /** Same as AssetGridSecondaryFilters: URL keys that must survive filter rebuilds (e.g. Collections `collection`). */
     filterUrlNavigationKeys = [],
 }) {
-    const pageProps = usePage().props
+    const page = usePage()
+    const pageProps = page.props
     const { auth } = pageProps
     
     // Normalize filter config using existing helper
@@ -111,16 +112,17 @@ export default function AssetGridMetadataPrimaryFilters({
     // This filters out any primary filters that shouldn't be shown
     // Note: getPrimaryFilters returns FilterClassification objects with .field property
     const visibilityContext = useMemo(() => {
-        // Metadata filters use file type ('image', 'video', 'document') for asset_type compatibility
-        // The normalizedConfig.asset_type might be organizational ('asset', 'deliverable')
-        // For metadata field compatibility, we need to use 'image' as the file type
-        // since most assets are images and metadata schema is resolved with file type
+        let urlFileType = null
+        try {
+            const q = page.url?.includes?.('?') ? page.url.split('?')[1] : (typeof window !== 'undefined' ? window.location.search.slice(1) : '')
+            urlFileType = new URLSearchParams(q).get('file_type')
+        } catch { /* ignore */ }
         return {
             category_id: normalizedConfig.category_id,
-            asset_type: 'image', // Use file type for metadata filter compatibility
+            asset_type: resolveVisibilityAssetType(urlFileType, normalizedConfig.asset_type),
             available_values: normalizedConfig.available_values,
-        };
-    }, [normalizedConfig])
+        }
+    }, [normalizedConfig, page.url])
     
     const filterKeys = useMemo(() => 
         (filterable_schema || []).map(f => f.field_key || f.key).filter(Boolean),
@@ -137,7 +139,6 @@ export default function AssetGridMetadataPrimaryFilters({
         return getVisibleFilters(primaryMetadataFields, visibilityContext)
     }, [primaryFilterClassifications, visibilityContext, filterable_schema, selectedCategoryId, available_values])
     
-    const page = usePage()
     const serverFilters = page.props.filters
     const [filters, setFilters] = useState(() => {
         try {

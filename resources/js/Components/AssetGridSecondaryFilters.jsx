@@ -44,7 +44,7 @@ import SortDropdown from './SortDropdown'
 import { normalizeFilterConfig } from '../utils/normalizeFilterConfig'
 import { getSecondaryFilters, getPrimaryFilters } from '../utils/filterTierResolver'
 import { getVisibleFilters, getHiddenFilters, getHiddenFilterCount, getFilterVisibilityState } from '../utils/filterVisibilityRules'
-import { isFilterCompatible } from '../utils/filterScopeRules'
+import { isFilterCompatible, resolveVisibilityAssetType } from '../utils/filterScopeRules'
 import {
     parseFiltersFromUrl,
     buildUrlParamsWithFlatFilters,
@@ -166,7 +166,8 @@ export default function AssetGridSecondaryFilters({
     inertiaPartialReloadKeys = null,
     clearFiltersCollectionsView = false,
 }) {
-    const pageProps = usePage().props
+    const page = usePage()
+    const pageProps = page.props
     const { auth, available_file_types = [] } = pageProps
     const brandPrimary = primaryColor || auth?.activeBrand?.primary_color || '#6366f1'
 
@@ -419,16 +420,17 @@ export default function AssetGridSecondaryFilters({
     // This filters out any secondary filters that shouldn't be shown
     // Note: getSecondaryFilters returns FilterClassification objects with .field property
     const visibilityContext = useMemo(() => {
-        // Metadata filters use file type ('image', 'video', 'document') for asset_type compatibility
-        // The normalizedConfig.asset_type might be organizational ('asset', 'deliverable')
-        // For metadata field compatibility, we need to use 'image' as the file type
-        // since most assets are images and metadata schema is resolved with file type
+        let urlFileType = null
+        try {
+            const q = page.url?.includes?.('?') ? page.url.split('?')[1] : (typeof window !== 'undefined' ? window.location.search.slice(1) : '')
+            urlFileType = new URLSearchParams(q).get('file_type')
+        } catch { /* ignore */ }
         return {
             category_id: normalizedConfig.category_id,
-            asset_type: 'image',
+            asset_type: resolveVisibilityAssetType(urlFileType, normalizedConfig.asset_type),
             available_values: normalizedConfig.available_values,
-        };
-    }, [normalizedConfig])
+        }
+    }, [normalizedConfig, page.url])
     
     const visibleSecondaryFilters = useMemo(() => {
         const filterFields = secondaryFilters.map(classification => classification.field || classification)
@@ -473,8 +475,7 @@ export default function AssetGridSecondaryFilters({
         const field = (filterable_schema || []).find(f => (f.field_key || f.key) === fieldKey)
         return field?.display_label || field?.label || fieldKey
     }
-    
-    const page = usePage()
+
     const serverFilters = page.props.filters
 
     /** Inertia often passes new object/array refs each render; use stable keys for sync effect deps. */

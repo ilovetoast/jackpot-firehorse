@@ -53,6 +53,22 @@
 import { isFilterCompatible, LIBRARY_TECHNICAL_FILTER_KEYS_ALWAYS_SHOWN } from './filterScopeRules';
 
 /**
+ * Boolean metadata shown as a toggle in the filter bar — always operable (Yes/No) without facet counts.
+ * @param {Object} filter
+ * @returns {boolean}
+ */
+function isBooleanToggleMetadataFilter(filter) {
+    if (!filter || typeof filter !== 'object') {
+        return false;
+    }
+    const key = filter.key || filter.field_key;
+    if (key === 'starred') {
+        return true;
+    }
+    return filter.type === 'boolean' && filter.display_widget === 'toggle';
+}
+
+/**
  * Filter visibility state
  * 
  * @typedef {'visible' | 'hidden'} FilterVisibilityState
@@ -135,6 +151,11 @@ export function hasAvailableValues(filter, available_values = {}) {
     }
 
     if (LIBRARY_TECHNICAL_FILTER_KEYS_ALWAYS_SHOWN.has(filterKey)) {
+        return true;
+    }
+
+    // Primary boolean toggles: no option list from facets; Yes/No is always meaningful
+    if (filter.is_primary === true && isBooleanToggleMetadataFilter(filter)) {
         return true;
     }
     
