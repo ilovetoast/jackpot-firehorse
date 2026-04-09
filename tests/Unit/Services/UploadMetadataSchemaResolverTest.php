@@ -2,6 +2,7 @@
 
 namespace Tests\Unit\Services;
 
+use App\Enums\AssetType;
 use App\Models\Brand;
 use App\Models\Category;
 use App\Models\Tenant;
@@ -9,6 +10,7 @@ use App\Services\MetadataPermissionResolver;
 use App\Services\MetadataSchemaResolver;
 use App\Services\MetadataVisibilityResolver;
 use App\Services\SystemMetadataVisibilityService;
+use App\Services\TenantMetadataVisibilityService;
 use App\Services\UploadMetadataSchemaResolver;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -39,10 +41,12 @@ class UploadMetadataSchemaResolverTest extends TestCase
         $permissionResolver = new MetadataPermissionResolver();
         $visibilityService = new SystemMetadataVisibilityService();
         $visibilityResolver = new MetadataVisibilityResolver($visibilityService);
+        $tenantVisibilityService = app(TenantMetadataVisibilityService::class);
         $this->resolver = new UploadMetadataSchemaResolver(
             $this->metadataSchemaResolver,
             $permissionResolver,
-            $visibilityResolver
+            $visibilityResolver,
+            $tenantVisibilityService
         );
     }
 
@@ -1028,5 +1032,53 @@ class UploadMetadataSchemaResolverTest extends TestCase
                 $this->assertArrayNotHasKey('is_internal_only', $field, 'Visibility flags should not be in output');
             }
         }
+    }
+
+    /**
+     * Restrict-list fields (e.g. font_role → fonts only) must not leak into upload/quick-view schema for Video
+     * when category visibility rows are missing — same intent as Manage UI type-family hiding.
+     */
+    public function test_restrict_list_font_role_excluded_for_video_category_on_upload_schema(): void
+    {
+        $fontRoleId = DB::table('metadata_fields')->where('key', 'font_role')->where('scope', 'system')->value('id');
+        if (! $fontRoleId) {
+            $this->markTestSkipped('font_role system field not present (run migrations)');
+        }
+
+        $tenant = Tenant::create([
+            'name' => 'Restrict Test Tenant',
+            'slug' => 'restrict-test-tenant',
+        ]);
+        $brand = Brand::create([
+            'tenant_id' => $tenant->id,
+            'name' => 'Restrict Test Brand',
+            'slug' => 'restrict-test-brand',
+        ]);
+        $category = Category::create([
+            'tenant_id' => $tenant->id,
+            'brand_id' => $brand->id,
+            'name' => 'Video',
+            'slug' => 'video',
+            'asset_type' => AssetType::ASSET,
+            'is_system' => false,
+            'is_private' => false,
+            'is_locked' => false,
+        ]);
+
+        $uploadSchema = $this->resolver->resolve(
+            $tenant->id,
+            $brand->id,
+            $category->id,
+            'image'
+        );
+
+        $keys = collect($uploadSchema['groups'] ?? [])
+            ->flatMap(fn ($g) => $g['fields'] ?? [])
+            ->pluck('key')
+            ->filter()
+            ->values()
+            ->all();
+
+        $this->assertTrue(! in_array('font_role', $keys, true), 'font_role must not appear for Video upload schema');
     }
 }

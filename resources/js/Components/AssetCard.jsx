@@ -602,11 +602,11 @@ export default function AssetCard({
                     <>
                         {/* Phase V-1: Video hover preview (desktop only, lazy load) */}
                         {isVideo && isHovering && asset.video_preview_url && !isMobile && !videoPreviewFailed && (
-                            <div className="absolute inset-0 z-10 overflow-hidden bg-black">
+                            <div className="absolute inset-0 z-10 flex items-center justify-center overflow-hidden bg-black">
                                 <video
                                     ref={videoPreviewRef}
                                     src={asset.video_preview_url}
-                                    className="h-full w-full object-cover"
+                                    className="block h-auto w-auto max-h-full max-w-full object-contain"
                                     autoPlay
                                     muted
                                     loop

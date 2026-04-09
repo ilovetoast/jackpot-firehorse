@@ -33,6 +33,24 @@ class CategoryTypeResolver
     ];
 
     /**
+     * File kind for {@see \App\Services\MetadataSchemaResolver::resolve} when loading upload metadata schema.
+     * Must match {@see metadata_fields.applies_to} for this folder’s canonical type field (see MetadataFieldsSeeder).
+     * Tags/collection/etc. use applies_to=all and appear for any kind.
+     */
+    public static function metadataSchemaAssetTypeForSlug(?string $categorySlug): string
+    {
+        $resolved = self::resolve($categorySlug);
+        if ($resolved === null) {
+            return 'image';
+        }
+
+        return match ($resolved['field_key']) {
+            'video_type' => 'video',
+            default => 'image',
+        };
+    }
+
+    /**
      * @return array{field_key: string, label: string}|null
      */
     public static function resolve(?string $categorySlug): ?array

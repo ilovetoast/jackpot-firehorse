@@ -106,15 +106,8 @@ class VideoPreviewGenerationService
             $previewDuration = min(4.0, max(2.0, min($duration, 4.0))); // 2-4 seconds, or full video if shorter
             $startTime = max(0, ($duration - $previewDuration) / 2); // Start from middle
 
-            // Calculate target resolution: ~320px width, maintain aspect ratio
+            // ~320px wide; height from FFmpeg scale=…:-2 so display aspect matches source (incl. anamorphic / SAR)
             $targetWidth = 320;
-            $aspectRatio = $height / $width;
-            $targetHeight = (int) round($targetWidth * $aspectRatio);
-
-            // Ensure height is even (required by H.264)
-            if ($targetHeight % 2 !== 0) {
-                $targetHeight += 1;
-            }
 
             // Generate preview video
             $previewPath = $this->extractPreviewSegment(
@@ -122,8 +115,7 @@ class VideoPreviewGenerationService
                 $ffmpegPath,
                 $startTime,
                 $previewDuration,
-                $targetWidth,
-                $targetHeight
+                $targetWidth
             );
 
             // Upload preview to S3
@@ -137,7 +129,7 @@ class VideoPreviewGenerationService
                 'asset_id' => $asset->id,
                 's3_path' => $s3PreviewPath,
                 'preview_duration' => $previewDuration,
-                'preview_resolution' => "{$targetWidth}x{$targetHeight}",
+                'preview_max_width' => $targetWidth,
             ]);
 
             return $s3PreviewPath;
@@ -156,8 +148,7 @@ class VideoPreviewGenerationService
      * @param string $ffmpegPath Path to FFmpeg executable
      * @param float $startTime Start time in seconds
      * @param float $duration Duration in seconds
-     * @param int $targetWidth Target width in pixels
-     * @param int $targetHeight Target height in pixels
+     * @param int $targetWidth Max width in pixels; height follows source display aspect (-2 = even)
      * @return string Path to generated preview video
      * @throws \RuntimeException If extraction fails
      */
@@ -166,8 +157,7 @@ class VideoPreviewGenerationService
         string $ffmpegPath,
         float $startTime,
         float $duration,
-        int $targetWidth,
-        int $targetHeight
+        int $targetWidth
     ): string {
         $previewPath = tempnam(sys_get_temp_dir(), 'video_preview_') . '.mp4';
 
@@ -175,8 +165,8 @@ class VideoPreviewGenerationService
         // -ss: seek to start time
         // -i: input file
         // -t: duration
-        // -vf: video filter (scale and fps)
-        // -an: no audio
+        // -vf: scale width, auto height from display aspect; setsar=1 square output pixels; fps
+        // -an: no audio (hover clip only — full source + audio is lightbox / ORIGINAL stream)
         // -c:v libx264: H.264 codec
         // -preset fast: encoding speed/quality balance
         // -crf 28: quality (lower is better, 28 is good for previews)
@@ -185,13 +175,12 @@ class VideoPreviewGenerationService
         $fps = 10; // 10 FPS for preview (smooth enough, smaller file)
         
         $command = sprintf(
-            '%s -ss %.2f -i %s -t %.2f -vf "scale=%d:%d,fps=%d" -an -c:v libx264 -preset fast -crf 28 -movflags +faststart -y %s 2>&1',
+            '%s -ss %.2f -i %s -t %.2f -vf "scale=%d:-2:flags=lanczos,setsar=1,fps=%d" -an -c:v libx264 -preset fast -crf 28 -movflags +faststart -y %s 2>&1',
             escapeshellarg($ffmpegPath),
             $startTime,
             escapeshellarg($sourcePath),
             $duration,
             $targetWidth,
-            $targetHeight,
             $fps,
             escapeshellarg($previewPath)
         );
@@ -200,7 +189,7 @@ class VideoPreviewGenerationService
             'source_path' => $sourcePath,
             'start_time' => $startTime,
             'duration' => $duration,
-            'target_resolution' => "{$targetWidth}x{$targetHeight}",
+            'target_max_width' => $targetWidth,
             'fps' => $fps,
         ]);
 

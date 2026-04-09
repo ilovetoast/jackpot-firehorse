@@ -65,6 +65,42 @@ class TenantMetadataVisibilityService
     }
 
     /**
+     * Slug-restricted fields ({@see config('metadata_category_defaults.restrict_fields')}) are only enabled for
+     * category slugs listed under {@see config('metadata_category_defaults.category_config')}[$fieldKey].
+     *
+     * Upload and quick-view schema use this so fields like font_role do not appear when
+     * metadata_field_visibility has no category row yet (defaults would otherwise show applies_to=all
+     * fields everywhere). Manage → Categories also hides non-matching type-family rows, which made the bug
+     * invisible in admin while the uploader still showed the field.
+     */
+    public function isRestrictFieldEnabledForCategorySlug(string $fieldKey, string $categorySlug): bool
+    {
+        if ($fieldKey === '' || $categorySlug === '') {
+            return true;
+        }
+
+        $config = config('metadata_category_defaults', []);
+        $restrictFields = $config['restrict_fields'] ?? [];
+        if (! in_array($fieldKey, $restrictFields, true)) {
+            return true;
+        }
+
+        $slugMap = ($config['category_config'] ?? [])[$fieldKey] ?? [];
+        if (! is_array($slugMap)) {
+            return false;
+        }
+
+        $needle = strtolower($categorySlug);
+        foreach (array_keys($slugMap) as $slug) {
+            if (strtolower((string) $slug) === $needle) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * Batch-check visibility for multiple fields. Avoids N+1 when filtering many fields.
      *
      * ⚠️ Use this instead of isVisibleForCategory() when processing multiple fields in a loop.

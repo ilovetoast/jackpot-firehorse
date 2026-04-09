@@ -35,7 +35,8 @@ class UploadMetadataSchemaResolver
     public function __construct(
         protected MetadataSchemaResolver $metadataSchemaResolver,
         protected MetadataPermissionResolver $permissionResolver,
-        protected MetadataVisibilityResolver $visibilityResolver
+        protected MetadataVisibilityResolver $visibilityResolver,
+        protected TenantMetadataVisibilityService $tenantMetadataVisibilityService,
     ) {
     }
 
@@ -147,6 +148,10 @@ class UploadMetadataSchemaResolver
             if (!$field['is_visible']) {
                 continue;
             }
+            $key = (string) ($field['key'] ?? '');
+            if ($category && $key !== '' && ! $this->tenantMetadataVisibilityService->isRestrictFieldEnabledForCategorySlug($key, (string) ($category->slug ?? ''))) {
+                continue;
+            }
             // C9.2: Respect Quick View (show_on_edit) from Metadata Management – no special case for collection
             $showOnEdit = $field['show_on_edit'] ?? true;
             if (!$showOnEdit) {
@@ -188,6 +193,11 @@ class UploadMetadataSchemaResolver
         foreach ($fields as $field) {
             // Exclude if not visible
             if (!$field['is_visible']) {
+                continue;
+            }
+
+            $key = (string) ($field['key'] ?? '');
+            if ($category && $key !== '' && ! $this->tenantMetadataVisibilityService->isRestrictFieldEnabledForCategorySlug($key, (string) ($category->slug ?? ''))) {
                 continue;
             }
 

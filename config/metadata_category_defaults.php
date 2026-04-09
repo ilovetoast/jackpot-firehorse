@@ -64,8 +64,13 @@ return [
         'graphic_type' => [
             'graphics' => ['enabled' => true, 'is_primary' => true],
         ],
+        // Primary inline grid filter for Video library (requires schema file kind `video`; see AssetController)
         'video_type' => [
             'video' => ['enabled' => true, 'is_primary' => true],
+        ],
+        // Font role: Fonts library / Brand Guidelines typography only (not Video or other asset categories)
+        'font_role' => [
+            'fonts' => ['enabled' => true, 'is_primary' => false],
         ],
         // Scene classification for image categories
         'scene_classification' => [

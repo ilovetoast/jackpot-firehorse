@@ -34,6 +34,7 @@ class MetadataFilterService
         'color_space',
         'resolution_class',
         'print_type',
+        'video_type',
         'dominant_hue_group',
     ];
 

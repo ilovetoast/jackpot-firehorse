@@ -34,6 +34,7 @@ use App\Services\Prostaff\GetProstaffDamFilterOptions;
 use App\Services\SystemCategoryService;
 use App\Services\UploadInitiationService;
 use App\Support\AssetVariant;
+use App\Support\Metadata\CategoryTypeResolver;
 use App\Support\DeliveryContext;
 use App\Support\ThumbnailMetadata;
 use App\Support\ThumbnailModeDeliveryUrls;
@@ -65,6 +66,18 @@ class AssetController extends Controller
         protected UploadInitiationService $uploadInitiationService,
         protected BrandLibraryCategoryCountService $brandLibraryCategoryCountService
     ) {}
+
+    /**
+     * File kind for {@see MetadataSchemaResolver::resolve} (`image` | `video` | `document`).
+     * This is not the same as the category's organizational `asset_type` (e.g. asset vs deliverable).
+     * The Video asset folder must use `video` so fields such as `video_type` load into schema and filters.
+     */
+    protected function resolveMetadataFileTypeForCategory(?Category $category): string
+    {
+        return CategoryTypeResolver::metadataSchemaAssetTypeForSlug(
+            $category ? (string) $category->slug : ''
+        );
+    }
 
     /**
      * GET /app/assets/staged
@@ -489,7 +502,7 @@ class AssetController extends Controller
         if (is_string($filters)) {
             $filters = json_decode($filters, true) ?? [];
         }
-        $fileType = 'image';
+        $fileType = $this->resolveMetadataFileTypeForCategory($categoryId ? $category : null);
         $schema = $categoryId && $category
             ? $this->metadataSchemaResolver->resolve($tenant->id, $brand->id, $categoryId, $fileType)
             : $this->metadataSchemaResolver->resolve($tenant->id, $brand->id, null, $fileType);
@@ -1118,9 +1131,7 @@ class AssetController extends Controller
         // Phase L.5.1: Enable filters in "All Categories" view
         // Resolve schema even when categoryId is null to allow system-level filters
         if ($categoryId && $category) {
-            // Use 'image' as default file type for metadata schema resolution
-            // Category's asset_type is organizational, not a file type
-            $fileType = 'image'; // Default file type for metadata schema resolution
+            $fileType = $this->resolveMetadataFileTypeForCategory($category);
 
             $schema = $this->metadataSchemaResolver->resolve(
                 $tenant->id,
@@ -2165,14 +2176,16 @@ class AssetController extends Controller
     }
 
     /**
-     * Signed URL for in-browser video (prefer transcoded preview, else original).
-     * Does not use AssetCompletionService::isComplete() — videos can play while AI tagging / metadata lag.
+     * Signed URL for in-browser video in the drawer/lightbox.
+     *
+     * VIDEO_PREVIEW is the short muted hover clip only (grid + drawer thumbnail). Fullscreen/lightbox uses this
+     * endpoint too and must stream the original so duration, quality, and audio match the source file.
      */
     private function jsonVideoStreamUrl(Asset $asset): JsonResponse
     {
-        $url = $asset->deliveryUrl(AssetVariant::VIDEO_PREVIEW, DeliveryContext::AUTHENTICATED);
+        $url = $asset->deliveryUrl(AssetVariant::ORIGINAL, DeliveryContext::AUTHENTICATED);
         if ($url === '' || $url === null) {
-            $url = $asset->deliveryUrl(AssetVariant::ORIGINAL, DeliveryContext::AUTHENTICATED);
+            $url = $asset->deliveryUrl(AssetVariant::VIDEO_PREVIEW, DeliveryContext::AUTHENTICATED);
         }
 
         if (! $url) {

@@ -3677,11 +3677,10 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
             return
         }
 
-        // Fetch metadata schema from backend
+        // Upload schema: backend derives file kind (image|video|document) from category slug — matches Manage → Categories
         setIsLoadingMetadataSchema(true)
         const params = new URLSearchParams({
             category_id: selectedCategoryId.toString(),
-            asset_type: 'image', // Default to 'image' for uploads (most assets are images)
         })
 
         fetch(`/app/uploads/metadata-schema?${params.toString()}`, {

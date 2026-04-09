@@ -215,7 +215,8 @@ class MetadataFieldsSeeder extends Seeder
             ['value' => 'promotional', 'system_label' => 'Promotional'],
         ]);
 
-        // Font role (Fonts category) — headline vs body copy (synced from Brand Guidelines typography)
+        // Font role — headline vs body copy (Brand Guidelines / Fonts library). Upload & filters: only the
+        // Fonts category slug via config/metadata_category_defaults.php (restrict_fields + category_config).
         $fontRoleId = $this->getOrCreateField([
             'key' => 'font_role',
             'system_label' => 'Font role',
@@ -257,7 +258,8 @@ class MetadataFieldsSeeder extends Seeder
             ['value' => 'texture', 'system_label' => 'Texture'],
         ]);
 
-        // Video Assets — video_type
+        // Video Assets — video_type (primary filter on Video category via config/metadata_category_defaults.php;
+        // asset grid resolves metadata schema with file kind `video` for category slug `video`).
         $videoTypeId = $this->getOrCreateField([
             'key' => 'video_type',
             'system_label' => 'Video Type',

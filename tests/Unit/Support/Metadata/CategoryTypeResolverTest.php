@@ -37,4 +37,19 @@ class CategoryTypeResolverTest extends TestCase
     {
         $this->assertNull(CategoryTypeResolver::resolve('custom-category'));
     }
+
+    public function test_metadata_schema_asset_type_video_folder_uses_video(): void
+    {
+        $this->assertSame('video', CategoryTypeResolver::metadataSchemaAssetTypeForSlug('video'));
+    }
+
+    public function test_metadata_schema_asset_type_print_deliverable_uses_image(): void
+    {
+        $this->assertSame('image', CategoryTypeResolver::metadataSchemaAssetTypeForSlug('print'));
+    }
+
+    public function test_metadata_schema_asset_type_unknown_slug_uses_image(): void
+    {
+        $this->assertSame('image', CategoryTypeResolver::metadataSchemaAssetTypeForSlug('custom-category'));
+    }
 }

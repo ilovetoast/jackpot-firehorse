@@ -844,8 +844,10 @@ export default function AssetDrawer({
     const [videoPreviewLoaded, setVideoPreviewLoaded] = useState(false)
     const [videoPreviewFailed, setVideoPreviewFailed] = useState(false)
     const videoPreviewRef = useRef(null)
-    /** Fullscreen lightbox: source video (not hover clip) — keep unmuted so native controls can play audio */
+    /** Fullscreen lightbox: full source via /view (ORIGINAL stream) — audio only there; hover clip stays muted */
     const lightboxVideoRef = useRef(null)
+    /** Avoid parallel play() from loadeddata + canplay + rAF racing and fighting over muted */
+    const lightboxPlayInFlightRef = useRef(false)
     const isMobile = typeof window !== 'undefined' ? window.innerWidth < 768 : false
     const [pdfCurrentPage, setPdfCurrentPage] = useState(1)
     const [pdfPageCache, setPdfPageCache] = useState({})
@@ -933,27 +935,62 @@ export default function AssetDrawer({
         }
     }, [showZoomModal, currentCarouselAsset?.id, currentCarouselAsset?.mime_type, currentCarouselAsset?.original_filename])
 
-    // Lightbox opens from a click (user gesture); ensure video is not forced muted so the speaker control works
+    useEffect(() => {
+        if (!showZoomModal) {
+            lightboxPlayInFlightRef.current = false
+        }
+    }, [showZoomModal])
+
+    useEffect(() => {
+        lightboxPlayInFlightRef.current = false
+    }, [videoViewUrl, currentCarouselAsset?.id])
+
+    // Lightbox video: play only after the element has data (rAF was too early). Unmuted autoplay usually
+    // fails after async /view fetch — try unmuted first, then muted autoplay so playback always starts.
+    const tryPlayLightboxVideo = useCallback((el) => {
+        if (!el || !videoViewUrl) return
+        if (lightboxPlayInFlightRef.current) return
+        lightboxPlayInFlightRef.current = true
+        const attempt = (muted) => {
+            el.muted = muted
+            const p = el.play()
+            if (p !== undefined) {
+                p.then(() => {}).catch((err) => {
+                    if (!muted) {
+                        attempt(true)
+                    } else {
+                        lightboxPlayInFlightRef.current = false
+                        console.warn('[AssetDrawer] Lightbox video play failed', err?.message || err)
+                    }
+                })
+            } else {
+                lightboxPlayInFlightRef.current = false
+            }
+        }
+        attempt(false)
+    }, [videoViewUrl])
+
     useEffect(() => {
         if (!showZoomModal || videoViewUrlLoading || !videoViewUrl) return undefined
         let cancelled = false
-        const run = () => {
+        const id = requestAnimationFrame(() => {
             if (cancelled) return
             const el = lightboxVideoRef.current
-            if (!el) return
-            el.muted = false
-            el.defaultMuted = false
-            const p = el.play()
-            if (p !== undefined) {
-                p.catch(() => {})
+            if (el && el.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+                tryPlayLightboxVideo(el)
             }
-        }
-        const id = requestAnimationFrame(run)
+        })
         return () => {
             cancelled = true
             cancelAnimationFrame(id)
         }
-    }, [showZoomModal, videoViewUrl, videoViewUrlLoading, currentCarouselAsset?.id])
+    }, [
+        showZoomModal,
+        videoViewUrl,
+        videoViewUrlLoading,
+        tryPlayLightboxVideo,
+        currentCarouselAsset?.id,
+    ])
 
     const effectivePdfPageCount = Math.max(
         1,
@@ -2792,13 +2829,13 @@ export default function AssetDrawer({
                                         setVideoPreviewLoaded(false)
                                     }}
                                 >
-                                    {/* Hover clip: full tile, cover crop, silent (preview MP4 has no audio) */}
+                                    {/* Hover clip: muted short MP4 only here + grid card; aspect matches source (object-contain) */}
                                     {isHoveringVideo && displayAsset.video_preview_url && !isMobile && !videoPreviewFailed && (
-                                        <div className="absolute inset-0 z-10 overflow-hidden bg-black">
+                                        <div className="absolute inset-0 z-10 flex items-center justify-center overflow-hidden bg-black">
                                             <video
                                                 ref={videoPreviewRef}
                                                 src={displayAsset.video_preview_url}
-                                                className="h-full w-full object-cover"
+                                                className="block h-auto w-auto max-h-full max-w-full object-contain"
                                                 autoPlay
                                                 muted
                                                 loop
@@ -5105,36 +5142,39 @@ export default function AssetDrawer({
                                 }
                                 
                                 return (
-                                    <div className="relative h-full w-full min-h-0 min-w-0 overflow-hidden bg-black">
-                                        <video
-                                            ref={lightboxVideoRef}
-                                            key={currentCarouselAsset.id}
-                                            className="h-full w-full object-cover transition-all duration-300 ease-in-out"
-                                            controls
-                                            muted={false}
-                                            defaultMuted={false}
-                                            poster={
-                                                currentCarouselAsset.video_poster_url ||
-                                                currentCarouselAsset.thumbnail_url ||
-                                                currentCarouselAsset.final_thumbnail_url ||
-                                                undefined
-                                            }
-                                            preload="auto"
-                                            playsInline
-                                            style={{
-                                                transform:
-                                                    transitionDirection === 'left'
-                                                        ? 'translateX(30px)'
-                                                        : transitionDirection === 'right'
-                                                          ? 'translateX(-30px)'
-                                                          : 'translateX(0)',
-                                                opacity: transitionDirection ? 0 : 1,
-                                            }}
-                                        >
-                                            <source src={videoViewUrl} type={currentCarouselAsset.mime_type || 'video/mp4'} />
-                                            Your browser does not support the video tag.
-                                        </video>
-                                    </div>
+                                    <video
+                                        ref={lightboxVideoRef}
+                                        key={`${currentCarouselAsset.id}-${videoViewUrl}`}
+                                        className="h-auto w-auto max-h-full max-w-full object-contain transition-all duration-300 ease-in-out"
+                                        controls
+                                        autoPlay
+                                        playsInline
+                                        poster={
+                                            currentCarouselAsset.video_poster_url ||
+                                            currentCarouselAsset.thumbnail_url ||
+                                            currentCarouselAsset.final_thumbnail_url ||
+                                            undefined
+                                        }
+                                        preload="auto"
+                                        src={videoViewUrl}
+                                        onLoadedData={(e) =>
+                                            tryPlayLightboxVideo(e.currentTarget)
+                                        }
+                                        onCanPlay={(e) =>
+                                            tryPlayLightboxVideo(e.currentTarget)
+                                        }
+                                        style={{
+                                            transform:
+                                                transitionDirection === 'left'
+                                                    ? 'translateX(30px)'
+                                                    : transitionDirection === 'right'
+                                                      ? 'translateX(-30px)'
+                                                      : 'translateX(0)',
+                                            opacity: transitionDirection ? 0 : 1,
+                                        }}
+                                    >
+                                        Your browser does not support the video tag.
+                                    </video>
                                 )
                             } else if (isCurrentPdf && currentCarouselAsset.id) {
                                 return (

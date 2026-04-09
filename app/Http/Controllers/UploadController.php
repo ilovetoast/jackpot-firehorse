@@ -26,6 +26,7 @@ use App\Services\UploadCompletionService;
 use App\Exceptions\CreatorModuleInactiveException;
 use App\Services\UploadInitiationService;
 use App\Services\UploadMetadataSchemaResolver;
+use App\Support\Metadata\CategoryTypeResolver;
 use Aws\S3\S3Client;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -2883,13 +2884,17 @@ class UploadController extends Controller
             }
         }
 
-        // Determine asset type (file type, not category asset_type)
-        // Default to 'image' if not provided
-        $assetType = $validated['asset_type'] ?? 'image';
+        // File kind for schema (image|video|document): upload forms MUST follow the folder’s type field applies_to
+        // (Manage → Categories), not a client default. Edit/quick-view uses the asset’s file kind from the request.
+        $context = $validated['context'] ?? 'upload';
+        if ($context === 'edit') {
+            $assetType = $validated['asset_type'] ?? 'image';
+        } else {
+            $assetType = CategoryTypeResolver::metadataSchemaAssetTypeForSlug((string) ($category->slug ?? ''));
+        }
 
         try {
             $userRole = $user->getRoleForBrand($brand) ?? $user->getRoleForTenant($tenant) ?? 'member';
-            $context = $validated['context'] ?? 'upload';
 
             // C9.2: When context=edit, return fields visible in quick view (drawer) so Collection shows when Quick View is checked
             if ($context === 'edit') {
