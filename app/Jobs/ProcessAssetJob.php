@@ -23,6 +23,10 @@ use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Redis;
+use Sentry\SentrySdk;
+use Sentry\State\HubInterface;
+use Sentry\Tracing\Transaction;
+use Sentry\Tracing\TransactionContext;
 
 class ProcessAssetJob implements ShouldQueue
 {
@@ -186,6 +190,25 @@ class ProcessAssetJob implements ShouldQueue
      */
     public function handle(): void
     {
+        $hub = SentrySdk::getCurrentHub();
+        $parentSpan = $hub->getSpan();
+        $sentryTransaction = $this->startSentryAssetProcessTransaction($hub);
+
+        try {
+            $this->runProcessAssetHandleBody();
+        } finally {
+            if ($sentryTransaction !== null) {
+                $sentryTransaction->finish();
+                $hub->setSpan($parentSpan);
+            }
+        }
+    }
+
+    /**
+     * Core handle logic (wrapped by {@see handle()} for optional manual Sentry performance tracing).
+     */
+    protected function runProcessAssetHandleBody(): void
+    {
         // Resolve version-aware or legacy: accept version ID or asset ID
         // Version path: load with lockForUpdate() for race safety
         $version = DB::transaction(fn () => AssetVersion::where('id', $this->assetId)->lockForUpdate()->first());
@@ -236,6 +259,27 @@ class ProcessAssetJob implements ShouldQueue
         }
 
         $this->runAssetProcessingPipeline($asset, $version, $thumbnailJobId);
+    }
+
+    /**
+     * When automatic queue transactions are disabled (see config/sentry.php tracing.queue_job_transactions),
+     * start a dedicated performance transaction so asset processing stays visible in Sentry.
+     */
+    protected function startSentryAssetProcessTransaction(HubInterface $hub): ?Transaction
+    {
+        if (empty(config('sentry.dsn')) && ! config('sentry.spotlight')) {
+            return null;
+        }
+        if (config('sentry.tracing.queue_job_transactions', false)) {
+            return null;
+        }
+
+        $context = new TransactionContext('asset.process');
+        $context->setOp('queue.job');
+        $transaction = \Sentry\startTransaction($context);
+        $hub->setSpan($transaction);
+
+        return $transaction;
     }
 
     /**

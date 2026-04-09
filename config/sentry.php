@@ -24,9 +24,12 @@ return [
     'environment' => env('SENTRY_ENVIRONMENT'),
 
     // @see: https://docs.sentry.io/platforms/php/guides/laravel/configuration/options/#sample_rate
+    // Error/event capture: unchanged — does not affect performance traces.
     'sample_rate' => env('SENTRY_SAMPLE_RATE') === null ? 1.0 : (float) env('SENTRY_SAMPLE_RATE'),
 
-    // @see: https://docs.sentry.io/platforms/php/guides/laravel/configuration/options/#traces_sample_rate
+    // Flat trace rate disabled in favor of {@see \App\Support\SentryTracesSampler} (registered in AppServiceProvider).
+    // That keeps config cache-safe and cuts volume ~70–80% while keeping uploads/assets/processing fully sampled.
+    // To force a flat rate instead, set SENTRY_TRACES_SAMPLE_RATE and disable the sampler in AppServiceProvider.
     'traces_sample_rate' => env('SENTRY_TRACES_SAMPLE_RATE') === null ? null : (float) env('SENTRY_TRACES_SAMPLE_RATE'),
 
     // @see: https://docs.sentry.io/platforms/php/guides/laravel/configuration/options/#profiles-sample-rate
@@ -45,9 +48,13 @@ return [
     // 'ignore_exceptions' => [],
 
     // @see: https://docs.sentry.io/platforms/php/guides/laravel/configuration/options/#ignore_transactions
+    // Exact match unless pattern is a regex (wrapped in /.../). Drops trivial HTTP from performance ingest.
     'ignore_transactions' => [
-        // Ignore Laravel's default health URL
         '/up',
+        '/^\/horizon/',
+        '/^\/telescope/',
+        '/^\/pulse/',
+        '/^\/api\/downloads\/poll$/',
     ],
 
     // Breadcrumb specific configuration
@@ -82,14 +89,15 @@ return [
 
     // Performance monitoring specific configuration
     'tracing' => [
-        // Trace queue jobs as their own transactions (this enables tracing for queue jobs)
-        'queue_job_transactions' => env('SENTRY_TRACE_QUEUE_ENABLED', true),
+        // Queue root transactions off by default: use manual tracing on critical jobs (e.g. ProcessAssetJob) to cut span volume.
+        // Set SENTRY_TRACE_QUEUE_ENABLED=true to restore automatic per-job transactions for all jobs.
+        'queue_job_transactions' => env('SENTRY_TRACE_QUEUE_ENABLED', false),
 
-        // Capture queue jobs as spans when executed on the sync driver
+        // Child spans for jobs when a parent HTTP transaction exists (sync driver / nested work)
         'queue_jobs' => env('SENTRY_TRACE_QUEUE_JOBS_ENABLED', true),
 
-        // Capture SQL queries as spans
-        'sql_queries' => env('SENTRY_TRACE_SQL_QUERIES_ENABLED', true),
+        // SQL as spans is very noisy on busy routes; disable for fewer child spans (errors unaffected).
+        'sql_queries' => env('SENTRY_TRACE_SQL_QUERIES_ENABLED', false),
 
         // Capture SQL query bindings (parameters) in SQL query spans
         'sql_bindings' => env('SENTRY_TRACE_SQL_BINDINGS_ENABLED', false),

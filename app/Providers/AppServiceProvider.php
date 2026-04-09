@@ -3,6 +3,7 @@
 namespace App\Providers;
 
 use App\Http\Middleware\EnsureIncubationWorkspaceNotLocked;
+use App\Support\SentryTracesSampler;
 use App\Contracts\ImageEmbeddingServiceInterface;
 use App\Events\AssetPendingApproval;
 use App\Events\AssetUploaded;
@@ -30,6 +31,12 @@ use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\ServiceProvider;
 use RuntimeException;
+use Sentry\ClientBuilder;
+use Sentry\Event as SentryEvent;
+use Sentry\EventHint;
+use Sentry\EventType;
+use Sentry\State\HubInterface;
+use Sentry\State\Scope;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -87,6 +94,18 @@ class AppServiceProvider extends ServiceProvider
                 $app->make(\App\Services\TenantBucketService::class),
             );
         });
+
+        // Sentry: dynamic trace sampling (config-cache-safe invokable, not a closure in config/sentry.php).
+        // Skip when SENTRY_TRACES_SAMPLE_RATE is set so ops can force a flat rate without code changes.
+        $this->app->afterResolving(ClientBuilder::class, function (ClientBuilder $builder): void {
+            if (env('SENTRY_TRACES_SAMPLE_RATE') !== null && env('SENTRY_TRACES_SAMPLE_RATE') !== '') {
+                return;
+            }
+            if (empty(config('sentry.dsn')) && ! config('sentry.spotlight')) {
+                return;
+            }
+            $builder->getOptions()->setTracesSampler(new SentryTracesSampler);
+        });
     }
 
     /**
@@ -94,6 +113,23 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        // Sentry: prevent huge transaction span explosions from inflating quota (drops the transaction only, not errors).
+        if ($this->app->bound(HubInterface::class)) {
+            \Sentry\configureScope(static function (Scope $scope): void {
+                $scope->addEventProcessor(static function (SentryEvent $event, ?EventHint $hint): ?SentryEvent {
+                    if ($event->getType() !== EventType::transaction()) {
+                        return $event;
+                    }
+                    $spans = $event->getSpans();
+                    if (count($spans) > 100) {
+                        return null;
+                    }
+
+                    return $event;
+                });
+            });
+        }
+
         // Map short actor_type strings for ActivityEvent morphTo resolution
         Relation::morphMap([
             'user' => \App\Models\User::class,
