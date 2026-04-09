@@ -44,7 +44,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense } from 'react'
 import { createPortal } from 'react-dom'
-import { XMarkIcon, ArrowPathIcon, ChevronLeftIcon, ChevronRightIcon, ChevronDownIcon, ExclamationTriangleIcon, EyeIcon, ArrowDownTrayIcon, CheckCircleIcon, CheckIcon, ArrowUturnLeftIcon, ClockIcon, XCircleIcon, CloudArrowUpIcon, RectangleStackIcon, TicketIcon, InformationCircleIcon, PhotoIcon, SpeakerWaveIcon, SpeakerXMarkIcon } from '@heroicons/react/24/outline'
+import { XMarkIcon, ArrowPathIcon, ChevronLeftIcon, ChevronRightIcon, ChevronDownIcon, ExclamationTriangleIcon, EyeIcon, ArrowDownTrayIcon, CheckCircleIcon, CheckIcon, ArrowUturnLeftIcon, ClockIcon, XCircleIcon, CloudArrowUpIcon, RectangleStackIcon, TicketIcon, InformationCircleIcon, PhotoIcon } from '@heroicons/react/24/outline'
 import { usePage, router, Link } from '@inertiajs/react'
 import AssetImage from './AssetImage'
 import AssetTimeline from './AssetTimeline'
@@ -843,8 +843,9 @@ export default function AssetDrawer({
     const [isHoveringVideo, setIsHoveringVideo] = useState(false)
     const [videoPreviewLoaded, setVideoPreviewLoaded] = useState(false)
     const [videoPreviewFailed, setVideoPreviewFailed] = useState(false)
-    const [videoPreviewAudioOn, setVideoPreviewAudioOn] = useState(false)
     const videoPreviewRef = useRef(null)
+    /** Fullscreen lightbox: source video (not hover clip) — keep unmuted so native controls can play audio */
+    const lightboxVideoRef = useRef(null)
     const isMobile = typeof window !== 'undefined' ? window.innerWidth < 768 : false
     const [pdfCurrentPage, setPdfCurrentPage] = useState(1)
     const [pdfPageCache, setPdfPageCache] = useState({})
@@ -931,6 +932,28 @@ export default function AssetDrawer({
             setVideoViewUrlLoading(false)
         }
     }, [showZoomModal, currentCarouselAsset?.id, currentCarouselAsset?.mime_type, currentCarouselAsset?.original_filename])
+
+    // Lightbox opens from a click (user gesture); ensure video is not forced muted so the speaker control works
+    useEffect(() => {
+        if (!showZoomModal || videoViewUrlLoading || !videoViewUrl) return undefined
+        let cancelled = false
+        const run = () => {
+            if (cancelled) return
+            const el = lightboxVideoRef.current
+            if (!el) return
+            el.muted = false
+            el.defaultMuted = false
+            const p = el.play()
+            if (p !== undefined) {
+                p.catch(() => {})
+            }
+        }
+        const id = requestAnimationFrame(run)
+        return () => {
+            cancelled = true
+            cancelAnimationFrame(id)
+        }
+    }, [showZoomModal, videoViewUrl, videoViewUrlLoading, currentCarouselAsset?.id])
 
     const effectivePdfPageCount = Math.max(
         1,
@@ -2761,7 +2784,6 @@ export default function AssetDrawer({
                                     onMouseLeave={() => {
                                         setIsHoveringVideo(false)
                                         setVideoPreviewFailed(false)
-                                        setVideoPreviewAudioOn(false)
                                         // Pause and reset video on mouse leave
                                         if (videoPreviewRef.current) {
                                             videoPreviewRef.current.pause()
@@ -2770,58 +2792,24 @@ export default function AssetDrawer({
                                         setVideoPreviewLoaded(false)
                                     }}
                                 >
-                                    {/* Hover preview: native aspect box, cover crop, optional audio (click speaker) */}
+                                    {/* Hover clip: full tile, cover crop, silent (preview MP4 has no audio) */}
                                     {isHoveringVideo && displayAsset.video_preview_url && !isMobile && !videoPreviewFailed && (
-                                        <div className="absolute inset-0 z-10 flex items-center justify-center bg-black">
-                                            {(() => {
-                                                const vw = Number(displayAsset.video_width)
-                                                const vh = Number(displayAsset.video_height)
-                                                const hasDims = vw > 0 && vh > 0
-                                                const landscape = !hasDims || vw >= vh
-                                                return (
-                                                    <div
-                                                        className={`relative z-10 overflow-hidden ${
-                                                            landscape ? 'h-auto w-full max-h-full' : 'h-full w-auto max-w-full'
-                                                        }`}
-                                                        style={{
-                                                            aspectRatio: hasDims ? `${vw} / ${vh}` : '16 / 9',
-                                                        }}
-                                                    >
-                                                        <video
-                                                            ref={videoPreviewRef}
-                                                            src={displayAsset.video_preview_url}
-                                                            className="h-full w-full object-cover"
-                                                            autoPlay
-                                                            muted={!videoPreviewAudioOn}
-                                                            loop
-                                                            playsInline
-                                                            onLoadedData={() => setVideoPreviewLoaded(true)}
-                                                            onError={() => setVideoPreviewFailed(true)}
-                                                            style={{
-                                                                opacity: videoPreviewLoaded ? 1 : 0,
-                                                                transition: 'opacity 0.2s',
-                                                            }}
-                                                        />
-                                                        <button
-                                                            type="button"
-                                                            className="absolute bottom-2 right-2 z-30 flex h-8 w-8 items-center justify-center rounded-full bg-black/65 text-white shadow-sm backdrop-blur-sm pointer-events-auto hover:bg-black/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/80"
-                                                            aria-label={videoPreviewAudioOn ? 'Mute preview' : 'Unmute preview'}
-                                                            aria-pressed={videoPreviewAudioOn}
-                                                            onClick={(e) => {
-                                                                e.stopPropagation()
-                                                                e.preventDefault()
-                                                                setVideoPreviewAudioOn((v) => !v)
-                                                            }}
-                                                        >
-                                                            {videoPreviewAudioOn ? (
-                                                                <SpeakerWaveIcon className="h-4 w-4" aria-hidden />
-                                                            ) : (
-                                                                <SpeakerXMarkIcon className="h-4 w-4" aria-hidden />
-                                                            )}
-                                                        </button>
-                                                    </div>
-                                                )
-                                            })()}
+                                        <div className="absolute inset-0 z-10 overflow-hidden bg-black">
+                                            <video
+                                                ref={videoPreviewRef}
+                                                src={displayAsset.video_preview_url}
+                                                className="h-full w-full object-cover"
+                                                autoPlay
+                                                muted
+                                                loop
+                                                playsInline
+                                                onLoadedData={() => setVideoPreviewLoaded(true)}
+                                                onError={() => setVideoPreviewFailed(true)}
+                                                style={{
+                                                    opacity: videoPreviewLoaded ? 1 : 0,
+                                                    transition: 'opacity 0.2s',
+                                                }}
+                                            />
                                         </div>
                                     )}
                                     
@@ -5116,34 +5104,37 @@ export default function AssetDrawer({
                                     )
                                 }
                                 
-                                const vw = currentCarouselAsset.video_width
-                                const vh = currentCarouselAsset.video_height
-                                const metaAspect =
-                                    vw && vh && Number(vw) > 0 && Number(vh) > 0
-                                        ? { aspectRatio: `${Number(vw)} / ${Number(vh)}` }
-                                        : {}
                                 return (
-                                    <video
-                                        key={currentCarouselAsset.id} // Key forces remount for clean transition
-                                        className="h-auto w-auto max-h-full max-w-full object-contain transition-all duration-300 ease-in-out bg-black"
-                                        controls
-                                        autoPlay
-                                        poster={currentCarouselAsset.video_poster_url || currentCarouselAsset.thumbnail_url || currentCarouselAsset.final_thumbnail_url || undefined}
-                                        preload="auto"
-                                        playsInline
-                                        style={{
-                                            transform: transitionDirection === 'left' 
-                                                ? 'translateX(30px)' 
-                                                : transitionDirection === 'right' 
-                                                ? 'translateX(-30px)' 
-                                                : 'translateX(0)',
-                                            opacity: transitionDirection ? 0 : 1,
-                                            ...metaAspect,
-                                        }}
-                                    >
-                                        <source src={videoViewUrl} type={currentCarouselAsset.mime_type || 'video/mp4'} />
-                                        Your browser does not support the video tag.
-                                    </video>
+                                    <div className="relative h-full w-full min-h-0 min-w-0 overflow-hidden bg-black">
+                                        <video
+                                            ref={lightboxVideoRef}
+                                            key={currentCarouselAsset.id}
+                                            className="h-full w-full object-cover transition-all duration-300 ease-in-out"
+                                            controls
+                                            muted={false}
+                                            defaultMuted={false}
+                                            poster={
+                                                currentCarouselAsset.video_poster_url ||
+                                                currentCarouselAsset.thumbnail_url ||
+                                                currentCarouselAsset.final_thumbnail_url ||
+                                                undefined
+                                            }
+                                            preload="auto"
+                                            playsInline
+                                            style={{
+                                                transform:
+                                                    transitionDirection === 'left'
+                                                        ? 'translateX(30px)'
+                                                        : transitionDirection === 'right'
+                                                          ? 'translateX(-30px)'
+                                                          : 'translateX(0)',
+                                                opacity: transitionDirection ? 0 : 1,
+                                            }}
+                                        >
+                                            <source src={videoViewUrl} type={currentCarouselAsset.mime_type || 'video/mp4'} />
+                                            Your browser does not support the video tag.
+                                        </video>
+                                    </div>
                                 )
                             } else if (isCurrentPdf && currentCarouselAsset.id) {
                                 return (
