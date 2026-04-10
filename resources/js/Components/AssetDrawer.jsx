@@ -4741,6 +4741,7 @@ export default function AssetDrawer({
                                                     placeholder="Select collections…"
                                                     showCreateButton
                                                     onCreateClick={() => setShowCreateCollectionModal(true)}
+                                                    compact
                                                 />
                                             )
                                         ) : undefined,

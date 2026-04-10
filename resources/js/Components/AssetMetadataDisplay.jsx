@@ -344,7 +344,11 @@ export default function AssetMetadataDisplay({
                                     Array.isArray(collectionDisplay.collections)) ? (
                                     <div
                                         key="collection-field"
-                                        className={`flex flex-col md:flex-row md:items-start md:justify-between gap-1 md:gap-4 md:flex-nowrap ${
+                                        className={`flex flex-col md:flex-row ${
+                                            collectionDisplay.inlineContent
+                                                ? 'md:items-center'
+                                                : 'md:items-start'
+                                        } md:justify-between gap-1 md:gap-4 md:flex-nowrap ${
                                             workspaceMode &&
                                             typeof collectionDisplay.onEdit === 'function' &&
                                             !collectionDisplay.inlineContent

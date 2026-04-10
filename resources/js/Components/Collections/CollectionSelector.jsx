@@ -26,6 +26,8 @@ export default function CollectionSelector({
     onCreateClick = null,
     /** Use `dark` in lightbox / dark panels so trigger and portal match the UI (default `light` for upload & modals). */
     variant = 'light',
+    /** Tighter trigger height — e.g. asset drawer metadata row next to a label. */
+    compact = false,
 }) {
     const isDark = variant === 'dark'
     const [isOpen, setIsOpen] = useState(false)
@@ -259,22 +261,34 @@ export default function CollectionSelector({
                 disabled={disabled}
                 className={
                     isDark
-                        ? 'relative w-full rounded-md border border-neutral-600 bg-neutral-900 px-3 py-2 text-left text-neutral-100 shadow-sm focus:border-neutral-500 focus:outline-none focus:ring-1 focus:ring-neutral-500 sm:text-sm disabled:opacity-50 disabled:cursor-not-allowed'
-                        : 'relative w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-left text-gray-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 sm:text-sm disabled:opacity-50 disabled:cursor-not-allowed'
+                        ? `relative w-full rounded-md border border-neutral-600 bg-neutral-900 text-left text-neutral-100 shadow-sm focus:border-neutral-500 focus:outline-none focus:ring-1 focus:ring-neutral-500 sm:text-sm disabled:opacity-50 disabled:cursor-not-allowed ${
+                              compact ? 'px-2.5 py-1 leading-tight' : 'px-3 py-2'
+                          }`
+                        : `relative w-full rounded-md border border-gray-300 bg-white text-left text-gray-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 sm:text-sm disabled:opacity-50 disabled:cursor-not-allowed ${
+                              compact ? 'px-2.5 py-1 leading-tight' : 'px-3 py-2'
+                          }`
                 }
             >
-                <span className="block truncate">
+                <span className={`block truncate ${compact ? 'text-sm' : ''}`}>
                     {selectedCount === 0
                         ? placeholder
                         : selectedCount === 1
                         ? selectedNames
                         : `${selectedCount} collections selected`}
                 </span>
-                <span className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2">
+                <span
+                    className={`pointer-events-none absolute inset-y-0 right-0 flex items-center ${compact ? 'pr-1.5' : 'pr-2'}`}
+                >
                     {isOpen ? (
-                        <ChevronUpIcon className={`h-5 w-5 ${isDark ? 'text-neutral-400' : 'text-gray-400'}`} aria-hidden="true" />
+                        <ChevronUpIcon
+                            className={`${compact ? 'h-4 w-4' : 'h-5 w-5'} ${isDark ? 'text-neutral-400' : 'text-gray-400'}`}
+                            aria-hidden="true"
+                        />
                     ) : (
-                        <ChevronDownIcon className={`h-5 w-5 ${isDark ? 'text-neutral-400' : 'text-gray-400'}`} aria-hidden="true" />
+                        <ChevronDownIcon
+                            className={`${compact ? 'h-4 w-4' : 'h-5 w-5'} ${isDark ? 'text-neutral-400' : 'text-gray-400'}`}
+                            aria-hidden="true"
+                        />
                     )}
                 </span>
             </button>
