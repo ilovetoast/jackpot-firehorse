@@ -54,6 +54,13 @@ class AssetDeliveryService
 
         $cdnUrl = CdnUrl::url($path);
 
+        $variantEnum = AssetVariant::tryFrom($variant);
+        // Hover preview is always stored at the same S3 key; after regeneration, CDN/browser caches
+        // would otherwise keep the old MP4. Bust cache whenever the asset row changes (updated_at).
+        if ($variantEnum === AssetVariant::VIDEO_PREVIEW && $path !== '') {
+            $cdnUrl = $this->appendVideoPreviewCacheBuster($cdnUrl, $asset);
+        }
+
         // Local/testing: Skip CloudFront signing; CdnUrl returns presigned S3 URL in local
         if (app()->environment(['local', 'testing'])) {
             \Log::info('SIGNED URL GENERATED', [
@@ -218,5 +225,25 @@ class AssetDeliveryService
         $expiresAt = time() + $ttl;
 
         return $this->signedUrlService->sign($cdnUrl, $expiresAt);
+    }
+
+    /**
+     * Append a stable query param derived from asset updated_at so regenerated hover previews
+     * get a distinct URL without changing the storage key. Works with presigned URLs (extra query params).
+     */
+    protected function appendVideoPreviewCacheBuster(string $url, Asset $asset): string
+    {
+        if ($url === '' || str_starts_with($url, 'data:')) {
+            return $url;
+        }
+
+        $ts = (int) ($asset->updated_at?->timestamp ?? 0);
+        if ($ts <= 0) {
+            $ts = time();
+        }
+
+        $sep = str_contains($url, '?') ? '&' : '?';
+
+        return $url.$sep.'pv='.$ts;
     }
 }

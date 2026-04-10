@@ -24,6 +24,7 @@ import {
     ArrowDownTrayIcon,
     WrenchScrewdriverIcon,
     ExclamationTriangleIcon,
+    PlayCircleIcon,
 } from '@heroicons/react/24/outline'
 /** Admin list: where this asset sits vs library grid / canvas / generative (see AdminAssetController::adminAssetRowContext) */
 const ROW_CONTEXT_BADGES = {
@@ -647,6 +648,7 @@ export default function AdminAssetsIndex({
         { id: 'restore', label: 'Restore', icon: ArrowUturnLeftIcon },
         { id: 'retry_pipeline', label: 'Force Retry Pipeline', icon: ArrowPathIcon },
         { id: 'regenerate_thumbnails', label: 'Regenerate Thumbnails', icon: PhotoIcon },
+        { id: 'generate_video_previews', label: 'Regenerate hover video previews', icon: PlayCircleIcon },
         { id: 'rerun_metadata', label: 'Re-run Metadata', icon: DocumentDuplicateIcon },
         { id: 'rerun_ai_tagging', label: 'Re-run AI Tagging', icon: TagIcon },
         { id: 'publish', label: 'Publish', icon: CheckCircleIcon },

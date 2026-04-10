@@ -10,6 +10,7 @@ use App\Enums\ThumbnailStatus;
 use App\Http\Controllers\Controller;
 use App\Jobs\GenerateAssetEmbeddingJob;
 use App\Jobs\GenerateThumbnailsJob;
+use App\Jobs\GenerateVideoPreviewJob;
 use App\Jobs\PopulateAutomaticMetadataJob;
 use App\Jobs\ProcessAssetJob;
 use App\Models\ActivityEvent;
@@ -22,11 +23,14 @@ use App\Models\Composition;
 use App\Models\SystemIncident;
 use App\Models\Tenant;
 use App\Services\Assets\AssetStateReconciliationService;
+use App\Services\FileTypeService;
 use App\Services\AssetUrlService;
 use App\Services\Reliability\ReliabilityEngine;
 use App\Services\SystemIncidentRecoveryService;
 use App\Services\TenantBucketService;
 use App\Services\ThumbnailRetryService;
+use App\Support\AssetVariant;
+use App\Support\DeliveryContext;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -331,7 +335,7 @@ class AdminAssetController extends Controller
         $requestFilters = $request->input('filters', []);
 
         $validActions = [
-            'restore', 'retry_pipeline', 'regenerate_thumbnails', 'rerun_metadata', 'rerun_ai_tagging',
+            'restore', 'retry_pipeline', 'regenerate_thumbnails', 'generate_video_previews', 'rerun_metadata', 'rerun_ai_tagging',
             'publish', 'unpublish', 'archive', 'clear_thumbnail_timeout', 'clear_promotion_failed', 'reconcile', 'create_ticket', 'export_ids',
         ];
         if ($this->canDestructive()) {
@@ -1085,6 +1089,9 @@ class AdminAssetController extends Controller
                 $asset->loadMissing('currentVersion');
                 \App\Jobs\GenerateThumbnailsJob::dispatch($asset->id)->onQueue(\App\Support\PipelineQueueResolver::imagesQueueForAsset($asset));
                 break;
+            case 'generate_video_previews':
+                $this->adminQueueHoverVideoPreviewRegeneration($asset);
+                break;
             case 'rerun_metadata':
                 \App\Jobs\ExtractMetadataJob::dispatch($asset->id)->onQueue(config('queue.images_queue', 'images'));
                 break;
@@ -1200,6 +1207,49 @@ class AdminAssetController extends Controller
 
             return null;
         }
+    }
+
+    /**
+     * Hover preview MP4 URL for admin asset detail (null until GenerateVideoPreviewJob has run).
+     * Uses AssetDeliveryService (includes cache-busting when the asset row is updated).
+     */
+    protected function adminVideoPreviewViewUrl(Asset $asset): ?string
+    {
+        $raw = $asset->getRawOriginal('video_preview_url') ?? ($asset->getAttributes()['video_preview_url'] ?? null);
+        if (! $raw) {
+            return null;
+        }
+
+        $url = $asset->deliveryUrl(AssetVariant::VIDEO_PREVIEW, DeliveryContext::AUTHENTICATED);
+        $placeholder = (string) config('assets.delivery.placeholder_url', '');
+        if ($url === '' || ($placeholder !== '' && $url === $placeholder)) {
+            return null;
+        }
+
+        return $url;
+    }
+
+    /**
+     * Clear stored preview path and queue hover MP4 regeneration (mirrors tenant bulk SITE_GENERATE_VIDEO_PREVIEWS).
+     */
+    protected function adminQueueHoverVideoPreviewRegeneration(Asset $asset): void
+    {
+        $fileTypeService = app(FileTypeService::class);
+        if ($fileTypeService->detectFileTypeFromAsset($asset) !== 'video') {
+            return;
+        }
+        if (! $asset->storage_root_path || ! $asset->storageBucket) {
+            return;
+        }
+        $hasPosterPath = (bool) ($asset->getRawOriginal('video_poster_url') ?? $asset->getAttributes()['video_poster_url'] ?? null);
+        $hasThumbnailPath = (bool) ($asset->thumbnailPathForStyle('thumb') ?? $asset->thumbnailPathForStyle('medium'));
+        if (! $hasPosterPath && ! $hasThumbnailPath) {
+            return;
+        }
+
+        $asset->update(['video_preview_url' => null]);
+        $asset->refresh();
+        GenerateVideoPreviewJob::dispatch($asset->id)->onQueue(config('queue.images_queue', 'images'));
     }
 
     /**
@@ -1397,6 +1447,11 @@ class AdminAssetController extends Controller
         $list['thumbnail_error'] = $asset->thumbnail_error;
         $list['thumbnail_view_urls'] = $this->adminThumbnailViewUrls($asset);
         $list['admin_download_url'] = $this->assetUrlService->getAdminDownloadUrl($asset);
+        $fileTypeService = app(FileTypeService::class);
+        $list['is_video'] = $fileTypeService->detectFileTypeFromAsset($asset) === 'video';
+        $list['video_preview_view_url'] = $list['is_video'] ? $this->adminVideoPreviewViewUrl($asset) : null;
+        $list['video_width'] = $asset->video_width;
+        $list['video_height'] = $asset->video_height;
 
         // Resolve category_id to category name for Overview display
         $categoryId = $metadata['category_id'] ?? null;

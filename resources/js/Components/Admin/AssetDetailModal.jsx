@@ -22,14 +22,21 @@ import {
     ArrowDownTrayIcon,
     InformationCircleIcon,
     SparklesIcon,
+    PlayCircleIcon,
+    PhotoIcon,
 } from '@heroicons/react/24/outline'
 import { getPipelineStageTooltip } from '../../utils/pipelineStatusUtils'
 
-const ADMIN_THUMBNAIL_VIEW_LINK_ORDER = [
+/** Standard derivative sizes (original thumbnail pipeline). */
+const ADMIN_THUMB_SIZE_LINKS = [
     ['preview', 'Preview'],
     ['thumb', 'Thumb'],
     ['medium', 'Medium'],
     ['large', 'Large'],
+]
+
+/** Per-pipeline medium renditions when present. */
+const ADMIN_THUMB_MODE_LINKS = [
     ['preferred_medium', 'Preferred · medium'],
     ['enhanced_medium', 'Enhanced · medium'],
     ['presentation_medium', 'Presentation · medium'],
@@ -435,27 +442,95 @@ export default function AssetDetailModal({ data, onClose, onAction, onRefresh, s
                         </div>
                     )}
                     {tab === 'thumbnails' && (
-                        <div className="space-y-4">
-                            {asset?.thumbnail_view_urls && Object.keys(asset.thumbnail_view_urls).length > 0 && (
-                                <div className="flex flex-wrap gap-3 text-sm">
-                                    <span className="text-slate-500">View in new window:</span>
-                                    {ADMIN_THUMBNAIL_VIEW_LINK_ORDER.map(([key, label]) =>
-                                        asset.thumbnail_view_urls[key] ? (
-                                            <a
-                                                key={key}
-                                                href={asset.thumbnail_view_urls[key]}
-                                                target="_blank"
-                                                rel="noopener noreferrer"
-                                                className="text-indigo-600 hover:text-indigo-800 hover:underline"
-                                            >
-                                                {label}
-                                            </a>
-                                        ) : null
+                        <div className="space-y-6">
+                            {asset?.is_video && (
+                                <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+                                    <div className="flex items-center gap-2 text-sm font-semibold text-slate-800">
+                                        <PlayCircleIcon className="h-5 w-5 text-indigo-600" aria-hidden />
+                                        Hover / quick preview (short MP4)
+                                    </div>
+                                    <p className="mt-1 text-xs text-slate-500">
+                                        Same clip used on the main asset grid on desktop hover. URL updates when the asset row changes so you are not stuck on a cached file after regeneration.
+                                    </p>
+                                    {asset.video_preview_view_url ? (
+                                        <video
+                                            key={asset.video_preview_view_url}
+                                            className="mt-3 max-h-72 w-full max-w-lg rounded-md border border-slate-200 bg-black object-contain"
+                                            src={asset.video_preview_view_url}
+                                            controls
+                                            muted
+                                            playsInline
+                                            preload="metadata"
+                                        />
+                                    ) : (
+                                        <p className="mt-3 text-sm text-amber-800 bg-amber-50 border border-amber-100 rounded-md px-3 py-2">
+                                            No hover preview file yet. Use <span className="font-medium">Regenerate hover video previews</span> in Asset Operations bulk actions (or the library grid bulk action <span className="font-medium">Generate video previews</span>) after thumbnails exist.
+                                        </p>
                                     )}
+                                    {(asset.video_width || asset.video_height) ? (
+                                        <p className="mt-2 text-xs text-slate-500 tabular-nums">
+                                            Reported source dimensions: {asset.video_width ?? '—'} × {asset.video_height ?? '—'} px
+                                        </p>
+                                    ) : null}
                                 </div>
                             )}
-                            <div className="overflow-auto rounded border border-slate-200 bg-slate-50 p-4 max-h-96 [&_.w-rjv]:text-xs">
-                                <JsonView value={asset?.metadata?.thumbnails ?? {}} collapsed={1} enableClipboard />
+
+                            {asset?.thumbnail_view_urls && Object.keys(asset.thumbnail_view_urls).length > 0 && (
+                                <div className="space-y-4">
+                                    <p className="text-sm font-medium text-slate-800">Still-image derivatives</p>
+                                    <p className="text-xs text-slate-500 -mt-2">Open each size in a new tab to compare sharpness and crop.</p>
+
+                                    <div>
+                                        <div className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                                            <PhotoIcon className="h-4 w-4" aria-hidden />
+                                            Standard sizes
+                                        </div>
+                                        <ul className="flex flex-wrap gap-2">
+                                            {ADMIN_THUMB_SIZE_LINKS.map(([key, label]) =>
+                                                asset.thumbnail_view_urls[key] ? (
+                                                    <li key={key}>
+                                                        <a
+                                                            href={asset.thumbnail_view_urls[key]}
+                                                            target="_blank"
+                                                            rel="noopener noreferrer"
+                                                            className="inline-flex rounded-md border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm text-indigo-700 hover:border-indigo-200 hover:bg-indigo-50"
+                                                        >
+                                                            {label}
+                                                        </a>
+                                                    </li>
+                                                ) : null
+                                            )}
+                                        </ul>
+                                    </div>
+
+                                    <div>
+                                        <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                                            Pipeline modes (medium)
+                                        </div>
+                                        <ul className="flex flex-wrap gap-2">
+                                            {ADMIN_THUMB_MODE_LINKS.map(([key, label]) =>
+                                                asset.thumbnail_view_urls[key] ? (
+                                                    <li key={key}>
+                                                        <a
+                                                            href={asset.thumbnail_view_urls[key]}
+                                                            target="_blank"
+                                                            rel="noopener noreferrer"
+                                                            className="inline-flex rounded-md border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm text-indigo-700 hover:border-indigo-200 hover:bg-indigo-50"
+                                                        >
+                                                            {label}
+                                                        </a>
+                                                    </li>
+                                                ) : null
+                                            )}
+                                        </ul>
+                                    </div>
+                                </div>
+                            )}
+                            <div>
+                                <p className="mb-2 text-sm font-medium text-slate-800">Raw thumbnail metadata</p>
+                                <div className="overflow-auto rounded border border-slate-200 bg-slate-50 p-4 max-h-96 [&_.w-rjv]:text-xs">
+                                    <JsonView value={asset?.metadata?.thumbnails ?? {}} collapsed={1} enableClipboard />
+                                </div>
                             </div>
                         </div>
                     )}

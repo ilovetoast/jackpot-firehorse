@@ -259,6 +259,7 @@ class VideoPreviewGenerationService
                 'Key' => $s3PreviewPath,
                 'Body' => file_get_contents($localPreviewPath),
                 'ContentType' => 'video/mp4',
+                'CacheControl' => 'public, max-age=0, must-revalidate',
                 'Metadata' => [
                     'original-asset-id' => $asset->id,
                     'preview-type' => 'hover',
