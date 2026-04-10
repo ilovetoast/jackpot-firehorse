@@ -47,6 +47,7 @@ class AssetBulkActionController extends Controller
             AssetBulkAction::SITE_RERUN_THUMBNAILS->value,
             AssetBulkAction::SITE_RERUN_AI_METADATA_TAGGING->value,
             AssetBulkAction::SITE_GENERATE_VIDEO_PREVIEWS->value,
+            AssetBulkAction::SITE_DELETE_VIDEO_PREVIEWS->value,
             AssetBulkAction::SITE_REPROCESS_SYSTEM_METADATA->value,
             AssetBulkAction::SITE_REPROCESS_FULL_PIPELINE->value,
             AssetBulkAction::GENERATE_VIDEO_INSIGHTS->value,

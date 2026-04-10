@@ -30,6 +30,7 @@ import {
     ChevronDownIcon,
     ChevronUpIcon,
     ClipboardDocumentListIcon,
+    Squares2X2Icon,
 } from '@heroicons/react/24/outline'
 
 const STATUS_COLORS = {
@@ -133,6 +134,12 @@ export default function AdminDashboard({ auth, metrics: initialMetrics }) {
         { name: 'Operations Center', description: `Critical: ${incidents.critical ?? 0} | Errors: ${incidents.error ?? 0}`, href: '/app/admin/operations-center', icon: ExclamationTriangleIcon },
         { name: 'Asset Operations', description: 'Cross-tenant asset search, repair, restore', href: '/app/admin/assets', icon: FolderIcon },
         { name: 'Brand Intelligence', description: 'EBI scores, breakdown, simulate (dev)', href: '/app/admin/brand-intelligence', icon: SparklesIcon },
+        {
+            name: 'AI content & analysis',
+            description: 'Brand Intelligence, editor audit, video insights monitor',
+            href: '/app/admin/ai/analyzed-content',
+            icon: Squares2X2Icon,
+        },
         { name: 'System Status', description: 'Monitor system health', href: '/app/admin/system-status', icon: CogIcon },
         { name: 'Performance', description: 'Response timing, slow routes', href: '/app/admin/performance', icon: ClockIcon },
         { name: 'Logs', description: 'Web, worker & deploy logs', href: '/app/admin/logs', icon: DocumentTextIcon },
@@ -153,6 +160,12 @@ export default function AdminDashboard({ auth, metrics: initialMetrics }) {
 
     const aiItems = perms.canViewAI
         ? [
+            {
+                name: 'AI content & analysis',
+                description: 'Brand Intelligence, editor audit, video insights monitor',
+                href: '/app/admin/ai/analyzed-content',
+                icon: Squares2X2Icon,
+            },
             { name: 'AI Dashboard', description: 'Costs, models, agents', href: '/app/admin/ai', icon: BoltIcon },
             { name: 'Editor image audit', description: 'Canvas + presentation preview — input/output', href: '/app/admin/ai/editor-image-audit', icon: SparklesIcon },
             { name: 'AI Agent Health', description: `${ai.failures_24h ?? 0} failures (24h)`, href: '/app/admin/ai-agents', icon: BoltIcon },

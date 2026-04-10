@@ -36,6 +36,9 @@ enum AssetBulkAction: string
     /** Site admin / site engineering only — queue hover video preview generation (video assets only). */
     case SITE_GENERATE_VIDEO_PREVIEWS = 'SITE_GENERATE_VIDEO_PREVIEWS';
 
+    /** Site admin / site engineering only — remove stored hover/quick preview MP4 from storage and clear DB paths (video assets only). */
+    case SITE_DELETE_VIDEO_PREVIEWS = 'SITE_DELETE_VIDEO_PREVIEWS';
+
     /** Site admin / site engineering only — recompute system metadata + automatic population (async). */
     case SITE_REPROCESS_SYSTEM_METADATA = 'SITE_REPROCESS_SYSTEM_METADATA';
 
@@ -70,6 +73,7 @@ enum AssetBulkAction: string
             self::SITE_RERUN_THUMBNAILS,
             self::SITE_RERUN_AI_METADATA_TAGGING,
             self::SITE_GENERATE_VIDEO_PREVIEWS,
+            self::SITE_DELETE_VIDEO_PREVIEWS,
             self::SITE_REPROCESS_SYSTEM_METADATA,
             self::SITE_REPROCESS_FULL_PIPELINE,
         ], true);

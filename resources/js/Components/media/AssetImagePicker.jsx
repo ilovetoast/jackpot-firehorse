@@ -22,6 +22,7 @@ import { usePage } from '@inertiajs/react'
 import { XMarkIcon, PhotoIcon, CloudArrowUpIcon, CheckIcon } from '@heroicons/react/24/outline'
 import ImageCropModal from '../ImageCropModal'
 import { getInlineImagePickerAccept, syncDamFileTypesFromPage } from '../../utils/damFileTypes'
+import { parseUploadFinalizeResult, uploadPutContentType } from '../../utils/uploadFinalize'
 
 const CONTEXT_LABELS = {
   logos: 'Logos',
@@ -252,8 +253,12 @@ export default function AssetImagePicker({
         headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrf, Accept: 'application/json' },
         credentials: 'same-origin',
         body: JSON.stringify({
-          file_name: file.name, file_size: file.size, mime_type: file.type || null,
-          brand_id: brandId, builder_staged: true, builder_context: 'visual_reference',
+          file_name: file.name,
+          file_size: file.size,
+          mime_type: file.type || (file.name?.toLowerCase().endsWith('.svg') ? 'image/svg+xml' : null),
+          brand_id: brandId,
+          builder_staged: true,
+          builder_context: 'visual_reference',
         }),
       })
       if (!initRes.ok) throw new Error(`Initiate failed: ${initRes.status}`)
@@ -269,7 +274,16 @@ export default function AssetImagePicker({
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrf, Accept: 'application/json' },
         credentials: 'same-origin',
-        body: JSON.stringify({ files: [{ file_name: file.name, file_size: file.size, mime_type: file.type }], category_id: categoryId }),
+        body: JSON.stringify({
+          files: [
+            {
+              file_name: file.name,
+              file_size: file.size,
+              mime_type: file.type || (file.name?.toLowerCase().endsWith('.svg') ? 'image/svg+xml' : null),
+            },
+          ],
+          category_id: categoryId,
+        }),
       })
       if (!initRes.ok) throw new Error(`Initiate failed: ${initRes.status}`)
       const initData = await initRes.json()
@@ -279,7 +293,7 @@ export default function AssetImagePicker({
     }
 
     if (!uploadUrl) throw new Error('No upload URL returned')
-    const putRes = await fetch(uploadUrl, { method: 'PUT', headers: { 'Content-Type': file.type || 'application/octet-stream' }, body: file })
+    const putRes = await fetch(uploadUrl, { method: 'PUT', headers: { 'Content-Type': uploadPutContentType(file) }, body: file })
     if (!putRes.ok) throw new Error(`Upload failed: ${putRes.status}`)
 
     const manifestEntry = { upload_key: typeof uploadKey === 'object' ? uploadKey.key : uploadKey, expected_size: file.size, resolved_filename: file.name }
@@ -294,10 +308,11 @@ export default function AssetImagePicker({
     })
     if (!finalRes.ok) throw new Error(`Finalize failed: ${finalRes.status}`)
     const finalData = await finalRes.json()
-    const assetResult = finalData.results?.[0]
-    const assetId = assetResult?.asset_id ?? assetResult?.id
-    if (!assetId) throw new Error('No asset ID returned')
-    return { id: assetId, thumbnail_url: assetResult?.thumbnail_url ?? assetResult?.final_thumbnail_url ?? previewUrl ?? null }
+    const parsed = parseUploadFinalizeResult(finalData)
+    return {
+      id: parsed.asset_id,
+      thumbnail_url: parsed.thumbnail_url ?? parsed.final_thumbnail_url ?? previewUrl ?? null,
+    }
   }
 
   const handleUploadAll = async () => {

@@ -8,6 +8,7 @@ import { useState, useRef, useEffect } from 'react'
 import { PhotoIcon, ScissorsIcon } from '@heroicons/react/24/outline'
 import AssetImagePicker from './AssetImagePicker'
 import ImageCropModal from '../ImageCropModal'
+import { parseUploadFinalizeResult, uploadPutContentType } from '../../utils/uploadFinalize'
 
 async function uploadFileAsAsset(file, { brandId, contextCategory }) {
   const csrf = document.querySelector('meta[name="csrf-token"]')?.content
@@ -19,7 +20,13 @@ async function uploadFileAsAsset(file, { brandId, contextCategory }) {
   const initRes = await fetch('/app/uploads/initiate-batch', {
     method: 'POST', headers, credentials: 'same-origin',
     body: JSON.stringify({
-      files: [{ file_name: file.name, file_size: file.size, mime_type: file.type }],
+      files: [
+        {
+          file_name: file.name,
+          file_size: file.size,
+          mime_type: file.type || (file.name?.toLowerCase().endsWith('.svg') ? 'image/svg+xml' : null),
+        },
+      ],
       ...(brandId ? { brand_id: brandId } : {}),
     }),
   })
@@ -34,7 +41,7 @@ async function uploadFileAsAsset(file, { brandId, contextCategory }) {
 
   const putRes = await fetch(uploadUrl, {
     method: 'PUT',
-    headers: { 'Content-Type': file.type || 'application/octet-stream' },
+    headers: { 'Content-Type': uploadPutContentType(file) },
     body: file,
   })
   if (!putRes.ok) throw new Error(`Upload failed: ${putRes.status}`)
@@ -52,10 +59,11 @@ async function uploadFileAsAsset(file, { brandId, contextCategory }) {
   })
   if (!finalRes.ok) throw new Error(`Finalize failed: ${finalRes.status}`)
   const finalData = await finalRes.json()
-  const assetResult = finalData.results?.[0]
-  const assetId = assetResult?.asset_id ?? assetResult?.id
-  if (!assetId) throw new Error('No asset ID returned')
-  return { asset_id: assetId, thumbnail_url: assetResult?.thumbnail_url ?? assetResult?.final_thumbnail_url ?? null }
+  const parsed = parseUploadFinalizeResult(finalData)
+  return {
+    asset_id: parsed.asset_id,
+    thumbnail_url: parsed.thumbnail_url ?? parsed.final_thumbnail_url ?? null,
+  }
 }
 
 export default function AssetImagePickerField({

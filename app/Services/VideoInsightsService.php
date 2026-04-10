@@ -39,11 +39,16 @@ class VideoInsightsService
      *   frame_count: int,
      *   effective_duration_sampled: float,
      *   whisper_cost_usd: float,
-     *   vision_cost_usd: float
+     *   vision_cost_usd: float,
+     *   vision_prompt: string,
+     *   raw_llm_response: string
      * }
+     *
+     * @param  (callable(string): void)|null  $onStep  Optional progress hook for admin / job observability.
      */
-    public function analyze(Asset $asset): array
+    public function analyze(Asset $asset, ?callable $onStep = null): array
     {
+        $onStep?->__invoke('downloading_source');
         $videoTmp = $this->videoDownload->downloadSourceToTemp($asset);
 
         $framePaths = [];
@@ -52,6 +57,7 @@ class VideoInsightsService
         $effectiveDurationSampled = 0.0;
 
         try {
+            $onStep?->__invoke('extracting_frames');
             $extracted = $this->frameExtractor->extractFrames($videoTmp);
             $framePaths = $extracted['frame_paths'];
             $hasAudio = $extracted['video_has_audio'];
@@ -70,11 +76,15 @@ class VideoInsightsService
                 $hasAudio
                 && (bool) config('assets.video_ai.transcription_enabled', true)
             ) {
+                $onStep?->__invoke('transcribing');
                 $t = $this->audioTranscription->transcribeVideoAudio($videoTmp, $maxDur);
                 $transcript = $t['text'];
                 $whisperCost = $t['cost_usd'];
+            } else {
+                $onStep?->__invoke('transcribe_skipped');
             }
 
+            $onStep?->__invoke('building_collage');
             $collageUrl = $this->collageBuilder->buildDataUrl($framePaths);
 
             $intervalSeconds = max(1, (int) config('assets.video_ai.frame_interval_seconds', 3));
@@ -97,12 +107,14 @@ class VideoInsightsService
             $model = (string) config('ai.video_insights.model', 'gpt-4o-mini');
             $maxTokens = (int) config('ai.video_insights.max_tokens', 1200);
 
+            $onStep?->__invoke('calling_vision_api');
             $response = $this->provider->analyzeImage($collageUrl, $prompt, [
                 'model' => $model,
                 'max_tokens' => $maxTokens,
                 'response_format' => ['type' => 'json_object'],
             ]);
 
+            $onStep?->__invoke('parsing_response');
             $parsed = $this->parseInsightsJson(
                 $response['text'] ?? '',
                 count($framePaths),
@@ -130,6 +142,8 @@ class VideoInsightsService
                 'effective_duration_sampled' => $effectiveDurationSampled,
                 'whisper_cost_usd' => $whisperCost,
                 'vision_cost_usd' => $visionCost,
+                'vision_prompt' => $prompt,
+                'raw_llm_response' => (string) ($response['text'] ?? ''),
             ];
         } finally {
             @unlink($videoTmp);
@@ -333,5 +347,57 @@ class VideoInsightsService
             ],
             'moments' => $moments,
         ];
+    }
+
+    /**
+     * Admin troubleshooting: re-sample frames the same way as analyze() without calling the vision API.
+     *
+     * @return array{
+     *   frames: list<array{index: int, seconds: float, label: string, data_url: string}>,
+     *   frame_interval_seconds: int,
+     *   frame_count: int
+     * }
+     */
+    public function previewSampledFramesForAdmin(Asset $asset): array
+    {
+        $videoTmp = $this->videoDownload->downloadSourceToTemp($asset);
+        $framePaths = [];
+
+        try {
+            $extracted = $this->frameExtractor->extractFrames($videoTmp);
+            $framePaths = $extracted['frame_paths'];
+            $intervalSeconds = max(1, (int) config('assets.video_ai.frame_interval_seconds', 3));
+            $frames = [];
+
+            foreach ($framePaths as $i => $path) {
+                if (! is_string($path) || ! is_file($path)) {
+                    continue;
+                }
+                $raw = file_get_contents($path);
+                if ($raw === false || $raw === '') {
+                    continue;
+                }
+                $sec = (float) ($i * $intervalSeconds);
+                $frames[] = [
+                    'index' => $i,
+                    'seconds' => $sec,
+                    'label' => 'Frame '.($i + 1).' (~'.$this->formatTimestampMmSs($sec).')',
+                    'data_url' => 'data:image/jpeg;base64,'.base64_encode($raw),
+                ];
+            }
+
+            return [
+                'frames' => $frames,
+                'frame_interval_seconds' => $intervalSeconds,
+                'frame_count' => count($frames),
+            ];
+        } finally {
+            @unlink($videoTmp);
+            foreach ($framePaths as $p) {
+                if (is_string($p) && is_file($p)) {
+                    @unlink($p);
+                }
+            }
+        }
     }
 }

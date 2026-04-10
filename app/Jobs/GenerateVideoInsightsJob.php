@@ -12,6 +12,7 @@ use App\Models\Tenant;
 use App\Services\ActivityRecorder;
 use App\Services\AiTagPolicyService;
 use App\Services\AiUsageService;
+use App\Services\BrandIntelligence\BrandIntelligenceScheduleService;
 use App\Services\FileTypeService;
 use App\Services\VideoAiMinuteEstimator;
 use App\Services\VideoInsightsSearchIndexWriter;
@@ -88,6 +89,9 @@ class GenerateVideoInsightsJob implements ShouldQueue
 
         if ($preflight !== VideoInsightsPreflightOutcome::Proceed) {
             $this->applyPreflightOutcome($asset, $preflight, $meta);
+            if ($preflight !== VideoInsightsPreflightOutcome::NotVideoClearQueue) {
+                $this->signalDeferredEbiIfVideoInsightsSettled($asset->fresh());
+            }
 
             return;
         }
@@ -95,6 +99,7 @@ class GenerateVideoInsightsJob implements ShouldQueue
         $policy = $policyService->shouldProceedWithAiTagging($asset);
         if (! $policy['should_proceed']) {
             $this->markSkipped($asset, $policy['reason'] ?? 'policy');
+            $this->signalDeferredEbiIfVideoInsightsSettled($asset->fresh());
 
             return;
         }
@@ -107,6 +112,7 @@ class GenerateVideoInsightsJob implements ShouldQueue
             }
             $this->markFailed($asset, 'Video file not yet available in storage.');
             Log::warning('[GenerateVideoInsightsJob] Missing storage path after waits', ['asset_id' => $asset->id]);
+            $this->signalDeferredEbiIfVideoInsightsSettled($asset->fresh());
 
             return;
         }
@@ -116,6 +122,7 @@ class GenerateVideoInsightsJob implements ShouldQueue
         $tenant = Tenant::find($asset->tenant_id);
         if (! $tenant) {
             $this->markSkipped($asset, 'tenant_not_found');
+            $this->signalDeferredEbiIfVideoInsightsSettled($asset->fresh());
 
             return;
         }
@@ -124,6 +131,7 @@ class GenerateVideoInsightsJob implements ShouldQueue
             $usageService->checkUsage($tenant, 'video_insights', 1);
         } catch (PlanLimitExceededException $e) {
             $this->markSkipped($asset, 'plan_limit_exceeded');
+            $this->signalDeferredEbiIfVideoInsightsSettled($asset->fresh());
 
             return;
         }
@@ -133,6 +141,7 @@ class GenerateVideoInsightsJob implements ShouldQueue
             $usageService->checkVideoAiMinuteBudget($tenant, $estMinutes);
         } catch (PlanLimitExceededException $e) {
             $this->markSkipped($asset, 'video_minute_limit_exceeded');
+            $this->signalDeferredEbiIfVideoInsightsSettled($asset->fresh());
 
             return;
         }
@@ -160,8 +169,19 @@ class GenerateVideoInsightsJob implements ShouldQueue
             ],
         ]);
 
+        $syncStep = function (string $step) use ($agentRun, $asset): void {
+            $agentRun->mergeMetadata(['step' => $step]);
+            $fresh = Asset::find($asset->id);
+            if ($fresh) {
+                $meta = $fresh->metadata ?? [];
+                $meta['ai_video_insights_step'] = $step;
+                $fresh->update(['metadata' => $meta]);
+            }
+        };
+
         try {
-            $results = $videoInsights->analyze($asset);
+            $syncStep('starting');
+            $results = $videoInsights->analyze($asset, $syncStep);
 
             try {
                 $usageService->trackUsageWithCost(
@@ -176,6 +196,7 @@ class GenerateVideoInsightsJob implements ShouldQueue
             } catch (PlanLimitExceededException $e) {
                 $agentRun->markAsFailed($e->getMessage());
                 $this->markSkipped($asset, 'plan_limit_exceeded');
+                $this->signalDeferredEbiIfVideoInsightsSettled($asset->fresh());
 
                 return;
             }
@@ -190,6 +211,7 @@ class GenerateVideoInsightsJob implements ShouldQueue
 
             $patch = [
                 'ai_video_status' => 'completed',
+                'ai_video_insights_step' => null,
                 'ai_video_insights' => [
                     'tags' => $results['tags'],
                     'summary' => $results['summary'],
@@ -212,6 +234,7 @@ class GenerateVideoInsightsJob implements ShouldQueue
                 $results['tokens_out'],
                 $results['cost_usd'],
                 array_merge($agentRun->metadata ?? [], [
+                    'step' => 'completed',
                     'frame_count' => $results['frame_count'],
                     'has_transcript' => $transcript !== '',
                     'type' => 'video_insights',
@@ -219,6 +242,8 @@ class GenerateVideoInsightsJob implements ShouldQueue
                     'billable_minutes' => $billableMinutes,
                     'vision_cost_usd' => (float) ($results['vision_cost_usd'] ?? 0),
                     'whisper_cost_usd' => (float) ($results['whisper_cost_usd'] ?? 0),
+                    'vision_prompt' => mb_substr((string) ($results['vision_prompt'] ?? ''), 0, 120000),
+                    'raw_llm_response' => mb_substr((string) ($results['raw_llm_response'] ?? ''), 0, 120000),
                 ]),
                 null,
                 null,
@@ -245,10 +270,17 @@ class GenerateVideoInsightsJob implements ShouldQueue
                 'error_type' => 'quota_exceeded',
                 'agent_run_id' => $agentRun->id,
             ]);
+            $this->signalDeferredEbiIfVideoInsightsSettled($asset->fresh());
             $this->fail($e);
+
+            return;
         } catch (\Throwable $e) {
             $raw = $e->getMessage();
-            $agentRun->markAsFailed($raw);
+            $runMeta = $agentRun->metadata ?? [];
+            $agentRun->markAsFailed($raw, array_merge($runMeta, [
+                'step' => 'failed',
+                'failed_at_step' => $runMeta['step'] ?? 'unknown',
+            ]));
             $this->markFailed($asset, AiErrorSanitizer::forUser($raw));
             Log::error('[GenerateVideoInsightsJob] Video insights failed', [
                 'asset_id' => $asset->id,
@@ -261,6 +293,13 @@ class GenerateVideoInsightsJob implements ShouldQueue
                 'agent_run_id' => $agentRun->id,
             ]);
         }
+
+        $this->signalDeferredEbiIfVideoInsightsSettled($asset->fresh());
+    }
+
+    protected function signalDeferredEbiIfVideoInsightsSettled(Asset $asset): void
+    {
+        app(BrandIntelligenceScheduleService::class)->dispatchAfterVideoInsightsIfDeferred($asset);
     }
 
     /**
@@ -320,6 +359,7 @@ class GenerateVideoInsightsJob implements ShouldQueue
             'ai_video_status' => 'skipped',
             'ai_video_insights_skip_reason' => $reason,
             'ai_video_insights_skipped_at' => now()->toIso8601String(),
+            'ai_video_insights_step' => null,
         ]);
     }
 
@@ -329,6 +369,7 @@ class GenerateVideoInsightsJob implements ShouldQueue
             'ai_video_status' => 'failed',
             'ai_video_insights_error' => $message,
             'ai_video_insights_failed_at' => now()->toIso8601String(),
+            'ai_video_insights_step' => null,
         ]);
     }
 }

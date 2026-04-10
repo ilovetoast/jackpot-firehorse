@@ -25,6 +25,7 @@ import {
     ChartBarIcon,
     ArrowDownTrayIcon,
     CloudArrowUpIcon,
+    Squares2X2Icon,
 } from '@heroicons/react/24/outline'
 import AppNav from '../../Components/AppNav'
 import { usePermission } from '../../hooks/usePermission'
@@ -167,6 +168,12 @@ export default function AdminIndex({ companies: initialCompanies, users: initial
             heading: 'AI & Automation',
             tools: [
                 { name: 'AI Agent Health', icon: BoltIcon, description: stats ? `Failures (24h): ${stats.ai_agent_failures_24h ?? 0}` : 'Agent runs, conclusions, escalation', href: '/app/admin/ai-agents' },
+                {
+                    name: 'AI content & analysis',
+                    icon: Squares2X2Icon,
+                    description: 'Brand Intelligence, editor audit, video insights monitor',
+                    href: '/app/admin/ai/analyzed-content',
+                },
                 ...(canViewAIDashboard ? [{ name: 'AI Dashboard', icon: BoltIcon, description: 'Observe and manage AI operations, view cost reports, and manage budgets', href: '/app/admin/ai' }] : []),
                 { name: 'AI Error Monitoring', icon: ExclamationTriangleIcon, description: 'Sentry issues, AI summary, root cause, fix suggestions', href: '/app/admin/ai-error-monitoring' },
             ],

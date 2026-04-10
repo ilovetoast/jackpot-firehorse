@@ -26,7 +26,12 @@ class ProcessVideoInsightsBatchJob implements ShouldQueue
     public function __construct(
         public readonly array $assetIds
     ) {
-        $this->onQueue(config('queue.default'));
+        // Must match {@see GenerateVideoInsightsJob}: fan-out runs on the same queue workers use for video AI
+        // (Horizon supervisor-ai listens to ai + ai-low). Do not use config('queue.default') — that is the
+        // connection *name* (e.g. redis), not a queue list like default/images.
+        $q = config('assets.video_ai.queue');
+
+        $this->onQueue($q ?: config('queue.ai_low_queue', 'ai-low'));
     }
 
     public function backoff(): array

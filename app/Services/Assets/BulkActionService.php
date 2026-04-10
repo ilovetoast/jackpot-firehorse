@@ -21,8 +21,10 @@ use App\Models\User;
 use App\Services\ActivityRecorder;
 use App\Services\AiTagPolicyService;
 use App\Services\AiUsageService;
+use App\Services\AssetVariantPathResolver;
 use App\Services\BulkMetadataService;
 use App\Services\FileTypeService;
+use App\Support\AssetVariant;
 use App\Support\PipelineQueueResolver;
 use App\Support\Roles\PermissionMap;
 use Illuminate\Auth\Access\AuthorizationException;
@@ -560,6 +562,7 @@ class BulkActionService
             AssetBulkAction::SITE_RERUN_AI_METADATA_TAGGING => $this->sitePipelineBulkAiMetadata($ordered, $totalSelected, $user, $tenantId),
             AssetBulkAction::SITE_RERUN_THUMBNAILS => $this->sitePipelineBulkThumbnails($ordered, $totalSelected, $user, $action->value),
             AssetBulkAction::SITE_GENERATE_VIDEO_PREVIEWS => $this->sitePipelineBulkVideoPreviews($ordered, $totalSelected, $user, $action->value),
+            AssetBulkAction::SITE_DELETE_VIDEO_PREVIEWS => $this->sitePipelineBulkDeleteVideoPreviews($ordered, $totalSelected, $user, $action->value),
             AssetBulkAction::SITE_REPROCESS_SYSTEM_METADATA => $this->sitePipelineBulkSystemMetadata($ordered, $totalSelected, $user, $action->value),
             AssetBulkAction::SITE_REPROCESS_FULL_PIPELINE => $this->sitePipelineBulkFullPipeline($ordered, $totalSelected, $user, $action->value),
             default => throw new \InvalidArgumentException('Unsupported site pipeline bulk action.'),
@@ -790,6 +793,155 @@ class BulkActionService
             errors: $errors,
             perActionSummary: $perActionSummary
         );
+    }
+
+    /**
+     * Remove hover/quick preview MP4 from object storage and clear {@see Asset::$video_preview_url} (+ metadata).
+     *
+     * @param  array<int, Asset>  $ordered
+     */
+    protected function sitePipelineBulkDeleteVideoPreviews(array $ordered, int $totalSelected, User $user, string $actionValue): BulkActionResult
+    {
+        $processed = 0;
+        $skipped = 0;
+        $errors = [];
+        $perActionSummary = [];
+        $fileTypeService = app(FileTypeService::class);
+        $s3Client = null;
+
+        $chunks = array_chunk($ordered, $this->pipelineBulkChunkSize());
+        foreach ($chunks as $idx => $chunk) {
+            if ($idx > 0) {
+                usleep(250_000);
+            }
+            foreach ($chunk as $asset) {
+                if (! Gate::forUser($user)->allows('view', $asset)) {
+                    $skipped++;
+                    $perActionSummary['skipped_unauthorized'] = ($perActionSummary['skipped_unauthorized'] ?? 0) + 1;
+
+                    continue;
+                }
+                if (! Gate::forUser($user)->allows('retryThumbnails', $asset)) {
+                    $skipped++;
+                    $perActionSummary['skipped_no_retry_permission'] = ($perActionSummary['skipped_no_retry_permission'] ?? 0) + 1;
+
+                    continue;
+                }
+                if (! $asset->storage_root_path || ! $asset->storageBucket) {
+                    $skipped++;
+                    $perActionSummary['skipped_no_storage'] = ($perActionSummary['skipped_no_storage'] ?? 0) + 1;
+
+                    continue;
+                }
+                if ($fileTypeService->detectFileTypeFromAsset($asset) !== 'video') {
+                    $skipped++;
+                    $perActionSummary['skipped_not_video'] = ($perActionSummary['skipped_not_video'] ?? 0) + 1;
+
+                    continue;
+                }
+                try {
+                    if ($s3Client === null) {
+                        $s3Client = $this->createS3ClientForVideoPreviewMutation();
+                    }
+                    $previousState = $this->snapshotState($asset);
+                    $this->deleteVideoPreviewObjectsFromStorage($asset, $s3Client);
+                    $meta = $asset->metadata ?? [];
+                    if (! is_array($meta)) {
+                        $meta = [];
+                    }
+                    unset($meta['video_preview']);
+                    $asset->update([
+                        'video_preview_url' => null,
+                        'metadata' => $meta,
+                    ]);
+                    $asset->refresh();
+                    $this->emitBulkActionPerformed($asset, $user, $actionValue, $previousState, $this->snapshotState($asset));
+                    $processed++;
+                } catch (\Throwable $e) {
+                    Log::warning('[BulkActionService] SITE_DELETE_VIDEO_PREVIEWS failed', [
+                        'asset_id' => $asset->id,
+                        'error' => $e->getMessage(),
+                    ]);
+                    $errors[] = ['asset_id' => $asset->id, 'reason' => $e->getMessage()];
+                }
+            }
+        }
+
+        return new BulkActionResult(
+            totalSelected: $totalSelected,
+            processed: $processed,
+            skipped: $skipped,
+            errors: $errors,
+            perActionSummary: $perActionSummary
+        );
+    }
+
+    /**
+     * @return list<string>
+     */
+    protected function candidateVideoPreviewStorageKeys(Asset $asset): array
+    {
+        $paths = [];
+        $raw = $asset->getAttributes()['video_preview_url'] ?? null;
+        if (is_string($raw) && $raw !== '' && ! str_starts_with($raw, 'http')) {
+            $paths[] = $raw;
+        }
+        $meta = $asset->metadata ?? [];
+        $metaPath = is_array($meta) ? ($meta['video_preview']['path'] ?? null) : null;
+        if (is_string($metaPath) && $metaPath !== '' && ! str_starts_with($metaPath, 'http')) {
+            $paths[] = $metaPath;
+        }
+        $resolved = app(AssetVariantPathResolver::class)->resolve($asset, AssetVariant::VIDEO_PREVIEW->value);
+        if (is_string($resolved) && $resolved !== '') {
+            $paths[] = $resolved;
+        }
+
+        return array_values(array_unique($paths));
+    }
+
+    protected function deleteVideoPreviewObjectsFromStorage(Asset $asset, \Aws\S3\S3Client $s3Client): void
+    {
+        $bucket = $asset->storageBucket;
+        if (! $bucket) {
+            return;
+        }
+        foreach ($this->candidateVideoPreviewStorageKeys($asset) as $key) {
+            try {
+                if ($s3Client->doesObjectExist($bucket->name, $key)) {
+                    $s3Client->deleteObject([
+                        'Bucket' => $bucket->name,
+                        'Key' => $key,
+                    ]);
+                    Log::info('[BulkActionService] Deleted video preview object', [
+                        'asset_id' => $asset->id,
+                        'key' => $key,
+                    ]);
+                }
+            } catch (\Throwable $e) {
+                Log::warning('[BulkActionService] Failed to delete video preview object (continuing)', [
+                    'asset_id' => $asset->id,
+                    'key' => $key,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+    }
+
+    protected function createS3ClientForVideoPreviewMutation(): \Aws\S3\S3Client
+    {
+        if (! class_exists(\Aws\S3\S3Client::class)) {
+            throw new \RuntimeException('AWS SDK not installed.');
+        }
+        $config = [
+            'version' => 'latest',
+            'region' => config('storage.default_region', config('filesystems.disks.s3.region', 'us-east-1')),
+        ];
+        if (config('filesystems.disks.s3.endpoint')) {
+            $config['endpoint'] = config('filesystems.disks.s3.endpoint');
+            $config['use_path_style_endpoint'] = config('filesystems.disks.s3.use_path_style_endpoint', false);
+        }
+
+        return new \Aws\S3\S3Client($config);
     }
 
     /**

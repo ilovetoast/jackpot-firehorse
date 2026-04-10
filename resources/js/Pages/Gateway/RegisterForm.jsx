@@ -47,23 +47,37 @@ export default function RegisterForm({ context, onToggleLogin }) {
 
     const inputClass = 'w-full px-4 py-3.5 bg-white/[0.04] border rounded-lg text-white placeholder-white/35 focus:outline-none transition-all duration-500'
 
+    const isJackpotDefault = theme?.mode === 'default'
+
     return (
         <div className="w-full max-w-sm animate-fade-in" style={{ animationDuration: '500ms' }}>
             <div className="text-center mb-10">
-                <div className="flex justify-center mb-6">
-                    <div
-                        className="h-14 w-14 rounded-xl flex items-center justify-center backdrop-blur"
-                        style={{ backgroundColor: `${primary}15` }}
-                    >
-                        {theme?.logo ? (
-                            <img src={theme.logo} alt={theme.name} className="h-9 object-contain" />
-                        ) : (
-                            <span className="text-xl font-semibold text-white">
-                                {theme?.name?.charAt(0) || 'J'}
-                            </span>
-                        )}
+                {!isJackpotDefault && (
+                    <div className="flex justify-center mb-6">
+                        <div
+                            className="h-14 w-14 rounded-xl flex items-center justify-center backdrop-blur"
+                            style={{ backgroundColor: `${primary}15` }}
+                        >
+                            {theme?.logo ? (
+                                <img src={theme.logo} alt={theme.name} className="h-9 object-contain" />
+                            ) : (
+                                <span className="text-xl font-semibold text-white">
+                                    {theme?.name?.charAt(0) || 'J'}
+                                </span>
+                            )}
+                        </div>
                     </div>
-                </div>
+                )}
+                {isJackpotDefault && (
+                    <div className="flex justify-center mb-6">
+                        <img
+                            src="/jp-wordmark-inverted.svg"
+                            alt="Jackpot"
+                            className="h-12 w-auto max-w-full sm:h-14 md:h-16"
+                            decoding="async"
+                        />
+                    </div>
+                )}
                 <h1 className="text-4xl md:text-5xl font-semibold tracking-tight leading-tight text-white/95 mb-2">
                     Get Started
                 </h1>

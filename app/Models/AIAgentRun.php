@@ -127,6 +127,20 @@ class AIAgentRun extends Model
     }
 
     /**
+     * Merge into JSON metadata without replacing the entire column (e.g. long-running job progress).
+     *
+     * @param  array<string, mixed>  $patch
+     */
+    public function mergeMetadata(array $patch): void
+    {
+        $meta = $this->metadata ?? [];
+        foreach ($patch as $k => $v) {
+            $meta[$k] = $v;
+        }
+        $this->update(['metadata' => $meta]);
+    }
+
+    /**
      * Get the duration of the agent run in seconds.
      *
      * @return int|null Duration in seconds, or null if not completed

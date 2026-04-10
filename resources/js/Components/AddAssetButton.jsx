@@ -38,9 +38,11 @@ export default function AddAssetButton({
         ? 'Add Asset' 
         : `Add ${DELIVERABLES_PAGE_LABEL_SINGULAR}`
 
-    const btnColor = getWorkspaceButtonColor(auth.activeBrand)
+    const workspaceBase = getWorkspaceButtonColor(auth.activeBrand)
+    // Same solid as Library "All" / category selected row (Assets Index: darken(workspace, 20))
+    const btnColor = darkenColor(workspaceBase, 20)
     const labelColor = getContrastTextColor(btnColor)
-    const hoverBg = darkenColor(btnColor, 20)
+    const hoverBg = darkenColor(workspaceBase, 35)
     const hoverLabelColor = getContrastTextColor(hoverBg)
 
     return (

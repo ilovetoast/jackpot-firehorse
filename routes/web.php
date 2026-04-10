@@ -467,6 +467,9 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
     // AI Dashboard routes (no tenant middleware - system-level only)
     Route::get('/admin/ai', [\App\Http\Controllers\Admin\AIDashboardController::class, 'index'])->name('admin.ai.index');
     Route::get('/admin/ai/activity', [\App\Http\Controllers\Admin\AIDashboardController::class, 'activity'])->name('admin.ai.activity');
+    Route::get('/admin/ai/analyzed-content', [\App\Http\Controllers\Admin\AdminAnalyzedContentController::class, 'index'])->name('admin.ai.analyzed-content');
+    Route::get('/admin/ai/analyzed-content/video-insights/runs/{run}', [\App\Http\Controllers\Admin\AdminAnalyzedContentController::class, 'videoInsightRunDetail'])->name('admin.ai.analyzed-content.video-insight-run');
+    Route::get('/admin/ai/analyzed-content/video-insights/assets/{asset}/frames', [\App\Http\Controllers\Admin\AdminAnalyzedContentController::class, 'videoInsightFrames'])->name('admin.ai.analyzed-content.video-insight-frames');
     Route::get('/admin/ai/editor-image-audit', [\App\Http\Controllers\Admin\AIDashboardController::class, 'editorImageAudit'])->name('admin.ai.editor-image-audit');
     Route::get('/admin/ai/models', [\App\Http\Controllers\Admin\AIDashboardController::class, 'models'])->name('admin.ai.models');
     Route::get('/admin/ai/agents', [\App\Http\Controllers\Admin\AIDashboardController::class, 'agents'])->name('admin.ai.agents');

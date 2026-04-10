@@ -931,7 +931,7 @@ export default function AssetsIndex({
         return luminance > 0.5
     }
     const textColor = isLightColor(sidebarColor) ? '#000000' : '#ffffff'
-    // Match Add Asset button: selected/hover use dark hue (same as button hover state)
+    // Same solid as AddAssetButton (darken workspace accent by 20) for Library row selection
     const contextualDarkColor = darkenColor(workspaceAccentColor, 20)
     const activeBgColor = contextualDarkColor
     const activeTextColor = getContrastTextColor(contextualDarkColor)

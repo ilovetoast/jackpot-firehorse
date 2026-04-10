@@ -2,11 +2,13 @@
 
 namespace App\Services\BrandIntelligence;
 
+use App\Enums\AssetType;
 use App\Jobs\DebouncedBrandIntelligenceRescoreJob;
 use App\Jobs\ScoreAssetBrandIntelligenceJob;
 use App\Models\Asset;
 use App\Models\BrandIntelligenceScore;
 use App\Models\Category;
+use App\Services\FileTypeService;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 
@@ -39,6 +41,61 @@ class BrandIntelligenceScheduleService
         ScoreAssetBrandIntelligenceJob::dispatch($asset->id);
 
         Log::debug('[EBI] Pipeline-complete score queued', ['asset_id' => $asset->id]);
+    }
+
+    /**
+     * Library (non-deliverable) videos with async video AI enabled: defer first-pass EBI until
+     * {@see \App\Jobs\GenerateVideoInsightsJob} reaches a terminal state. Deliverables keep immediate EBI.
+     */
+    public function shouldDeferBrandIntelligenceUntilVideoInsights(Asset $asset): bool
+    {
+        if (app(FileTypeService::class)->detectFileTypeFromAsset($asset) !== 'video') {
+            return false;
+        }
+
+        if ($asset->type === AssetType::DELIVERABLE) {
+            return false;
+        }
+
+        return (bool) config('assets.video_ai.enabled', true);
+    }
+
+    /**
+     * Video insights finished, skipped, or failed — safe to allow deferred EBI for library videos.
+     */
+    public function videoInsightsTerminalForDeferredEbi(Asset $asset): bool
+    {
+        $meta = $asset->metadata ?? [];
+        if (! empty($meta['ai_video_insights_completed_at'])) {
+            return true;
+        }
+
+        $st = $meta['ai_video_status'] ?? null;
+
+        return in_array($st, ['skipped', 'failed'], true);
+    }
+
+    /**
+     * After video insights settle, queue first-pass EBI if the asset was deferred at finalize.
+     * Idempotent via {@see ScoreAssetBrandIntelligenceJob}.
+     */
+    public function dispatchAfterVideoInsightsIfDeferred(Asset $asset): void
+    {
+        $asset->refresh();
+
+        if (! $this->shouldDeferBrandIntelligenceUntilVideoInsights($asset)) {
+            return;
+        }
+
+        if (! $this->videoInsightsTerminalForDeferredEbi($asset)) {
+            return;
+        }
+
+        $this->dispatchAfterPipelineComplete($asset);
+
+        Log::debug('[EBI] Deferred library-video score queued after video insights terminal', [
+            'asset_id' => $asset->id,
+        ]);
     }
 
     /**

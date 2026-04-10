@@ -35,9 +35,19 @@ const RENAME_ASSETS_ACTION = 'RENAME_ASSETS'
 const SITE_RERUN_THUMBNAILS = 'SITE_RERUN_THUMBNAILS'
 const SITE_RERUN_AI_METADATA_TAGGING = 'SITE_RERUN_AI_METADATA_TAGGING'
 const SITE_GENERATE_VIDEO_PREVIEWS = 'SITE_GENERATE_VIDEO_PREVIEWS'
+const SITE_DELETE_VIDEO_PREVIEWS = 'SITE_DELETE_VIDEO_PREVIEWS'
 const SITE_REPROCESS_SYSTEM_METADATA = 'SITE_REPROCESS_SYSTEM_METADATA'
 const SITE_REPROCESS_FULL_PIPELINE = 'SITE_REPROCESS_FULL_PIPELINE'
 const SITE_PIPELINE_ACTIONS = new Set([
+    SITE_RERUN_THUMBNAILS,
+    SITE_RERUN_AI_METADATA_TAGGING,
+    SITE_GENERATE_VIDEO_PREVIEWS,
+    SITE_DELETE_VIDEO_PREVIEWS,
+    SITE_REPROCESS_SYSTEM_METADATA,
+    SITE_REPROCESS_FULL_PIPELINE,
+])
+/** Subset of site pipeline: queued jobs (excludes synchronous delete preview). */
+const SITE_PIPELINE_QUEUED_ACTIONS = new Set([
     SITE_RERUN_THUMBNAILS,
     SITE_RERUN_AI_METADATA_TAGGING,
     SITE_GENERATE_VIDEO_PREVIEWS,
@@ -46,7 +56,7 @@ const SITE_PIPELINE_ACTIONS = new Set([
 ])
 /** Tenant video AI insights (same confirm / queue UX as site pipeline jobs). */
 const GENERATE_VIDEO_INSIGHTS = 'GENERATE_VIDEO_INSIGHTS'
-const BACKGROUND_QUEUE_BULK_ACTIONS = new Set([...SITE_PIPELINE_ACTIONS, GENERATE_VIDEO_INSIGHTS])
+const BACKGROUND_QUEUE_BULK_ACTIONS = new Set([...SITE_PIPELINE_QUEUED_ACTIONS, GENERATE_VIDEO_INSIGHTS])
 /** Full pipeline only: explicit acknowledgment (resource intensive). */
 const SITE_FULL_PIPELINE_ACTION = SITE_REPROCESS_FULL_PIPELINE
 /** Align with config/asset_processing.php max_bulk_pipeline_assets */
@@ -283,6 +293,7 @@ function getActionLabel(actionId) {
     if (actionId === SITE_RERUN_THUMBNAILS) return 'Refresh previews'
     if (actionId === SITE_RERUN_AI_METADATA_TAGGING) return 'Improve AI tags'
     if (actionId === SITE_GENERATE_VIDEO_PREVIEWS) return 'Generate video previews'
+    if (actionId === SITE_DELETE_VIDEO_PREVIEWS) return 'Delete video quick previews'
     if (actionId === SITE_REPROCESS_SYSTEM_METADATA) return 'Re-run metadata extraction'
     if (actionId === SITE_REPROCESS_FULL_PIPELINE) return 'Reprocess entire asset'
     if (actionId === GENERATE_VIDEO_INSIGHTS) return 'Analyze video content'
@@ -300,6 +311,9 @@ function getConfirmSummaryText(actionId, count) {
     }
     if (actionId === SITE_GENERATE_VIDEO_PREVIEWS) {
         return `This will queue hover/quick preview MP4 regeneration for video assets in your selection (${count} selected), including correct orientation from metadata. Non-video assets and items without a poster/thumbnail will be skipped.${batchNote}`
+    }
+    if (actionId === SITE_DELETE_VIDEO_PREVIEWS) {
+        return `This will remove stored hover/quick preview MP4 files from storage and clear preview paths for video assets in your selection (${count} selected). Non-video assets will be skipped. Does not queue regeneration — use Generate video previews afterward if you want new files.${batchNote}`
     }
     if (actionId === SITE_REPROCESS_SYSTEM_METADATA) {
         return `This will re-run technical metadata extraction for ${count} selected asset${count !== 1 ? 's' : ''}. Requires admin or the right permission on this company.${batchNote}`
@@ -525,11 +539,13 @@ export default function BulkActionsModal({
                 payload,
             })
             const { processed = 0, skipped = 0, errors: errs = [] } = data
-            const mainMsg = BACKGROUND_QUEUE_BULK_ACTIONS.has(selectedAction)
-                ? selectedAction === GENERATE_VIDEO_INSIGHTS
-                    ? `Queued ${processed} video${processed !== 1 ? 's' : ''} for analysis${skipped > 0 ? `. ${skipped} skipped.` : ''}`
-                    : `Processing started for ${processed} asset${processed !== 1 ? 's' : ''}.${skipped > 0 ? ` ${skipped} skipped.` : ''}`
-                : `${processed} asset${processed !== 1 ? 's' : ''} updated${skipped > 0 ? `. ${skipped} skipped.` : '.'}`
+            const mainMsg = selectedAction === SITE_DELETE_VIDEO_PREVIEWS
+                ? `Removed quick previews for ${processed} video${processed !== 1 ? 's' : ''}${skipped > 0 ? `. ${skipped} skipped.` : '.'}`
+                : BACKGROUND_QUEUE_BULK_ACTIONS.has(selectedAction)
+                  ? selectedAction === GENERATE_VIDEO_INSIGHTS
+                      ? `Queued ${processed} video${processed !== 1 ? 's' : ''} for analysis${skipped > 0 ? `. ${skipped} skipped.` : ''}`
+                      : `Processing started for ${processed} asset${processed !== 1 ? 's' : ''}.${skipped > 0 ? ` ${skipped} skipped.` : ''}`
+                  : `${processed} asset${processed !== 1 ? 's' : ''} updated${skipped > 0 ? `. ${skipped} skipped.` : '.'}`
             if (typeof window !== 'undefined' && window.toast) {
                 window.toast(mainMsg, processed > 0 ? 'success' : 'info')
             } else if (typeof window !== 'undefined' && window.flash) {
@@ -556,7 +572,9 @@ export default function BulkActionsModal({
     const isLifecycle = selectedAction && LIFECYCLE_ACTIONS.has(selectedAction)
     const isSitePipeline = selectedAction && SITE_PIPELINE_ACTIONS.has(selectedAction)
     const isBackgroundQueueBulk = selectedAction && BACKGROUND_QUEUE_BULK_ACTIONS.has(selectedAction)
+    const isSitePipelineSyncDelete = selectedAction === SITE_DELETE_VIDEO_PREVIEWS
     const isFullPipelineBulk = selectedAction === SITE_FULL_PIPELINE_ACTION
+    const pipelineSelectionBlocksAction = (isBackgroundQueueBulk || isSitePipelineSyncDelete) && pipelineSelectionOverLimit
 
     const summaryEligible = selectedAssetSummary
         ? (selectedAction === 'PUBLISH' ? selectedAssetSummary.filter((a) => !a.is_published).length : selectedAction === 'UNPUBLISH' ? selectedAssetSummary.filter((a) => a.is_published).length : null)
@@ -765,6 +783,14 @@ export default function BulkActionsModal({
                                             disabled={pipelineSelectionOverLimit}
                                         />
                                         <ProcessingActionCard
+                                            icon="trash"
+                                            title="Delete video quick previews"
+                                            description="Remove hover MP4 from storage and clear paths (no regeneration)"
+                                            variant="danger"
+                                            onClick={() => handleSelectAction(SITE_DELETE_VIDEO_PREVIEWS)}
+                                            disabled={pipelineSelectionOverLimit}
+                                        />
+                                        <ProcessingActionCard
                                             icon="refresh"
                                             title="Re-run metadata extraction"
                                             description="Technical file metadata only"
@@ -925,12 +951,14 @@ export default function BulkActionsModal({
                                 </div>
                             )}
 
-                            {(isLifecycle || isBackgroundQueueBulk) && (
+                            {(isLifecycle || isBackgroundQueueBulk || isSitePipelineSyncDelete) && (
                                 <div
                                     className={`rounded-xl border p-4 mb-6 shadow-sm transition-all duration-[140ms] ease-out ${
-                                        isBackgroundQueueBulk
-                                            ? 'border-indigo-200 bg-indigo-50/60'
-                                            : 'border-gray-200 bg-gray-50/50'
+                                        isSitePipelineSyncDelete
+                                            ? 'border-amber-200 bg-amber-50/60'
+                                            : isBackgroundQueueBulk
+                                              ? 'border-indigo-200 bg-indigo-50/60'
+                                              : 'border-gray-200 bg-gray-50/50'
                                     }`}
                                     style={{
                                         opacity: confirmPanelEntered ? 1 : 0,
@@ -953,6 +981,11 @@ export default function BulkActionsModal({
                                     {isBackgroundQueueBulk && (
                                         <p className="text-xs text-yellow-700 mt-3">
                                             These actions run in the background and may take several minutes.
+                                        </p>
+                                    )}
+                                    {isSitePipelineSyncDelete && (
+                                        <p className="text-xs text-amber-900/80 mt-3">
+                                            Runs immediately: preview files are removed from storage and paths cleared on each asset (no background job).
                                         </p>
                                     )}
                                 </div>
@@ -994,18 +1027,22 @@ export default function BulkActionsModal({
                                         (isReject && !rejectionReason.trim()) ||
                                         (isAssignCategory && !assignCategoryId) ||
                                         (isRename && (!bulkRenameBase.trim() || n < 2)) ||
-                                        (isBackgroundQueueBulk && pipelineSelectionOverLimit) ||
+                                        pipelineSelectionBlocksAction ||
                                         (isFullPipelineBulk && !fullPipelineResourceAck)
                                     }
                                     className={`px-4 py-2 text-sm font-medium rounded-xl disabled:opacity-50 disabled:pointer-events-none shadow-sm transition-colors ${
                                         isFullPipelineBulk
                                             ? 'text-white bg-red-600 hover:bg-red-700'
-                                            : 'text-white bg-indigo-600 hover:bg-indigo-700'
+                                            : isSitePipelineSyncDelete
+                                              ? 'text-white bg-amber-700 hover:bg-amber-800'
+                                              : 'text-white bg-indigo-600 hover:bg-indigo-700'
                                     }`}
                                 >
                                     {submitting
                                         ? `Processing ${n} assets...`
-                                        : isBackgroundQueueBulk
+                                        : isSitePipelineSyncDelete
+                                          ? 'Delete previews'
+                                          : isBackgroundQueueBulk
                                         ? 'Queue jobs'
                                         : isLifecycle
                                         ? 'Confirm Action'

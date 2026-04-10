@@ -156,7 +156,15 @@ class FinalizeAssetJob implements ShouldQueue
             GenerateAssetEmbeddingJob::dispatch($asset->id)->onQueue(config('queue.images_queue', 'images'));
         } else {
             // Non-images and image assets without embeddings: embedding job normally dispatches EBI after scoring.
-            app(BrandIntelligenceScheduleService::class)->dispatchAfterPipelineComplete($asset->fresh());
+            $fresh = $asset->fresh();
+            $schedule = app(BrandIntelligenceScheduleService::class);
+            if ($schedule->shouldDeferBrandIntelligenceUntilVideoInsights($fresh)) {
+                Log::debug('[FinalizeAssetJob] Deferring EBI until video insights complete (library video)', [
+                    'asset_id' => $fresh->id,
+                ]);
+            } else {
+                $schedule->dispatchAfterPipelineComplete($fresh);
+            }
         }
     }
 

@@ -34,6 +34,7 @@ export default function EnterTransition() {
     }, [isInstant, destination])
 
     const primary = theme?.colors?.primary || '#6366f1'
+    const isJackpotDefault = theme?.mode === 'default'
 
     // Instant mode: minimal fade with brand presence
     if (isInstant) {
@@ -45,14 +46,27 @@ export default function EnterTransition() {
                 style={{ background: theme?.background?.value || '#0B0B0D' }}
             >
                 <div className="flex flex-col items-center">
-                    <div
-                        className="h-12 w-12 rounded-xl flex items-center justify-center mb-3"
-                        style={{ background: `linear-gradient(135deg, ${primary}CC, ${primary}55)` }}
-                    >
-                        <span className="text-lg font-bold text-white">
-                            {theme?.name?.charAt(0) || 'J'}
-                        </span>
-                    </div>
+                    {isJackpotDefault ? (
+                        <img
+                            src="/jp-wordmark-inverted.svg"
+                            alt="Jackpot"
+                            className="h-8 w-auto max-w-[min(100%,14rem)] mb-3"
+                            decoding="async"
+                        />
+                    ) : (
+                        <div
+                            className="h-12 w-12 rounded-xl flex items-center justify-center mb-3"
+                            style={{ background: `linear-gradient(135deg, ${primary}CC, ${primary}55)` }}
+                        >
+                            {theme?.logo ? (
+                                <img src={theme.logo} alt={theme.name} className="h-7 object-contain" />
+                            ) : (
+                                <span className="text-lg font-bold text-white">
+                                    {theme?.name?.charAt(0) || 'J'}
+                                </span>
+                            )}
+                        </div>
+                    )}
                     <p className="text-xs text-white/40 tracking-wide">
                         Entering {theme?.name || 'Jackpot'}
                     </p>
@@ -87,7 +101,14 @@ export default function EnterTransition() {
                         opacity: stage !== 'init' ? 1 : 0,
                     }}
                 >
-                    {theme?.logo ? (
+                    {isJackpotDefault ? (
+                        <img
+                            src="/jp-wordmark-inverted.svg"
+                            alt="Jackpot"
+                            className="h-16 w-auto max-w-full sm:h-20 md:h-24 lg:h-28 mx-auto mb-6 object-contain"
+                            decoding="async"
+                        />
+                    ) : theme?.logo ? (
                         <img
                             src={theme.logo}
                             alt={theme.name}
@@ -107,12 +128,14 @@ export default function EnterTransition() {
                     )}
                 </div>
 
-                <h1
-                    className="text-5xl md:text-6xl font-semibold tracking-tight leading-tight text-white/95 mb-2 transition-opacity duration-500"
-                    style={{ opacity: stage !== 'init' ? 1 : 0 }}
-                >
-                    {theme?.name || 'JACKPOT'}
-                </h1>
+                {!isJackpotDefault && (
+                    <h1
+                        className="text-5xl md:text-6xl font-semibold tracking-tight leading-tight text-white/95 mb-2 transition-opacity duration-500"
+                        style={{ opacity: stage !== 'init' ? 1 : 0 }}
+                    >
+                        {theme?.name || 'JACKPOT'}
+                    </h1>
+                )}
 
                 <p
                     className="text-lg text-white/60 mb-2 transition-opacity duration-500 delay-100"
