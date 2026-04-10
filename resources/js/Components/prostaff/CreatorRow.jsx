@@ -33,20 +33,23 @@ function formatLastActivity(iso) {
 /**
  * @param {{
  *   row: Record<string, unknown>,
- *   onRowClick: (userId: number) => void,
+ *   onRowClick: (prostaffMembershipId: number) => void,
  *   onDamClick?: (userId: number) => void,
  * }} props
  */
 export default function CreatorRow({ row, onRowClick, onDamClick }) {
+    const membershipId =
+        row.prostaff_membership_id != null ? Number(row.prostaff_membership_id) : NaN
     const userId = row.user_id != null ? Number(row.user_id) : NaN
     const pct = Number(row.completion_percentage)
-    const rowClickable = Number.isFinite(userId) && userId > 0
+    const profileClickable = Number.isFinite(membershipId) && membershipId > 0
+    const damClickable = Number.isFinite(userId) && userId > 0
 
     return (
         <tr
-            className={`border-b border-white/[0.06] transition ${rowClickable ? 'cursor-pointer hover:bg-white/[0.04]' : 'cursor-default opacity-80'}`}
+            className={`border-b border-white/[0.06] transition ${profileClickable ? 'cursor-pointer hover:bg-white/[0.04]' : 'cursor-default opacity-80'}`}
             onClick={() => {
-                if (rowClickable) onRowClick(userId)
+                if (profileClickable) onRowClick(membershipId)
             }}
         >
             <td className="whitespace-nowrap px-4 py-3 text-sm font-medium text-white/95">{row.name}</td>
@@ -65,13 +68,13 @@ export default function CreatorRow({ row, onRowClick, onDamClick }) {
                     type="button"
                     onClick={(e) => {
                         e.stopPropagation()
-                        if (!rowClickable) return
-                        const openDam = onDamClick ?? onRowClick
-                        openDam(userId)
+                        if (!damClickable || !onDamClick) return
+                        onDamClick(userId)
                     }}
                     className="inline-flex items-center gap-1 rounded-lg border border-white/15 bg-white/[0.06] px-2.5 py-1.5 text-xs font-medium text-white/85 backdrop-blur-sm transition hover:border-white/25 hover:bg-white/10"
+                    title="Open library filtered to this creator’s uploads"
                 >
-                    DAM
+                    Library
                     <ArrowTopRightOnSquareIcon className="h-3.5 w-3.5 opacity-70" />
                 </button>
             </td>

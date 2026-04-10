@@ -10,7 +10,14 @@ import { XMarkIcon, CloudArrowUpIcon } from '@heroicons/react/24/outline'
 import { usePage } from '@inertiajs/react'
 import { getUploadAcceptAttribute } from '../utils/damFileTypes'
 
-export default function ReplaceFileModal({ asset, isOpen, onClose, onSuccess }) {
+export default function ReplaceFileModal({
+    asset,
+    isOpen,
+    onClose,
+    onSuccess,
+    /** Tailwind z-index class when nested above other modals (e.g. Manage Asset). */
+    zIndexClass = 'z-[80]',
+}) {
     const { auth, dam_file_types: damFileTypesProp } = usePage().props
     const replaceFileAccept = damFileTypesProp?.upload_accept || getUploadAcceptAttribute()
     const planAllowsVersions = auth?.plan_allows_versions ?? false
@@ -177,7 +184,7 @@ export default function ReplaceFileModal({ asset, isOpen, onClose, onSuccess }) 
     }
 
     return (
-        <div className="fixed inset-0 z-[80] overflow-y-auto">
+        <div className={`fixed inset-0 overflow-y-auto ${zIndexClass}`}>
             <div className="flex min-h-full items-end justify-center p-4 text-center sm:items-center sm:p-0">
                 <div
                     className="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity"

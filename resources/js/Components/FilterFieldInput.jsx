@@ -210,7 +210,15 @@ export function FilterValueInput({
     const fieldKey = field?.field_key || field?.key
     const fieldType = field?.type || 'text'
     const pageProps = usePage().props
-    const tenantId = pageProps.tenant?.id || pageProps.auth?.activeCompany?.id || pageProps.auth?.user?.current_tenant_id
+    const auth = pageProps.auth
+    const activeTenantFromCompanies = Array.isArray(auth?.companies)
+        ? auth.companies.find((c) => c?.is_active)?.id
+        : null
+    const tenantId =
+        pageProps.tenant?.id ??
+        auth?.activeCompany?.id ??
+        activeTenantFromCompanies ??
+        auth?.user?.current_tenant_id
 
     const inputClass = variant === 'primary'
         ? `px-2 py-1 text-xs border border-gray-300 rounded shadow-sm focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 transition-colors ${compact ? 'min-w-[80px]' : 'min-w-[100px]'}`

@@ -152,6 +152,8 @@ class DeliverableController extends Controller
                 'is_hidden' => $category->is_hidden,
                 'sort_order' => $category->sort_order ?? ($matchingTemplate ? $matchingTemplate->sort_order : 999), // Prefer category's sort_order (from Metadata reorder)
                 'access_rules' => $accessRules,
+                // Drawer Brand Intelligence / Revue: must match AssetController (sidebar category list)
+                'ebi_enabled' => $category->isEbiEnabled(),
             ]);
         }
 

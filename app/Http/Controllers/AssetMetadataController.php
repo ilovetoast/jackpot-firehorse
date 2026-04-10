@@ -47,6 +47,7 @@ use App\Services\MetadataPersistenceService;
 use App\Services\MetadataSchemaResolver;
 use App\Services\PlanService;
 use App\Services\SystemIncidentService;
+use App\Services\Assets\AssetProcessingGuardService;
 use App\Services\TenantPermissionResolver;
 use App\Support\ThumbnailMetadata;
 use Illuminate\Http\JsonResponse;
@@ -864,6 +865,7 @@ class AssetMetadataController extends Controller
 
         // Filter to editable fields only
         $candidateFields = [];
+        $restrictVisibility = app(\App\Services\TenantMetadataVisibilityService::class);
         foreach ($schema['fields'] ?? [] as $field) {
             // Exclude internal-only fields, EXCEPT quality_rating which should be visible
             $fieldKey = $field['key'] ?? null;
@@ -874,6 +876,11 @@ class AssetMetadataController extends Controller
             // Exclude dimensions - it's file info, not metadata, and should only appear in file info area
             // Dimensions is still used for orientation calculation but shouldn't be shown in metadata section
             if ($fieldKey === 'dimensions') {
+                continue;
+            }
+
+            // Slug-restricted fields (e.g. font_role → fonts only): same rule as upload/edit schema resolver
+            if ($fieldKey !== null && $fieldKey !== '' && ! $restrictVisibility->isRestrictFieldEnabledForCategorySlug((string) $fieldKey, (string) ($category->slug ?? ''))) {
                 continue;
             }
 
@@ -1501,6 +1508,9 @@ class AssetMetadataController extends Controller
             return response()->json(['message' => 'Asset is already processing'], 409);
         }
 
+        $user = Auth::user();
+        app(AssetProcessingGuardService::class)->assertCanDispatch($user, $asset, AssetProcessingGuardService::ACTION_FULL_PIPELINE);
+
         $metadata = $asset->metadata ?? [];
         unset($metadata['processing_started'], $metadata['processing_started_at']);
         unset($metadata['thumbnail_skip_reason']);
@@ -1526,6 +1536,8 @@ class AssetMetadataController extends Controller
         }
 
         ProcessAssetJob::dispatch($asset->id)->onQueue(config('queue.images_queue', 'images'));
+
+        app(AssetProcessingGuardService::class)->markDispatched($user, $asset, AssetProcessingGuardService::ACTION_FULL_PIPELINE);
 
         return response()->json(['status' => 'queued', 'message' => 'Asset reprocessing started']);
     }
@@ -1934,8 +1946,14 @@ class AssetMetadataController extends Controller
             ->pluck('is_hidden', 'metadata_field_id')
             ->toArray();
 
+        $restrictVisibility = app(\App\Services\TenantMetadataVisibilityService::class);
         $schemaFields = [];
         foreach ($fields as $fieldId => $field) {
+            $fieldKeyEarly = (string) ($field->key ?? '');
+            if ($fieldKeyEarly !== '' && ! $restrictVisibility->isRestrictFieldEnabledForCategorySlug($fieldKeyEarly, (string) ($category->slug ?? ''))) {
+                continue;
+            }
+
             // Check if field is enabled for this category (big blue toggle)
             // 1. Check category-level visibility override (highest priority - the big blue toggle)
             if (isset($categoryVisibilityOverrides[$fieldId])) {

@@ -6,6 +6,7 @@
  */
 
 import { useState, useEffect } from 'react'
+import MetadataAnalysisRunningBanner from './MetadataAnalysisRunningBanner'
 import { PencilIcon, LockClosedIcon, ArrowPathIcon, CheckIcon, XMarkIcon, RectangleStackIcon, GlobeAltIcon } from '@heroicons/react/24/outline'
 import { usePage } from '@inertiajs/react'
 import AssetMetadataEditModal from './AssetMetadataEditModal'
@@ -35,14 +36,32 @@ async function parseJsonResponse(res) {
     }
 }
 
+/** Field keys rendered last (after Collection + auto/system fields) — legal / rights row near AI in drawer. */
+const PINNED_BOTTOM_METADATA_KEYS = ['photo_type', 'usage_rights', 'expiration_date']
+const PINNED_BOTTOM_METADATA_SET = new Set(PINNED_BOTTOM_METADATA_KEYS)
+
+/** After pinned legal row — inline rating / starred toggles at bottom of drawer metadata. */
+const DRAWER_QUICK_EDIT_LAST_KEYS = ['quality_rating', 'starred']
+const DRAWER_QUICK_EDIT_LAST_SET = new Set(DRAWER_QUICK_EDIT_LAST_KEYS)
+
+function metadataFieldKeyLo(f) {
+    return String(f?.key || f?.field_key || '').toLowerCase()
+}
+
 export default function AssetMetadataDisplay({
     assetId,
     onPendingCountChange,
     collectionDisplay = null,
     primaryColor,
     suppressAnalysisRunningBanner = false,
-    /** Dev only: parent (e.g. drawer) renders pipeline UI above Metadata; avoids duplicate fetch. */
-    onPipelineDebugStateChange = null,
+    /** When true: values only — no edit buttons, rating changes, or collection edit (e.g. drawer quick view). */
+    readOnly = false,
+    /** Manage asset workspace: no pencil buttons — tap/click row to open edit (except inline toggle/rating). */
+    workspaceMode = false,
+    /** Fires when pipeline health / analysis status updates (parent may render the analysis banner in Revue). */
+    onAnalysisPipelineStateChange = null,
+    /** After a successful inline toggle save (e.g. Starred). Parent can sync grid / toast. */
+    onToggleFieldSaved = null,
 }) {
     const { auth } = usePage().props
     const brandPrimary = primaryColor || auth?.activeBrand?.primary_color || '#6366f1'
@@ -103,13 +122,15 @@ export default function AssetMetadataDisplay({
     }, [assetId])
 
     useEffect(() => {
-        if (!onPipelineDebugStateChange || loading) return
-        onPipelineDebugStateChange({
+        if (typeof onAnalysisPipelineStateChange !== 'function') {
+            return
+        }
+        onAnalysisPipelineStateChange({
+            metadataHealth,
             analysisStatus,
             thumbnailStatus,
-            metadataHealth,
         })
-    }, [onPipelineDebugStateChange, loading, analysisStatus, thumbnailStatus, metadataHealth])
+    }, [metadataHealth, analysisStatus, thumbnailStatus, onAnalysisPipelineStateChange])
 
     // Phase 8: Listen for metadata updates (from approval actions)
     useEffect(() => {
@@ -278,40 +299,14 @@ export default function AssetMetadataDisplay({
     // Always show the Metadata section content, even if no fields (for consistency)
     return (
         <>
-            {/* Local diagnostics only when parent does not lift state (e.g. drawer uses onPipelineDebugStateChange). */}
-            {!import.meta.env.PROD && !onPipelineDebugStateChange && (
-                <div className="mb-3 rounded border border-amber-300 bg-amber-50/80 p-3 font-mono text-xs text-amber-900">
-                    <div className="font-semibold mb-1">Pipeline state (dev)</div>
-                    <pre className="whitespace-pre-wrap break-all">
-                        analysis_status: {analysisStatus}
-                        thumbnail_status: {thumbnailStatus}
-                        metadata_health: {metadataHealth ? JSON.stringify(metadataHealth) : 'null'}
-                    </pre>
-                </div>
-            )}
             <div>
-                {!suppressAnalysisRunningBanner && !metadataHealth?.is_complete && metadataHealth && analysisStatus !== 'complete' && (
-                    <div className="bg-amber-50 border border-amber-200 rounded-md p-4 mb-4">
-                        {thumbnailStatus === 'completed' && metadataHealth?.visual_metadata_ready === false ? (
-                            <>
-                                <div className="font-medium text-amber-800">
-                                    Visual metadata invalid
-                                </div>
-                                <div className="text-sm text-amber-700 mt-1">
-                                    Thumbnail exists but dimensions or metadata are missing or invalid. Re-run analysis or contact support.
-                                </div>
-                            </>
-                        ) : (
-                            <>
-                                <div className="font-medium text-amber-800">
-                                    System analysis still running
-                                </div>
-                                <div className="text-sm text-amber-700 mt-1">
-                                    Dominant colors, embeddings, or thumbnails may not have completed. Re-run analysis will be available once the pipeline finishes.
-                                </div>
-                            </>
-                        )}
-                    </div>
+                {!suppressAnalysisRunningBanner && (
+                    <MetadataAnalysisRunningBanner
+                        metadataHealth={metadataHealth}
+                        analysisStatus={analysisStatus}
+                        thumbnailStatus={thumbnailStatus}
+                        className="mb-4"
+                    />
                 )}
                 {fields.length === 0 ? (
                     <div className="text-sm text-gray-500 italic">No editable metadata fields available</div>
@@ -320,65 +315,138 @@ export default function AssetMetadataDisplay({
                         {(() => {
                             const filtered = fields.filter(field => !isExcludedFromGenericLoop(field))
                             const isAuto = (f) => f.readonly || f.population_mode === 'automatic'
-                            const nonAutoFields = filtered.filter(f => !isAuto(f)).sort((a, b) => 0)
+                            const isPinnedBottom = (f) => PINNED_BOTTOM_METADATA_SET.has(metadataFieldKeyLo(f))
+                            const isQuickEditLast = (f) =>
+                                DRAWER_QUICK_EDIT_LAST_SET.has(metadataFieldKeyLo(f))
+                            const nonAutoFields = filtered.filter(f => !isAuto(f))
+                            const nonAutoMain = nonAutoFields.filter(
+                                (f) => !isPinnedBottom(f) && !isQuickEditLast(f),
+                            )
+                            const nonAutoQuickEditLast = nonAutoFields
+                                .filter((f) => !isPinnedBottom(f) && isQuickEditLast(f))
+                                .sort(
+                                    (a, b) =>
+                                        DRAWER_QUICK_EDIT_LAST_KEYS.indexOf(metadataFieldKeyLo(a)) -
+                                        DRAWER_QUICK_EDIT_LAST_KEYS.indexOf(metadataFieldKeyLo(b)),
+                                )
+                            const nonAutoPinned = nonAutoFields
+                                .filter((f) => isPinnedBottom(f))
+                                .sort(
+                                    (a, b) =>
+                                        PINNED_BOTTOM_METADATA_KEYS.indexOf(metadataFieldKeyLo(a)) -
+                                        PINNED_BOTTOM_METADATA_KEYS.indexOf(metadataFieldKeyLo(b)),
+                                )
                             const autoFields = filtered.filter(f => isAuto(f)).sort((a, b) => 0)
-                            // Order: user-managed fields first, then Collection, then system automated fields last
-                            const collectionElement = (collectionDisplay && Array.isArray(collectionDisplay.collections)) ? (
-                                <div
-                                    key="collection-field"
-                                    className="flex flex-col md:flex-row md:items-start md:justify-between gap-1 md:gap-4 md:flex-nowrap"
-                                >
-                                    <div className="flex flex-col md:flex-row md:items-start md:gap-4 md:flex-1 md:min-w-0 md:flex-wrap">
-                                        <dt className="text-sm text-gray-500 mb-1 md:mb-0 md:w-32 md:flex-shrink-0 flex items-center md:items-start">
-                                            <span className="flex items-center flex-wrap gap-1 md:gap-1.5">
-                                                Collection
-                                            </span>
-                                        </dt>
-                                        <dd className="text-sm font-semibold text-gray-900 md:flex-1 md:min-w-0 break-words">
-                                            {collectionDisplay.loading ? (
-                                                <span className="text-gray-400">Loading…</span>
-                                            ) : collectionDisplay.collections.length > 0 ? (
-                                                <div className="flex items-center gap-2 flex-wrap">
-                                                    {collectionDisplay.collections.map((c) => (
-                                                        <span
-                                                            key={c.id}
-                                                            className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium"
-                                                            style={{ backgroundColor: badgeBg, color: brandPrimary }}
-                                                            title={c.is_public ? 'Public collection' : undefined}
-                                                        >
-                                                            <RectangleStackIcon className="h-3 w-3" aria-hidden="true" />
-                                                            {c.name}
-                                                            {c.is_public && (
-                                                                <GlobeAltIcon className="h-3 w-3 opacity-80" aria-hidden="true" title="Public" />
-                                                            )}
-                                                        </span>
-                                                    ))}
-                                                </div>
-                                            ) : (
-                                                <span className="text-gray-400">No collections</span>
-                                            )}
-                                        </dd>
-                                    </div>
-                                    {collectionDisplay.showEditButton !== false && typeof collectionDisplay.onEdit === 'function' && (
-                                        <div className="self-start md:self-auto ml-auto md:ml-0 flex-shrink-0 flex items-center gap-2">
-                                            <button
-                                                type="button"
-                                                onClick={collectionDisplay.onEdit}
-                                                className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 hover:opacity-90"
-                                                style={{ color: brandPrimary, ['--tw-ring-color']: brandPrimary }}
-                                            >
-                                                <PencilIcon className="h-3 w-3" />
-                                                {collectionDisplay.collections.length > 0 ? 'Edit' : 'Add'}
-                                            </button>
+                            // Order: user-managed fields (except pinned trio), Collection, system auto fields, then photo_type / usage_rights / expiration_date
+                            const collectionElement =
+                                collectionDisplay &&
+                                (collectionDisplay.inlineContent ||
+                                    Array.isArray(collectionDisplay.collections)) ? (
+                                    <div
+                                        key="collection-field"
+                                        className={`flex flex-col md:flex-row md:items-start md:justify-between gap-1 md:gap-4 md:flex-nowrap ${
+                                            workspaceMode &&
+                                            typeof collectionDisplay.onEdit === 'function' &&
+                                            !collectionDisplay.inlineContent
+                                                ? 'cursor-pointer rounded-lg -mx-2 px-2 py-1.5 transition-colors hover:bg-gray-50'
+                                                : ''
+                                        }`}
+                                        onClick={
+                                            workspaceMode &&
+                                            typeof collectionDisplay.onEdit === 'function' &&
+                                            !collectionDisplay.inlineContent
+                                                ? (e) => {
+                                                      if (e.target.closest('button, a, input, select, [role="checkbox"]'))
+                                                          return
+                                                      collectionDisplay.onEdit()
+                                                  }
+                                                : undefined
+                                        }
+                                        role={
+                                            workspaceMode &&
+                                            typeof collectionDisplay.onEdit === 'function' &&
+                                            !collectionDisplay.inlineContent
+                                                ? 'button'
+                                                : undefined
+                                        }
+                                        tabIndex={
+                                            workspaceMode &&
+                                            typeof collectionDisplay.onEdit === 'function' &&
+                                            !collectionDisplay.inlineContent
+                                                ? 0
+                                                : undefined
+                                        }
+                                        onKeyDown={
+                                            workspaceMode &&
+                                            typeof collectionDisplay.onEdit === 'function' &&
+                                            !collectionDisplay.inlineContent
+                                                ? (e) => {
+                                                      if (e.key === 'Enter' || e.key === ' ') {
+                                                          e.preventDefault()
+                                                          collectionDisplay.onEdit()
+                                                      }
+                                                  }
+                                                : undefined
+                                        }
+                                    >
+                                        <div className="flex flex-col md:flex-row md:items-start md:gap-4 md:flex-1 md:min-w-0 md:flex-wrap">
+                                            <dt className="text-sm text-gray-500 mb-1 md:mb-0 md:w-32 md:flex-shrink-0 flex items-center md:items-start">
+                                                <span className="flex items-center flex-wrap gap-1 md:gap-1.5">
+                                                    Collection
+                                                </span>
+                                            </dt>
+                                            <dd className="text-sm font-semibold text-gray-900 md:flex-1 md:min-w-0 break-words w-full min-w-0">
+                                                {collectionDisplay.inlineContent ? (
+                                                    collectionDisplay.inlineContent
+                                                ) : collectionDisplay.loading ? (
+                                                    <span className="text-gray-400">Loading…</span>
+                                                ) : collectionDisplay.collections.length > 0 ? (
+                                                    <div className="flex items-center gap-2 flex-wrap">
+                                                        {collectionDisplay.collections.map((c) => (
+                                                            <span
+                                                                key={c.id}
+                                                                className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium"
+                                                                style={{ backgroundColor: badgeBg, color: brandPrimary }}
+                                                                title={c.is_public ? 'Public collection' : undefined}
+                                                            >
+                                                                <RectangleStackIcon className="h-3 w-3" aria-hidden="true" />
+                                                                {c.name}
+                                                                {c.is_public && (
+                                                                    <GlobeAltIcon className="h-3 w-3 opacity-80" aria-hidden="true" title="Public" />
+                                                                )}
+                                                            </span>
+                                                        ))}
+                                                    </div>
+                                                ) : (
+                                                    <span className="text-gray-400">No collections</span>
+                                                )}
+                                            </dd>
                                         </div>
-                                    )}
-                                </div>
-                            ) : null
+                                        {!readOnly &&
+                                            !collectionDisplay.inlineContent &&
+                                            collectionDisplay.showEditButton !== false &&
+                                            typeof collectionDisplay.onEdit === 'function' &&
+                                            !workspaceMode && (
+                                                <div className="self-start md:self-auto ml-auto md:ml-0 flex-shrink-0 flex items-center gap-2">
+                                                    <button
+                                                        type="button"
+                                                        onClick={collectionDisplay.onEdit}
+                                                        className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 hover:opacity-90"
+                                                        style={{ color: brandPrimary, ['--tw-ring-color']: brandPrimary }}
+                                                    >
+                                                        <PencilIcon className="h-3 w-3" />
+                                                        {collectionDisplay.collections.length > 0 ? 'Edit' : 'Add'}
+                                                    </button>
+                                                </div>
+                                            )}
+                                    </div>
+                                ) : null
 
                             const renderField = (field) => {
                                 const fieldHasValue = hasValue(field.current_value)
                                 const widget = resolve(field, CONTEXT.DISPLAY)
                             const isRating = widget === WIDGET.RATING
+                            const isToggle = widget === WIDGET.TOGGLE
                             const isDominantColors = widget === WIDGET.DOMINANT_COLORS
                             // For dominant_colors, check if we have a valid array
                             let dominantColorsArray = null
@@ -398,7 +466,7 @@ export default function AssetMetadataDisplay({
                             let displayValue = formattedValue
                             
                             // If no formatted value but we have a raw value, try to format it
-                            if (!displayValue && field.current_value !== null && field.current_value !== undefined && !dominantColorsArray && !isRating) {
+                            if (!displayValue && field.current_value !== null && field.current_value !== undefined && !dominantColorsArray && !isRating && !isToggle) {
                                 const rawValue = field.current_value
                                 
                                 // Skip empty strings
@@ -424,16 +492,62 @@ export default function AssetMetadataDisplay({
                             // 4. They are system fields (always visible in details view, even when empty or still calculating)
                             const systemFieldKeys = ['dominant_colors', 'dominant_hue_group', 'orientation', 'resolution_class']
                             const isSystemField = systemFieldKeys.includes(field.key || field.field_key)
-                            const shouldShow = displayValue || dominantColorsArray || isRating || (!isAutoField && !field.readonly) || isSystemField
+                            const shouldShow =
+                                displayValue ||
+                                dominantColorsArray ||
+                                isRating ||
+                                isToggle ||
+                                (!isAutoField && !field.readonly) ||
+                                isSystemField
                             
                                 if (!shouldShow) {
                                     return []
                                 }
+
+                            const fieldOpensEditModal =
+                                !isRating &&
+                                !(
+                                    isToggle &&
+                                    !readOnly &&
+                                    field.can_edit !== false &&
+                                    field.is_user_editable !== false
+                                ) &&
+                                !(field.readonly || field.population_mode === 'automatic') &&
+                                !readOnly &&
+                                field.can_edit !== false &&
+                                field.is_user_editable !== false
                             
                             const fieldElement = (
                                 <div 
                                     key={field.metadata_field_id} 
-                                    className="flex flex-col md:flex-row md:items-start md:justify-between gap-1 md:gap-4 md:flex-nowrap"
+                                    className={`flex flex-col md:flex-row md:items-start md:justify-between gap-1 md:gap-4 md:flex-nowrap ${
+                                        workspaceMode && fieldOpensEditModal
+                                            ? 'cursor-pointer rounded-lg -mx-2 px-2 py-1.5 transition-colors hover:bg-gray-50'
+                                            : ''
+                                    }`}
+                                    role={workspaceMode && fieldOpensEditModal ? 'button' : undefined}
+                                    tabIndex={workspaceMode && fieldOpensEditModal ? 0 : undefined}
+                                    onClick={
+                                        workspaceMode && fieldOpensEditModal
+                                            ? (e) => {
+                                                  if (e.target.closest('button, a, input, select, textarea, [role="checkbox"]'))
+                                                      return
+                                                  setEditingFieldId(field.metadata_field_id)
+                                                  setEditingField(field)
+                                              }
+                                            : undefined
+                                    }
+                                    onKeyDown={
+                                        workspaceMode && fieldOpensEditModal
+                                            ? (e) => {
+                                                  if (e.key === 'Enter' || e.key === ' ') {
+                                                      e.preventDefault()
+                                                      setEditingFieldId(field.metadata_field_id)
+                                                      setEditingField(field)
+                                                  }
+                                              }
+                                            : undefined
+                                    }
                                 >
                                     <div className="flex flex-col md:flex-row md:items-start md:gap-4 md:flex-1 md:min-w-0 md:flex-wrap">
                                         {/* Mobile: label above, Desktop: fixed-width label column */}
@@ -443,10 +557,89 @@ export default function AssetMetadataDisplay({
                                             </span>
                                         </dt>
                                         {/* Show the value if there is one; system fields show label even when empty */}
-                                        {(displayValue || dominantColorsArray || isRating || isSystemField) ? (
+                                        {(displayValue || dominantColorsArray || isRating || isToggle || isSystemField) ? (
                                             <dd className="text-sm font-semibold text-gray-900 md:flex-1 md:min-w-0 break-words">
-                                                {/* Rating: inline control. Starred/other booleans with display_widget=toggle use Edit → modal (brand-colored toggle). */}
-                                                {isRating ? (
+                                                {isToggle &&
+                                                !readOnly &&
+                                                field.can_edit !== false &&
+                                                field.is_user_editable !== false ? (
+                                                    <label className="inline-flex shrink-0 cursor-pointer items-center gap-2">
+                                                        <input
+                                                            type="checkbox"
+                                                            className="peer sr-only"
+                                                            checked={
+                                                                field.current_value === true ||
+                                                                field.current_value === 'true'
+                                                            }
+                                                            onChange={async (e) => {
+                                                                const newValue = e.target.checked
+                                                                try {
+                                                                    const response = await fetch(
+                                                                        `/app/assets/${assetId}/metadata/edit`,
+                                                                        {
+                                                                            method: 'POST',
+                                                                            headers: {
+                                                                                'Content-Type': 'application/json',
+                                                                                'X-CSRF-TOKEN':
+                                                                                    document.querySelector(
+                                                                                        'meta[name="csrf-token"]',
+                                                                                    )?.content,
+                                                                            },
+                                                                            credentials: 'same-origin',
+                                                                            body: JSON.stringify({
+                                                                                metadata_field_id:
+                                                                                    field.metadata_field_id,
+                                                                                value: newValue,
+                                                                            }),
+                                                                        },
+                                                                    )
+                                                                    if (!response.ok) {
+                                                                        const data = await response.json()
+                                                                        throw new Error(
+                                                                            data.message || 'Failed to save',
+                                                                        )
+                                                                    }
+                                                                    setFields((prevFields) =>
+                                                                        prevFields.map((f) =>
+                                                                            f.metadata_field_id ===
+                                                                            field.metadata_field_id
+                                                                                ? { ...f, current_value: newValue }
+                                                                                : f,
+                                                                        ),
+                                                                    )
+                                                                    if (typeof onToggleFieldSaved === 'function') {
+                                                                        onToggleFieldSaved({
+                                                                            assetId,
+                                                                            fieldKey:
+                                                                                field.key ||
+                                                                                field.field_key ||
+                                                                                '',
+                                                                            value: newValue,
+                                                                        })
+                                                                    }
+                                                                } catch (err) {
+                                                                    console.error(
+                                                                        '[AssetMetadataDisplay] Failed to save toggle',
+                                                                        err,
+                                                                    )
+                                                                }
+                                                            }}
+                                                        />
+                                                        <div
+                                                            className="relative box-border h-6 w-12 min-w-12 max-w-12 shrink-0 rounded-full bg-gray-200 after:pointer-events-none after:absolute after:left-[2px] after:top-1/2 after:z-0 after:h-5 after:w-5 after:-translate-y-1/2 after:rounded-full after:border after:border-gray-300 after:bg-white after:shadow-sm after:transition-transform after:duration-200 peer-checked:after:translate-x-6 peer-checked:after:-translate-y-1/2 peer-focus-visible:outline peer-focus-visible:ring-4 peer-focus-visible:ring-offset-1"
+                                                            style={{
+                                                                ['--tw-ring-color']: brandPrimary,
+                                                                ...(field.current_value === true ||
+                                                                field.current_value === 'true'
+                                                                    ? { backgroundColor: brandPrimary }
+                                                                    : {}),
+                                                            }}
+                                                            aria-hidden
+                                                        />
+                                                    </label>
+                                                ) : isToggle ? (
+                                                    <span className="font-semibold">{displayValue}</span>
+                                                ) : isRating ? (
                                                     <StarRating
                                                         value={field.current_value}
                                                         primaryColor={brandPrimary}
@@ -484,7 +677,12 @@ export default function AssetMetadataDisplay({
                                                                 // Optionally show error toast/notification
                                                             }
                                                         }}
-                                                        editable={field.can_edit !== false && (field.key === 'quality_rating' || (!field.readonly && field.population_mode !== 'automatic'))}
+                                                        editable={
+                                                            !readOnly &&
+                                                            field.can_edit !== false &&
+                                                            (field.key === 'quality_rating' ||
+                                                                (!field.readonly && field.population_mode !== 'automatic'))
+                                                        }
                                                         maxStars={5}
                                                         size="md"
                                                     />
@@ -499,14 +697,15 @@ export default function AssetMetadataDisplay({
                                         ) : null}
                                     </div>
                                     {/* Show "Auto" badge where edit button would be for readonly/automatic fields */}
-                                    {/* For rating only, no edit button - inline control; starred uses Edit → modal */}
+                                    {/* Rating + toggle: inline controls — no Edit button */}
                                     {/* Only show edit button if user has edit permission (can_edit/is_user_editable) */}
-                                    {isRating ? null : (field.readonly || field.population_mode === 'automatic') ? (
+                                    {isRating || (isToggle && !readOnly && field.can_edit !== false && field.is_user_editable !== false) ? null : (field.readonly || field.population_mode === 'automatic') ? (
                                         <div className="self-start md:self-auto ml-auto md:ml-0 flex-shrink-0 inline-flex items-center gap-1 text-xs text-gray-500">
                                             <LockClosedIcon className="h-3 w-3" />
                                             <span className="italic">Auto</span>
                                         </div>
-                                    ) : (field.can_edit !== false && field.is_user_editable !== false) ? (
+                                    ) : !readOnly && field.can_edit !== false && field.is_user_editable !== false ? (
+                                        workspaceMode ? null : (
                                         <div className="self-start md:self-auto ml-auto md:ml-0 flex-shrink-0 flex items-center gap-2">
                                             {/* Step 1: Inline approval buttons removed - all approval actions consolidated in Pending Metadata section */}
                                             <button
@@ -522,6 +721,7 @@ export default function AssetMetadataDisplay({
                                                 {fieldHasValue ? 'Edit' : 'Add'}
                                             </button>
                                         </div>
+                                        )
                                     ) : null}
                                 </div>
                             )
@@ -529,16 +729,24 @@ export default function AssetMetadataDisplay({
                                 return [fieldElement]
                             }
 
-                            const nonAutoElements = nonAutoFields.flatMap(renderField)
+                            const nonAutoMainElements = nonAutoMain.flatMap(renderField)
                             const autoElements = autoFields.flatMap(renderField)
-                            return [...nonAutoElements, ...(collectionElement ? [collectionElement] : []), ...autoElements]
+                            const nonAutoPinnedElements = nonAutoPinned.flatMap(renderField)
+                            const nonAutoQuickEditLastElements = nonAutoQuickEditLast.flatMap(renderField)
+                            return [
+                                ...nonAutoMainElements,
+                                ...(collectionElement ? [collectionElement] : []),
+                                ...autoElements,
+                                ...nonAutoPinnedElements,
+                                ...nonAutoQuickEditLastElements,
+                            ]
                         })()}
                     </dl>
                 )}
             </div>
 
             {/* Edit Modal: pass brand primary so toggle widgets use it (display_widget=toggle / starred) */}
-            {editingField && (
+            {editingField && !readOnly && (
                 <AssetMetadataEditModal
                     assetId={assetId}
                     field={editingField}

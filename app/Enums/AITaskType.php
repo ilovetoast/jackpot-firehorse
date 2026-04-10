@@ -42,6 +42,9 @@ class AITaskType
 
     public const ASSET_METADATA_GENERATION = 'asset_metadata_generation';
 
+    /** Async video frame + optional transcript + vision insights (tags, summary, structured hints) */
+    public const VIDEO_INSIGHTS = 'video_insights';
+
     public const APPROVAL_FEEDBACK_SUMMARY = 'approval_feedback_summary'; // Phase AF-6
 
     /** Template-based or future-AI enhanced thumbnail previews */
@@ -107,6 +110,7 @@ class AITaskType
             self::SYSTEM_RELIABILITY_ANALYSIS,
             self::ASSET_TAG_SUGGESTION,
             self::ASSET_METADATA_GENERATION,
+            self::VIDEO_INSIGHTS,
             self::APPROVAL_FEEDBACK_SUMMARY,
             self::ALERT_SUMMARY,
             self::DOWNLOAD_ZIP_FAILURE_ANALYSIS,
@@ -151,7 +155,7 @@ class AITaskType
             ],
             'engineering' => [self::ERROR_PATTERN_ANALYSIS],
             'audit' => [self::AUDIT_REPORT_GENERATION, self::PERFORMANCE_ANALYSIS, self::SYSTEM_RELIABILITY_ANALYSIS],
-            'asset' => [self::ASSET_TAG_SUGGESTION, self::ASSET_METADATA_GENERATION, self::APPROVAL_FEEDBACK_SUMMARY, self::THUMBNAIL_ENHANCEMENT, self::THUMBNAIL_PRESENTATION_PREVIEW],
+            'asset' => [self::ASSET_TAG_SUGGESTION, self::ASSET_METADATA_GENERATION, self::VIDEO_INSIGHTS, self::APPROVAL_FEEDBACK_SUMMARY, self::THUMBNAIL_ENHANCEMENT, self::THUMBNAIL_PRESENTATION_PREVIEW],
         ];
 
         return $mapping[$category] ?? [];

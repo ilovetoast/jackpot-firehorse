@@ -43,6 +43,8 @@ export default function AssetTimeline({
             'asset.ai_tagging.completed': `AI tagging completed${metadata?.tag_count ? ` (${metadata.tag_count} tags)` : ''}`,
             'asset.ai_metadata.generated': `AI metadata generated`,
             'asset.ai_metadata.failed': `AI metadata generation failed`,
+            'asset.ai_video_insights.completed': `Video AI insights completed`,
+            'asset.ai_video_insights.failed': `Video AI insights failed`,
             'asset.ai_suggestions.generated': `AI suggestions generated${metadata?.suggestions_count ? ` (${metadata.suggestions_count} suggestions)` : ''}`,
             'asset.ai_suggestions.failed': `AI suggestions failed`,
             'asset.ai_suggestion.accepted': metadata?.field_label 

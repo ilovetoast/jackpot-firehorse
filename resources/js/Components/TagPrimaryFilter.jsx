@@ -14,7 +14,8 @@
  * but provides tag-specific UX for Primary filter placement.
  */
 
-import { useState, useRef, useEffect, useMemo, useCallback } from 'react'
+import { useState, useRef, useEffect, useLayoutEffect, useMemo, useCallback } from 'react'
+import { createPortal } from 'react-dom'
 import { XMarkIcon, TagIcon } from '@heroicons/react/24/outline'
 
 export default function TagPrimaryFilter({
@@ -31,7 +32,9 @@ export default function TagPrimaryFilter({
     const [showSuggestions, setShowSuggestions] = useState(false)
     const [selectedIndex, setSelectedIndex] = useState(-1)
     const [loadingSuggestions, setLoadingSuggestions] = useState(false)
+    const [menuPos, setMenuPos] = useState(null)
     const inputRef = useRef(null)
+    const containerRef = useRef(null)
 
     // Ensure value is always an array (memoized to prevent recreation)
     const selectedTags = useMemo(() => Array.isArray(value) ? value : [], [value])
@@ -118,6 +121,35 @@ export default function TagPrimaryFilter({
         return () => clearTimeout(timeoutId)
     }, [inputValue, tenantId, selectedTags, fetchSuggestions])
 
+    // Position dropdown in a portal — parent filter rows use overflow-x-auto which clips position:absolute menus.
+    const updateMenuPosition = useCallback(() => {
+        const el = containerRef.current
+        if (!el || !showSuggestions) {
+            return
+        }
+        const rect = el.getBoundingClientRect()
+        setMenuPos({
+            top: rect.bottom + 4,
+            left: rect.left,
+            width: Math.max(rect.width, fullWidth ? rect.width : 200),
+        })
+    }, [showSuggestions, fullWidth])
+
+    useLayoutEffect(() => {
+        if (!showSuggestions) {
+            setMenuPos(null)
+            return
+        }
+        updateMenuPosition()
+        const onReposition = () => updateMenuPosition()
+        window.addEventListener('resize', onReposition)
+        window.addEventListener('scroll', onReposition, true)
+        return () => {
+            window.removeEventListener('resize', onReposition)
+            window.removeEventListener('scroll', onReposition, true)
+        }
+    }, [showSuggestions, updateMenuPosition, suggestions.length, loadingSuggestions, inputValue, selectedTags.length])
+
     // Add tag to filter
     const addTag = (tagValue) => {
         if (!tagValue.trim()) return
@@ -190,13 +222,66 @@ export default function TagPrimaryFilter({
         addTag(suggestion.tag)
     }
 
-    // Handle input blur
+    // Handle input blur (delay so portal suggestion clicks register; mousedown on menu prevents blur)
     const handleBlur = () => {
         setTimeout(() => {
             setShowSuggestions(false)
             setSelectedIndex(-1)
         }, 150)
     }
+
+    const suggestionPanel =
+        showSuggestions && menuPos
+            ? createPortal(
+                  <div
+                      className={`fixed z-[200] max-h-48 overflow-auto rounded-lg border border-gray-300 bg-white shadow-lg ${
+                          fullWidth ? 'min-w-0' : 'min-w-[140px]'
+                      }`}
+                      style={{
+                          top: menuPos.top,
+                          left: menuPos.left,
+                          width: menuPos.width,
+                      }}
+                      role="listbox"
+                      onMouseDown={(e) => e.preventDefault()}
+                  >
+                      {loadingSuggestions && suggestions.length === 0 ? (
+                          <div className="px-3 py-2 text-sm text-gray-500">Loading tags...</div>
+                      ) : suggestions.length === 0 ? (
+                          <div className="px-3 py-2 text-sm text-gray-500">
+                              No tags on assets yet — this list only shows tags already saved on an asset.
+                          </div>
+                      ) : (
+                          suggestions.map((suggestion, index) => (
+                              <button
+                                  key={`${suggestion.tag}-${index}`}
+                                  id={`tag-primary-suggestion-${index}`}
+                                  type="button"
+                                  onClick={() => handleSuggestionClick(suggestion)}
+                                  className={`w-full px-3 py-2 text-left text-sm hover:bg-gray-50 focus:bg-gray-50 focus:outline-none ${
+                                      index === selectedIndex ? 'bg-indigo-50 text-indigo-900' : 'text-gray-900'
+                                  }`}
+                                  role="option"
+                                  aria-selected={index === selectedIndex}
+                              >
+                                  <div className="flex items-center justify-between">
+                                      <span className="font-medium">{suggestion.tag}</span>
+                                      <div className="flex items-center gap-2 text-xs text-gray-500">
+                                          {suggestion.usage_count > 0 && (
+                                              <span>{suggestion.usage_count} uses</span>
+                                          )}
+                                          <span className="rounded bg-green-100 px-1.5 py-0.5 text-xs font-medium text-green-800">
+                                              Filter
+                                          </span>
+                                      </div>
+                                  </div>
+                              </button>
+                          ))
+                      )}
+                  </div>,
+                  document.body
+              )
+            : null
 
     return (
         <div className={`relative ${className}`}>
@@ -211,7 +296,10 @@ export default function TagPrimaryFilter({
                 )}
 
                 {/* Single border only (no inner outline): one visible box; primary bar: match height of other selects */}
-                <div className={`flex items-center flex-wrap gap-1 px-2 rounded-md bg-white text-xs border border-gray-300 focus-within:border-indigo-500 focus-within:ring-0 transition-colors ${fullWidth ? 'w-full min-w-0 min-h-[2.375rem] py-1.5' : 'w-[140px] max-w-[140px] min-w-[100px] min-h-[1.75rem] py-1 shadow-sm'}`}>
+                <div
+                    ref={containerRef}
+                    className={`flex items-center flex-wrap gap-1 px-2 rounded-md bg-white text-xs border border-gray-300 focus-within:border-indigo-500 focus-within:ring-0 transition-colors ${fullWidth ? 'w-full min-w-0 min-h-[2.375rem] py-1.5' : 'w-[140px] max-w-[140px] min-w-[100px] min-h-[1.75rem] py-1 shadow-sm'}`}
+                >
                     {/* Selected tag pills */}
                     {selectedTags.map((tag, index) => (
                         <div
@@ -250,42 +338,7 @@ export default function TagPrimaryFilter({
                 </div>
             </div>
 
-            {/* Autocomplete suggestions - width matches input container; show loading when fetching used tags */}
-            {showSuggestions && (
-                <div className={`absolute z-50 mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-48 overflow-auto ${fullWidth ? 'w-full min-w-0' : 'w-[200px] min-w-[140px]'}`}>
-                    {loadingSuggestions && suggestions.length === 0 ? (
-                        <div className="px-3 py-2 text-sm text-gray-500">Loading tags...</div>
-                    ) : suggestions.length === 0 ? (
-                        <div className="px-3 py-2 text-sm text-gray-500">No tags on assets yet — this list only shows tags already saved on an asset.</div>
-                    ) : (
-                        suggestions.map((suggestion, index) => (
-                        <button
-                            key={`${suggestion.tag}-${index}`}
-                            id={`tag-primary-suggestion-${index}`}
-                            type="button"
-                            onClick={() => handleSuggestionClick(suggestion)}
-                            className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-50 focus:bg-gray-50 focus:outline-none ${
-                                index === selectedIndex ? 'bg-indigo-50 text-indigo-900' : 'text-gray-900'
-                            }`}
-                            role="option"
-                            aria-selected={index === selectedIndex}
-                        >
-                            <div className="flex items-center justify-between">
-                                <span className="font-medium">{suggestion.tag}</span>
-                                <div className="flex items-center gap-2 text-xs text-gray-500">
-                                    {suggestion.usage_count > 0 && (
-                                        <span>{suggestion.usage_count} uses</span>
-                                    )}
-                                    <span className="px-1.5 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">
-                                        Filter
-                                    </span>
-                                </div>
-                            </div>
-                        </button>
-                    ))
-                    )}
-                </div>
-            )}
+            {suggestionPanel}
 
             {/* Clear all button (when tags are selected) */}
             {selectedTags.length > 0 && (

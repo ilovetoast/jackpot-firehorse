@@ -150,6 +150,12 @@ class MetadataFilterService
                 continue;
             }
 
+            // Video AI structured hints (assets.metadata JSON, not asset_metadata rows)
+            if (in_array($fieldKey, ['video_scene', 'video_activity', 'video_setting'], true)) {
+                $this->applyVideoInsightMetadataFilter($query, $fieldKey, $value);
+                continue;
+            }
+
             if (!isset($fieldMap[$fieldKey])) {
                 continue; // Skip invalid fields
             }
@@ -220,6 +226,46 @@ class MetadataFilterService
                 ->whereColumn('asset_tags.asset_id', 'assets.id')
                 ->whereIn('asset_tags.tag', $tags);
         });
+    }
+
+    /**
+     * Filter by video AI structured metadata (scene / activity / setting) in assets.metadata JSON.
+     *
+     * @param  \Illuminate\Database\Eloquent\Builder  $query
+     */
+    protected function applyVideoInsightMetadataFilter($query, string $fieldKey, mixed $value): void
+    {
+        $needle = is_array($value) ? (string) reset($value) : (string) $value;
+        $needle = trim($needle);
+        if ($needle === '') {
+            return;
+        }
+
+        $jsonPath = match ($fieldKey) {
+            'video_scene' => '$.ai_video_insights.metadata.scene',
+            'video_activity' => '$.ai_video_insights.metadata.activity',
+            'video_setting' => '$.ai_video_insights.metadata.setting',
+            default => null,
+        };
+        if ($jsonPath === null) {
+            return;
+        }
+
+        $like = '%'.$this->escapeLike(strtolower($needle)).'%';
+
+        $query->whereRaw(
+            'LOWER(JSON_UNQUOTE(JSON_EXTRACT(assets.metadata, ?))) LIKE ?',
+            [$jsonPath, $like]
+        );
+    }
+
+    private function escapeLike(string $value): string
+    {
+        return str_replace(
+            ['\\', '%', '_'],
+            ['\\\\', '\\%', '\\_'],
+            $value
+        );
     }
 
     /**
@@ -485,10 +531,14 @@ class MetadataFilterService
         $candidateFields = [];
         $alwaysHiddenFields = config('metadata_category_defaults.always_hidden_fields', []);
 
+        $restrictVisibility = app(TenantMetadataVisibilityService::class);
         foreach ($schema['fields'] ?? [] as $field) {
             $fieldKey = $field['key'] ?? null;
             if ($fieldKey && in_array($fieldKey, $alwaysHiddenFields, true)) {
                 continue; // Behind-the-scenes fields (e.g. dimensions) never appear in More filters
+            }
+            if ($fieldKey && $category && ! $restrictVisibility->isRestrictFieldEnabledForCategorySlug((string) $fieldKey, (string) ($category->slug ?? ''))) {
+                continue;
             }
             if (!($field['is_filterable'] ?? false)) {
                 continue;

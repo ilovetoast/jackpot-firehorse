@@ -44,6 +44,19 @@ class VideoPreviewGenerationService
     }
 
     /**
+     * Download the asset's original video from tenant S3 to a temp file (caller must unlink).
+     * Shared with other FFmpeg-based video workers (e.g. video AI frame sampling).
+     */
+    public function downloadSourceToTemp(Asset $asset): string
+    {
+        if (! $asset->storage_root_path || ! $asset->storageBucket) {
+            throw new \RuntimeException('Asset missing storage path or bucket');
+        }
+
+        return $this->downloadFromS3($asset->storageBucket, $asset->storage_root_path);
+    }
+
+    /**
      * Generate preview video for an asset.
      *
      * Downloads the video from S3, extracts a short segment, encodes it as
@@ -69,7 +82,7 @@ class VideoPreviewGenerationService
         ]);
 
         // Download original video to temporary location
-        $tempPath = $this->downloadFromS3($bucket, $sourceS3Path);
+        $tempPath = $this->downloadSourceToTemp($asset);
 
         if (!file_exists($tempPath) || filesize($tempPath) === 0) {
             throw new \RuntimeException('Downloaded source video file is invalid or empty');

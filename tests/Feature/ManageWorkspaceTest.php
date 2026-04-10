@@ -105,15 +105,17 @@ class ManageWorkspaceTest extends TestCase
         $this->assertStringContainsString('category=test-folder-slug', $location);
     }
 
-    public function test_manage_fields_redirects_to_categories_preserving_query(): void
+    public function test_manage_fields_returns_200_with_overview_props(): void
     {
-        $response = $this->actingWithTenantBrand()
-            ->get('/app/manage/fields?category=test-slug&filter=low_coverage');
-        $response->assertRedirect();
-        $location = $response->headers->get('Location');
-        $this->assertStringContainsString('/app/manage/categories', $location);
-        $this->assertStringContainsString('category=test-slug', $location);
-        $this->assertStringContainsString('filter=low_coverage', $location);
+        $this->actingWithTenantBrand()
+            ->get('/app/manage/fields')
+            ->assertStatus(200)
+            ->assertInertia(fn ($page) => $page
+                ->component('Manage/Fields')
+                ->has('brand')
+                ->has('categories')
+                ->has('custom_fields')
+                ->has('system_fields'));
     }
 
     public function test_manage_tags_returns_200_with_workspace_props(): void

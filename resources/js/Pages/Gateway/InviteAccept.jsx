@@ -1,6 +1,7 @@
 import { useForm, usePage } from '@inertiajs/react'
 import { useEffect, useMemo, useState } from 'react'
 import { firstError } from '../../utils/inertiaErrors'
+import { refreshCsrfTokenFromServer } from '../../utils/csrf'
 
 export default function InviteAccept({ invitation, isAuthenticated, token }) {
     const { theme } = usePage().props
@@ -18,7 +19,12 @@ export default function InviteAccept({ invitation, isAuthenticated, token }) {
 function AuthenticatedAccept({ invitation, token, primary, portalInvite }) {
     const { post, processing } = useForm()
 
-    const handleAccept = () => {
+    const handleAccept = async () => {
+        try {
+            await refreshCsrfTokenFromServer()
+        } catch {
+            /* still attempt */
+        }
         post(`/gateway/invite/${token}/accept`, {
             preserveScroll: true,
             preserveState: true,
@@ -122,8 +128,13 @@ function GuestRegistration({ invitation, token, primary, portalInvite, focusedFi
         [sharedErrors, formErrors],
     )
 
-    const handleSubmit = (e) => {
+    const handleSubmit = async (e) => {
         e.preventDefault()
+        try {
+            await refreshCsrfTokenFromServer()
+        } catch {
+            /* still attempt */
+        }
         post(`/gateway/invite/${token}/complete`, {
             preserveScroll: true,
             withAllErrors: true,

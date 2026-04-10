@@ -84,6 +84,8 @@ export default function AssetGrid({
     selectionAssetType = 'asset', // Phase 2 Selection: 'asset' | 'execution' for SelectionContext type
     layoutMode = 'grid', // 'grid' | 'masonry' — column count still follows card size; masonry uses natural heights (capped)
     executionThumbnailViewMode = null, // Deliverables: standard | enhanced | presentation
+    /** Server ?q= — highlight matching video AI tags in card when non-empty */
+    gridSearchQuery = '',
 }) {
     const safeAssets = (assets || []).filter(Boolean)
     const selection = useSelectionOptional()
@@ -341,6 +343,7 @@ export default function AssetGrid({
                     layoutMode={layoutMode}
                     masonryMaxHeightPx={masonryMaxPx}
                     executionThumbnailViewMode={executionThumbnailViewMode}
+                    gridSearchQuery={gridSearchQuery}
                 />
             </div>
         )

@@ -103,6 +103,10 @@ class EventType
     public const ASSET_AI_METADATA_GENERATED = 'asset.ai_metadata.generated';
     public const ASSET_AI_METADATA_REGENERATED = 'asset.ai_metadata.regenerated';
     public const ASSET_AI_METADATA_FAILED = 'asset.ai_metadata.failed';
+
+    public const ASSET_AI_VIDEO_INSIGHTS_COMPLETED = 'asset.ai_video_insights.completed';
+
+    public const ASSET_AI_VIDEO_INSIGHTS_FAILED = 'asset.ai_video_insights.failed';
     
     // AI Suggestions events (AiMetadataSuggestionJob - creates user-facing suggestions from candidates)
     public const ASSET_AI_SUGGESTIONS_GENERATED = 'asset.ai_suggestions.generated';
@@ -326,6 +330,8 @@ class EventType
             self::ASSET_AI_METADATA_GENERATED,
             self::ASSET_AI_METADATA_REGENERATED,
             self::ASSET_AI_METADATA_FAILED,
+            self::ASSET_AI_VIDEO_INSIGHTS_COMPLETED,
+            self::ASSET_AI_VIDEO_INSIGHTS_FAILED,
             self::ASSET_AI_SUGGESTIONS_GENERATED,
             self::ASSET_AI_SUGGESTIONS_FAILED,
             self::ASSET_AI_SUGGESTION_ACCEPTED,

@@ -1,23 +1,15 @@
 import axios from 'axios';
 import { showGlobalErrorFromAxios } from './stores/errorStore';
+import { applyCsrfTokenToPage } from './utils/csrf';
 
 window.axios = axios;
 
 window.axios.defaults.headers.common['X-Requested-With'] = 'XMLHttpRequest';
 
-// Helper function to update CSRF token in meta tag and axios defaults
-function updateCsrfToken(newToken) {
-    const metaTag = document.head.querySelector('meta[name="csrf-token"]');
-    if (metaTag) {
-        metaTag.setAttribute('content', newToken);
-    }
-    window.axios.defaults.headers.common['X-CSRF-TOKEN'] = newToken;
-}
-
 // Set initial CSRF token for all axios requests
 const token = document.head.querySelector('meta[name="csrf-token"]');
-if (token) {
-    window.axios.defaults.headers.common['X-CSRF-TOKEN'] = token.content;
+if (token?.content) {
+    applyCsrfTokenToPage(token.content);
 } else {
     console.error('CSRF token not found: https://laravel.com/docs/csrf#csrf-x-csrf-token');
 }
@@ -41,8 +33,7 @@ window.axios.interceptors.response.use(
                 });
 
                 if (response.data?.token) {
-                    // Update CSRF token in meta tag and axios defaults
-                    updateCsrfToken(response.data.token);
+                    applyCsrfTokenToPage(response.data.token);
 
                     // Update the original request's CSRF token header
                     originalRequest.headers['X-CSRF-TOKEN'] = response.data.token;

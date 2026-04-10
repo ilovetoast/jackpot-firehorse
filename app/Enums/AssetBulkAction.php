@@ -33,6 +33,18 @@ enum AssetBulkAction: string
     /** Site admin / site engineering only — queue AI vision metadata + tag auto-apply (same chain as single-asset regenerate). */
     case SITE_RERUN_AI_METADATA_TAGGING = 'SITE_RERUN_AI_METADATA_TAGGING';
 
+    /** Site admin / site engineering only — queue hover video preview generation (video assets only). */
+    case SITE_GENERATE_VIDEO_PREVIEWS = 'SITE_GENERATE_VIDEO_PREVIEWS';
+
+    /** Site admin / site engineering only — recompute system metadata + automatic population (async). */
+    case SITE_REPROCESS_SYSTEM_METADATA = 'SITE_REPROCESS_SYSTEM_METADATA';
+
+    /** Site admin / site engineering only — full asset pipeline (ProcessAssetJob); same as single-asset reprocess. */
+    case SITE_REPROCESS_FULL_PIPELINE = 'SITE_REPROCESS_FULL_PIPELINE';
+
+    /** Queue video AI insights for selected video assets (tenant; respects plan + AI policy). */
+    case GENERATE_VIDEO_INSIGHTS = 'GENERATE_VIDEO_INSIGHTS';
+
     public function isApprovalAction(): bool
     {
         return in_array($this, [
@@ -57,6 +69,9 @@ enum AssetBulkAction: string
         return in_array($this, [
             self::SITE_RERUN_THUMBNAILS,
             self::SITE_RERUN_AI_METADATA_TAGGING,
+            self::SITE_GENERATE_VIDEO_PREVIEWS,
+            self::SITE_REPROCESS_SYSTEM_METADATA,
+            self::SITE_REPROCESS_FULL_PIPELINE,
         ], true);
     }
 

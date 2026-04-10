@@ -411,4 +411,18 @@ class Tenant extends Model
             ->where('status', \App\Enums\OwnershipTransferStatus::COMPLETED)
             ->exists();
     }
+
+    /**
+     * True when adding billable minutes would exceed the plan's monthly video AI minutes cap.
+     */
+    public function hasExceededVideoAiMinuteLimit(float $additionalBillableMinutes = 0.0): bool
+    {
+        $svc = app(\App\Services\AiUsageService::class);
+        $cap = $svc->getVideoAiMinutesCap($this);
+        if ($cap <= 0) {
+            return false;
+        }
+
+        return $svc->getVideoAiMinutesUsedThisMonth($this) + $additionalBillableMinutes > $cap;
+    }
 }

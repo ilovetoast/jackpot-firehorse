@@ -47,8 +47,6 @@ final class PrintLayoutCropService
      */
     public function findDominantContentBoundingBox(Imagick $image, bool $forOverlayVisualization = false): ?array
     {
-        (void) $forOverlayVisualization;
-
         $work = null;
         $inner = null;
 

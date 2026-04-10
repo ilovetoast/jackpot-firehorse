@@ -50,6 +50,7 @@ class FieldSuggestionEngine
 
         $analyzer = new MetadataInsightsAnalyzer;
         $mergedBySlug = $analyzer->mergeFieldSignals($tenantId);
+        $minLift = (float) config('ai_metadata_field_suggestions.min_co_lift_ratio', 1.35);
 
         $existingFieldKeys = $this->applicableMetadataFieldKeysLower($tenantId);
         $existingOptionLabels = $this->selectOptionLabelsLowerForTenant($tenantId);
@@ -77,6 +78,8 @@ class FieldSuggestionEngine
             if ($totalInCategory < $minAssets) {
                 continue;
             }
+
+            $categoryTagCounts = $analyzer->distinctAssetCountsPerLowerTagInCategory($tenantId, $categoryId);
 
             $block = $mergedBySlug[$slug] ?? null;
             if ($block === null || empty($block['signals'])) {
@@ -187,12 +190,17 @@ class FieldSuggestionEngine
                     continue;
                 }
 
-                $coValues = $this->collectCoValuesFromMergedSignals(
-                    $block['signals'],
+                $coValues = $analyzer->coOccurringOptionLabelsForAnchor(
+                    $tenantId,
+                    $categoryId,
                     $anchor,
                     self::MIN_OPTION_OCCURRENCE,
                     $maxOptions,
-                    $stopTags
+                    $minLift,
+                    $stopTags,
+                    $totalInCategory,
+                    $categoryTagCounts,
+                    fn (string $v) => $this->isNoiseCoOption($v)
                 );
 
                 if (count($coValues) < (int) config('ai_metadata_field_suggestions.min_co_occurring_tags', 3)) {
@@ -313,43 +321,29 @@ class FieldSuggestionEngine
     }
 
     /**
-     * @param  list<array<string, mixed>>  $signals
-     * @param  list<string>  $stopTags
-     * @return list<string>
+     * Drop technical / campaign-slug style tokens that should not become dropdown options.
      */
-    protected function collectCoValuesFromMergedSignals(
-        array $signals,
-        string $anchorLower,
-        int $minOccurrence,
-        int $maxOptions,
-        array $stopTags
-    ): array {
-        $scores = [];
-        foreach ($signals as $signal) {
-            $v = strtolower(trim((string) ($signal['value'] ?? '')));
-            if ($v === '' || $v === $anchorLower) {
-                continue;
-            }
-            if (in_array($v, $stopTags, true)) {
-                continue;
-            }
-            $d = (int) ($signal['distinct_asset_count'] ?? 0);
-            if ($d < $minOccurrence) {
-                continue;
-            }
-            $scores[$v] = ($scores[$v] ?? 0) + $d;
+    protected function isNoiseCoOption(string $valueLower): bool
+    {
+        $v = strtolower(trim($valueLower));
+        if ($v === '' || strlen($v) > 72) {
+            return true;
         }
 
-        arsort($scores);
-        $out = [];
-        foreach (array_keys($scores) as $v) {
-            $out[] = $v;
-            if (count($out) >= $maxOptions) {
-                break;
+        foreach (config('ai_metadata_field_suggestions.co_option_noise_regexes', []) as $pattern) {
+            if (is_string($pattern) && $pattern !== '' && @preg_match($pattern, $v) === 1) {
+                return true;
             }
         }
 
-        return $out;
+        foreach (config('ai_metadata_field_suggestions.co_option_blocklist_substrings', []) as $frag) {
+            $f = strtolower(trim((string) $frag));
+            if ($f !== '' && str_contains($v, $f)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

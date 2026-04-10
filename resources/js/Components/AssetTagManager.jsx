@@ -30,6 +30,8 @@ export default function AssetTagManager({
     primaryColor = null,
     /** 'dark' = light text for embedded lightbox details column */
     variant = 'default',
+    /** View-only: no add/remove (e.g. lightbox read-only column) */
+    readOnly = false,
 }) {
     const isDark = variant === 'dark'
     const [refreshTrigger, setRefreshTrigger] = useState(0)
@@ -58,6 +60,8 @@ export default function AssetTagManager({
     const { can } = usePermission()
     const canAddTags = can('assets.tags.create')
     const canRemoveTags = can('assets.tags.delete')
+    const effectiveShowInput = readOnly ? false : showInput
+    const effectiveShowRemove = readOnly ? false : canRemoveTags
 
     // Handle tag added
     const handleTagAdded = (newTag) => {
@@ -88,7 +92,7 @@ export default function AssetTagManager({
                     <div className="flex items-center gap-2 mb-3">
                         <TagIcon className="h-4 w-4 text-gray-500" />
                         <span className="text-sm font-medium text-gray-700">Tags:</span>
-                        {showInput && canAddTags && (
+                        {effectiveShowInput && canAddTags && (
                             <div className="flex-1">
                                 <TagInputUnified
                                     mode="asset"
@@ -115,7 +119,7 @@ export default function AssetTagManager({
                         onTagsLoaded={handleTagsLoaded}
                         refreshTrigger={refreshTrigger}
                         className=""
-                        showRemoveButtons={canRemoveTags}
+                        showRemoveButtons={effectiveShowRemove}
                         maxTags={maxDisplayTags}
                         compact={compact}
                         detailed={detailed}
@@ -123,7 +127,7 @@ export default function AssetTagManager({
                     />
 
                     {/* Permission message if can't add tags */}
-                    {showInput && !canAddTags && canView && (
+                    {effectiveShowInput && !canAddTags && canView && (
                         <div className="text-gray-500 italic text-xs mt-2">
                             You don't have permission to add tags
                         </div>
@@ -155,7 +159,7 @@ export default function AssetTagManager({
                         onTagsLoaded={handleTagsLoaded}
                         refreshTrigger={refreshTrigger}
                         className="mb-3"
-                        showRemoveButtons={canRemoveTags}
+                        showRemoveButtons={effectiveShowRemove}
                         maxTags={maxDisplayTags}
                         compact={compact}
                         detailed={detailed}
@@ -164,7 +168,7 @@ export default function AssetTagManager({
                     />
 
                     {/* Add new tag input */}
-                    {showInput && canAddTags && (
+                    {effectiveShowInput && canAddTags && (
                         <TagInputUnified
                             mode="asset"
                             assetId={asset.id}
@@ -176,7 +180,7 @@ export default function AssetTagManager({
                     )}
 
                     {/* Permission message if can't add tags */}
-                    {showInput && !canAddTags && canView && (
+                    {effectiveShowInput && !canAddTags && canView && (
                         <div className={`italic ${compact ? 'text-xs' : 'text-sm'} ${isDark ? 'text-neutral-500' : 'text-gray-500'}`}>
                             You don't have permission to add tags
                         </div>

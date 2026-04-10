@@ -4,6 +4,7 @@ namespace App\Assets\Metadata;
 
 use App\Models\Asset;
 use App\Models\AssetMetadataIndexEntry;
+use App\Services\VideoInsightsSearchIndexWriter;
 use Carbon\CarbonInterface;
 use Illuminate\Support\Str;
 
@@ -17,7 +18,8 @@ class EmbeddedMetadataIndexBuilder
     public function __construct(
         protected EmbeddedMetadataRegistry $registry,
         protected EmbeddedMetadataSearchTextNormalizer $searchTextNormalizer,
-        protected EmbeddedMetadataTechnicalNormalizer $technicalNormalizer
+        protected EmbeddedMetadataTechnicalNormalizer $technicalNormalizer,
+        protected VideoInsightsSearchIndexWriter $videoInsightsSearchIndexWriter,
     ) {}
 
     /**
@@ -72,6 +74,9 @@ class EmbeddedMetadataIndexBuilder
             }
 
             $this->flushPendingIndexRows();
+
+            $asset->refresh();
+            $this->videoInsightsSearchIndexWriter->syncForAsset($asset);
         } finally {
             $this->pendingIndexRows = [];
             $this->indexInsertTimestamp = null;

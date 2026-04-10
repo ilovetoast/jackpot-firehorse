@@ -43,14 +43,19 @@ class AssetBulkActionController extends Controller
             'payload' => 'nullable|array',
         ]);
 
-        $sitePipelineActions = [
+        $bulkActionsWithPerRequestAssetCap = [
             AssetBulkAction::SITE_RERUN_THUMBNAILS->value,
             AssetBulkAction::SITE_RERUN_AI_METADATA_TAGGING->value,
+            AssetBulkAction::SITE_GENERATE_VIDEO_PREVIEWS->value,
+            AssetBulkAction::SITE_REPROCESS_SYSTEM_METADATA->value,
+            AssetBulkAction::SITE_REPROCESS_FULL_PIPELINE->value,
+            AssetBulkAction::GENERATE_VIDEO_INSIGHTS->value,
         ];
-        if (in_array($validated['action'], $sitePipelineActions, true) && count($validated['asset_ids']) > 100) {
+        $maxBulk = max(1, (int) config('asset_processing.max_bulk_pipeline_assets', 25));
+        if (in_array($validated['action'], $bulkActionsWithPerRequestAssetCap, true) && count($validated['asset_ids']) > $maxBulk) {
             return response()->json([
-                'message' => 'Select at most 100 assets per site pipeline bulk action.',
-                'errors' => ['asset_ids' => ['Maximum 100 assets per request.']],
+                'message' => "Select at most {$maxBulk} assets per processing bulk action.",
+                'errors' => ['asset_ids' => ["Maximum {$maxBulk} assets per request."]],
             ], 422);
         }
 

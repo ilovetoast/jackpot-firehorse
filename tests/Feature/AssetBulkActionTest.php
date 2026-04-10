@@ -10,6 +10,8 @@ use App\Enums\ThumbnailStatus;
 use App\Enums\UploadStatus;
 use App\Enums\UploadType;
 use App\Jobs\GenerateThumbnailsJob;
+use App\Jobs\ProcessAssetJob;
+use App\Jobs\RegenerateSystemMetadataQueuedJob;
 use App\Models\Asset;
 use App\Models\Brand;
 use App\Models\StorageBucket;
@@ -313,5 +315,56 @@ class AssetBulkActionTest extends TestCase
             ]);
 
         $response->assertStatus(403);
+    }
+
+    public function test_site_reprocess_system_metadata_queues_job_for_site_engineering(): void
+    {
+        Queue::fake();
+        Role::firstOrCreate(['name' => 'site_engineering', 'guard_name' => 'web']);
+        $this->user->assignRole('site_engineering');
+
+        app()->instance('tenant', $this->tenant);
+        app()->instance('brand', $this->brand);
+
+        $response = $this->actingAs($this->user)
+            ->postJson(route('assets.bulk-action'), [
+                'asset_ids' => [$this->asset1->id],
+                'action' => 'SITE_REPROCESS_SYSTEM_METADATA',
+                'payload' => [],
+            ]);
+
+        $response->assertOk();
+        $response->assertJson([
+            'total_selected' => 1,
+            'processed' => 1,
+            'errors' => [],
+        ]);
+        Queue::assertPushed(RegenerateSystemMetadataQueuedJob::class, 1);
+    }
+
+    public function test_site_reprocess_full_pipeline_queues_process_asset_job_for_site_engineering(): void
+    {
+        Queue::fake();
+        Role::firstOrCreate(['name' => 'site_engineering', 'guard_name' => 'web']);
+        $this->user->assignRole('site_engineering');
+        $this->asset1->update(['thumbnail_status' => ThumbnailStatus::COMPLETED]);
+
+        app()->instance('tenant', $this->tenant);
+        app()->instance('brand', $this->brand);
+
+        $response = $this->actingAs($this->user)
+            ->postJson(route('assets.bulk-action'), [
+                'asset_ids' => [$this->asset1->id],
+                'action' => 'SITE_REPROCESS_FULL_PIPELINE',
+                'payload' => [],
+            ]);
+
+        $response->assertOk();
+        $response->assertJson([
+            'total_selected' => 1,
+            'processed' => 1,
+            'errors' => [],
+        ]);
+        Queue::assertPushed(ProcessAssetJob::class, 1);
     }
 }

@@ -111,10 +111,12 @@ export default function CreatorsDashboard({
     }, [])
 
     const openCreatorProfile = useCallback(
-        (userId) => {
-            router.visit(route('brands.creators.show', { brand: brand.id, user: userId }))
+        (prostaffMembershipId) => {
+            router.visit(
+                route('brands.creators.show', { brand: brand.id, membership: prostaffMembershipId }),
+            )
         },
-        [brand.id]
+        [brand.id],
     )
 
     const hasAgencyQuickLink = Array.isArray(auth?.companies)

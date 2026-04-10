@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Prostaff;
 
 use App\Http\Controllers\Controller;
 use App\Models\Brand;
+use App\Models\ProstaffMembership;
 use App\Models\Tenant;
 use App\Models\User;
 use App\Exceptions\CreatorModuleInactiveException;
@@ -59,9 +60,12 @@ class ProstaffDashboardController extends Controller
     }
 
     /**
-     * GET /app/brands/{brand}/creators/{user}
+     * GET /app/brands/{brand}/creators/{membership}
+     *
+     * Resolves the creator via {@see ProstaffMembership} id (dashboard rows use this id for navigation).
+     * Using {@see User} id in the URL was fragile: membership primary keys were sometimes mistaken for user ids.
      */
-    public function creatorPage(Request $request, Brand $brand, User $creator): Response|RedirectResponse
+    public function creatorPage(Request $request, Brand $brand, ProstaffMembership $membership): Response|RedirectResponse
     {
         /** @var User $authUser */
         $authUser = Auth::user();
@@ -71,6 +75,24 @@ class ProstaffDashboardController extends Controller
             abort(403, 'Brand does not belong to this workspace.');
         }
 
+        if ((int) $membership->brand_id !== (int) $brand->id || (int) $membership->tenant_id !== (int) $brand->tenant_id) {
+            abort(404);
+        }
+
+        if ($membership->status !== 'active') {
+            abort(404);
+        }
+
+        $membership->loadMissing([
+            'user' => static function ($query): void {
+                $query->select(['id', 'first_name', 'last_name', 'email']);
+            },
+        ]);
+        $creator = $membership->user;
+        if ($creator === null) {
+            abort(404);
+        }
+
         $this->authorize('view', $brand);
 
         $access = app(ResolveCreatorsDashboardAccess::class);
@@ -78,10 +100,6 @@ class ProstaffDashboardController extends Controller
             if ((int) $authUser->id !== (int) $creator->id || ! $authUser->isProstaffForBrand($brand)) {
                 abort(403, 'You do not have permission to view this creator profile.');
             }
-        }
-
-        if (! $creator->isProstaffForBrand($brand)) {
-            abort(404);
         }
 
         // Do not require belongsToTenant() here: a row can still appear on the creators dashboard while the
@@ -111,10 +129,6 @@ class ProstaffDashboardController extends Controller
 
         $rejections = $service->rejectedProstaffUploadsForUser($brand, (int) $creator->id);
         $awaitingBrandReviewCount = $service->pendingProstaffApprovalCountForUser($brand, (int) $creator->id);
-        $membership = $creator->activeProstaffMembership($brand);
-        if ($membership === null) {
-            abort(404);
-        }
 
         return Inertia::render('Prostaff/CreatorProfile', [
             'brand' => [
@@ -198,6 +212,8 @@ class ProstaffDashboardController extends Controller
                 'id' => $authUser->id,
                 'name' => $authUser->name,
                 'email' => $authUser->email,
+                'avatar_url' => $authUser->avatar_url,
+                'last_login_at' => $authUser->last_login_at?->toIso8601String(),
             ],
             'creator_home' => $creatorHome,
             'canManageCreators' => $access->canManage($authUser, $tenant, $brand),

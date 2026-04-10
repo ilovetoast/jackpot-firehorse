@@ -297,15 +297,25 @@ export default function AssetBrandIntelligenceBlock({
             <div className="px-4 py-3 border-t border-gray-200">{card}</div>
         )
 
+    /** Drawer: section title is CollapsibleSection; no purple/brand tint shell (aligns with Metadata Review). */
+    const insightShellClass = drawerInsightGroup
+        ? 'space-y-3'
+        : `rounded-md p-2.5 border shadow-sm`
+    const insightShellStyle = drawerInsightGroup
+        ? undefined
+        : { borderColor: `${brandColor}40`, backgroundColor: brandColorTint }
+
     if (!hasPublishedGuidelines) {
         return wrapCard(
             <div
-                className={`rounded-md border border-amber-200/90 bg-amber-50/95 p-3 ${drawerInsightGroup ? 'shadow-sm' : ''}`}
+                className={`rounded-md border border-amber-200/90 bg-amber-50/95 p-3 ${!drawerInsightGroup ? 'shadow-sm' : ''}`}
             >
-                <div className="flex items-center gap-1.5 mb-2">
-                    <SparklesIcon className="h-3.5 w-3.5 flex-shrink-0 text-amber-800" aria-hidden />
-                    <h3 className="text-xs font-semibold text-amber-950">Brand Intelligence</h3>
-                </div>
+                {!drawerInsightGroup && (
+                    <div className="flex items-center gap-1.5 mb-2">
+                        <SparklesIcon className="h-3.5 w-3.5 flex-shrink-0 text-amber-800" aria-hidden />
+                        <h3 className="text-xs font-semibold text-amber-950">Brand Intelligence</h3>
+                    </div>
+                )}
                 <p className="text-sm text-amber-950/90">
                     Scoring is available only after brand guidelines are <strong>published</strong>. We don&apos;t run
                     Brand Intelligence until then.
@@ -326,14 +336,13 @@ export default function AssetBrandIntelligenceBlock({
 
     if (!bi) {
         return wrapCard(
-            <div
-                className={`rounded-md p-2.5 border ${drawerInsightGroup ? 'shadow-sm' : ''}`}
-                style={{ borderColor: `${brandColor}40`, backgroundColor: brandColorTint }}
-            >
-                    <div className="flex items-center gap-1.5 mb-2">
-                        <SparklesIcon className="h-3.5 w-3.5 flex-shrink-0" style={{ color: brandColor }} />
-                        <h3 className="text-xs font-semibold text-gray-900">Brand Intelligence</h3>
-                    </div>
+            <div className={insightShellClass} style={insightShellStyle}>
+                    {!drawerInsightGroup && (
+                        <div className="flex items-center gap-1.5 mb-2">
+                            <SparklesIcon className="h-3.5 w-3.5 flex-shrink-0" style={{ color: brandColor }} />
+                            <h3 className="text-xs font-semibold text-gray-900">Brand Intelligence</h3>
+                        </div>
+                    )}
                     {rescoreLoading ? (
                         <p className="text-sm text-slate-600" role="status" aria-live="polite">
                             Analyzing brand alignment…
@@ -375,14 +384,13 @@ export default function AssetBrandIntelligenceBlock({
     }
 
     return wrapCard(
-        <div
-            className={`rounded-md p-2.5 border ${drawerInsightGroup ? 'shadow-sm' : ''}`}
-            style={{ borderColor: `${brandColor}40`, backgroundColor: brandColorTint }}
-        >
-            <div className="flex items-center gap-1.5 mb-2">
-                <SparklesIcon className="h-3.5 w-3.5 flex-shrink-0" style={{ color: brandColor }} />
-                <h3 className="text-xs font-semibold text-gray-900">Brand Intelligence</h3>
-            </div>
+        <div className={insightShellClass} style={insightShellStyle}>
+            {!drawerInsightGroup && (
+                <div className="flex items-center gap-1.5 mb-2">
+                    <SparklesIcon className="h-3.5 w-3.5 flex-shrink-0" style={{ color: brandColor }} />
+                    <h3 className="text-xs font-semibold text-gray-900">Brand Intelligence</h3>
+                </div>
+            )}
             {rescoreLoading ? (
                 <p className="text-lg font-semibold text-slate-700" role="status" aria-live="polite">
                     Analyzing brand alignment…

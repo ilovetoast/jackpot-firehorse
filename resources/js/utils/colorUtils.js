@@ -76,18 +76,17 @@ export function darkenColor(hexColor, amount = 20) {
 }
 
 /**
- * Get appropriate text color (white or black) based on background color
- * Uses WCAG contrast ratio guidelines - returns white for dark backgrounds, black for light
+ * Foreground (#fff vs #000) for solid UI backgrounds — picks whichever maximizes WCAG 2.1 contrast ratio.
+ * Prefer this over luminance-only heuristics for saturated mid-light brand colors (e.g. cyan) on buttons.
  * @param {string} backgroundColor - Hex color string
- * @returns {string} '#ffffff' for dark backgrounds, '#000000' for light backgrounds
+ * @returns {'#ffffff'|'#000000'}
  */
 export function getContrastTextColor(backgroundColor) {
-    if (!backgroundColor) return '#ffffff' // Default to white if no color
-    
-    const luminance = getLuminance(backgroundColor)
-    // If luminance is less than 0.5, it's a dark color, use white text
-    // If luminance is 0.5 or greater, it's a light color, use black text
-    return luminance < 0.5 ? '#ffffff' : '#000000'
+    if (!backgroundColor) return '#ffffff'
+    const bg = normalizeHexColor(backgroundColor)
+    const ratioWhite = getContrastRatio('#ffffff', bg)
+    const ratioBlack = getContrastRatio('#000000', bg)
+    return ratioWhite >= ratioBlack ? '#ffffff' : '#000000'
 }
 
 /**

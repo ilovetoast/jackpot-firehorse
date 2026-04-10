@@ -1011,6 +1011,7 @@ class DevelopmentDataSeeder extends Seeder
         'packaging' => 'packaging_type',
         'product-renders' => 'product_render_type',
         'radio' => 'radio_type',
+        'fonts' => 'font_role',
     ];
 
     /**
@@ -1040,6 +1041,9 @@ class DevelopmentDataSeeder extends Seeder
         $remaining = $metadataFields->filter(fn ($f) => ! isset($fields[$f->key]))->values();
         $added = 0;
         foreach ($remaining as $field) {
+            if ($field->key === 'font_role' && ($category?->slug ?? '') !== 'fonts') {
+                continue;
+            }
             $needMore = count($fields) < $minFields;
             $roll = fake()->boolean($fillChance);
             if (! $needMore && ! $roll) {

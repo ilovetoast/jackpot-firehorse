@@ -215,8 +215,9 @@ class MetadataFieldsSeeder extends Seeder
             ['value' => 'promotional', 'system_label' => 'Promotional'],
         ]);
 
-        // Font role — headline vs body copy (Brand Guidelines / Fonts library). Upload & filters: only the
-        // Fonts category slug via config/metadata_category_defaults.php (restrict_fields + category_config).
+        // Font role — headline vs body copy (Fonts library / Brand Guidelines typography only).
+        // Visibility is enforced per category slug via config/metadata_category_defaults.php (restrict_fields +
+        // category_config) and TenantMetadataVisibilityService::isRestrictFieldEnabledForCategorySlug — not by applies_to alone.
         $fontRoleId = $this->getOrCreateField([
             'key' => 'font_role',
             'system_label' => 'Font role',

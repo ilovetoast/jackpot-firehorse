@@ -318,7 +318,7 @@ class AiUsageService
      */
     public function getUsageStatus(Tenant $tenant): array
     {
-        $features = ['tagging', 'suggestions', 'brand_research', 'insights', 'generative_editor_images'];
+        $features = ['tagging', 'suggestions', 'brand_research', 'insights', 'generative_editor_images', 'video_insights'];
         $status = [];
 
         foreach ($features as $feature) {
@@ -383,7 +383,7 @@ class AiUsageService
      */
     public function getUsageStatusForPeriod(Tenant $tenant, int $year, int $month): array
     {
-        $features = ['tagging', 'suggestions', 'brand_research', 'insights', 'generative_editor_images'];
+        $features = ['tagging', 'suggestions', 'brand_research', 'insights', 'generative_editor_images', 'video_insights'];
         $status = [];
 
         foreach ($features as $feature) {
@@ -533,6 +533,72 @@ class AiUsageService
             'p95_duration_ms' => $m['p95_duration_ms'],
         ];
 
+        $videoAgg = app(AssetAiCostService::class)->getTenantVideoAiAggregate($tenant->id);
+        $minuteCap = $this->getVideoAiMinutesCap($tenant);
+        $aiUsageData['video_ai'] = [
+            'video_ai_cost_total' => $videoAgg['cost_usd'],
+            'video_ai_jobs_count' => (int) $videoAgg['jobs_count'],
+            'video_ai_minutes_used' => $videoAgg['minutes_billed'],
+            'video_ai_minutes_cap' => $minuteCap,
+        ];
+
         return $aiUsageData;
+    }
+
+    /**
+     * Billable video minutes cap for the tenant plan (0 = unlimited).
+     */
+    public function getVideoAiMinutesCap(Tenant $tenant): int
+    {
+        $limits = app(PlanService::class)->getPlanLimits($tenant);
+
+        return (int) ($limits['max_video_ai_minutes_per_month'] ?? 0);
+    }
+
+    /**
+     * Sum of billable minutes from successful video insight runs this calendar month.
+     */
+    public function getVideoAiMinutesUsedThisMonth(Tenant $tenant): float
+    {
+        $start = now()->startOfMonth();
+        $end = now()->endOfMonth();
+
+        $rows = AIAgentRun::query()
+            ->where('tenant_id', $tenant->id)
+            ->where('task_type', AITaskType::VIDEO_INSIGHTS)
+            ->where('status', 'success')
+            ->whereBetween('started_at', [$start, $end])
+            ->get(['metadata']);
+
+        $sum = 0.0;
+        foreach ($rows as $row) {
+            $meta = $row->metadata ?? [];
+            $sum += (float) ($meta['billable_minutes'] ?? 0);
+        }
+
+        return round($sum, 4);
+    }
+
+    /**
+     * @throws PlanLimitExceededException
+     */
+    public function checkVideoAiMinuteBudget(Tenant $tenant, float $additionalBillableMinutes): void
+    {
+        $cap = $this->getVideoAiMinutesCap($tenant);
+        if ($cap <= 0) {
+            return;
+        }
+
+        $used = $this->getVideoAiMinutesUsedThisMonth($tenant);
+        if ($used + $additionalBillableMinutes <= $cap) {
+            return;
+        }
+
+        throw new PlanLimitExceededException(
+            'video_ai_minutes',
+            (int) floor($used),
+            $cap,
+            'Monthly video AI minutes cap exceeded. Usage resets at the start of next month.'
+        );
     }
 }

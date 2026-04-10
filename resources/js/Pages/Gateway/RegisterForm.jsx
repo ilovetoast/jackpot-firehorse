@@ -1,6 +1,7 @@
 import { useForm, usePage } from '@inertiajs/react'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { firstError } from '../../utils/inertiaErrors'
+import { refreshCsrfTokenFromServer } from '../../utils/csrf'
 
 export default function RegisterForm({ context, onToggleLogin }) {
     const { theme, errors: sharedErrors = {} } = usePage().props
@@ -21,8 +22,17 @@ export default function RegisterForm({ context, onToggleLogin }) {
 
     const [focusedField, setFocusedField] = useState(null)
 
-    const handleSubmit = (e) => {
+    useEffect(() => {
+        refreshCsrfTokenFromServer().catch(() => {})
+    }, [])
+
+    const handleSubmit = async (e) => {
         e.preventDefault()
+        try {
+            await refreshCsrfTokenFromServer()
+        } catch {
+            /* still attempt */
+        }
         post('/gateway/register')
     }
 

@@ -82,6 +82,7 @@ export function mergeAsset(prev, incoming) {
 
     if (
         incoming.brand_intelligence === undefined &&
+        !('starred' in incoming) &&
         prev.preview_thumbnail_url === incoming.preview_thumbnail_url &&
         prev.final_thumbnail_url === incoming.final_thumbnail_url &&
         prev.thumbnail_version === incoming.thumbnail_version &&

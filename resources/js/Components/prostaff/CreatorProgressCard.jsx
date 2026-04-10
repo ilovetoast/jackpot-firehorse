@@ -9,18 +9,31 @@ function periodLabel(periodType) {
     return p ? p.charAt(0).toUpperCase() + p.slice(1) : 'Period'
 }
 
-function statusBadge(status) {
+function initialsFromName(name) {
+    const n = String(name || '').trim()
+    if (!n) return '?'
+    const parts = n.split(/\s+/).filter(Boolean)
+    if (parts.length >= 2) {
+        return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
+    }
+    return n.slice(0, 2).toUpperCase()
+}
+
+/** Encouraging copy — no “behind pace” framing. */
+function statusBadge(status, completionPct) {
     const s = String(status || '').toLowerCase()
+    const pct = Number(completionPct)
+    const pctRounded = Number.isFinite(pct) ? Math.min(100, Math.max(0, Math.round(pct))) : null
     const map = {
-        behind: 'border-rose-400/40 bg-rose-500/15 text-rose-100',
-        on_track: 'border-amber-400/35 bg-amber-500/12 text-amber-100',
+        behind: 'border-indigo-400/35 bg-indigo-500/12 text-indigo-100',
+        on_track: 'border-sky-400/35 bg-sky-500/12 text-sky-100',
         complete: 'border-emerald-400/40 bg-emerald-500/15 text-emerald-100',
     }
     const cls = map[s] || 'border-white/15 bg-white/10 text-white/70'
     const labels = {
-        behind: '🔴 Behind Pace',
-        on_track: '🟡 On Track',
-        complete: '🟢 Complete',
+        behind: pctRounded != null ? `${pctRounded}% toward goal` : 'Working toward goal',
+        on_track: 'Strong progress',
+        complete: 'Goal reached',
     }
     const label = labels[s] || '—'
     return (
@@ -32,7 +45,7 @@ function statusBadge(status) {
  * Prostaff self-service progress on Overview (data from GET /app/api/prostaff/me).
  *
  * @param {{
- *   data?: { actual_uploads?: number, target_uploads?: number|null, uploads_remaining?: number|null, completion_percentage?: number, period_type?: string, status?: string } | null,
+ *   data?: { actual_uploads?: number, target_uploads?: number|null, uploads_remaining?: number|null, completion_percentage?: number, period_type?: string, status?: string, avatar_url?: string|null, last_login_at?: string|null, total_assets_uploaded?: number, display_name?: string } | null,
  *   loading?: boolean,
  *   brandColor?: string,
  * }} props
@@ -77,6 +90,13 @@ export default function CreatorProgressCard({ data, loading = false, brandColor 
                   : null
             : null
 
+    const displayName = data.display_name || ''
+    const avatarUrl = data.avatar_url ?? null
+    const totalAll =
+        data.total_assets_uploaded != null && Number.isFinite(Number(data.total_assets_uploaded))
+            ? Number(data.total_assets_uploaded)
+            : null
+
     return (
         <motion.div
             className="animate-fadeInUp-d2 relative overflow-hidden rounded-2xl border border-white/10 bg-white/[0.05] p-5 shadow-[0_0_40px_-12px_rgba(255,255,255,0.15)] backdrop-blur-xl transition-[box-shadow,border-color] duration-300 hover:border-white/15 hover:shadow-[0_0_48px_-8px_rgba(255,255,255,0.18)]"
@@ -90,26 +110,54 @@ export default function CreatorProgressCard({ data, loading = false, brandColor 
                 style={{ backgroundColor: `${brandColor}33` }}
             />
             <div className="relative flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                <div>
-                    <h2 className="text-sm font-semibold uppercase tracking-wide text-white/45">Creator Home</h2>
-                    <p className="mt-1 text-xs text-white/40">
-                        Upload quota · {periodLabel(data.period_type)}
-                    </p>
-                    <p className="mt-3 text-lg font-medium tabular-nums text-white">
-                        {actual}
-                        <span className="text-white/40"> of </span>
-                        {target != null && Number.isFinite(target) ? target : '—'}
-                        <span className="text-sm font-normal text-white/50"> uploads</span>
-                    </p>
-                    {uploadsRemaining != null && targetNum != null && targetNum > 0 ? (
-                        <p className="mt-2 text-xs text-white/45">
-                            <span className="font-semibold tabular-nums text-white/70">{uploadsRemaining}</span> upload
-                            {uploadsRemaining === 1 ? '' : 's'} remaining
+                <div className="flex min-w-0 flex-1 gap-4">
+                    {avatarUrl ? (
+                        <img
+                            src={avatarUrl}
+                            alt=""
+                            className="h-14 w-14 shrink-0 rounded-xl object-cover ring-1 ring-white/15"
+                        />
+                    ) : (
+                        <div
+                            className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl text-sm font-semibold text-white/90 ring-1 ring-white/15"
+                            style={{
+                                background: `linear-gradient(145deg, ${brandColor}66, ${brandColor}33)`,
+                            }}
+                            aria-hidden
+                        >
+                            {initialsFromName(displayName)}
+                        </div>
+                    )}
+                    <div className="min-w-0">
+                        <h2 className="text-sm font-semibold uppercase tracking-wide text-white/45">Creator Home</h2>
+                        {displayName ? (
+                            <p className="mt-0.5 truncate text-base font-medium text-white/90">{displayName}</p>
+                        ) : null}
+                        <p className="mt-1 text-xs text-white/40">
+                            Upload quota · {periodLabel(data.period_type)}
+                            {totalAll != null ? (
+                                <>
+                                    {' '}
+                                    · <span className="tabular-nums text-white/55">{totalAll}</span> assets on brand
+                                </>
+                            ) : null}
                         </p>
-                    ) : null}
-                    {progressHint ? <p className="mt-1 text-xs text-white/40">{progressHint}</p> : null}
+                        <p className="mt-3 text-lg font-medium tabular-nums text-white">
+                            {actual}
+                            <span className="text-white/40"> of </span>
+                            {target != null && Number.isFinite(target) ? target : '—'}
+                            <span className="text-sm font-normal text-white/50"> this period</span>
+                        </p>
+                        {uploadsRemaining != null && targetNum != null && targetNum > 0 ? (
+                            <p className="mt-2 text-xs text-white/45">
+                                <span className="font-semibold tabular-nums text-white/70">{uploadsRemaining}</span> upload
+                                {uploadsRemaining === 1 ? '' : 's'} remaining
+                            </p>
+                        ) : null}
+                        {progressHint ? <p className="mt-1 text-xs text-white/40">{progressHint}</p> : null}
+                    </div>
                 </div>
-                <div className="shrink-0 sm:pt-0.5">{statusBadge(data.status)}</div>
+                <div className="shrink-0 sm:pt-0.5">{statusBadge(data.status, data.completion_percentage)}</div>
             </div>
             <div className="relative mt-5 h-2.5 w-full overflow-hidden rounded-full bg-black/40 ring-1 ring-inset ring-white/10">
                 <motion.div
@@ -123,7 +171,7 @@ export default function CreatorProgressCard({ data, loading = false, brandColor 
                     transition={{ duration: 0.85, ease: [0.22, 1, 0.36, 1] }}
                 />
             </div>
-            <p className="mt-2 text-right text-xs tabular-nums text-white/40">{pct.toFixed(1)}% complete</p>
+            <p className="mt-2 text-right text-xs tabular-nums text-white/40">{pct.toFixed(1)}% toward your goal</p>
             <div className="relative mt-4 border-t border-white/10 pt-4">
                 <Link
                     href={

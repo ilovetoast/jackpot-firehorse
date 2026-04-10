@@ -20,6 +20,7 @@ use App\Services\AiUsageService;
 use App\Services\AssetArchiveService;
 use App\Services\AssetDeletionService;
 use App\Services\AssetPublicationService;
+use App\Services\Assets\AssetProcessingGuardService;
 use App\Services\AssetSearchService;
 use App\Services\AssetSortService;
 use App\Services\BrandDNA\GoogleFontLibraryEntriesService;
@@ -46,6 +47,7 @@ use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -138,6 +140,7 @@ class AssetController extends Controller
                 'sort' => AssetSortService::DEFAULT_SORT,
                 'sort_direction' => AssetSortService::DEFAULT_DIRECTION,
                 'q' => '',
+                'pending_publication_review_count' => 0,
                 'prostaff_filter_options' => [],
                 'dam_prostaff_filter_config' => GetProstaffDamFilterOptions::damProstaffFilterConfig(),
             ]);
@@ -391,6 +394,19 @@ class AssetController extends Controller
             );
         }
 
+        // Content type: all | image (non-video) | video — additive query narrowing
+        $contentType = $request->input('content_type');
+        if (is_string($contentType) && $contentType !== '' && $contentType !== 'all') {
+            if ($contentType === 'video') {
+                $assetsQuery->where('mime_type', 'like', 'video/%');
+            } elseif ($contentType === 'image') {
+                $assetsQuery->where(function ($q) {
+                    $q->whereNull('mime_type')
+                        ->orWhere('mime_type', 'not like', 'video/%');
+                });
+            }
+        }
+
         // Reference materials count for sidebar — no lifecycle filter (reference materials are unpublished working assets)
         $referenceMaterialsCount = 0;
         if (! $isTrashView) {
@@ -410,6 +426,36 @@ class AssetController extends Controller
                 ->where('brand_id', $brand->id)
                 ->where('type', AssetType::ASSET)
                 ->count();
+        }
+
+        // Approver banner (Assets index): tenant admin/owner or brand_manager only — same audience as UI callout
+        $tenantRoleLower = strtolower((string) ($user?->getRoleForTenant($tenant) ?? ''));
+        $isTenantAdminOrOwner = in_array($tenantRoleLower, ['admin', 'owner'], true);
+        $brandMembership = ($user && $brand) ? $user->activeBrandMembership($brand) : null;
+        $isBrandManager = $brandMembership && (($brandMembership['role'] ?? null) === 'brand_manager');
+        $canSeePendingReviewBanner = $user && ($isTenantAdminOrOwner || $isBrandManager);
+
+        // Approver banner (Assets index): count assets in scope of lifecycle=pending_publication (brand-wide, viewable categories)
+        $pendingPublicationReviewCount = 0;
+        if (
+            $canSeePendingReviewBanner
+            && ! $isTrashView
+            && ! $isStagedView
+            && ! $isReferenceMaterialsView
+            && $user->hasPermissionForTenant($tenant, 'asset.publish')
+            && $viewableCategoryIds !== []
+        ) {
+            $pendingPubQuery = Asset::query()
+                ->normalIntakeOnly()
+                ->excludeBuilderStaged()
+                ->where('tenant_id', $tenant->id)
+                ->where('brand_id', $brand->id)
+                ->where('type', AssetType::ASSET)
+                ->whereNotNull('metadata')
+                ->whereIn(DB::raw(Asset::categoryIdMetadataCastExpression()), array_map('intval', $viewableCategoryIds));
+
+            $this->lifecycleResolver->apply($pendingPubQuery, 'pending_publication', $user, $tenant, $brand);
+            $pendingPublicationReviewCount = (int) $pendingPubQuery->count();
         }
 
         // Phase L.5.1: Apply lifecycle filtering via LifecycleResolver
@@ -511,9 +557,9 @@ class AssetController extends Controller
         // Include special keys (tags, collection) so load_more and any GET with flat params apply all filters.
         if (empty($filters) || ! is_array($filters)) {
             $filterKeys = array_values(array_filter(array_column($schema['fields'] ?? [], 'key')));
-            $specialFilterKeys = ['tags', 'collection']; // Applied from asset_tags/asset_collections; may be missing from schema
+            $specialFilterKeys = ['tags', 'collection', 'video_scene', 'video_activity', 'video_setting']; // Applied from asset_tags/asset_collections / video JSON; may be missing from schema
             $filterKeys = array_values(array_unique(array_merge($filterKeys, $specialFilterKeys)));
-            $reserved = ['category', 'sort', 'sort_direction', 'lifecycle', 'uploaded_by', 'submitted_by_prostaff', 'prostaff_user_id', 'file_type', 'asset', 'edit_metadata', 'page', 'filters', 'q'];
+            $reserved = ['category', 'sort', 'sort_direction', 'lifecycle', 'uploaded_by', 'submitted_by_prostaff', 'prostaff_user_id', 'file_type', 'asset', 'edit_metadata', 'page', 'filters', 'q', 'content_type'];
             $filters = [];
             $multiValueKeys = ['tags', 'collection', 'dominant_hue_group'];
             foreach ($filterKeys as $key) {
@@ -758,8 +804,10 @@ class AssetController extends Controller
                 ->keyBy('id');
         }
 
+        $searchQueryTrimmed = is_string($searchQ) ? trim($searchQ) : '';
+
         try {
-            $mappedAssets = $assetModels->map(function ($asset) use ($starredFromTable, $incidentSeverityByAsset, $categoriesByIdForGrid) {
+            $mappedAssets = $assetModels->map(function ($asset) use ($starredFromTable, $incidentSeverityByAsset, $categoriesByIdForGrid, $searchQueryTrimmed) {
                 try {
                     // Derive file extension from original_filename, with mime_type fallback
                     $fileExtension = null;
@@ -992,6 +1040,7 @@ class AssetController extends Controller
                         'thumbnail_mode_urls' => ThumbnailModeDeliveryUrls::map($asset),
                         'thumbnail_modes_meta' => ThumbnailModeDeliveryUrls::modesMetaForApi($asset),
                         'thumbnail_modes_status' => $metadata['thumbnail_modes_status'] ?? null,
+                        'matched_moment' => $this->firstMatchedVideoMoment($metadata, $searchQueryTrimmed),
                     ];
                     if ($finalThumbnailUrl && str_contains($finalThumbnailUrl, 'X-Amz-Signature')) {
                         Log::info('ASSET API RESPONSE URL', [
@@ -1051,6 +1100,7 @@ class AssetController extends Controller
                         'thumbnail_mode_urls' => [],
                         'thumbnail_modes_meta' => [],
                         'thumbnail_modes_status' => null,
+                        'matched_moment' => null,
                     ];
                 }
             })
@@ -1164,6 +1214,30 @@ class AssetController extends Controller
             $keysWithValues = $this->metadataFilterService->getFieldKeysWithValuesInScope($baseQueryForFilterVisibility, $filterableSchema);
             $filterableSchema = $this->metadataFilterService->restrictFilterableSchemaToKeysWithValuesInScope($filterableSchema, $keysWithValues);
         }
+
+        $filterableSchema = array_merge($filterableSchema, [
+            [
+                'key' => 'video_scene',
+                'field_key' => 'video_scene',
+                'label' => 'Video scene',
+                'type' => 'text',
+                'is_filterable' => true,
+            ],
+            [
+                'key' => 'video_activity',
+                'field_key' => 'video_activity',
+                'label' => 'Video activity',
+                'type' => 'text',
+                'is_filterable' => true,
+            ],
+            [
+                'key' => 'video_setting',
+                'field_key' => 'video_setting',
+                'label' => 'Video setting',
+                'type' => 'text',
+                'is_filterable' => true,
+            ],
+        ]);
 
         // available_values is required by Phase H filter visibility rules
         // Do not remove without updating Phase H contract
@@ -1564,6 +1638,9 @@ class AssetController extends Controller
             'sort' => $sort,
             'sort_direction' => $sortDirection,
             'q' => $request->input('q', ''),
+            'content_type' => is_string($request->input('content_type')) && $request->input('content_type') !== ''
+                ? $request->input('content_type')
+                : 'all',
             'lifecycle' => $lifecycleParam, // Phase B2: e.g. 'deleted' for trash view
             'can_view_trash' => $canViewTrash,
             'trash_count' => $trashCount,
@@ -1573,6 +1650,7 @@ class AssetController extends Controller
             'uploaded_by_users' => $uploadedByUsersPayload,
             'prostaff_filter_options' => app(GetProstaffDamFilterOptions::class)->activeMemberOptionsForBrand($brand),
             'dam_prostaff_filter_config' => GetProstaffDamFilterOptions::damProstaffFilterConfig(),
+            'pending_publication_review_count' => $pendingPublicationReviewCount,
         ]);
     }
 
@@ -2201,6 +2279,37 @@ class AssetController extends Controller
     }
 
     /**
+     * Processing guard status for drawer UI (cooldowns, last run).
+     *
+     * GET /app/assets/{asset}/processing-status
+     */
+    public function processingGuardStatus(Asset $asset): JsonResponse
+    {
+        $tenant = app('tenant');
+        $brand = app('brand');
+
+        if ($asset->tenant_id !== $tenant->id || $asset->brand_id !== $brand->id) {
+            return response()->json(['message' => 'Asset not found'], 404);
+        }
+
+        $this->authorize('view', $asset);
+
+        $guard = app(AssetProcessingGuardService::class);
+        $types = [
+            AssetProcessingGuardService::ACTION_FULL_PIPELINE,
+            AssetProcessingGuardService::ACTION_THUMBNAILS,
+            AssetProcessingGuardService::ACTION_AI_METADATA,
+        ];
+        $actions = $guard->statusForAsset($asset, $types);
+
+        return response()->json([
+            'thumbnail_status' => $asset->thumbnail_status?->value ?? (string) $asset->thumbnail_status,
+            'analysis_status' => $asset->analysis_status,
+            'actions' => $actions,
+        ]);
+    }
+
+    /**
      * Regenerate AI metadata (vision pipeline) for an asset — manual rerun.
      *
      * POST /app/assets/{asset}/ai-metadata/regenerate
@@ -2249,6 +2358,8 @@ class AssetController extends Controller
             ], 403);
         }
 
+        app(AssetProcessingGuardService::class)->assertCanDispatch($user, $asset, AssetProcessingGuardService::ACTION_AI_METADATA);
+
         try {
             // Chain: vision creates tag candidates; auto-apply promotes to asset_tags when tenant enables it.
             Bus::chain([
@@ -2257,6 +2368,8 @@ class AssetController extends Controller
             ])
                 ->onQueue(config('queue.images_queue', 'images'))
                 ->dispatch();
+
+            app(AssetProcessingGuardService::class)->markDispatched($user, $asset, AssetProcessingGuardService::ACTION_AI_METADATA);
 
             return response()->json([
                 'success' => true,
@@ -2903,6 +3016,56 @@ class AssetController extends Controller
         $url = $asset->deliveryUrl(AssetVariant::THUMB_SMALL, DeliveryContext::AUTHENTICATED);
 
         return $url !== '' ? $url : null;
+    }
+
+    /**
+     * When the grid search query matches a video moment label, surface it so the client can seek on open.
+     *
+     * @param  array<string, mixed>  $metadata
+     * @return array{timestamp: ?string, seconds: ?float, label: string, frame_index: ?int}|null
+     */
+    private function firstMatchedVideoMoment(array $metadata, string $query): ?array
+    {
+        $query = trim($query);
+        if ($query === '') {
+            return null;
+        }
+
+        $moments = $metadata['ai_video_insights']['moments'] ?? null;
+        if (! is_array($moments)) {
+            return null;
+        }
+
+        $interval = max(1, (int) ($metadata['ai_video_frame_interval_seconds'] ?? config('assets.video_ai.frame_interval_seconds', 3)));
+
+        foreach ($moments as $m) {
+            if (! is_array($m)) {
+                continue;
+            }
+            $label = $m['label'] ?? '';
+            if (! is_string($label) || $label === '') {
+                continue;
+            }
+            if (! Str::contains($label, $query, true)) {
+                continue;
+            }
+
+            $seconds = null;
+            if (isset($m['seconds']) && is_numeric($m['seconds'])) {
+                $seconds = (float) $m['seconds'];
+            } elseif (isset($m['frame_index']) && is_numeric($m['frame_index'])) {
+                $seconds = max(0.0, ((int) $m['frame_index'] - 1) * $interval);
+            }
+
+            return [
+                'timestamp' => isset($m['timestamp']) && is_string($m['timestamp']) ? $m['timestamp'] : null,
+                'seconds' => $seconds,
+                'label' => $label,
+                'frame_index' => isset($m['frame_index']) ? (int) $m['frame_index'] : null,
+            ];
+        }
+
+        return null;
     }
 
     /**

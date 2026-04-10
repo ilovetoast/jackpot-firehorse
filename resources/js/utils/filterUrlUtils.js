@@ -232,6 +232,7 @@ export function clearToolbarFilterParams(searchString, { filterKeys = [], collec
     'lifecycle',
     'uploaded_by',
     'file_type',
+    'content_type',
     'compliance_filter',
     'filters',
     'asset',
@@ -270,6 +271,8 @@ export function toolbarQueryHasClearableFilters(searchString, filterKeys = [], c
   if (u.get('uploaded_by')) return true
   const ft = u.get('file_type')
   if (ft && ft !== 'all') return true
+  const contentType = u.get('content_type')
+  if (contentType && contentType !== 'all') return true
   if (u.get('compliance_filter')) return true
   if (collectionsView) {
     if (u.get('category_id')) return true

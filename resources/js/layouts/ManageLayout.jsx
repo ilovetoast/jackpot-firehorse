@@ -2,13 +2,17 @@ import { Link, usePage } from '@inertiajs/react'
 import AppHead from '../Components/AppHead'
 import AppNav from '../Components/AppNav'
 import AppFooter from '../Components/AppFooter'
-import { Squares2X2Icon, TagIcon, ListBulletIcon } from '@heroicons/react/24/outline'
+import { Squares2X2Icon, TagIcon, ListBulletIcon, RectangleStackIcon } from '@heroicons/react/24/outline'
 
 const MANAGE_CATEGORIES_HREF =
     typeof route === 'function' ? route('manage.categories') : '/app/manage/categories'
 
+const MANAGE_FIELDS_HREF =
+    typeof route === 'function' ? route('manage.fields') : '/app/manage/fields'
+
 const SIDEBAR_ITEMS = [
     { id: 'categories', label: 'Categories', href: MANAGE_CATEGORIES_HREF, icon: Squares2X2Icon },
+    { id: 'fields', label: 'Fields', href: MANAGE_FIELDS_HREF, icon: RectangleStackIcon },
     { id: 'tags', label: 'Tags', href: '/app/manage/tags', icon: TagIcon },
     { id: 'values', label: 'Values', href: '/app/manage/values', icon: ListBulletIcon },
 ]
@@ -26,9 +30,9 @@ export default function ManageLayout({ children, title = 'Manage', activeSection
                     <div className="mb-6">
                         <h1 className="text-3xl font-bold text-gray-900">Manage</h1>
                         <p className="mt-2 text-sm text-gray-600">
-                            Configure categories, tags, and controlled values for your brand library. On Categories,
-                            folder order and field switches save as you change them; dialogs that edit definitions have
-                            their own Save. Tags and Values use confirm for removals.
+                            Configure categories, fields, tags, and controlled values for your brand library. On
+                            Categories, folder order and field switches save as you change them; dialogs that edit
+                            definitions have their own Save. Tags and Values use confirm for removals.
                         </p>
                     </div>
 

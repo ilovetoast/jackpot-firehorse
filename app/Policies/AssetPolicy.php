@@ -456,6 +456,25 @@ class AssetPolicy
     }
 
     /**
+     * General asset mutation (metadata, video AI queue, etc.) — aligns with metadata edit permissions.
+     */
+    public function update(User $user, Asset $asset): bool
+    {
+        if (! $this->view($user, $asset)) {
+            return false;
+        }
+
+        $tenant = $this->tenantForAsset($asset);
+        if (! $tenant) {
+            return false;
+        }
+
+        $brand = $this->brandForAsset($asset);
+
+        return $user->canForContext('metadata.edit_post_upload', $tenant, $brand);
+    }
+
+    /**
      * Determine if the user can restore an archived asset.
      *
      * Phase L.3 — Archive Restore: Editor+ (asset.restore permission).

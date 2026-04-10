@@ -43,6 +43,58 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Video insights (multi-frame vision + optional Whisper transcript)
+    |--------------------------------------------------------------------------
+    |
+    | One composited grid image is sent to the default vision model via
+    | AIProviderInterface::analyzeImage (same stack as asset metadata vision).
+    |
+    */
+    'video_insights' => [
+        'model' => env('AI_VIDEO_INSIGHTS_MODEL', 'gpt-4o-mini'),
+        'max_tokens' => (int) env('AI_VIDEO_INSIGHTS_MAX_TOKENS', 1400),
+        /** Whisper model for /v1/audio/transcriptions */
+        'whisper_model' => env('AI_VIDEO_INSIGHTS_WHISPER_MODEL', 'whisper-1'),
+        /**
+         * USD per second of audio (approximate; aligns with OpenAI Whisper list pricing).
+         * Used when the API does not return usage; tune via env if pricing changes.
+         */
+        'whisper_cost_per_second_usd' => (float) env('AI_VIDEO_INSIGHTS_WHISPER_COST_PER_SEC', 0.0001),
+        'prompt' => <<<'PROMPT'
+You are analyzing a video for a digital asset management system.
+
+You are given:
+- A single composite image containing sequential frames sampled from the video (read left-to-right, top-to-bottom).
+- An optional transcript of spoken audio (may be empty).
+
+Return JSON only with this exact shape:
+{
+  "tags": ["tag1", "tag2"],
+  "summary": "2-4 sentences for marketers",
+  "suggested_category": "short label or empty string if unclear",
+  "metadata": {
+    "scene": "",
+    "activity": "",
+    "setting": ""
+  },
+  "moments": [
+    { "frame_index": 1, "label": "short visual description for that frame" }
+  ]
+}
+
+Rules:
+- tags: lowercase short phrases, marketing-relevant and specific; no generic filler.
+- summary: focus on what a brand team can use (subject, mood, use-case).
+- suggested_category: only if clearly implied; else "".
+- metadata fields: concise factual phrases from visual + transcript context.
+- moments: 0–8 entries; frame_index must refer to FRAME_TIMELINE below (1 = first tile). Labels describe what is visible at that moment (for "jump to clip" UX).
+
+JSON only. No markdown.
+PROMPT,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | OpenAI Provider
     |--------------------------------------------------------------------------
     |

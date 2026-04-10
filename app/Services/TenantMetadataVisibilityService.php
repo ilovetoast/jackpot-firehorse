@@ -340,6 +340,48 @@ class TenantMetadataVisibilityService
     }
 
     /**
+     * Category IDs where each field is suppressed (hidden), for many fields at once.
+     *
+     * Aligns with {@see isVisibleForCategory}: includes brand-scoped rows for the given brand and
+     * tenant-level rows (brand_id null) for the same category.
+     *
+     * @param  array<int>  $fieldIds
+     * @return array<int, array<int>>
+     */
+    public function getSuppressedCategoryIdsByFieldIds(Tenant $tenant, array $fieldIds, int $brandId): array
+    {
+        $fieldIds = array_values(array_unique(array_filter($fieldIds)));
+        if ($fieldIds === []) {
+            return [];
+        }
+
+        $rows = DB::table('metadata_field_visibility')
+            ->whereIn('metadata_field_id', $fieldIds)
+            ->where('tenant_id', $tenant->id)
+            ->whereNotNull('category_id')
+            ->where('is_hidden', true)
+            ->where(function ($q) use ($brandId) {
+                $q->where('brand_id', $brandId)->orWhereNull('brand_id');
+            })
+            ->get(['metadata_field_id', 'category_id']);
+
+        $map = array_fill_keys($fieldIds, []);
+        foreach ($rows as $row) {
+            $fid = (int) $row->metadata_field_id;
+            if (! array_key_exists($fid, $map)) {
+                $map[$fid] = [];
+            }
+            $map[$fid][] = (int) $row->category_id;
+        }
+
+        foreach ($map as $fid => $ids) {
+            $map[$fid] = array_values(array_unique($ids));
+        }
+
+        return $map;
+    }
+
+    /**
      * Check if a field is visible for a category at tenant level.
      */
     public function isVisibleForCategory(Tenant $tenant, int $fieldId, ?Category $category): bool

@@ -22,11 +22,11 @@ import {
     ArrowUturnLeftIcon,
     PencilSquareIcon,
     ExclamationTriangleIcon,
-    PhotoIcon,
     SparklesIcon,
 } from '@heroicons/react/24/outline'
 import axios from 'axios'
 import { usePermission } from '../hooks/usePermission'
+import ProcessingActionCard from './ProcessingActionCard'
 
 const EASING_TOOLBAR = 'cubic-bezier(0.16, 1, 0.3, 1)'
 
@@ -34,7 +34,23 @@ const RENAME_ASSETS_ACTION = 'RENAME_ASSETS'
 
 const SITE_RERUN_THUMBNAILS = 'SITE_RERUN_THUMBNAILS'
 const SITE_RERUN_AI_METADATA_TAGGING = 'SITE_RERUN_AI_METADATA_TAGGING'
-const SITE_PIPELINE_ACTIONS = new Set([SITE_RERUN_THUMBNAILS, SITE_RERUN_AI_METADATA_TAGGING])
+const SITE_GENERATE_VIDEO_PREVIEWS = 'SITE_GENERATE_VIDEO_PREVIEWS'
+const SITE_REPROCESS_SYSTEM_METADATA = 'SITE_REPROCESS_SYSTEM_METADATA'
+const SITE_REPROCESS_FULL_PIPELINE = 'SITE_REPROCESS_FULL_PIPELINE'
+const SITE_PIPELINE_ACTIONS = new Set([
+    SITE_RERUN_THUMBNAILS,
+    SITE_RERUN_AI_METADATA_TAGGING,
+    SITE_GENERATE_VIDEO_PREVIEWS,
+    SITE_REPROCESS_SYSTEM_METADATA,
+    SITE_REPROCESS_FULL_PIPELINE,
+])
+/** Tenant video AI insights (same confirm / queue UX as site pipeline jobs). */
+const GENERATE_VIDEO_INSIGHTS = 'GENERATE_VIDEO_INSIGHTS'
+const BACKGROUND_QUEUE_BULK_ACTIONS = new Set([...SITE_PIPELINE_ACTIONS, GENERATE_VIDEO_INSIGHTS])
+/** Full pipeline only: explicit acknowledgment (resource intensive). */
+const SITE_FULL_PIPELINE_ACTION = SITE_REPROCESS_FULL_PIPELINE
+/** Align with config/asset_processing.php max_bulk_pipeline_assets */
+const MAX_BULK_PIPELINE_ASSETS = 25
 const SITE_PIPELINE_ROLES = new Set(['site_owner', 'site_admin', 'site_engineering'])
 
 /** Match upload batch naming slug (see Upload/BatchNamingBar.jsx). */
@@ -264,17 +280,35 @@ function getActionLabel(actionId) {
         const a = group.actions.find((x) => x.id === actionId)
         if (a) return a.label
     }
-    if (actionId === SITE_RERUN_THUMBNAILS) return 'Rerun thumbnails'
-    if (actionId === SITE_RERUN_AI_METADATA_TAGGING) return 'Rerun AI metadata & tagging'
+    if (actionId === SITE_RERUN_THUMBNAILS) return 'Refresh previews'
+    if (actionId === SITE_RERUN_AI_METADATA_TAGGING) return 'Improve AI tags'
+    if (actionId === SITE_GENERATE_VIDEO_PREVIEWS) return 'Generate video previews'
+    if (actionId === SITE_REPROCESS_SYSTEM_METADATA) return 'Re-run metadata extraction'
+    if (actionId === SITE_REPROCESS_FULL_PIPELINE) return 'Reprocess entire asset'
+    if (actionId === GENERATE_VIDEO_INSIGHTS) return 'Analyze video content'
     return actionId
 }
 
 function getConfirmSummaryText(actionId, count) {
+    const batchNote =
+        count > 10 ? ` Jobs are dispatched in batches of up to 10 with a short delay between batches.` : ''
     if (actionId === SITE_RERUN_THUMBNAILS) {
-        return `This will queue thumbnail regeneration for ${count} selected asset${count !== 1 ? 's' : ''} (background workers).`
+        return `This will refresh thumbnails and preview images for ${count} selected asset${count !== 1 ? 's' : ''}.${batchNote}`
     }
     if (actionId === SITE_RERUN_AI_METADATA_TAGGING) {
-        return `This will queue AI vision metadata and tag auto-apply for ${count} selected asset${count !== 1 ? 's' : ''}. Assets without completed thumbnails will be skipped. Uses tenant AI tagging quota.`
+        return `This will improve AI-suggested tags and metadata for ${count} selected asset${count !== 1 ? 's' : ''}. Assets without completed thumbnails will be skipped. Uses tenant AI tagging quota.${batchNote}`
+    }
+    if (actionId === SITE_GENERATE_VIDEO_PREVIEWS) {
+        return `This will queue hover video preview generation for video assets in your selection (${count} selected). Non-video assets and items without a poster/thumbnail will be skipped.${batchNote}`
+    }
+    if (actionId === SITE_REPROCESS_SYSTEM_METADATA) {
+        return `This will re-run technical metadata extraction for ${count} selected asset${count !== 1 ? 's' : ''}. Requires admin or the right permission on this company.${batchNote}`
+    }
+    if (actionId === SITE_REPROCESS_FULL_PIPELINE) {
+        return `This will reprocess the entire asset (AI, previews, metadata) for ${count} selected asset${count !== 1 ? 's' : ''}. Resource intensive.${batchNote}`
+    }
+    if (actionId === GENERATE_VIDEO_INSIGHTS) {
+        return `This will queue video AI analysis (summary, tags, transcript cues) for video files in your selection (${count} selected). Non-video assets will be skipped. Uses tenant video AI job and minute limits.${batchNote}`
     }
     const verb = actionId === 'PUBLISH' ? 'publish' : actionId === 'UNPUBLISH' ? 'unpublish' : actionId === 'ARCHIVE' ? 'archive' : actionId === 'RESTORE_ARCHIVE' ? 'restore from archive' : actionId === 'APPROVE' ? 'mark as approved' : actionId === 'MARK_PENDING' ? 'mark as pending' : actionId === 'REJECT' ? 'reject' : actionId === 'SOFT_DELETE' ? 'move to trash' : actionId === 'RESTORE_TRASH' ? 'restore from trash' : 'update'
     return `This will ${verb} ${count} selected asset${count !== 1 ? 's' : ''}.`
@@ -303,8 +337,8 @@ export default function BulkActionsModal({
     const { can } = usePermission()
     const canBulkRename = can('metadata.edit_post_upload')
     const canBulkRemoveTags = can('assets.tags.delete')
-    const brandPrimary = auth?.activeBrand?.primary_color || null
-    const canSitePipeline = useMemo(() => {
+    const canQueueVideoInsights = can('metadata.edit_post_upload')
+    const canSiteAdminPipeline = useMemo(() => {
         const roles = auth?.user?.site_roles
         if (!Array.isArray(roles)) return false
         return roles.some((r) => SITE_PIPELINE_ROLES.has(r))
@@ -312,6 +346,7 @@ export default function BulkActionsModal({
 
     const [step, setStep] = useState('select')
     const [selectedAction, setSelectedAction] = useState(null)
+    const [fullPipelineResourceAck, setFullPipelineResourceAck] = useState(false)
     const [rejectionReason, setRejectionReason] = useState('')
     const [assignAssetType, setAssignAssetType] = useState('asset')
     const [assignCategoryId, setAssignCategoryId] = useState('')
@@ -325,6 +360,7 @@ export default function BulkActionsModal({
 
     const bulkActionUrl = typeof route !== 'undefined' ? route('assets.bulk-action') : '/app/assets/bulk-action'
     const n = assetIds.length
+    const pipelineSelectionOverLimit = n > MAX_BULK_PIPELINE_ASSETS
 
     const validIds = useMemo(
         () => computeValidActionIds(selectionSummary, { isTrashMode, canForceDelete, selectedCount: n }),
@@ -394,11 +430,7 @@ export default function BulkActionsModal({
     }, [step])
 
     useEffect(() => {
-        if (
-            step === 'configure' &&
-            selectedAction &&
-            (LIFECYCLE_ACTIONS.has(selectedAction) || SITE_PIPELINE_ACTIONS.has(selectedAction))
-        ) {
+        if (step === 'configure' && selectedAction && (LIFECYCLE_ACTIONS.has(selectedAction) || BACKGROUND_QUEUE_BULK_ACTIONS.has(selectedAction))) {
             setConfirmPanelEntered(false)
             const id = setTimeout(() => setConfirmPanelEntered(true), 20)
             return () => clearTimeout(id)
@@ -420,6 +452,7 @@ export default function BulkActionsModal({
             return
         }
         setSelectedAction(actionId)
+        setFullPipelineResourceAck(false)
         setStep('configure')
         setError(null)
         if (actionId === ASSIGN_CATEGORY_ACTION) {
@@ -435,6 +468,7 @@ export default function BulkActionsModal({
     const handleBack = useCallback(() => {
         setStep('select')
         setSelectedAction(null)
+        setFullPipelineResourceAck(false)
         setRejectionReason('')
         setBulkRenameBase('')
         setRenamePreviewExpanded(false)
@@ -444,6 +478,7 @@ export default function BulkActionsModal({
     const handleClose = useCallback(() => {
         setStep('select')
         setSelectedAction(null)
+        setFullPipelineResourceAck(false)
         setRejectionReason('')
         setAssignCategoryId('')
         setAssignAssetType('asset')
@@ -490,7 +525,11 @@ export default function BulkActionsModal({
                 payload,
             })
             const { processed = 0, skipped = 0, errors: errs = [] } = data
-            const mainMsg = `${processed} asset${processed !== 1 ? 's' : ''} updated${skipped > 0 ? `. ${skipped} skipped.` : '.'}`
+            const mainMsg = BACKGROUND_QUEUE_BULK_ACTIONS.has(selectedAction)
+                ? selectedAction === GENERATE_VIDEO_INSIGHTS
+                    ? `Queued ${processed} video${processed !== 1 ? 's' : ''} for analysis${skipped > 0 ? `. ${skipped} skipped.` : ''}`
+                    : `Processing started for ${processed} asset${processed !== 1 ? 's' : ''}.${skipped > 0 ? ` ${skipped} skipped.` : ''}`
+                : `${processed} asset${processed !== 1 ? 's' : ''} updated${skipped > 0 ? `. ${skipped} skipped.` : '.'}`
             if (typeof window !== 'undefined' && window.toast) {
                 window.toast(mainMsg, processed > 0 ? 'success' : 'info')
             } else if (typeof window !== 'undefined' && window.flash) {
@@ -516,6 +555,8 @@ export default function BulkActionsModal({
     const isRename = selectedAction === RENAME_ASSETS_ACTION
     const isLifecycle = selectedAction && LIFECYCLE_ACTIONS.has(selectedAction)
     const isSitePipeline = selectedAction && SITE_PIPELINE_ACTIONS.has(selectedAction)
+    const isBackgroundQueueBulk = selectedAction && BACKGROUND_QUEUE_BULK_ACTIONS.has(selectedAction)
+    const isFullPipelineBulk = selectedAction === SITE_FULL_PIPELINE_ACTION
 
     const summaryEligible = selectedAssetSummary
         ? (selectedAction === 'PUBLISH' ? selectedAssetSummary.filter((a) => !a.is_published).length : selectedAction === 'UNPUBLISH' ? selectedAssetSummary.filter((a) => a.is_published).length : null)
@@ -640,56 +681,104 @@ export default function BulkActionsModal({
                                 </div>
                             )}
 
-                            {canSitePipeline && (
-                                <div
-                                    className="mt-8 rounded-2xl border-2 border-indigo-200/90 p-5 shadow-sm"
-                                    style={
-                                        brandPrimary
-                                            ? {
-                                                  borderColor: brandPrimary,
-                                                  background: `linear-gradient(135deg, ${brandPrimary}14 0%, ${brandPrimary}08 50%, rgb(238 242 255) 100%)`,
-                                              }
-                                            : { background: 'linear-gradient(135deg, rgb(238 242 255) 0%, rgb(245 243 255) 100%)' }
-                                    }
-                                >
-                                    <div className="flex items-start gap-2 mb-3">
+                            {canQueueVideoInsights && (
+                                <div className="mt-6 rounded-2xl border border-violet-200 bg-violet-50/40 p-5 shadow-sm">
+                                    <div className="flex flex-wrap items-center gap-2 mb-2">
+                                        <span className="inline-flex items-center rounded-md bg-violet-600/90 px-2 py-0.5 text-[10px] font-bold tracking-wide text-white">
+                                            Video AI
+                                        </span>
+                                        <h3 className="text-sm font-semibold text-gray-700">Searchable video insights</h3>
+                                    </div>
+                                    <p className="text-xs text-gray-500 mb-4">
+                                        Queue analysis for video files (summary, tags, transcript cues). Non-videos are skipped.
+                                        Respects tenant video AI job and minute limits. Jobs run in the background.
+                                    </p>
+                                    {pipelineSelectionOverLimit && (
+                                        <div className="mb-4 flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                                            <ExclamationTriangleIcon className="h-4 w-4 shrink-0" />
+                                            <span>
+                                                Select at most {MAX_BULK_PIPELINE_ASSETS} assets per processing bulk action.
+                                            </span>
+                                        </div>
+                                    )}
+                                    <button
+                                        type="button"
+                                        onClick={() => handleSelectAction(GENERATE_VIDEO_INSIGHTS)}
+                                        disabled={pipelineSelectionOverLimit}
+                                        className="flex w-full items-center gap-3 p-3.5 text-left rounded-xl bg-white border border-violet-200 shadow-sm hover:shadow-md hover:-translate-y-px transition-all disabled:cursor-not-allowed disabled:opacity-50"
+                                    >
+                                        <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-violet-100 shrink-0">
+                                            <SparklesIcon className="w-5 h-5 text-violet-700" />
+                                        </span>
+                                        <div className="min-w-0">
+                                            <span className="block text-sm font-medium text-gray-900">Analyze video content</span>
+                                            <span className="block text-xs text-gray-600 mt-0.5">
+                                                Make videos discoverable in search (tags, scenes, summary)
+                                            </span>
+                                        </div>
+                                    </button>
+                                </div>
+                            )}
+
+                            {canSiteAdminPipeline && (
+                                <div className="mt-6 rounded-2xl border border-gray-200 bg-gray-50/50 p-5 shadow-sm">
+                                    <div className="flex flex-wrap items-center gap-2 mb-2">
                                         <span className="inline-flex items-center rounded-md bg-indigo-600/90 px-2 py-0.5 text-[10px] font-bold tracking-wide text-white">
                                             Admin
                                         </span>
-                                        <div className="min-w-0 flex-1">
-                                            <h3 className="text-sm font-semibold text-indigo-950">Pipeline tools</h3>
-                                            <p className="text-xs text-indigo-900/70 mt-0.5 leading-snug">
-                                                Site admin or engineering only. Work runs in the queue (Horizon) — not instant. Max 100 assets per request.
-                                            </p>
-                                        </div>
+                                        <h3 className="text-sm font-semibold text-gray-700">Processing &amp; Automation</h3>
                                     </div>
-                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                        <button
-                                            type="button"
-                                            onClick={() => handleSelectAction(SITE_RERUN_THUMBNAILS)}
-                                            className="flex w-full items-center gap-3 p-3.5 text-left rounded-xl bg-white/80 border border-indigo-100 shadow-sm hover:shadow-md hover:-translate-y-px transition-all"
-                                        >
-                                            <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-indigo-100 shrink-0">
-                                                <PhotoIcon className="w-5 h-5 text-indigo-700" />
+                                    <p className="text-xs text-gray-500 mb-2">
+                                        Site admin or engineering only. Matches per-asset drawer tools. Max {MAX_BULK_PIPELINE_ASSETS} assets; the server dispatches in chunks of 10 with a short delay between chunks.
+                                    </p>
+                                    <div className="text-xs text-yellow-700 mb-4">
+                                        These actions run in the background and may take several minutes.
+                                    </div>
+                                    {pipelineSelectionOverLimit && (
+                                        <div className="mb-4 flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                                            <ExclamationTriangleIcon className="h-4 w-4 shrink-0" />
+                                            <span>
+                                                Select at most {MAX_BULK_PIPELINE_ASSETS} assets to use processing actions.
                                             </span>
-                                            <div className="min-w-0">
-                                                <span className="block text-sm font-medium text-gray-900">Rerun thumbnails</span>
-                                                <span className="block text-xs text-gray-600 mt-0.5">Regenerate preview images (all styles)</span>
-                                            </div>
-                                        </button>
-                                        <button
-                                            type="button"
+                                        </div>
+                                    )}
+                                    <div className="grid grid-cols-1 gap-3">
+                                        <ProcessingActionCard
+                                            icon="sparkles"
+                                            title="Improve AI tags"
+                                            description="Refresh AI suggestions and tags"
                                             onClick={() => handleSelectAction(SITE_RERUN_AI_METADATA_TAGGING)}
-                                            className="flex w-full items-center gap-3 p-3.5 text-left rounded-xl bg-white/80 border border-indigo-100 shadow-sm hover:shadow-md hover:-translate-y-px transition-all"
-                                        >
-                                            <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-violet-100 shrink-0">
-                                                <SparklesIcon className="w-5 h-5 text-violet-700" />
-                                            </span>
-                                            <div className="min-w-0">
-                                                <span className="block text-sm font-medium text-gray-900">Rerun AI metadata &amp; tagging</span>
-                                                <span className="block text-xs text-gray-600 mt-0.5">Vision + tag auto-apply; needs completed thumbnails</span>
-                                            </div>
-                                        </button>
+                                            disabled={pipelineSelectionOverLimit}
+                                        />
+                                        <ProcessingActionCard
+                                            icon="photo"
+                                            title="Refresh previews"
+                                            description="Rebuild thumbnails and preview images"
+                                            onClick={() => handleSelectAction(SITE_RERUN_THUMBNAILS)}
+                                            disabled={pipelineSelectionOverLimit}
+                                        />
+                                        <ProcessingActionCard
+                                            icon="video"
+                                            title="Generate video previews"
+                                            description="Create preview clips for video assets"
+                                            onClick={() => handleSelectAction(SITE_GENERATE_VIDEO_PREVIEWS)}
+                                            disabled={pipelineSelectionOverLimit}
+                                        />
+                                        <ProcessingActionCard
+                                            icon="refresh"
+                                            title="Re-run metadata extraction"
+                                            description="Technical file metadata only"
+                                            onClick={() => handleSelectAction(SITE_REPROCESS_SYSTEM_METADATA)}
+                                            disabled={pipelineSelectionOverLimit}
+                                        />
+                                        <ProcessingActionCard
+                                            icon="refreshDanger"
+                                            title="Reprocess entire asset"
+                                            description="Full pipeline — resource intensive"
+                                            variant="danger"
+                                            onClick={() => handleSelectAction(SITE_REPROCESS_FULL_PIPELINE)}
+                                            disabled={pipelineSelectionOverLimit}
+                                        />
                                     </div>
                                 </div>
                             )}
@@ -836,10 +925,10 @@ export default function BulkActionsModal({
                                 </div>
                             )}
 
-                            {(isLifecycle || isSitePipeline) && (
+                            {(isLifecycle || isBackgroundQueueBulk) && (
                                 <div
                                     className={`rounded-xl border p-4 mb-6 shadow-sm transition-all duration-[140ms] ease-out ${
-                                        isSitePipeline
+                                        isBackgroundQueueBulk
                                             ? 'border-indigo-200 bg-indigo-50/60'
                                             : 'border-gray-200 bg-gray-50/50'
                                     }`}
@@ -849,7 +938,11 @@ export default function BulkActionsModal({
                                     }}
                                 >
                                     <h3 className="text-sm font-semibold text-gray-900 mb-2">
-                                        {isSitePipeline ? 'Confirm site pipeline action' : 'Confirm Bulk Action'}
+                                        {isSitePipeline
+                                            ? 'Confirm site pipeline action'
+                                            : selectedAction === GENERATE_VIDEO_INSIGHTS
+                                              ? 'Confirm video analysis'
+                                              : 'Confirm Bulk Action'}
                                     </h3>
                                     <p className="text-sm text-gray-700 mb-3">
                                         {getConfirmSummaryText(selectedAction, n)}
@@ -857,7 +950,26 @@ export default function BulkActionsModal({
                                     <p className="text-xs text-gray-500">
                                         {summaryLine}
                                     </p>
+                                    {isBackgroundQueueBulk && (
+                                        <p className="text-xs text-yellow-700 mt-3">
+                                            These actions run in the background and may take several minutes.
+                                        </p>
+                                    )}
                                 </div>
+                            )}
+
+                            {isFullPipelineBulk && (
+                                <label className="mb-4 flex cursor-pointer items-start gap-3 rounded-xl border border-amber-200 bg-amber-50/60 p-4 shadow-sm">
+                                    <input
+                                        type="checkbox"
+                                        className="mt-0.5 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                        checked={fullPipelineResourceAck}
+                                        onChange={(e) => setFullPipelineResourceAck(e.target.checked)}
+                                    />
+                                    <span className="text-sm text-gray-800">
+                                        I understand this is resource intensive.
+                                    </span>
+                                </label>
                             )}
 
                             {error && (
@@ -881,13 +993,19 @@ export default function BulkActionsModal({
                                         submitting ||
                                         (isReject && !rejectionReason.trim()) ||
                                         (isAssignCategory && !assignCategoryId) ||
-                                        (isRename && (!bulkRenameBase.trim() || n < 2))
+                                        (isRename && (!bulkRenameBase.trim() || n < 2)) ||
+                                        (isBackgroundQueueBulk && pipelineSelectionOverLimit) ||
+                                        (isFullPipelineBulk && !fullPipelineResourceAck)
                                     }
-                                    className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-xl hover:bg-indigo-700 disabled:opacity-50 disabled:pointer-events-none shadow-sm transition-colors"
+                                    className={`px-4 py-2 text-sm font-medium rounded-xl disabled:opacity-50 disabled:pointer-events-none shadow-sm transition-colors ${
+                                        isFullPipelineBulk
+                                            ? 'text-white bg-red-600 hover:bg-red-700'
+                                            : 'text-white bg-indigo-600 hover:bg-indigo-700'
+                                    }`}
                                 >
                                     {submitting
                                         ? `Processing ${n} assets...`
-                                        : isSitePipeline
+                                        : isBackgroundQueueBulk
                                         ? 'Queue jobs'
                                         : isLifecycle
                                         ? 'Confirm Action'

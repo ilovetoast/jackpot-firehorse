@@ -26,6 +26,16 @@ import {
     isExecutionEnhancedGridMode,
 } from '../utils/assetCardEnhancedExecutionChrome'
 
+function searchTokensForHighlight(q) {
+    if (!q || typeof q !== 'string') return []
+    return q
+        .toLowerCase()
+        .trim()
+        .split(/\s+/)
+        .map((t) => t.replace(/^"|"$/g, ''))
+        .filter((t) => t.length >= 2)
+}
+
 export default function AssetCard({
     asset,
     onClick = null,
@@ -50,6 +60,7 @@ export default function AssetCard({
     masonryMaxHeightPx = 560,
     /** Deliverables grid: standard | enhanced | presentation — null disables mode-aware thumbnails */
     executionThumbnailViewMode = null,
+    gridSearchQuery = '',
 }) {
     const { auth } = usePage().props
     /** Brand Guidelines Google Fonts (no DAM file) — grid preview only, no drawer */
@@ -148,6 +159,14 @@ export default function AssetCard({
     const videoExtensions = ['mp4', 'mov', 'avi', 'mkv', 'webm', 'm4v']
     const isVideo = Boolean(asset?.mime_type?.startsWith('video/') || videoExtensions.includes(extLower))
 
+    const highlightTokens = useMemo(() => searchTokensForHighlight(gridSearchQuery), [gridSearchQuery])
+    const videoSummary =
+        typeof asset?.metadata?.ai_video_insights?.summary === 'string'
+            ? asset.metadata.ai_video_insights.summary
+            : ''
+    const videoTags = Array.isArray(asset?.metadata?.ai_video_insights?.tags) ? asset.metadata.ai_video_insights.tags : []
+    const aiVideoStatus = asset?.metadata?.ai_video_status
+
     /** Raster thumbnails (PDF, PSD, …) are not “image-like” for card chrome but still need execution grid modes. */
     const supportsExecutionGridThumbnailMode =
         supportsThumbnail(asset.mime_type, extLower) && !isVideo
@@ -202,13 +221,27 @@ export default function AssetCard({
         thumbnailVersion,
     ])
     
-    // Phase 3.1E: Processing = thumbnail PENDING or analysis not complete (e.g. ZIP "analysis still running")
-    // Orange dot shows for both thumbnail processing and analysis in progress
-    const analysisStatus = asset?.analysis_status ?? ''
-    const analysisComplete = analysisStatus === 'complete'
+    // Phase 3.1E: Processing badge only when thumbnail or analysis pipelines are actively in-flight.
+    // Do not use getThumbnailState PENDING (preview URL without final still reports PENDING — not "busy" for the badge).
+    // Do not treat every non-complete analysis_status as busy (e.g. promotion_failed is terminal).
+    const thumbStatusRaw = String(
+        asset?.thumbnail_status?.value ?? asset?.thumbnail_status ?? '',
+    ).toLowerCase()
+    const thumbnailPipelineActive =
+        thumbStatusRaw === 'pending' || thumbStatusRaw === 'processing'
+
+    const analysisStatusNorm = String(asset?.analysis_status ?? '').toLowerCase()
+    const analysisPipelineActive = [
+        'uploading',
+        'generating_thumbnails',
+        'extracting_metadata',
+        'scoring',
+        'generating_embedding',
+    ].includes(analysisStatusNorm)
+
     const isProcessing =
         !isVirtualGoogleFont &&
-        (thumbnailState.state === 'PENDING' || (analysisStatus && !analysisComplete))
+        (thumbnailPipelineActive || analysisPipelineActive)
 
     // Phase 3.1E: Detect meaningful state transitions for thumbnail animation
     // Track previous state to detect transitions from non-AVAILABLE → AVAILABLE
@@ -557,10 +590,23 @@ export default function AssetCard({
                     }
                 }}
             >
-                {/* Processing: orange dot indicator */}
+                {/* Processing: dot-only by default; label expands on hover */}
                 {isProcessing && (
-                    <div className="absolute top-2 right-2 z-10 flex items-center justify-center" aria-hidden>
-                        <span className="h-2.5 w-2.5 rounded-full bg-amber-500 animate-pulse" title="Processing" />
+                    <div
+                        className="group/procbadge pointer-events-auto absolute top-2 right-2 z-10 flex h-6 max-w-[1.375rem] items-center overflow-hidden rounded-full bg-amber-500/95 py-0.5 pl-1.5 pr-0 text-white shadow-sm ring-1 ring-white/20 transition-[max-width,padding] duration-300 ease-out hover:max-w-[9rem] hover:pr-2"
+                        title="Processing"
+                    >
+                        <span className="sr-only">Processing</span>
+                        <span
+                            className="h-1.5 w-1.5 shrink-0 rounded-full bg-white animate-pulse"
+                            aria-hidden
+                        />
+                        <span
+                            className="ml-0 max-w-0 overflow-hidden whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide opacity-0 transition-[max-width,margin-left,opacity] duration-300 ease-out group-hover/procbadge:ml-1.5 group-hover/procbadge:max-w-[6rem] group-hover/procbadge:opacity-100"
+                            aria-hidden
+                        >
+                            Processing
+                        </span>
                     </div>
                 )}
                 {isExecutionEnhancedGrid && (
@@ -765,6 +811,19 @@ export default function AssetCard({
                                 {fileExtension}
                             </span>
                         )}
+                        {showInfo && !isGuidelines && isVideo && (
+                            <span className="inline-flex items-center rounded-md bg-violet-700/85 backdrop-blur-sm px-2 py-1 text-xs font-medium text-white">
+                                Video
+                            </span>
+                        )}
+                        {showInfo &&
+                            !isGuidelines &&
+                            isVideo &&
+                            ['queued', 'processing'].includes(String(aiVideoStatus || '')) && (
+                                <span className="inline-flex items-center rounded-md bg-amber-600/90 backdrop-blur-sm px-2 py-1 text-xs font-medium text-white">
+                                    Analyzing
+                                </span>
+                            )}
                         {/* Starred: gold for visibility on varied image backgrounds (brand primary was too dark) */}
                         {asset.starred === true && (
                             <StarIcon className="h-3.5 w-3.5 text-amber-400 drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]" aria-label="Starred" />
@@ -810,6 +869,38 @@ export default function AssetCard({
                         >
                             {asset.title || asset.original_filename || 'Untitled Asset'}
                         </h3>
+                        {isVideo && videoSummary && gridSearchQuery.trim() && (
+                            <p
+                                className={`mt-1 line-clamp-2 text-xs ${
+                                    isCinematic ? 'text-white/75' : 'text-gray-500'
+                                }`}
+                            >
+                                {videoSummary}
+                            </p>
+                        )}
+                        {isVideo && highlightTokens.length > 0 && videoTags.length > 0 && (
+                            <div className="mt-1 flex flex-wrap gap-1">
+                                {videoTags.slice(0, 8).map((tag, idx) => {
+                                    const label = String(tag)
+                                    const lower = label.toLowerCase()
+                                    const hit = highlightTokens.some((t) => lower.includes(t))
+                                    return (
+                                        <span
+                                            key={`${label}-${idx}`}
+                                            className={`max-w-full truncate rounded px-1 text-[10px] ${
+                                                hit
+                                                    ? 'bg-yellow-100 text-gray-900'
+                                                    : isCinematic
+                                                      ? 'bg-white/15 text-white/90'
+                                                      : 'bg-gray-100 text-gray-600'
+                                            }`}
+                                        >
+                                            {label}
+                                        </span>
+                                    )
+                                })}
+                            </div>
+                        )}
                     </div>
                 )
             )}

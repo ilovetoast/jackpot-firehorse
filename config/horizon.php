@@ -108,6 +108,8 @@ return [
         'redis:images' => 300,
         'redis:images-heavy' => 600,
         'redis:pdf-processing' => 300,
+        'redis:ai' => 600,
+        'redis:ai-low' => 900,
     ],
 
     /*
@@ -272,6 +274,20 @@ return [
             'timeout' => 600,
             'nice' => 0,
         ],
+        'supervisor-ai' => [
+            'connection' => 'redis',
+            'queue' => [env('QUEUE_AI_QUEUE', 'ai'), env('QUEUE_AI_LOW_QUEUE', 'ai-low')],
+            'balance' => 'auto',
+            'autoScalingStrategy' => 'time',
+            'maxProcesses' => 1,
+            'minProcesses' => 1,
+            'maxTime' => 3600,
+            'maxJobs' => 100,
+            'memory' => (int) env('HORIZON_AI_MEMORY', 1024),
+            'tries' => 1,
+            'timeout' => (int) env('HORIZON_AI_WORKER_TIMEOUT', 960),
+            'nice' => 0,
+        ],
     ],
 
     'environments' => [
@@ -297,6 +313,12 @@ return [
                 'balanceMaxShift' => 1,
                 'balanceCooldown' => 3,
             ],
+            'supervisor-ai' => [
+                'maxProcesses' => 2,
+                'minProcesses' => 1,
+                'balanceMaxShift' => 1,
+                'balanceCooldown' => 3,
+            ],
         ] : [],
 
         'staging' => $horizonQueueWorkersEnabled ? [
@@ -318,6 +340,10 @@ return [
                 'maxProcesses' => 1,
                 'tries' => 1,
             ],
+            'supervisor-ai' => [
+                'maxProcesses' => 1,
+                'minProcesses' => 1,
+            ],
         ] : [],
 
         'local' => [
@@ -332,6 +358,9 @@ return [
                 'minProcesses' => 1,
             ],
             'supervisor-pdf-processing' => [
+                'maxProcesses' => 1,
+            ],
+            'supervisor-ai' => [
                 'maxProcesses' => 1,
             ],
         ],

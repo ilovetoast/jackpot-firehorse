@@ -380,6 +380,24 @@ class HandleInertiaRequests extends Middleware
             $collectionModelForGuestNav = $this->resolveCollectionForCollectionGuestInertia($request, $tenant);
         }
 
+        // Creator Home (nav + badge): prostaff users — rejected assets need re-upload
+        $creatorHomeAttentionCount = 0;
+        $showCreatorHomeNav = false;
+        if ($user && $activeBrand && $tenant) {
+            $showCreatorHomeNav = $user->isProstaffForBrand($activeBrand)
+                && app(FeatureGate::class)->creatorModuleEnabled($tenant)
+                && $user->hasPermissionForBrand($activeBrand, 'asset.view');
+            if ($showCreatorHomeNav) {
+                try {
+                    $counts = app(\App\Services\Prostaff\GetProstaffDashboardData::class)
+                        ->pipelineCountsForProstaffUser($activeBrand, (int) $user->id);
+                    $creatorHomeAttentionCount = (int) ($counts['rejected'] ?? 0);
+                } catch (\Throwable) {
+                    $creatorHomeAttentionCount = 0;
+                }
+            }
+        }
+
         $shared = [
             ...$parentShared,
             'flash' => $flash,
@@ -418,6 +436,9 @@ class HandleInertiaRequests extends Middleware
                     'thumbnail_accept' => $svc->buildHtmlAcceptAttribute($thumbMimes, $thumbExts),
                 ];
             })(),
+            'video_ai' => [
+                'show_cost_in_drawer' => (bool) config('assets.video_ai.show_cost_in_drawer', true),
+            ],
             // Phase C12.0: Collection-only mode (no brand; user has only collection access)
             'collection_only' => app()->bound('collection_only') && app('collection_only'),
             'collection_only_collection' => $this->collectionToSharedCollectionOnlyPayload($collectionModelForGuestNav),
@@ -454,6 +475,8 @@ class HandleInertiaRequests extends Middleware
                 'tenant_role' => ($user && $tenant) ? ($user->getRoleForTenant($tenant) ?? null) : null,
                 /** Creator / prostaff — active membership on the workspace brand (overview + /api/prostaff/me). */
                 'is_prostaff_for_active_brand' => $user && $activeBrand ? $user->isProstaffForBrand($activeBrand) : false,
+                /** Rejected creator uploads still needing fix & re-upload (AppNav badge). */
+                'creator_home_attention_count' => $creatorHomeAttentionCount,
                 'user' => $user ? [
                     'id' => $user->id,
                     'first_name' => $user->first_name,
@@ -547,6 +570,8 @@ class HandleInertiaRequests extends Middleware
                         && app(ResolveCreatorsDashboardAccess::class)->canView($user, $tenant, $activeBrand),
                     'can_manage_creators_dashboard' => $tenant && $activeBrand && $user
                         && app(ResolveCreatorsDashboardAccess::class)->canManage($user, $tenant, $activeBrand),
+                    /** Overview dropdown → Creator Home (matches cinematic overview quick links). */
+                    'show_creator_home_nav' => $showCreatorHomeNav,
                 ],
                 // Phase AF-5: Approval feature flags (plan-gated)
                 'approval_features' => $tenant ? (function () use ($tenant) {

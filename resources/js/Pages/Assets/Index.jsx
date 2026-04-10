@@ -31,6 +31,7 @@ import LoadMoreFooter from '../../Components/LoadMoreFooter'
 import axios from 'axios'
 import { motion } from 'framer-motion'
 import {
+    ClockIcon,
     DocumentTextIcon,
     FolderIcon,
     TagIcon,
@@ -51,9 +52,40 @@ const ASSET_INDEX_SIDEBAR_COUNT_PROPS = [
 ]
 
 /** Inertia `only` keys whenever the paginated grid query result is refreshed */
-const ASSET_GRID_QUERY_KEYS = ['assets', 'next_page_url', 'filtered_grid_total', 'grid_folder_total']
+const ASSET_GRID_QUERY_KEYS = [
+    'assets',
+    'next_page_url',
+    'filtered_grid_total',
+    'grid_folder_total',
+    'content_type',
+    'pending_publication_review_count',
+]
 
-export default function AssetsIndex({ categories, bulk_categories_by_asset_type = null, categories_by_type, selected_category, show_all_button = false, total_asset_count = 0, assets = [], next_page_url = null, filtered_grid_total = 0, grid_folder_total = 0, filterable_schema = [], saved_views = [], available_values = {}, sort = 'created', sort_direction = 'desc', q: searchQuery = '', lifecycle = '', can_view_trash = false, trash_count = 0, source = '', reference_materials_count = 0, staged_count = 0 }) {
+export default function AssetsIndex({
+    categories,
+    bulk_categories_by_asset_type = null,
+    categories_by_type,
+    selected_category,
+    show_all_button = false,
+    total_asset_count = 0,
+    assets = [],
+    next_page_url = null,
+    filtered_grid_total = 0,
+    grid_folder_total = 0,
+    filterable_schema = [],
+    saved_views = [],
+    available_values = {},
+    sort = 'created',
+    sort_direction = 'desc',
+    q: searchQuery = '',
+    lifecycle = '',
+    can_view_trash = false,
+    trash_count = 0,
+    source = '',
+    reference_materials_count = 0,
+    staged_count = 0,
+    pending_publication_review_count = 0,
+}) {
     const pageProps = usePage().props
     const { auth } = pageProps
     const { can } = usePermission()
@@ -154,6 +186,8 @@ export default function AssetsIndex({ categories, bulk_categories_by_asset_type 
     const [activeAssetId, setActiveAssetId] = useState(null) // Asset ID selected for drawer
     /** Grid double-click opens AssetDrawer with fullscreen zoom already open */
     const [openDrawerWithZoom, setOpenDrawerWithZoom] = useState(false)
+    /** Search hit on a video moment label: seek fullscreen video to this time (seconds) */
+    const [drawerInitialVideoSeekSeconds, setDrawerInitialVideoSeekSeconds] = useState(null)
     // Prevent URL/search effect from re-opening drawer after user explicitly closes it
     const userClosedDrawerRef = useRef(false)
     const lastOpenedFromUrlRef = useRef(null)
@@ -172,10 +206,13 @@ export default function AssetsIndex({ categories, bulk_categories_by_asset_type 
 
     // UX: Click on asset card always opens drawer. Checkbox uses SelectionContext. Double-click opens zoom overlay.
     const handleAssetClick = useCallback((asset) => {
-        setOpenDrawerWithZoom(false)
+        const seekTo = typeof asset?.matched_moment?.seconds === 'number' ? asset.matched_moment.seconds : null
+        setDrawerInitialVideoSeekSeconds(seekTo)
+        setOpenDrawerWithZoom(seekTo != null)
         setActiveAssetId(asset?.id || null)
     }, [])
     const handleAssetDoubleClick = useCallback((asset) => {
+        setDrawerInitialVideoSeekSeconds(null)
         setOpenDrawerWithZoom(true)
         setActiveAssetId(asset?.id || null)
     }, [])
@@ -209,6 +246,7 @@ export default function AssetsIndex({ categories, bulk_categories_by_asset_type 
     useEffect(() => {
         setActiveAssetId(null)
         setOpenDrawerWithZoom(false)
+        setDrawerInitialVideoSeekSeconds(null)
         userClosedDrawerRef.current = false
         lastOpenedFromUrlRef.current = null
         
@@ -251,6 +289,10 @@ export default function AssetsIndex({ categories, bulk_categories_by_asset_type 
                     if (userClosedDrawerRef.current && assetId === lastOpenedFromUrlRef.current) {
                         return
                     }
+                    const seekTo =
+                        typeof asset.matched_moment?.seconds === 'number' ? asset.matched_moment.seconds : null
+                    setDrawerInitialVideoSeekSeconds(seekTo)
+                    setOpenDrawerWithZoom(seekTo != null)
                     setActiveAssetId(assetId)
                     lastOpenedFromUrlRef.current = assetId
                     userClosedDrawerRef.current = false
@@ -739,7 +781,31 @@ export default function AssetsIndex({ categories, bulk_categories_by_asset_type 
         setIsAutoClosing(false) // Reset flag if manually closed
         setDroppedFiles(null) // Clear dropped files when dialog closes
     }, [])
-    
+
+    /** Creator Home "Fix & reupload" deep link: ?asset=…&reupload=1 opens the Phase 3 uploader after the asset is in the grid. */
+    const reuploadDialogOpenedRef = useRef(false)
+    useEffect(() => {
+        if (typeof window === 'undefined') return
+        if (!canUpload || isAutoClosing) return
+        const urlParams = new URLSearchParams(window.location.search)
+        if (urlParams.get('reupload') !== '1' && urlParams.get('reupload') !== 'true') {
+            reuploadDialogOpenedRef.current = false
+            return
+        }
+        const assetId = urlParams.get('asset')
+        if (!assetId) return
+        if (reuploadDialogOpenedRef.current) return
+        if (safeAssetsList.length === 0) return
+        if (!safeAssetsList.some((a) => a?.id === assetId)) return
+
+        reuploadDialogOpenedRef.current = true
+        handleOpenUploadDialog()
+
+        urlParams.delete('reupload')
+        const qs = urlParams.toString()
+        window.history.replaceState({}, '', `${window.location.pathname}${qs ? `?${qs}` : ''}`)
+    }, [safeAssetsList, canUpload, isAutoClosing, handleOpenUploadDialog])
+
     // Handle drag-and-drop on grid area
     const handleDragOver = useCallback((e) => {
         // Only allow drag-over if user can upload
@@ -871,7 +937,32 @@ export default function AssetsIndex({ categories, bulk_categories_by_asset_type 
     const unselectedTextColor = textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.65)' : 'rgba(0, 0, 0, 0.65)'
     const unselectedIconColor = textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0, 0, 0, 0.6)'
     const unselectedCountColor = textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.5)' : 'rgba(0, 0, 0, 0.5)'
-    
+
+    const canPublish = can('asset.publish')
+    const pendingReviewTotal = Number(pending_publication_review_count) || 0
+    const tenantRoleLower = (auth?.user?.tenant_role || auth?.tenant_role || '').toLowerCase()
+    const isTenantAdminOrOwner = tenantRoleLower === 'admin' || tenantRoleLower === 'owner'
+    const isBrandManager = auth?.user?.brand_role === 'brand_manager'
+    const isApproverBannerAudience = isTenantAdminOrOwner || isBrandManager
+    const showPendingReviewBanner =
+        isApproverBannerAudience &&
+        canPublish &&
+        lifecycle !== 'deleted' &&
+        source !== 'staged' &&
+        source !== 'reference_materials' &&
+        !isPendingPublicationFilter &&
+        pendingReviewTotal > 0
+
+    const handleShowPendingReview = useCallback(() => {
+        const urlParams = new URLSearchParams(window.location.search)
+        urlParams.set('lifecycle', 'pending_publication')
+        urlParams.delete('page')
+        router.get(window.location.pathname, Object.fromEntries(urlParams), {
+            preserveState: true,
+            preserveScroll: true,
+            only: [...ASSET_GRID_QUERY_KEYS, 'lifecycle', 'filters'],
+        })
+    }, [])
 
     return (
         <div className="h-screen flex flex-col overflow-hidden">
@@ -1123,6 +1214,38 @@ export default function AssetsIndex({ categories, bulk_categories_by_asset_type 
                             )
                         })()}
                         <div className="py-6 px-4 sm:px-6 lg:px-8">
+                        {showPendingReviewBanner ? (
+                            <div
+                                className="mb-6 flex flex-col gap-3 rounded-xl border border-gray-200 bg-gradient-to-r from-gray-50 to-white px-4 py-3.5 shadow-sm sm:flex-row sm:items-center sm:justify-between sm:gap-4"
+                                style={{ borderLeftWidth: 4, borderLeftColor: workspaceAccentColor }}
+                                role="status"
+                            >
+                                <div className="flex min-w-0 items-start gap-3">
+                                    <ClockIcon
+                                        className="h-6 w-6 shrink-0 mt-0.5"
+                                        style={{ color: workspaceAccentColor }}
+                                        aria-hidden
+                                    />
+                                    <div className="min-w-0">
+                                        <p className="text-sm font-semibold text-gray-900">
+                                            {pendingReviewTotal}{' '}
+                                            {pendingReviewTotal === 1 ? 'asset' : 'assets'} awaiting your review
+                                        </p>
+                                        <p className="mt-0.5 text-sm text-gray-600">
+                                            Filter the library to pending and rejected submissions so you can approve or request changes.
+                                        </p>
+                                    </div>
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={handleShowPendingReview}
+                                    className="inline-flex w-full shrink-0 items-center justify-center rounded-lg px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:opacity-95 sm:w-auto"
+                                    style={{ backgroundColor: workspaceAccentColor }}
+                                >
+                                    Review pending
+                                </button>
+                            </div>
+                        ) : null}
                         {/* Brief feedback when an asset can't be added to the download bucket (e.g. not published) */}
                         {/* Asset Grid Toolbar - Always visible (persists across categories) */}
                         {/* Primary metadata filters are now integrated into the toolbar (between search and controls) */}
@@ -1139,8 +1262,9 @@ export default function AssetsIndex({ categories, bulk_categories_by_asset_type 
                                 filterable_schema={filterable_schema}
                                 selectedCategoryId={selectedCategoryId}
                                 available_values={availableValues}
+                                inertiaSearchOnly={ASSET_GRID_QUERY_KEYS}
                                 searchTagAutocompleteTenantId={auth?.activeCompany?.id}
-                                searchPlaceholder="Search items, titles, tags…"
+                                searchPlaceholder="Search assets, scenes, or video content…"
                                 sortBy={sort}
                                 sortDirection={sort_direction}
                                 onSortChange={(newSort, newDir) => {
@@ -1150,7 +1274,7 @@ export default function AssetsIndex({ categories, bulk_categories_by_asset_type 
                                     urlParams.delete('page')
                                     router.get(window.location.pathname, Object.fromEntries(urlParams), { preserveState: true, preserveScroll: true, only: [...ASSET_GRID_QUERY_KEYS, 'sort', 'sort_direction'] })
                                 }}
-                                clearFiltersInertiaOnly={['assets', 'next_page_url', 'filters', 'uploaded_by_users', 'q', 'filtered_grid_total', 'grid_folder_total']}
+                                clearFiltersInertiaOnly={['assets', 'next_page_url', 'filters', 'uploaded_by_users', 'q', 'filtered_grid_total', 'grid_folder_total', 'content_type']}
                                 showMoreFilters={true}
                                 moreFiltersContent={
                                     /* Secondary Metadata Filters - Renders metadata fields with is_primary !== true */
@@ -1221,6 +1345,7 @@ export default function AssetsIndex({ categories, bulk_categories_by_asset_type 
                                     showInfo={showInfo}
                                     selectedAssetId={activeAssetId}
                                     primaryColor={workspaceAccentColor}
+                                    gridSearchQuery={typeof searchQuery === 'string' ? searchQuery : ''}
                                     isPendingApprovalMode={isPendingApprovalMode}
                                     isPendingPublicationFilter={isPendingPublicationFilter}
                                     onAssetApproved={(assetId) => {
@@ -1294,6 +1419,7 @@ export default function AssetsIndex({ categories, bulk_categories_by_asset_type 
                                     userClosedDrawerRef.current = true
                                     setActiveAssetId(null)
                                     setOpenDrawerWithZoom(false)
+                                    setDrawerInitialVideoSeekSeconds(null)
                                 }}
                                 assets={assetsList}
                                 currentAssetIndex={activeAsset ? safeAssetsList.findIndex(a => a?.id === activeAsset?.id) : -1}
@@ -1301,6 +1427,7 @@ export default function AssetsIndex({ categories, bulk_categories_by_asset_type 
                                 selectionAssetType="asset"
                                 primaryColor={workspaceAccentColor}
                                 initialZoomOpen={openDrawerWithZoom}
+                                initialVideoSeekSeconds={drawerInitialVideoSeekSeconds}
                                 onInitialZoomConsumed={handleInitialZoomConsumed}
                             />
                         </div>
@@ -1321,12 +1448,14 @@ export default function AssetsIndex({ categories, bulk_categories_by_asset_type 
                                 userClosedDrawerRef.current = true
                                 setActiveAssetId(null)
                                 setOpenDrawerWithZoom(false)
+                                setDrawerInitialVideoSeekSeconds(null)
                             }}
                             assets={assetsList}
                             currentAssetIndex={activeAsset ? safeAssetsList.findIndex(a => a?.id === activeAsset?.id) : -1}
                             onAssetUpdate={handleLifecycleUpdate}
                             primaryColor={workspaceAccentColor}
                             initialZoomOpen={openDrawerWithZoom}
+                            initialVideoSeekSeconds={drawerInitialVideoSeekSeconds}
                             onInitialZoomConsumed={handleInitialZoomConsumed}
                         />
                     </div>

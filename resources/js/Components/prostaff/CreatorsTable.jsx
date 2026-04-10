@@ -18,7 +18,7 @@ function SkeletonRows() {
  * @param {{
  *   creators: Array<Record<string, unknown>>,
  *   loading: boolean,
- *   onRowClick: (userId: number) => void,
+ *   onRowClick: (prostaffMembershipId: number) => void,
  *   onDamClick?: (userId: number) => void,
  *   emptyCta?: React.ReactNode,
  *   emptyReadOnlyHint?: string | null,
@@ -86,7 +86,12 @@ export default function CreatorsTable({
                             <SkeletonRows />
                         ) : (
                             creators.map((row) => (
-                                <CreatorRow key={row.user_id} row={row} onRowClick={onRowClick} onDamClick={onDamClick} />
+                                <CreatorRow
+                                    key={row.prostaff_membership_id ?? row.user_id}
+                                    row={row}
+                                    onRowClick={onRowClick}
+                                    onDamClick={onDamClick}
+                                />
                             ))
                         )}
                     </tbody>

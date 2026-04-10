@@ -1,5 +1,6 @@
 import { router, usePage } from '@inertiajs/react'
 import { useState } from 'react'
+import { refreshCsrfTokenFromServer } from '../../utils/csrf'
 import BrandIconUnified from '../../Components/BrandIconUnified'
 
 function BrandLogo({ brand, disabled }) {
@@ -33,9 +34,14 @@ export default function BrandSelector({ brands, tenant, tenantMemberWithoutBrand
     const isEmpty = list.length === 0
     const hasDisabledBrands = list.some((b) => b.is_disabled)
 
-    const handleSelect = (brand) => {
+    const handleSelect = async (brand) => {
         if (processing || brand.is_disabled) return
         setProcessing(true)
+        try {
+            await refreshCsrfTokenFromServer()
+        } catch {
+            /* still attempt */
+        }
         router.post('/gateway/select-brand', { brand_id: brand.id }, {
             onFinish: () => setProcessing(false),
         })

@@ -11,6 +11,7 @@ use App\Services\AssetProcessingFailureService;
 use App\Services\FileInspectionService;
 use App\Services\SystemIncidentService;
 use App\Jobs\Concerns\QueuesOnImagesChannel;
+use App\Jobs\ProcessVideoInsightsBatchJob;
 use App\Support\Logging\PipelineLogger;
 use App\Support\PipelineQueueResolver;
 use App\Enums\ThumbnailStatus;
@@ -501,6 +502,18 @@ class ProcessAssetJob implements ShouldQueue
         Bus::chain($chainJobs)
             ->onQueue($pipelineQueue)
             ->dispatch();
+
+        if ($isVideo && config('assets.video_ai.enabled', true)) {
+            $asset->refresh();
+            $policyCheck = app(\App\Services\AiTagPolicyService::class)->shouldProceedWithAiTagging($asset);
+            $assetMeta = $asset->metadata ?? [];
+            $skipVideo = ! empty($assetMeta['_skip_ai_video_insights']);
+            if ($policyCheck['should_proceed'] && ! $skipVideo) {
+                $mergedMeta = array_merge($assetMeta, ['ai_video_status' => 'queued']);
+                $asset->update(['metadata' => $mergedMeta]);
+                ProcessVideoInsightsBatchJob::dispatch([(string) $asset->id]);
+            }
+        }
 
         // Seed page 1 render for PDFs on dedicated queue.
         if ($fileType === 'pdf') {

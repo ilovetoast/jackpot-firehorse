@@ -25,6 +25,8 @@ export default function AiTagSuggestionsInline({
     analysisStatus = null,
     primaryColor,
     drawerInsightGroup = false,
+    /** Flat card with section label (Metadata Review drawer) — no shadow */
+    unifiedDrawerReview = false,
 }) {
     const { auth } = usePage().props
     const brandColor = primaryColor || auth?.activeBrand?.primary_color || '#6366f1'
@@ -213,12 +215,15 @@ export default function AiTagSuggestionsInline({
         return null // Hide if user doesn't have permission
     }
 
-    const wrapOuter = (inner) =>
-        drawerInsightGroup ? (
-            <div className="rounded-md border border-gray-200 bg-white p-3 shadow-sm">{inner}</div>
-        ) : (
-            <div className="px-4 py-3 border-t border-gray-200">{inner}</div>
-        )
+    const wrapOuter = (inner) => {
+        if (drawerInsightGroup && unifiedDrawerReview) {
+            return <div className="border border-gray-200 rounded-md p-3">{inner}</div>
+        }
+        if (drawerInsightGroup) {
+            return <div className="rounded-md border border-gray-200 bg-white p-3 shadow-sm">{inner}</div>
+        }
+        return <div className="px-4 py-3 border-t border-gray-200">{inner}</div>
+    }
 
     if (loading) {
         return wrapOuter(<div className="text-sm text-gray-500">Loading AI tag suggestions...</div>)
@@ -231,8 +236,18 @@ export default function AiTagSuggestionsInline({
     const body = (
         <>
             <div className="flex items-center gap-1.5 mb-2">
-                <SparklesIcon className="h-3.5 w-3.5 flex-shrink-0" style={{ color: brandColor }} />
-                <h3 className="text-xs font-semibold text-gray-900">AI Suggested Tags</h3>
+                {!unifiedDrawerReview && (
+                    <SparklesIcon className="h-3.5 w-3.5 flex-shrink-0" style={{ color: brandColor }} />
+                )}
+                <h3
+                    className={
+                        unifiedDrawerReview
+                            ? 'text-[11px] font-medium uppercase tracking-wide text-gray-400'
+                            : 'text-xs font-semibold text-gray-900'
+                    }
+                >
+                    AI suggested tags
+                </h3>
             </div>
 
             <div className="flex flex-wrap gap-1.5">
@@ -241,8 +256,16 @@ export default function AiTagSuggestionsInline({
                     return (
                         <div
                             key={suggestion.id}
-                            className="inline-flex items-center gap-2 rounded-md px-2 py-1 border"
-                            style={{ borderColor: `${brandColor}40`, backgroundColor: brandColorTint }}
+                            className={
+                                unifiedDrawerReview
+                                    ? 'inline-flex items-center gap-2 rounded-md px-2 py-1 border border-gray-200 bg-white'
+                                    : 'inline-flex items-center gap-2 rounded-md px-2 py-1 border'
+                            }
+                            style={
+                                unifiedDrawerReview
+                                    ? undefined
+                                    : { borderColor: `${brandColor}40`, backgroundColor: brandColorTint }
+                            }
                         >
                             <span className="text-xs font-medium text-gray-900">
                                 {suggestion.tag}

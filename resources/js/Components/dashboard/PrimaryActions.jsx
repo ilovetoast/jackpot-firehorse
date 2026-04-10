@@ -71,7 +71,7 @@ const CREATOR_QUICK_LINKS = [
     {
         key: 'creator_progress',
         title: 'Creator progress',
-        description: 'Upload pipeline, targets, and anonymized peer comparison',
+        description: 'Upload pipeline, targets, and how you compare',
         permission: 'showCreatorOverviewQuickLinks',
         hrefFn: () =>
             typeof route === 'function'

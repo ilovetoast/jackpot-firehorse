@@ -365,11 +365,14 @@ class User extends Authenticatable
 
     /**
      * Active prostaff row for this brand, if any (status = active only).
+     *
+     * Tenant must match the brand — same scope as {@see GetProstaffDashboardData::managerDashboardRows()}.
      */
     public function activeProstaffMembership(Brand $brand): ?ProstaffMembership
     {
         return $this->prostaffMemberships()
             ->where('brand_id', $brand->id)
+            ->where('tenant_id', $brand->tenant_id)
             ->where('status', 'active')
             ->first();
     }

@@ -12,6 +12,7 @@ use App\Models\Asset;
 use App\Models\Brand;
 use App\Models\BrandInvitation;
 use App\Models\Category;
+use App\Models\ProstaffMembership;
 use App\Models\ProstaffPeriodStat;
 use App\Models\StorageBucket;
 use App\Models\Tenant;
@@ -113,6 +114,14 @@ class ProstaffDashboardTest extends TestCase
         ];
     }
 
+    protected function prostaffMembershipIdFor(User $user): int
+    {
+        $m = $user->activeProstaffMembership($this->brand);
+        $this->assertNotNull($m);
+
+        return (int) $m->id;
+    }
+
     protected function makeProstaffUser(string $email, string $first, string $last): User
     {
         $user = User::create([
@@ -160,6 +169,15 @@ class ProstaffDashboardTest extends TestCase
         $this->assertCount(2, $rows);
         $ids = collect($rows)->pluck('user_id')->sort()->values()->all();
         $this->assertSame([(int) $this->prostaffA->id, (int) $this->prostaffB->id], $ids);
+        $membershipIds = collect($rows)->pluck('prostaff_membership_id')->sort()->values()->all();
+        $expectedMembershipIds = ProstaffMembership::query()
+            ->where('brand_id', $this->brand->id)
+            ->whereIn('user_id', [$this->prostaffA->id, $this->prostaffB->id])
+            ->pluck('id')
+            ->sort()
+            ->values()
+            ->all();
+        $this->assertSame($expectedMembershipIds, $membershipIds);
     }
 
     public function test_manager_dashboard_lists_pending_creator_invites(): void
@@ -364,7 +382,7 @@ class ProstaffDashboardTest extends TestCase
     {
         $this->actingAs($this->manager)
             ->withSession($this->sessionFor($this->manager))
-            ->get("/app/brands/{$this->brand->id}/creators/{$this->prostaffA->id}")
+            ->get("/app/brands/{$this->brand->id}/creators/{$this->prostaffMembershipIdFor($this->prostaffA)}")
             ->assertOk()
             ->assertInertia(fn ($page) => $page
                 ->component('Prostaff/CreatorProfile')
@@ -384,7 +402,7 @@ class ProstaffDashboardTest extends TestCase
 
         $this->actingAs($this->manager)
             ->withSession($this->sessionFor($this->manager))
-            ->get("/app/brands/{$this->brand->id}/creators/{$this->prostaffA->id}")
+            ->get("/app/brands/{$this->brand->id}/creators/{$this->prostaffMembershipIdFor($this->prostaffA)}")
             ->assertOk()
             ->assertInertia(fn ($page) => $page
                 ->component('Prostaff/CreatorProfile')
@@ -395,7 +413,7 @@ class ProstaffDashboardTest extends TestCase
     {
         $this->actingAs($this->prostaffA)
             ->withSession($this->sessionFor($this->prostaffA))
-            ->get("/app/brands/{$this->brand->id}/creators/{$this->prostaffA->id}")
+            ->get("/app/brands/{$this->brand->id}/creators/{$this->prostaffMembershipIdFor($this->prostaffA)}")
             ->assertOk()
             ->assertInertia(fn ($page) => $page
                 ->component('Prostaff/CreatorProfile')
@@ -427,7 +445,7 @@ class ProstaffDashboardTest extends TestCase
     {
         $this->actingAs($this->prostaffA)
             ->withSession($this->sessionFor($this->prostaffA))
-            ->get("/app/brands/{$this->brand->id}/creators/{$this->prostaffB->id}")
+            ->get("/app/brands/{$this->brand->id}/creators/{$this->prostaffMembershipIdFor($this->prostaffB)}")
             ->assertForbidden();
     }
 

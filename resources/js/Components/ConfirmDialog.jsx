@@ -19,6 +19,8 @@ export default function ConfirmDialog({
     confirmDisabled = false,
     /** Tailwind max-width classes for the panel (e.g. sm:max-w-2xl for longer copy) */
     panelClassName = 'sm:max-w-lg',
+    /** Root overlay z-index when stacked above other modals (e.g. Manage Asset). */
+    zIndexClass = 'z-50',
 }) {
     const [typedMatch, setTypedMatch] = useState('')
 
@@ -95,7 +97,7 @@ export default function ConfirmDialog({
     }
 
     return (
-        <div className="fixed inset-0 z-50 overflow-y-auto">
+        <div className={`fixed inset-0 overflow-y-auto ${zIndexClass}`}>
             <div className="flex min-h-full items-end justify-center p-4 text-center sm:items-center sm:p-0">
                 {/* Backdrop */}
                 <div

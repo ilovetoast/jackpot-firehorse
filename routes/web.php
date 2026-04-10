@@ -579,6 +579,7 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
             Route::post('/assets/{asset}/pdf-text-extraction', [\App\Http\Controllers\AssetPdfTextExtractionController::class, 'store'])
                 ->name('assets.pdf-text-extraction.store');
             Route::get('/assets/{asset}/view', [\App\Http\Controllers\AssetController::class, 'view'])->name('assets.view');
+            Route::get('/assets/{asset}/processing-status', [\App\Http\Controllers\AssetController::class, 'processingGuardStatus'])->name('assets.processing-status');
             Route::get('/assets/{asset}/activity', [\App\Http\Controllers\AssetController::class, 'activity'])->name('assets.activity');
             Route::get('/assets/{asset}/versions', [\App\Http\Controllers\AssetVersionController::class, 'index'])->name('assets.versions.index');
             Route::post('/assets/{asset}/versions/{version}/restore', [\App\Http\Controllers\AssetVersionController::class, 'restore'])->name('assets.versions.restore');
@@ -904,7 +905,7 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
             // Phase J.2: Pending assets for review modal
             Route::get('/api/brands/{brand}/pending-assets', [\App\Http\Controllers\AssetApprovalController::class, 'pendingAssets'])->name('api.brands.pending-assets');
             Route::get('/brands/{brand}/creators', [\App\Http\Controllers\Prostaff\ProstaffDashboardController::class, 'page'])->name('brands.creators');
-            Route::get('/brands/{brand}/creators/{user}', [\App\Http\Controllers\Prostaff\ProstaffDashboardController::class, 'creatorPage'])->name('brands.creators.show');
+            Route::get('/brands/{brand}/creators/{membership}', [\App\Http\Controllers\Prostaff\ProstaffDashboardController::class, 'creatorPage'])->name('brands.creators.show');
             Route::get('/api/brands/{brand}/prostaff/dashboard', [\App\Http\Controllers\Prostaff\ProstaffDashboardController::class, 'index'])->name('api.brands.prostaff.dashboard');
             Route::get('/api/brands/{brand}/prostaff/options', [\App\Http\Controllers\Prostaff\ProstaffDashboardController::class, 'filterOptions'])->name('api.brands.prostaff.options');
             Route::post('/api/brands/{brand}/prostaff/members', [\App\Http\Controllers\Prostaff\ProstaffMembershipController::class, 'store'])->name('api.brands.prostaff.members.store');

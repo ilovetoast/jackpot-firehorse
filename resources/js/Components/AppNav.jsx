@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { Link, router, usePage } from '@inertiajs/react'
 import { DELIVERABLES_PAGE_LABEL } from '../utils/uiLabels'
+import { resolveOverviewIconColor } from '../utils/colorUtils'
 import { showWorkspaceSwitchingOverlay } from '../utils/workspaceSwitchOverlay'
 import AppBrandLogo from './AppBrandLogo'
 import JackpotLogo from './JackpotLogo'
@@ -9,6 +10,7 @@ import GlobalUserControls from './Layout/GlobalUserControls'
 import {
     AdjustmentsHorizontalIcon,
     ArrowDownTrayIcon,
+    ArrowTrendingUpIcon,
     BookOpenIcon,
     ChartBarIcon,
     ChevronDownIcon,
@@ -430,10 +432,12 @@ export default function AppNav({
         }, 160)
     }
 
-    /** Desktop workspace nav: Overview + hover panel (Tasks → overview route, then Insights, Manage, Settings, Creators). */
+    /** Desktop workspace nav: Overview + hover panel (Tasks, Creator Home, Creators, Insights, Manage, Settings). */
     const renderDesktopOverviewNav = () => {
-        const overviewPathActive =
-            currentUrl === '/app/overview' || currentUrl.startsWith('/app/overview')
+        const creatorHomePathActive = currentUrl.startsWith('/app/overview/creator-progress')
+        const tasksPathActive =
+            !creatorHomePathActive &&
+            (currentUrl === '/app/overview' || currentUrl.startsWith('/app/overview?'))
         const insightsPathActive = currentUrl.startsWith('/app/insights')
         const managePathActive = currentUrl.startsWith('/app/manage')
         const creatorsPathActive =
@@ -443,7 +447,8 @@ export default function AppNav({
             currentUrl.startsWith(`/app/brands/${activeBrand.id}`) &&
             !creatorsPathActive
         const overviewGroupActive =
-            overviewPathActive ||
+            tasksPathActive ||
+            creatorHomePathActive ||
             insightsPathActive ||
             managePathActive ||
             brandSettingsPathActive ||
@@ -451,6 +456,11 @@ export default function AppNav({
 
         const inactiveNavColor = textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)'
         const accent = activeBrand?.primary_color || '#6366f1'
+        /** Same treatment as Overview primary-action cards — brand tint that reads on dark surfaces. */
+        const creatorsNavIconColor =
+            variant === 'transparent'
+                ? resolveOverviewIconColor(accent, { surface: '#0f1115' })
+                : accent
         const linkStyle = {
             color: overviewGroupActive ? textColor : inactiveNavColor,
             borderBottomColor: overviewGroupActive ? accent : 'transparent',
@@ -473,6 +483,10 @@ export default function AppNav({
             can('metadata.registry.view') || can('metadata.tenant.visibility.manage')
         const canViewCreatorsDashboard = Boolean(auth?.permissions?.can_view_creators_dashboard)
         const showCreatorsNav = Boolean(activeBrand?.id) && canViewCreatorsDashboard
+        const showCreatorHomeNav = Boolean(auth?.permissions?.show_creator_home_nav)
+        const creatorHomeAttentionCount = Math.max(0, Number(auth?.creator_home_attention_count) || 0)
+        const creatorHomeHref =
+            typeof route === 'function' ? route('overview.creator-progress') : '/app/overview/creator-progress'
 
         const subLinkBase =
             'block border-l-[3px] px-3 py-2 text-sm font-medium leading-snug transition-[border-color,background-color,color] duration-150 ease-out'
@@ -522,14 +536,43 @@ export default function AppNav({
                     >
                         <Link
                             href="/app/overview"
-                            className={`${subLinkBase} ${overviewPathActive ? subLinkActive : subLinkInactive}`}
-                            style={overviewPathActive ? { borderLeftColor: accent } : undefined}
+                            className={`${subLinkBase} ${tasksPathActive ? subLinkActive : subLinkInactive}`}
+                            style={tasksPathActive ? { borderLeftColor: accent } : undefined}
                         >
                             <span className="inline-flex items-center gap-2">
                                 <ClipboardDocumentListIcon className="h-4 w-4 shrink-0 opacity-70" aria-hidden="true" />
                                 Tasks
                             </span>
                         </Link>
+                        {showCreatorHomeNav ? (
+                            <Link
+                                href={creatorHomeHref}
+                                className={`${subLinkBase} ${creatorHomePathActive ? subLinkActive : subLinkInactive}`}
+                                style={creatorHomePathActive ? { borderLeftColor: accent } : undefined}
+                            >
+                                <span className="flex w-full min-w-0 items-center justify-between gap-2">
+                                    <span className="inline-flex min-w-0 items-center gap-2">
+                                        <ArrowTrendingUpIcon
+                                            className="h-4 w-4 shrink-0 opacity-70"
+                                            aria-hidden="true"
+                                        />
+                                        <span className="truncate">Creator Home</span>
+                                    </span>
+                                    {creatorHomeAttentionCount > 0 ? (
+                                        <span
+                                            className={
+                                                variant === 'transparent'
+                                                    ? 'inline-flex min-w-[1.25rem] shrink-0 items-center justify-center rounded-full bg-rose-500/90 px-1.5 py-0.5 text-[10px] font-bold leading-none text-white'
+                                                    : 'inline-flex min-w-[1.25rem] shrink-0 items-center justify-center rounded-full bg-rose-600 px-1.5 py-0.5 text-[10px] font-bold leading-none text-white'
+                                            }
+                                            title="Assets need your attention (e.g. re-upload)"
+                                        >
+                                            {creatorHomeAttentionCount > 99 ? '99+' : creatorHomeAttentionCount}
+                                        </span>
+                                    ) : null}
+                                </span>
+                            </Link>
+                        ) : null}
                         {showCreatorsNav ? (
                             <Link
                                 href={route('brands.creators', { brand: activeBrand.id })}
@@ -548,12 +591,8 @@ export default function AppNav({
                                         }}
                                     >
                                         <UserGroupIcon
-                                            className={
-                                                variant === 'transparent'
-                                                    ? 'h-4 w-4 shrink-0 text-white'
-                                                    : 'h-4 w-4 shrink-0'
-                                            }
-                                            style={variant === 'transparent' ? undefined : { color: accent }}
+                                            className="h-4 w-4 shrink-0"
+                                            style={{ color: creatorsNavIconColor }}
                                             aria-hidden="true"
                                         />
                                     </span>
@@ -924,7 +963,7 @@ export default function AppNav({
                             )}
                         </div>
 
-                        {/* Main menu: Overview (dropdown: Tasks, Insights, Manage, Settings…), Assets, Executions, Collections, Generative */}
+                        {/* Main menu: Overview (dropdown: Tasks, Creator Home, …), Assets, Executions, Collections, Generative */}
                         {isAppPage ? (isExternalCollectionChrome ? (
                             <div className="hidden min-w-0 flex-1 sm:flex sm:min-w-0 sm:items-center sm:gap-6 lg:gap-8 sm:pl-4 lg:pl-6 overflow-x-auto" data-collection-only="true">
                                 {(() => {

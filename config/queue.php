@@ -65,6 +65,25 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | AI queue (video insights, future long-running AI work)
+    |--------------------------------------------------------------------------
+    |
+    | Isolated from the images pipeline so vision + optional transcription
+    | do not compete with thumbnail workers. Run Horizon with this queue
+    | (see config/horizon.php supervisor-ai).
+    |
+    */
+    'ai_queue' => env('QUEUE_AI_QUEUE', 'ai'),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Low-priority AI queue (video insights batch fan-out)
+    |--------------------------------------------------------------------------
+    */
+    'ai_low_queue' => env('QUEUE_AI_LOW_QUEUE', 'ai-low'),
+
+    /*
+    |--------------------------------------------------------------------------
     | Queue Connections
     |--------------------------------------------------------------------------
     |

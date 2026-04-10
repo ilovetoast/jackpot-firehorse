@@ -48,16 +48,18 @@ import { XMarkIcon, ArrowPathIcon, ChevronLeftIcon, ChevronRightIcon, ChevronDow
 import { usePage, router, Link } from '@inertiajs/react'
 import AssetImage from './AssetImage'
 import AssetTimeline from './AssetTimeline'
-import AiTagSuggestionsInline from './AiTagSuggestionsInline'
 import AssetTagManager from './AssetTagManager'
 import AssetMetadataDisplay from './AssetMetadataDisplay'
 import PendingMetadataList from './PendingMetadataList'
-import MetadataCandidateReview from './MetadataCandidateReview'
+import ManageAssetModal from './ManageAssetModal'
 import ThumbnailPreview from './ThumbnailPreview'
 import ReplaceFileModal from './ReplaceFileModal'
-import AssetDetailPanel from './AssetDetailPanel'
 import CollapsibleSection from './CollapsibleSection'
+import ProcessingActionCard, { formatProcessingLastRunLine } from './ProcessingActionCard'
 import AssetBrandIntelligenceBlock from './AssetBrandIntelligenceBlock'
+import AiTagSuggestionsInline from './AiTagSuggestionsInline'
+import MetadataCandidateReview from './MetadataCandidateReview'
+import MetadataAnalysisRunningBanner from './MetadataAnalysisRunningBanner'
 import ApprovalHistory from './ApprovalHistory'
 import PendingAssetReviewModal from './PendingAssetReviewModal'
 import PDFViewer from './PDFViewer'
@@ -97,10 +99,144 @@ import CreateCollectionModal from './Collections/CreateCollectionModal' // C9.1
 import { useSelectionOptional } from '../contexts/SelectionContext'
 import { useDeliverablesThumbnailMode } from '../contexts/DeliverablesThumbnailModeContext'
 import ExecutionTripleCompareModal from './ExecutionTripleCompareModal'
+import AssetDetailPanel from './AssetDetailPanel'
 import {
     getPreferredExecutionThumbnailTier,
     setPreferredExecutionThumbnailTier,
 } from '../utils/executionPreferredThumbnailStorage'
+
+/**
+ * Best delivery URL for a pipeline mode (large → medium → thumb). No fallback to original/preferred.
+ * @param {'enhanced'|'presentation'} mode
+ */
+function pickModeOnlyPreviewUrl(asset, mode) {
+    if (!asset) {
+        return null
+    }
+    for (const style of ['large', 'medium', 'thumb']) {
+        const u = getThumbnailUrlModeOnly(asset, style, mode)
+        if (u) {
+            return u
+        }
+    }
+    return null
+}
+
+/** Download a single presigned preview image; blob + `download` filename, or new tab if CORS blocks fetch. */
+async function downloadPreviewImageFile(url, filenameBase) {
+    const safeBase = String(filenameBase || 'preview')
+        .replace(/[/\\?%*:|"<>]/g, '-')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, 120)
+    let ext = 'jpg'
+    try {
+        const pathPart = url.split('?')[0]
+        const m = pathPart.match(/\.(webp|jpe?g|png|gif)(?:$|[?#])/i)
+        if (m) {
+            ext = m[1].toLowerCase()
+            if (ext === 'jpeg') {
+                ext = 'jpg'
+            }
+        }
+    } catch {
+        /* noop */
+    }
+    const filename = `${safeBase}.${ext}`
+    try {
+        const res = await fetch(url, { mode: 'cors', credentials: 'omit' })
+        if (!res.ok) {
+            throw new Error('fetch failed')
+        }
+        const blob = await res.blob()
+        const objectUrl = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = objectUrl
+        a.download = filename
+        document.body.appendChild(a)
+        a.click()
+        a.remove()
+        URL.revokeObjectURL(objectUrl)
+    } catch {
+        window.open(url, '_blank', 'noopener,noreferrer')
+    }
+}
+
+/**
+ * Fullscreen lightbox raster preview: resolve URL from pipeline thumbnails (`thumbnail_mode_urls`) with legacy fallbacks.
+ * Parity with drawer tiles for enhanced (enhanced → preferred) and presentation.
+ * @param {'original'|'enhanced'|'presentation'} mode
+ */
+function resolveLightboxRasterPreviewUrl(asset, mode) {
+    if (!asset?.id) {
+        return ''
+    }
+    const styleOrder = ['large', 'medium', 'thumb']
+
+    if (mode === 'original') {
+        for (const s of styleOrder) {
+            const u = getThumbnailUrl(asset, s, 'original')
+            if (u) {
+                return u
+            }
+        }
+        return ''
+    }
+
+    if (mode === 'enhanced') {
+        const pickMode = (m) => {
+            for (const s of styleOrder) {
+                const u = getThumbnailUrlModeOnly(asset, s, m)
+                if (u) {
+                    return u
+                }
+            }
+            return null
+        }
+        const enhanced = pickMode('enhanced')
+        if (enhanced) {
+            return enhanced
+        }
+        const preferred = pickMode('preferred')
+        if (preferred) {
+            return preferred
+        }
+        for (const s of styleOrder) {
+            const gEnh = getThumbnailUrl(asset, s, 'enhanced')
+            const gOrig = getThumbnailUrl(asset, s, 'original')
+            if (gEnh && gOrig && gEnh !== gOrig) {
+                return gEnh
+            }
+        }
+        return ''
+    }
+
+    if (mode === 'presentation') {
+        const pickMode = (m) => {
+            for (const s of styleOrder) {
+                const u = getThumbnailUrlModeOnly(asset, s, m)
+                if (u) {
+                    return u
+                }
+            }
+            return null
+        }
+        const pres = pickMode('presentation')
+        if (pres) {
+            return pres
+        }
+        for (const s of styleOrder) {
+            const gPres = getThumbnailUrl(asset, s, 'presentation')
+            const gOrig = getThumbnailUrl(asset, s, 'original')
+            if (gPres && gOrig && gPres !== gOrig) {
+                return gPres
+            }
+        }
+        return ''
+    }
+
+    return ''
+}
 
 /** Brand reference CTA thresholds: quality rating must be > this (i.e. 4–5 on 1–5 scale), or starred, or engagement. */
 const BRAND_REFERENCE_PROMPT_MIN_QUALITY_EXCLUSIVE = 3
@@ -180,7 +316,7 @@ function LightboxPreviewPlaceholder({ asset }) {
                 </div>
                 <p className="text-lg font-semibold tracking-tight text-white/95">{title}</p>
                 <p className="mt-3 text-sm leading-relaxed text-white/50">
-                    Preview isn&apos;t available for this file in the browser. Use <span className="text-white/70">Details</span> for metadata and actions, or download the original from the asset panel.
+                    Preview isn&apos;t available for this file in the browser. Close fullscreen and use the asset panel for details, or download the original.
                 </p>
             </div>
         </div>
@@ -200,11 +336,14 @@ export default function AssetDrawer({
     selectionAssetType = 'asset',
     /** When true (e.g. grid double-click), open the fullscreen zoom modal once the drawer mounts */
     initialZoomOpen = false,
+    /** If set with initialZoomOpen (e.g. search matched a video moment), seek the lightbox video to this time */
+    initialVideoSeekSeconds = null,
     onInitialZoomConsumed = null,
     /** Collection invite / external guest: skip internal-only fetches (activity, incidents, metrics, collections admin APIs). */
     externalCollectionGuest = false,
 }) {
     const pageProps = usePage().props
+    const videoAiShowCost = pageProps.video_ai?.show_cost_in_drawer !== false
     const { auth, download_policy_disable_single_asset: policyDisableSingleAsset = false } = pageProps
     const damUploadAccept = pageProps.dam_file_types?.upload_accept || getUploadAcceptAttribute()
     const categories = pageProps.categories ?? []
@@ -218,10 +357,10 @@ export default function AssetDrawer({
     const [showZoomModal, setShowZoomModal] = useState(false)
     /** Google Fonts virtual row: stylesheet loaded for specimen preview in drawer/lightbox */
     const [virtualGoogleFontReady, setVirtualGoogleFontReady] = useState(false)
-    /** When true, lightbox shows AssetDetailPanel in the right column (or below on small screens) */
-    const [showLightboxDetails, setShowLightboxDetails] = useState(false)
     /** Lightbox raster preview failed or URL empty — show themed placeholder instead of broken <img> */
     const [lightboxImageError, setLightboxImageError] = useState(false)
+    /** Lightbox raster: original vs enhanced vs presentation (thumbnail pipeline modes) */
+    const [lightboxRasterMode, setLightboxRasterMode] = useState('original')
     const [activityEvents, setActivityEvents] = useState([])
     const [activityLoading, setActivityLoading] = useState(false)
     // Track layout settling to prevent preview jump during grid reflow (grid reserves drawer width in one frame)
@@ -234,6 +373,8 @@ export default function AssetDrawer({
     /** When true, next enhanced generate draws print-layout bbox (red) on source before compositing — visible in saved thumbnails */
     const [enhancedDebugBboxOverlay, setEnhancedDebugBboxOverlay] = useState(false)
     const [presentationPreviewLoading, setPresentationPreviewLoading] = useState(false)
+    /** Preview options: enhanced / presentation one-file download */
+    const [previewModeDownloadLoading, setPreviewModeDownloadLoading] = useState(null)
     /** Deliverables: collapsible “Preview options” (enhanced controls) */
     const [previewOptionsExpanded, setPreviewOptionsExpanded] = useState(false)
     const [executionTripleCompareOpen, setExecutionTripleCompareOpen] = useState(false)
@@ -246,6 +387,12 @@ export default function AssetDrawer({
     const [generateError, setGenerateError] = useState(null)
     const [generateTimeoutId, setGenerateTimeoutId] = useState(null)
     const [reprocessLoading, setReprocessLoading] = useState(false)
+    const [adminRemovePreviewLoading, setAdminRemovePreviewLoading] = useState(false)
+    const [regeneratingAiAnalysisDrawer, setRegeneratingAiAnalysisDrawer] = useState(false)
+    const [regeneratingSystemMetadataDrawer, setRegeneratingSystemMetadataDrawer] = useState(false)
+    const [regeneratingThumbnailsStylesDrawer, setRegeneratingThumbnailsStylesDrawer] = useState(false)
+    const [regeneratingVideoPreviewDrawer, setRegeneratingVideoPreviewDrawer] = useState(false)
+    const [videoInsightsRetryLoading, setVideoInsightsRetryLoading] = useState(false)
     const [extractAllLoading, setExtractAllLoading] = useState(false)
     const [extractAllError, setExtractAllError] = useState(null)
     const [extractAllBatchId, setExtractAllBatchId] = useState(null)
@@ -265,6 +412,7 @@ export default function AssetDrawer({
     
     // Phase J.3.1: Replace file state
     const [showReplaceFileModal, setShowReplaceFileModal] = useState(false)
+    const [manageAssetModalOpen, setManageAssetModalOpen] = useState(false)
     
     // Asset delete (soft delete) confirmation state
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
@@ -295,6 +443,8 @@ export default function AssetDrawer({
     // Metadata approval state
     const [pendingMetadataCount, setPendingMetadataCount] = useState(0)
     const [approvingAllMetadata, setApprovingAllMetadata] = useState(false)
+    /** Synced from AssetMetadataDisplay — shown in Revue instead of above the metadata list when Revue is visible. */
+    const [drawerPipelineBanner, setDrawerPipelineBanner] = useState(null)
 
     // C5: Collections (In X collections + Add to Collection)
     const [assetCollections, setAssetCollections] = useState([])
@@ -317,8 +467,6 @@ export default function AssetDrawer({
     // Toast notification state
     const [toastMessage, setToastMessage] = useState(null)
     const [brandIntelActivityBanner, setBrandIntelActivityBanner] = useState(null)
-    /** Dev-only: pipeline debug snapshot lifted from AssetMetadataDisplay (single fetch). */
-    const [pipelineDevSnap, setPipelineDevSnap] = useState(null)
     const [toastType, setToastType] = useState('success')
     const [toastTicketUrl, setToastTicketUrl] = useState(null)
     
@@ -677,6 +825,90 @@ export default function AssetDrawer({
     // Asset may be temporarily undefined while localAssets array is being updated
     const displayAsset = drawerAsset || asset || null
 
+    const handleDrawerCollectionsChange = useCallback(
+        async (newCollectionIds) => {
+            if (!displayAsset?.id || addToCollectionLoading) {
+                return
+            }
+            setAddToCollectionLoading(true)
+            try {
+                await window.axios.put(
+                    `/app/assets/${displayAsset.id}/collections`,
+                    { collection_ids: newCollectionIds },
+                    { headers: { Accept: 'application/json' } },
+                )
+                const res = await window.axios.get(`/app/assets/${displayAsset.id}/collections`, {
+                    headers: { Accept: 'application/json' },
+                })
+                setAssetCollections((res.data?.collections ?? []).filter(Boolean))
+                const added = newCollectionIds.filter(
+                    (id) => !(assetCollections || []).filter(Boolean).some((c) => c?.id === id),
+                )
+                const removed = (assetCollections || [])
+                    .filter(Boolean)
+                    .filter((c) => !newCollectionIds.includes(c?.id))
+                    .map((c) => c?.id)
+                    .filter(Boolean)
+                if (collectionContext) {
+                    added.forEach((id) => collectionContext.onAssetAddedToCollection?.(displayAsset.id, id))
+                    removed.forEach((id) =>
+                        collectionContext.onAssetRemovedFromCollection?.(displayAsset.id, id),
+                    )
+                }
+                setToastMessage('Collections updated')
+                setToastType('success')
+                setTimeout(() => setToastMessage(null), 3000)
+            } catch (err) {
+                const errorMsg =
+                    err.response?.data?.message ||
+                    err.response?.data?.errors?.collection_ids?.[0] ||
+                    'Failed to update collections'
+                setToastMessage(errorMsg)
+                setToastType('error')
+                try {
+                    const res = await window.axios.get(`/app/assets/${displayAsset.id}/collections`, {
+                        headers: { Accept: 'application/json' },
+                    })
+                    setAssetCollections((res.data?.collections ?? []).filter(Boolean))
+                } catch {
+                    /* noop */
+                }
+            } finally {
+                setAddToCollectionLoading(false)
+            }
+        },
+        [displayAsset?.id, addToCollectionLoading, assetCollections, collectionContext],
+    )
+
+    const [processingGuardStatus, setProcessingGuardStatus] = useState(null)
+
+    useEffect(() => {
+        if (!displayAsset?.id || externalCollectionGuest) {
+            setProcessingGuardStatus(null)
+            return undefined
+        }
+        let cancelled = false
+        window.axios
+            .get(`/app/assets/${displayAsset.id}/processing-status`)
+            .then((res) => {
+                if (!cancelled) setProcessingGuardStatus(res.data)
+            })
+            .catch(() => {
+                if (!cancelled) setProcessingGuardStatus(null)
+            })
+        return () => {
+            cancelled = true
+        }
+    }, [displayAsset?.id, externalCollectionGuest])
+
+    const refetchProcessingGuardStatus = useCallback(() => {
+        if (!displayAsset?.id || externalCollectionGuest) return
+        window.axios
+            .get(`/app/assets/${displayAsset.id}/processing-status`)
+            .then((r) => setProcessingGuardStatus(r.data))
+            .catch(() => {})
+    }, [displayAsset?.id, externalCollectionGuest])
+
     useEffect(() => {
         setExecutionTripleCompareOpen(false)
     }, [displayAsset?.id])
@@ -729,7 +961,51 @@ export default function AssetDrawer({
         return categories.find((c) => String(c.id) === String(cid)) ?? null
     }, [categories, displayAsset])
 
-    const ebiEnabledForAsset = drawerCategory?.ebi_enabled === true
+    // Deliverables/Executions: sidebar categories from DeliverableController now include ebi_enabled; also trust asset payload.
+    const ebiEnabledForAsset =
+        drawerCategory?.ebi_enabled === true || displayAsset?.category?.ebi_enabled === true
+
+    const revueSuggestionsEligible =
+        can('metadata.suggestions.view') ||
+        can('metadata.suggestions.apply') ||
+        (isOwnUpload && can('metadata.edit_post_upload'))
+    /** Library + executions: show Revue when EBI is on for the category, or when the user can view/apply metadata suggestions (not execution-only). */
+    const showRevueCollapsible = ebiEnabledForAsset || revueSuggestionsEligible
+
+    const handleAnalysisPipelineState = useCallback((s) => {
+        setDrawerPipelineBanner(s)
+    }, [])
+
+    useEffect(() => {
+        setDrawerPipelineBanner(null)
+    }, [displayAsset?.id])
+
+    const suppressAnalysisRunningBannerInMetadata = useMemo(
+        () =>
+            Boolean(
+                showRevueCollapsible &&
+                    displayAsset?.id &&
+                    !isVirtualGoogleFont &&
+                    !externalCollectionGuest,
+            ) ||
+            (assetIncidents?.length > 0) ||
+            (displayAsset?.analysis_status ?? '') === 'promotion_failed',
+        [
+            showRevueCollapsible,
+            displayAsset?.id,
+            isVirtualGoogleFont,
+            externalCollectionGuest,
+            assetIncidents?.length,
+            displayAsset?.analysis_status,
+        ],
+    )
+
+    const pipelineBannerForRevue =
+        showRevueCollapsible &&
+        !externalCollectionGuest &&
+        !isVirtualGoogleFont &&
+        assetIncidents?.length === 0 &&
+        (displayAsset?.analysis_status ?? '') !== 'promotion_failed'
 
     /** Show “Use as a brand reference” only for strong signals (curation or usage), or when already promoted */
     const showBrandReferenceCard = useMemo(() => {
@@ -766,6 +1042,17 @@ export default function AssetDrawer({
         viewCount,
     ])
 
+    /** Banner + “Use as a brand reference” only — Review / AI review lives in its own section above Metadata */
+    const showBrandIntelDrawerStrip = useMemo(() => {
+        if (!displayAsset?.id || isVirtualGoogleFont) {
+            return false
+        }
+        return Boolean(
+            brandIntelActivityBanner ||
+                (can('brand_settings.manage') && showBrandReferenceCard),
+        )
+    }, [displayAsset?.id, isVirtualGoogleFont, brandIntelActivityBanner, showBrandReferenceCard, can])
+
     const brandDebugPreviewUrl = useMemo(
         () =>
             displayAsset?.final_thumbnail_url ||
@@ -799,10 +1086,6 @@ export default function AssetDrawer({
         setBrandIntelActivityBanner(null)
     }, [displayAsset?.id])
 
-    useEffect(() => {
-        setPipelineDevSnap(null)
-    }, [displayAsset?.id])
-
     // Reliability Timeline: fetch full incident history (resolved + unresolved) to decide if section is shown
     useEffect(() => {
         if (externalCollectionGuest || !displayAsset?.id || displayAsset.is_virtual_google_font) {
@@ -828,6 +1111,33 @@ export default function AssetDrawer({
         const ext = filename.split('.').pop()?.toLowerCase() || ''
         return mimeType.startsWith('video/') || videoExtensions.includes(ext)
     }, [displayAsset])
+
+    const bulkActionUrl =
+        typeof route !== 'undefined' ? route('assets.bulk-action') : '/app/assets/bulk-action'
+
+    const handleRetryVideoInsights = useCallback(async () => {
+        const id = displayAsset?.id
+        if (!id || videoInsightsRetryLoading || typeof window === 'undefined' || !window.axios) return
+        setVideoInsightsRetryLoading(true)
+        try {
+            await window.axios.post(bulkActionUrl, {
+                asset_ids: [id],
+                action: 'GENERATE_VIDEO_INSIGHTS',
+                payload: {},
+            })
+            if (window.toast) {
+                window.toast('Video analysis queued.', 'success')
+            }
+            router.reload({ only: ['assets'], preserveState: true, preserveScroll: true })
+        } catch (e) {
+            const msg = e.response?.data?.message || e.message || 'Could not retry analysis.'
+            if (window.toast) {
+                window.toast(msg, 'error')
+            }
+        } finally {
+            setVideoInsightsRetryLoading(false)
+        }
+    }, [bulkActionUrl, displayAsset?.id, videoInsightsRetryLoading])
 
     const isPdf = useMemo(() => {
         if (!displayAsset) return false
@@ -883,15 +1193,89 @@ export default function AssetDrawer({
     // Phase V-1: Video view URL state (for gallery view)
     const [videoViewUrl, setVideoViewUrl] = useState(null)
     const [videoViewUrlLoading, setVideoViewUrlLoading] = useState(false)
+    /** Seek lightbox to this time (seconds) once the source video is ready */
+    const [pendingLightboxSeekSeconds, setPendingLightboxSeekSeconds] = useState(null)
 
     // Use displayAsset for carousel (with live updates)
     const currentCarouselAsset = imageAssets[carouselIndex] || displayAsset
     const canNavigateLeft = carouselIndex > 0
     const canNavigateRight = carouselIndex < imageAssets.length - 1
 
+    /** Prefer drawer-polled asset when it matches the carousel slide (full `thumbnail_mode_urls`). */
+    const lightboxRasterSourceAsset = useMemo(() => {
+        if (!currentCarouselAsset?.id) {
+            return null
+        }
+        if (displayAsset?.id === currentCarouselAsset.id) {
+            return displayAsset
+        }
+        return currentCarouselAsset
+    }, [currentCarouselAsset, displayAsset])
+
+    const lightboxCarouselIsRasterImage = useMemo(() => {
+        if (!currentCarouselAsset?.id || currentCarouselAsset?.is_virtual_google_font) {
+            return false
+        }
+        const mime = currentCarouselAsset.mime_type || ''
+        const fn = currentCarouselAsset.original_filename || ''
+        const ext = fn.split('.').pop()?.toLowerCase() || ''
+        const videoExtensions = ['mp4', 'mov', 'avi', 'mkv', 'webm', 'm4v']
+        const isVideo = mime.startsWith('video/') || videoExtensions.includes(ext)
+        const isPdf =
+            Boolean(currentCarouselAsset?.is_pdf) || mime === 'application/pdf' || ext === 'pdf'
+        return !isVideo && !isPdf
+    }, [currentCarouselAsset])
+
+    const lightboxRasterDisplayUrl = useMemo(
+        () => resolveLightboxRasterPreviewUrl(lightboxRasterSourceAsset, lightboxRasterMode),
+        [lightboxRasterSourceAsset, lightboxRasterMode],
+    )
+
+    const lightboxRasterEnhancedAvailable = useMemo(
+        () => Boolean(resolveLightboxRasterPreviewUrl(lightboxRasterSourceAsset, 'enhanced')),
+        [lightboxRasterSourceAsset],
+    )
+
+    const lightboxRasterPresentationAvailable = useMemo(
+        () => Boolean(resolveLightboxRasterPreviewUrl(lightboxRasterSourceAsset, 'presentation')),
+        [lightboxRasterSourceAsset],
+    )
+
+    /** Only list preview modes that have a real thumbnail URL (hide Enhanced/Presentation until generated). */
+    const lightboxRasterPreviewOptions = useMemo(() => {
+        if (!lightboxRasterSourceAsset?.id) {
+            return []
+        }
+        const opts = []
+        if (resolveLightboxRasterPreviewUrl(lightboxRasterSourceAsset, 'original')) {
+            opts.push({ id: 'original', label: 'Original' })
+        }
+        if (lightboxRasterEnhancedAvailable) {
+            opts.push({ id: 'enhanced', label: 'Enhanced' })
+        }
+        if (lightboxRasterPresentationAvailable) {
+            opts.push({ id: 'presentation', label: 'Presentation' })
+        }
+        return opts
+    }, [lightboxRasterSourceAsset, lightboxRasterEnhancedAvailable, lightboxRasterPresentationAvailable])
+
     useEffect(() => {
         setLightboxImageError(false)
     }, [currentCarouselAsset?.id, showZoomModal])
+
+    useEffect(() => {
+        const ids = lightboxRasterPreviewOptions.map((o) => o.id)
+        if (ids.length === 0) {
+            return
+        }
+        setLightboxRasterMode((prev) =>
+            ids.includes(prev) ? prev : ids.includes('original') ? 'original' : ids[0],
+        )
+    }, [lightboxRasterPreviewOptions, currentCarouselAsset?.id])
+
+    useEffect(() => {
+        setLightboxImageError(false)
+    }, [lightboxRasterMode, lightboxRasterDisplayUrl])
 
     // Phase V-1: Fetch view URL for video when gallery opens
     // NOTE: Must be after currentCarouselAsset is defined
@@ -989,6 +1373,44 @@ export default function AssetDrawer({
         videoViewUrl,
         videoViewUrlLoading,
         tryPlayLightboxVideo,
+        currentCarouselAsset?.id,
+    ])
+
+    useEffect(() => {
+        if (!showZoomModal) {
+            setPendingLightboxSeekSeconds(null)
+
+            return
+        }
+        if (pendingLightboxSeekSeconds == null) {
+            return
+        }
+        if (videoViewUrlLoading || !videoViewUrl) {
+            return
+        }
+        const el = lightboxVideoRef.current
+        if (!el) {
+            return
+        }
+        const t = pendingLightboxSeekSeconds
+        const apply = () => {
+            try {
+                el.currentTime = Math.max(0, t)
+            } catch (_) {
+                /* ignore */
+            }
+            setPendingLightboxSeekSeconds(null)
+        }
+        if (el.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+            apply()
+        } else {
+            el.addEventListener('loadeddata', apply, { once: true })
+        }
+    }, [
+        showZoomModal,
+        pendingLightboxSeekSeconds,
+        videoViewUrlLoading,
+        videoViewUrl,
         currentCarouselAsset?.id,
     ])
 
@@ -1283,12 +1705,6 @@ export default function AssetDrawer({
         return () => document.removeEventListener('keydown', handleKeyDown)
     }, [showZoomModal, canNavigateLeft, canNavigateRight, isTransitioning])
 
-    useEffect(() => {
-        if (!showZoomModal) {
-            setShowLightboxDetails(false)
-        }
-    }, [showZoomModal])
-
     // Lightbox: lock page scroll; portal renders to document.body (Safari fixes fixed/overflow inside drawer)
     useEffect(() => {
         if (!showZoomModal) return
@@ -1383,6 +1799,31 @@ export default function AssetDrawer({
         !externalCollectionGuest
 
     const canRetryThumbnails = can('assets.retry_thumbnails')
+    const canRegenerateAiMetadata = can('assets.ai_metadata.regenerate')
+    const isTenantOwnerOrAdminForAi = auth?.tenant_role === 'owner' || auth?.tenant_role === 'admin'
+    const canRegenerateAiMetadataForTroubleshooting = canRegenerateAiMetadata || isTenantOwnerOrAdminForAi
+    const canRegenerateThumbnailsAdmin = can('assets.regenerate_thumbnails_admin')
+    const canSiteAdminPipeline = useMemo(() => {
+        const roles = auth?.user?.site_roles
+        if (!Array.isArray(roles)) return false
+        return roles.some((r) => ['site_owner', 'site_admin', 'site_engineering'].includes(r))
+    }, [auth?.user?.site_roles])
+    const guardBlocksFullPipeline = Boolean(processingGuardStatus?.actions?.full_pipeline?.blocked)
+    const guardBlocksThumbnails = Boolean(processingGuardStatus?.actions?.thumbnails?.blocked)
+    const guardBlocksAiMetadata = Boolean(processingGuardStatus?.actions?.ai_metadata?.blocked)
+    const cooldownHintFull = processingGuardStatus?.actions?.full_pipeline?.cooldown_remaining_minutes > 0
+        ? `This action is temporarily unavailable. Try again in ${processingGuardStatus.actions.full_pipeline.cooldown_remaining_minutes} minute(s).`
+        : null
+    const cooldownHintThumb = processingGuardStatus?.actions?.thumbnails?.cooldown_remaining_minutes > 0
+        ? `This action is temporarily unavailable. Try again in ${processingGuardStatus.actions.thumbnails.cooldown_remaining_minutes} minute(s).`
+        : null
+    const cooldownHintAi = processingGuardStatus?.actions?.ai_metadata?.cooldown_remaining_minutes > 0
+        ? `This action is temporarily unavailable. Try again in ${processingGuardStatus.actions.ai_metadata.cooldown_remaining_minutes} minute(s).`
+        : null
+    const cooldownMinutesFull = processingGuardStatus?.actions?.full_pipeline?.cooldown_remaining_minutes ?? 0
+    const cooldownMinutesThumb = processingGuardStatus?.actions?.thumbnails?.cooldown_remaining_minutes ?? 0
+    const cooldownMinutesAi = processingGuardStatus?.actions?.ai_metadata?.cooldown_remaining_minutes ?? 0
+    const isTenantAdminForProcessing = canRegenerateAiMetadata || isTenantOwnerOrAdminForAi
     const canOfferEnhancedPreviewGenerate = useMemo(
         () => canRetryThumbnails && showExecutionPreviewChrome,
         [canRetryThumbnails, showExecutionPreviewChrome],
@@ -1567,6 +2008,49 @@ export default function AssetDrawer({
         return null
     }, [displayAsset, displayAsset?.id, showExecutionPreviewChrome, executionDrawerThumbStyle])
 
+    const executionDrawerEnhancedDownloadUrl = useMemo(() => {
+        if (!displayAsset?.id || !showExecutionPreviewChrome) {
+            return null
+        }
+        return pickModeOnlyPreviewUrl(displayAsset, 'enhanced')
+    }, [displayAsset, displayAsset?.id, showExecutionPreviewChrome])
+
+    const executionDrawerPresentationDownloadUrl = useMemo(() => {
+        if (!displayAsset?.id || !showExecutionPreviewChrome) {
+            return null
+        }
+        return pickModeOnlyPreviewUrl(displayAsset, 'presentation')
+    }, [displayAsset, displayAsset?.id, showExecutionPreviewChrome])
+
+    const handleDownloadPreviewMode = useCallback(
+        async (mode) => {
+            if (!displayAsset?.id) {
+                return
+            }
+            const url =
+                mode === 'enhanced' ? executionDrawerEnhancedDownloadUrl : executionDrawerPresentationDownloadUrl
+            if (!url) {
+                setToastMessage(
+                    mode === 'enhanced'
+                        ? 'No enhanced preview file available yet.'
+                        : 'No presentation preview file available yet.',
+                )
+                setToastType('error')
+                setTimeout(() => setToastMessage(null), 4000)
+                return
+            }
+            const slug = mode === 'enhanced' ? 'enhanced-preview' : 'presentation-preview'
+            const base = `${displayAsset.title || displayAsset.original_filename || 'asset'}-${slug}`
+            setPreviewModeDownloadLoading(mode)
+            try {
+                await downloadPreviewImageFile(url, base)
+            } finally {
+                setPreviewModeDownloadLoading(null)
+            }
+        },
+        [displayAsset, executionDrawerEnhancedDownloadUrl, executionDrawerPresentationDownloadUrl],
+    )
+
     const selectExecutionPreviewTier = useCallback(
         (tier) => {
             if (tier === 'original') {
@@ -1663,6 +2147,7 @@ export default function AssetDrawer({
     }, [displayAsset])
 
     // Grid double-click: jump straight to fullscreen zoom (same modal as "Click to zoom" in drawer)
+    // Search moment match: same path + seek once the /view URL is ready (pendingLightboxSeekSeconds effect)
     useEffect(() => {
         if (!initialZoomOpen || !displayAsset?.id) return
         if (initialZoomAppliedRef.current) return
@@ -1677,9 +2162,24 @@ export default function AssetDrawer({
             setCarouselIndex(idx)
         }
         setShowZoomModal(true)
-        setShowLightboxDetails(false)
+        if (
+            typeof initialVideoSeekSeconds === 'number' &&
+            !Number.isNaN(initialVideoSeekSeconds) &&
+            initialVideoSeekSeconds >= 0
+        ) {
+            setPendingLightboxSeekSeconds(initialVideoSeekSeconds)
+        }
         onInitialZoomConsumed?.()
-    }, [initialZoomOpen, displayAsset?.id, hasThumbnailSupport, isVideo, isVirtualGoogleFont, imageAssets, onInitialZoomConsumed])
+    }, [
+        initialZoomOpen,
+        displayAsset?.id,
+        hasThumbnailSupport,
+        isVideo,
+        isVirtualGoogleFont,
+        imageAssets,
+        onInitialZoomConsumed,
+        initialVideoSeekSeconds,
+    ])
 
     // Phase 3.1: Derive stable thumbnail version signal
     // This ensures ThumbnailPreview re-evaluates after live polling updates
@@ -1713,6 +2213,9 @@ export default function AssetDrawer({
         const s = String(displayAsset?.analysis_status ?? '').toLowerCase()
         return s === 'uploading' || s === 'generating_thumbnails'
     }, [displayAsset?.analysis_status])
+
+    /** Disables processing actions while the asset is actively running server-side pipeline work */
+    const isProcessingDrawerBusy = thumbnailStatus === 'processing' || isAssetAnalysisPipelineRunning
 
     // Status badge uses Asset.status (visibility only: VISIBLE, HIDDEN, FAILED)
     // If status is VISIBLE, asset was uploaded correctly (not processing)
@@ -2045,6 +2548,113 @@ export default function AssetDrawer({
         return supportsThumbnail(mimeType, extension)
     }, [displayAsset, thumbnailStatus, canRetryThumbnails, generateLoading])
 
+    const canRegeneratePreviewInProcessingSection = useMemo(() => {
+        if (!displayAsset || !canRetryThumbnails) return false
+        if (canGenerateThumbnail) return true
+        if (
+            canRegenerateThumbnailsAdmin &&
+            supportsThumbnail(
+                (displayAsset.mime_type || '').toLowerCase(),
+                displayAsset.file_extension || displayAsset.original_filename?.split?.('.')?.pop() || '',
+            )
+        ) {
+            return true
+        }
+        return false
+    }, [displayAsset, canGenerateThumbnail, canRegenerateThumbnailsAdmin, canRetryThumbnails])
+
+    const showDrawerYourProcessingActions = canRegenerateAiMetadataForTroubleshooting
+
+    const showProcessingAutomationSection =
+        !externalCollectionGuest &&
+        !displayAsset?.deleted_at &&
+        (showDrawerYourProcessingActions || isTenantAdminForProcessing || canSiteAdminPipeline)
+
+    const thumbnailStatusForPanel = String(
+        processingGuardStatus?.thumbnail_status ?? thumbnailStatus ?? '—',
+    )
+    const analysisStatusForPanel = String(
+        processingGuardStatus?.analysis_status ?? displayAsset?.analysis_status ?? '—',
+    )
+
+    const processingStatusSummaryEl = useMemo(() => {
+        const statusWord = (raw) => {
+            const x = String(raw || '').toLowerCase()
+            let label = '—'
+            let cls = 'text-gray-500'
+            if (x === 'completed' || x === 'complete') {
+                label = 'Complete'
+                cls = 'text-green-600'
+            } else if (x === 'processing' || x === 'queued') {
+                label = 'Processing'
+                cls = 'text-blue-600'
+            } else if (x === 'failed') {
+                label = 'Failed'
+                cls = 'text-red-600'
+            } else if (raw && String(raw).trim() !== '' && String(raw) !== '—') {
+                label = String(raw)
+            }
+            return <span className={cls}>{label}</span>
+        }
+        return (
+            <>
+                <span className="text-gray-600">Previews: </span>
+                {statusWord(thumbnailStatusForPanel)}
+                <span className="text-gray-400"> • </span>
+                <span className="text-gray-600">AI: </span>
+                {statusWord(analysisStatusForPanel)}
+            </>
+        )
+    }, [thumbnailStatusForPanel, analysisStatusForPanel])
+
+    const aiPipelineCompleteForDrawer = useMemo(() => {
+        const x = String(analysisStatusForPanel || '').toLowerCase()
+        return x === 'complete' || x === 'completed'
+    }, [analysisStatusForPanel])
+
+    const showPreviewContentSection = useMemo(
+        () =>
+            !externalCollectionGuest &&
+            !displayAsset?.deleted_at &&
+            (canRegeneratePreviewInProcessingSection ||
+                isPdf ||
+                isVideo ||
+                showExecutionPreviewChrome),
+        [
+            externalCollectionGuest,
+            displayAsset?.deleted_at,
+            canRegeneratePreviewInProcessingSection,
+            isPdf,
+            isVideo,
+            showExecutionPreviewChrome,
+        ],
+    )
+
+    const processingDrawerLastRuns = useMemo(
+        () => ({
+            ai_metadata: processingGuardStatus?.actions?.ai_metadata?.last_run_at ?? null,
+            thumbnails: processingGuardStatus?.actions?.thumbnails?.last_run_at ?? null,
+            system_metadata: null,
+            video_preview: null,
+            full_pipeline: processingGuardStatus?.actions?.full_pipeline?.last_run_at ?? null,
+            remove_preview: null,
+        }),
+        [processingGuardStatus],
+    )
+
+    const drawerLastRunLine = useCallback(
+        (key) => formatProcessingLastRunLine(processingDrawerLastRuns[key], formatIsoDateTimeLocal),
+        [processingDrawerLastRuns],
+    )
+
+    const lastRunFooter = useCallback(
+        (key) => {
+            const t = drawerLastRunLine(key)
+            return t ? <div className="text-[11px] text-gray-400">{t}</div> : false
+        },
+        [drawerLastRunLine],
+    )
+
     const extForThumbnailUtils = useMemo(() => {
         const raw = (displayAsset?.file_extension || displayAsset?.original_filename?.split?.('.')?.pop() || '')
             .toLowerCase()
@@ -2086,6 +2696,64 @@ export default function AssetDrawer({
         thumbnailsFailed,
     ])
 
+    /**
+     * Quick View accordion: Metadata stays collapsed by default; open Preview & AI and Processing & Automation
+     * when previews/AI/video/execution need attention (matches “expand when there are processing issues”).
+     */
+    const drawerExpandPreviewOrProcessingSections = useMemo(() => {
+        const ts = String(thumbnailStatusForPanel || '').toLowerCase()
+        const thumbNeedsAttention =
+            ts === 'pending' ||
+            ts === 'processing' ||
+            ts === 'failed' ||
+            ts === 'queued' ||
+            (ts === 'skipped' && Boolean(canRegeneratePreviewInProcessingSection))
+
+        const analysisNeedsAttention = !aiPipelineCompleteForDrawer
+
+        const videoNeedsAttention =
+            isVideo &&
+            ['queued', 'processing', 'failed'].includes(
+                String(displayAsset?.metadata?.ai_video_status || ''),
+            )
+
+        const pipelineNeedsAttention =
+            isProcessingDrawerBusy ||
+            isAssetAnalysisPipelineRunning ||
+            Boolean(generateError) ||
+            showPreviewMissingInfo
+
+        const executionNeedsAttention =
+            showExecutionPreviewChrome &&
+            (preferredPipelineStatus === 'processing' ||
+                enhancedPipelineStatus === 'processing' ||
+                presentationPipelineStatus === 'processing' ||
+                enhancedPipelineStatus === 'failed' ||
+                presentationPipelineStatus === 'failed')
+
+        return (
+            thumbNeedsAttention ||
+            analysisNeedsAttention ||
+            videoNeedsAttention ||
+            pipelineNeedsAttention ||
+            executionNeedsAttention
+        )
+    }, [
+        thumbnailStatusForPanel,
+        canRegeneratePreviewInProcessingSection,
+        aiPipelineCompleteForDrawer,
+        isVideo,
+        displayAsset?.metadata?.ai_video_status,
+        isProcessingDrawerBusy,
+        isAssetAnalysisPipelineRunning,
+        generateError,
+        showPreviewMissingInfo,
+        showExecutionPreviewChrome,
+        preferredPipelineStatus,
+        enhancedPipelineStatus,
+        presentationPipelineStatus,
+    ])
+
     // Handle manual thumbnail generation (for previously skipped assets)
     const handleGenerateThumbnail = async () => {
         if (!displayAsset?.id || !canGenerateThumbnail) return
@@ -2103,6 +2771,13 @@ export default function AssetDrawer({
             const response = await window.axios.post(`/app/assets/${displayAsset.id}/thumbnails/generate`)
             
             if (response.data.success) {
+                setToastMessage('Refresh previews started. This may take a few minutes.')
+                setToastType('success')
+                setTimeout(() => setToastMessage(null), 4000)
+                window.axios
+                    .get(`/app/assets/${displayAsset.id}/processing-status`)
+                    .then((r) => setProcessingGuardStatus(r.data))
+                    .catch(() => {})
                 // Success - the drawer polling will detect the status change automatically
                 // No need to manually update - respects non-realtime design
                 // Button will be hidden because status will change to 'processing' or 'pending'
@@ -2133,6 +2808,8 @@ export default function AssetDrawer({
                 
                 if (status === 409) {
                     setGenerateError('Thumbnail generation is already in progress')
+                } else if (status === 429) {
+                    setGenerateError(errorMessage)
                 } else if (status === 422) {
                     setGenerateError(errorMessage)
                 } else if (status === 403) {
@@ -2151,22 +2828,144 @@ export default function AssetDrawer({
     }
 
     // Reprocess Asset — full pipeline (same as upload). Use when Regenerate Preview doesn't work.
-    const handleReprocessAsset = async () => {
-        if (!displayAsset?.id || !canRetryThumbnails) return
+    const handleReprocessAsset = async (assetIdOverride) => {
+        const targetId =
+            assetIdOverride != null && typeof assetIdOverride !== 'object'
+                ? assetIdOverride
+                : displayAsset?.id
+        if (!targetId || !canRetryThumbnails) return
         setReprocessLoading(true)
         try {
-            await window.axios.post(`/app/assets/${displayAsset.id}/reprocess`)
-            setToastMessage('Asset reprocessing started. Ensure queue worker is running.')
+            await window.axios.post(`/app/assets/${targetId}/reprocess`)
+            setToastMessage('Reprocess entire asset started. This may take several minutes.')
             setToastType('success')
             setTimeout(() => setToastMessage(null), 5000)
             if (onAssetUpdate) onAssetUpdate()
             router.reload({ only: ['assets'] })
+            window.axios.get(`/app/assets/${targetId}/processing-status`).then((r) => setProcessingGuardStatus(r.data)).catch(() => {})
         } catch (e) {
-            setToastMessage(e.response?.data?.message || 'Failed to reprocess asset')
+            setToastMessage(
+                e.response?.data?.message || e.response?.data?.error || 'Failed to reprocess asset'
+            )
             setToastType('error')
             setTimeout(() => setToastMessage(null), 5000)
         } finally {
             setReprocessLoading(false)
+        }
+    }
+
+    const handleAdminRemovePreview = async () => {
+        if (!displayAsset?.id || !canSiteAdminPipeline) return
+        setAdminRemovePreviewLoading(true)
+        try {
+            await window.axios.delete(`/app/assets/${displayAsset.id}/thumbnails/preview`)
+            setToastMessage('Preview removal queued.')
+            setToastType('success')
+            setTimeout(() => setToastMessage(null), 4000)
+            router.reload({ only: ['assets'], preserveState: true, preserveScroll: true })
+        } catch (e) {
+            setToastMessage(e.response?.data?.message || e.response?.data?.error || 'Failed to remove preview')
+            setToastType('error')
+            setTimeout(() => setToastMessage(null), 5000)
+        } finally {
+            setAdminRemovePreviewLoading(false)
+        }
+    }
+
+    const closeLightboxAndFocusDrawer = useCallback(() => {
+        setShowZoomModal(false)
+        requestAnimationFrame(() => {
+            try {
+                drawerRef.current?.focus({ preventScroll: true })
+            } catch {
+                drawerRef.current?.focus()
+            }
+        })
+    }, [])
+
+    const lightboxDetailOnToast = useCallback((message, type = 'success') => {
+        if (message == null || message === '') {
+            setToastMessage(null)
+            return
+        }
+        setToastMessage(message)
+        setToastType(type === 'error' ? 'error' : type === 'warning' ? 'warning' : 'success')
+        setTimeout(() => setToastMessage(null), type === 'error' ? 5000 : 3500)
+    }, [])
+
+    const handleDrawerRegenerateAiAnalysis = async () => {
+        if (!displayAsset?.id || !canRegenerateAiMetadataForTroubleshooting) return
+        setRegeneratingAiAnalysisDrawer(true)
+        try {
+            const metaRes = await window.axios.post(`/app/assets/${displayAsset.id}/ai-metadata/regenerate`)
+            if (!metaRes.data?.success) return
+            let taggingWarned = false
+            try {
+                await window.axios.post(`/app/assets/${displayAsset.id}/ai-tagging/regenerate`)
+            } catch (err) {
+                taggingWarned = true
+                const msg = err.response?.data?.message || err.message || 'AI tagging regenerate failed'
+                setToastMessage(`Metadata queued; AI tagging step: ${msg}`)
+                setToastType('warning')
+                setTimeout(() => setToastMessage(null), 6000)
+            }
+            if (!taggingWarned) {
+                setToastMessage('Improve AI tags started. This may take a few minutes.')
+                setToastType('success')
+                setTimeout(() => setToastMessage(null), 5000)
+            }
+            refetchProcessingGuardStatus()
+            router.reload({ only: ['assets'], preserveState: true, preserveScroll: true })
+        } finally {
+            setRegeneratingAiAnalysisDrawer(false)
+        }
+    }
+
+    const handleDrawerRegenerateSystemMetadata = async () => {
+        if (!displayAsset?.id || !canRegenerateAiMetadataForTroubleshooting) return
+        setRegeneratingSystemMetadataDrawer(true)
+        try {
+            const res = await window.axios.post(`/app/assets/${displayAsset.id}/system-metadata/regenerate`)
+            if (res.data?.success) {
+                setToastMessage('Metadata extraction finished. Previews and filters may update shortly.')
+                setToastType('success')
+                setTimeout(() => setToastMessage(null), 5000)
+                refetchProcessingGuardStatus()
+                router.reload({ only: ['assets'], preserveState: true, preserveScroll: true })
+            }
+        } finally {
+            setRegeneratingSystemMetadataDrawer(false)
+        }
+    }
+
+    const handleDrawerRegenerateThumbnailsStyles = async () => {
+        if (!displayAsset?.id || !canRegenerateThumbnailsAdmin) return
+        setRegeneratingThumbnailsStylesDrawer(true)
+        try {
+            await window.axios.post(`/app/assets/${displayAsset.id}/thumbnails/regenerate-styles`, {
+                styles: ['thumb', 'medium', 'large'],
+                force_imagick: false,
+            })
+            setToastMessage('Refresh previews started. This may take a few minutes.')
+            setToastType('success')
+            setTimeout(() => setToastMessage(null), 5000)
+            router.reload({ only: ['assets'], preserveState: true, preserveScroll: true })
+        } finally {
+            setRegeneratingThumbnailsStylesDrawer(false)
+        }
+    }
+
+    const handleDrawerRegenerateVideoPreview = async () => {
+        if (!displayAsset?.id || !isVideo) return
+        setRegeneratingVideoPreviewDrawer(true)
+        try {
+            await window.axios.post(`/app/assets/${displayAsset.id}/thumbnails/regenerate-video-preview`)
+            setToastMessage('Generate video previews started. This may take a few minutes.')
+            setToastType('success')
+            setTimeout(() => setToastMessage(null), 5000)
+            router.reload({ preserveState: true, preserveScroll: true })
+        } finally {
+            setRegeneratingVideoPreviewDrawer(false)
         }
     }
 
@@ -2452,6 +3251,7 @@ export default function AssetDrawer({
     return (
         <div
             ref={drawerRef}
+            tabIndex={-1}
             className="fixed inset-y-0 right-0 z-[130] w-full overflow-y-auto bg-white shadow-xl md:w-auto pb-[calc(env(safe-area-inset-bottom)+5rem)] md:pb-6" /* above AppNav dropdowns z-[100] / agency z-[60] / nav z-50 */
             style={{
                 maxWidth: '480px',
@@ -2463,10 +3263,12 @@ export default function AssetDrawer({
             {/* Header */}
             <div className="sticky top-0 z-10 bg-white border-b border-gray-200">
                 <div className="px-6 py-4">
-                    <div className="flex items-center justify-between">
-                        <h2 id="drawer-title" className="text-lg font-semibold text-gray-900 truncate pr-4">
-                            {displayAsset.title || displayAsset.original_filename || 'Asset Details'}
-                        </h2>
+                    <div className="flex items-center justify-between gap-2">
+                        <div className="min-w-0 flex-1">
+                            <h2 id="drawer-title" className="text-lg font-semibold text-gray-900 truncate pr-2">
+                                {displayAsset.title || displayAsset.original_filename || 'Asset Details'}
+                            </h2>
+                        </div>
                         <button
                             ref={closeButtonRef}
                             type="button"
@@ -2815,7 +3617,6 @@ export default function AssetDrawer({
                                     onClick={() => {
                                         // Open gallery view (zoom modal) for videos
                                         setShowZoomModal(true)
-                                        setShowLightboxDetails(false)
                                     }}
                                     onMouseEnter={() => !isMobile && setIsHoveringVideo(true)}
                                     onMouseLeave={() => {
@@ -2884,7 +3685,6 @@ export default function AssetDrawer({
                                                 Boolean(drawerForcedPreviewUrl) || state === 'AVAILABLE'
                                             if (canZoom) {
                                                 setShowZoomModal(true)
-                                                setShowLightboxDetails(false)
                                             }
                                         }}
                                     >
@@ -2921,7 +3721,6 @@ export default function AssetDrawer({
                                         onClick={() => {
                                             if (pdfPageCache[pdfCurrentPage] || pdfPageCache[1]) {
                                                 setShowZoomModal(true)
-                                                setShowLightboxDetails(false)
                                             }
                                         }}
                                         role={pdfPageCache[pdfCurrentPage] || pdfPageCache[1] ? 'button' : undefined}
@@ -2930,7 +3729,6 @@ export default function AssetDrawer({
                                             if ((pdfPageCache[pdfCurrentPage] || pdfPageCache[1]) && (e.key === 'Enter' || e.key === ' ')) {
                                                 e.preventDefault()
                                                 setShowZoomModal(true)
-                                                setShowLightboxDetails(false)
                                             }
                                         }}
                                     >
@@ -2986,7 +3784,6 @@ export default function AssetDrawer({
                                         const { state } = getThumbnailState(displayAsset, thumbnailRetryCount)
                                         if (state === 'AVAILABLE') {
                                             setShowZoomModal(true)
-                                            setShowLightboxDetails(false)
                                         }
                                     }}
                                 >
@@ -3056,99 +3853,6 @@ export default function AssetDrawer({
                         </div>
                     )}
 
-                    {isPdf && (
-                        <div className="space-y-2 rounded-md border border-gray-200 bg-white px-3 py-2">
-                            {useDrawerThumbnailModeOverride ? (
-                                <p className="text-xs text-gray-600">
-                                    Styled preview uses the PDF cover thumbnail. Choose{' '}
-                                    <span className="font-medium text-gray-800">Original</span> in Preview Options to
-                                    page through the document.
-                                </p>
-                            ) : (
-                                <div className="flex items-center justify-between">
-                                    <button
-                                        type="button"
-                                        onClick={() => handlePdfPageNavigate(pdfCurrentPage - 1)}
-                                        disabled={pdfCurrentPage <= 1 || pdfPageLoading}
-                                        className="inline-flex items-center rounded border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
-                                    >
-                                        Previous
-                                    </button>
-                                    <div className="text-xs text-gray-600">
-                                        Page {pdfCurrentPage} of {effectivePdfPageCount}
-                                    </div>
-                                    <button
-                                        type="button"
-                                        onClick={() => handlePdfPageNavigate(pdfCurrentPage + 1)}
-                                        disabled={pdfCurrentPage >= effectivePdfPageCount || pdfPageLoading}
-                                        className="inline-flex items-center rounded border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
-                                    >
-                                        Next
-                                    </button>
-                                </div>
-                            )}
-                            {canRequestFullPdfExtraction && effectivePdfPageCount > 1 && (
-                                <div className="flex items-center justify-between gap-2 border-t border-gray-100 pt-2">
-                                    <p className="text-xs text-gray-500">
-                                        Render all pages for AI ingestion and faster navigation.
-                                    </p>
-                                    <button
-                                        type="button"
-                                        onClick={handleRequestFullPdfExtraction}
-                                        disabled={pdfFullExtractionLoading || pdfFullExtractionRequested}
-                                        className="inline-flex shrink-0 items-center rounded border border-indigo-300 px-2 py-1 text-xs font-medium text-indigo-700 hover:bg-indigo-50 disabled:cursor-not-allowed disabled:opacity-50"
-                                    >
-                                        {pdfFullExtractionLoading
-                                            ? 'Queueing...'
-                                            : pdfFullExtractionRequested
-                                                ? 'Queued'
-                                                : 'Render all pages'}
-                                    </button>
-                                </div>
-                            )}
-                            {canRequestFullPdfExtraction && (
-                                <div className="flex flex-wrap items-center justify-between gap-2 border-t border-gray-100 pt-2">
-                                    <p className="text-xs text-gray-500">
-                                        Extract text from PDF for search and AI (pdftotext).
-                                    </p>
-                                    <div className="flex shrink-0 items-center gap-2">
-                                        {pdfTextExtraction?.status === 'complete' && (
-                                            <button
-                                                type="button"
-                                                onClick={() => setShowPdfTextModal(true)}
-                                                className="inline-flex items-center rounded border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50"
-                                            >
-                                                View
-                                            </button>
-                                        )}
-                                        {pdfTextExtraction?.status && (
-                                            <span className={[
-                                                'inline-flex rounded-full px-2 py-0.5 text-xs font-medium',
-                                                pdfTextExtraction.status === 'complete' && 'bg-green-100 text-green-700',
-                                                pdfTextExtraction.status === 'failed' && 'bg-red-100 text-red-700',
-                                                pdfTextExtraction.status === 'processing' && 'bg-amber-100 text-amber-700',
-                                                pdfTextExtraction.status === 'pending' && 'bg-gray-100 text-gray-600',
-                                            ].filter(Boolean).join(' ') || 'bg-gray-100 text-gray-600'}>
-                                                {pdfTextExtraction.status === 'complete' && 'Complete'}
-                                                {pdfTextExtraction.status === 'failed' && 'Failed'}
-                                                {pdfTextExtraction.status === 'processing' && 'Processing'}
-                                                {pdfTextExtraction.status === 'pending' && 'Pending'}
-                                            </span>
-                                        )}
-                                        <button
-                                            type="button"
-                                            onClick={handleTriggerPdfOcr}
-                                            disabled={pdfOcrTriggerLoading || pdfTextExtractionLoading}
-                                            className="inline-flex shrink-0 items-center rounded border border-emerald-300 px-2 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-50"
-                                        >
-                                            {pdfOcrTriggerLoading ? 'Starting...' : pdfTextExtraction ? 'Re-Extract Text' : 'Extract Text (OCR)'}
-                                        </button>
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-                    )}
-                    
                     {/* Phase B2: Deleted (trash) banner */}
                     {displayAsset.deleted_at && (
                         <div className="rounded-lg border border-red-200 bg-red-50 p-4 space-y-2">
@@ -3228,7 +3932,7 @@ export default function AssetDrawer({
                             View and download counts apply to files stored in your library. This Google Font is referenced from Brand Guidelines and is not stored as an asset file.
                         </p>
                     ) : (
-                    <div className="flex items-center gap-4">
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
                         <div className="flex items-center gap-2 text-sm text-gray-600">
                             <EyeIcon className="h-4 w-4 text-gray-400" />
                             <span className="font-medium text-gray-900">
@@ -3236,12 +3940,27 @@ export default function AssetDrawer({
                             </span>
                             <span className="text-gray-500">views</span>
                         </div>
-                        <div className="flex items-center gap-2 text-sm text-gray-600">
-                            <ArrowDownTrayIcon className="h-4 w-4 text-gray-400" />
-                            <span className="font-medium text-gray-900">
-                                {metricsLoading ? '...' : (downloadCount ?? 0)}
-                            </span>
-                            <span className="text-gray-500">downloads</span>
+                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                            <div className="flex items-center gap-2 text-sm text-gray-600">
+                                <ArrowDownTrayIcon className="h-4 w-4 text-gray-400" />
+                                <span className="font-medium text-gray-900">
+                                    {metricsLoading ? '...' : (downloadCount ?? 0)}
+                                </span>
+                                <span className="text-gray-500">downloads</span>
+                            </div>
+                            {displayAsset?.id &&
+                                !isVirtualGoogleFont &&
+                                can('metadata.edit_post_upload') && (
+                                    <button
+                                        type="button"
+                                        onClick={() => setManageAssetModalOpen(true)}
+                                        className="text-sm font-medium underline decoration-2 underline-offset-2 hover:opacity-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 rounded-sm"
+                                        style={{ color: brandPrimary }}
+                                        title="Edit metadata, tags, and more"
+                                    >
+                                        Edit asset
+                                    </button>
+                                )}
                         </div>
                     </div>
                     )}
@@ -3286,19 +4005,19 @@ export default function AssetDrawer({
                                             type="button"
                                             onClick={() => {
                                                 setShowZoomModal(true)
-                                                setShowLightboxDetails(true)
                                             }}
-                                            className="inline-flex w-full items-center justify-center rounded-md bg-gray-600 px-3 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-gray-700"
+                                            className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-md border border-transparent px-4 text-sm font-semibold text-white shadow-sm transition-opacity hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+                                            style={{ backgroundColor: brandPrimary, outlineColor: brandPrimary }}
                                         >
-                                            <EyeIcon className="h-4 w-4 mr-2" />
-                                            Details
-                                        </button>
+                                                <EyeIcon className="h-4 w-4 shrink-0" aria-hidden />
+                                                Fullscreen
+                                            </button>
                                         {googleFontSpecimenUrl && (
                                             <a
                                                 href={googleFontSpecimenUrl}
                                                 target="_blank"
                                                 rel="noopener noreferrer"
-                                                className="inline-flex w-full items-center justify-center rounded-md border border-sky-300 bg-white px-3 py-2.5 text-sm font-semibold text-sky-800 shadow-sm hover:bg-sky-50"
+                                                className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-md border border-sky-300 bg-white px-4 text-sm font-semibold text-sky-800 shadow-sm transition-colors hover:bg-sky-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-500"
                                             >
                                                 Open on Google Fonts
                                             </a>
@@ -3308,8 +4027,8 @@ export default function AssetDrawer({
                                                 href={typeof route === 'function'
                                                     ? route('brands.brand-guidelines.builder', { brand: auth.activeBrand.id, step: 'standards' })
                                                     : `/app/brands/${auth.activeBrand.id}/brand-guidelines/builder?step=standards`}
-                                                className="inline-flex w-full items-center justify-center rounded-md px-3 py-2.5 text-sm font-semibold text-white shadow-sm hover:opacity-95"
-                                                style={{ backgroundColor: brandPrimary }}
+                                                className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-md border border-transparent px-4 text-sm font-semibold text-white shadow-sm transition-opacity hover:opacity-95 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+                                                style={{ backgroundColor: brandPrimary, outlineColor: brandPrimary }}
                                             >
                                                 Edit typography in Brand Guidelines
                                             </Link>
@@ -3539,18 +4258,18 @@ export default function AssetDrawer({
                                 const showAddToDownload = selection != null
                                 return (
                                     <div className="space-y-2">
-                                        {/* Row 1: View (Details) + Add to download */}
+                                        {/* Row 1: Fullscreen + Add to download */}
                                         <div className={`grid gap-2 ${showAddToDownload ? 'grid-cols-2' : 'grid-cols-1'}`}>
                                             <button
                                                 type="button"
                                                 onClick={() => {
                                                     setShowZoomModal(true)
-                                                    setShowLightboxDetails(true)
                                                 }}
-                                                className="inline-flex items-center justify-center rounded-md bg-gray-600 px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2"
+                                                className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-md border border-transparent px-4 text-sm font-semibold text-white shadow-sm transition-opacity hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+                                                style={{ backgroundColor: brandPrimary, outlineColor: brandPrimary }}
                                             >
-                                                <EyeIcon className="h-4 w-4 mr-2" />
-                                                Details
+                                                <EyeIcon className="h-4 w-4 shrink-0" aria-hidden />
+                                                Fullscreen
                                             </button>
                                             {showAddToDownload && (
                                                 <button
@@ -3567,86 +4286,95 @@ export default function AssetDrawer({
                                                             })
                                                         }
                                                     }}
-                                                    className={`inline-flex items-center justify-center rounded-md px-3 py-2 text-sm font-medium border focus:outline-none focus:ring-2 focus:ring-offset-2 ${
+                                                    className={`inline-flex h-10 w-full items-center justify-center gap-2 rounded-md border px-4 text-sm font-semibold shadow-sm transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${
                                                         isInBucket
-                                                            ? 'text-white'
+                                                            ? 'border-transparent text-white'
                                                             : isEligibleForDownload
-                                                                ? 'bg-white shadow-sm hover:opacity-90'
-                                                                : 'bg-gray-100 text-gray-400 cursor-not-allowed border-gray-300'
+                                                                ? 'border-gray-300 bg-white text-gray-900 hover:bg-gray-50 focus-visible:outline-gray-400'
+                                                                : 'cursor-not-allowed border-gray-200 bg-gray-50 text-gray-400'
                                                     }`}
-                                                    style={isEligibleForDownload ? {
-                                                        borderColor: isInBucket ? brandPrimary : brandPrimary,
-                                                        color: isInBucket ? '#fff' : brandPrimary,
-                                                        backgroundColor: isInBucket ? brandPrimary : undefined,
-                                                        ['--tw-ring-color']: brandPrimary,
-                                                    } : {}}
+                                                    style={
+                                                        isEligibleForDownload
+                                                            ? {
+                                                                  borderColor: isInBucket ? brandPrimary : brandPrimary,
+                                                                  color: isInBucket ? '#fff' : brandPrimary,
+                                                                  backgroundColor: isInBucket ? brandPrimary : undefined,
+                                                              }
+                                                            : undefined
+                                                    }
                                                     title={!isEligibleForDownload ? 'Publish this asset to add to download' : isInBucket ? 'Remove from download' : 'Add to download'}
                                                 >
                                                     {isInBucket ? (
                                                         <>
-                                                            <CheckIcon className="h-4 w-4 mr-2" />
+                                                            <CheckIcon className="h-4 w-4 shrink-0" aria-hidden />
                                                             In download
                                                         </>
                                                     ) : (
                                                         <>
-                                                            <RectangleStackIcon className="h-4 w-4 mr-2" />
+                                                            <RectangleStackIcon className="h-4 w-4 shrink-0" aria-hidden />
                                                             Add to download
                                                         </>
                                                     )}
                                                 </button>
                                             )}
                                         </div>
-                                        {/* Row 2: Download full width */}
-                                        <button
-                                            type="button"
-                                            disabled={!canSingleAssetDownload}
-                                            onClick={async () => {
-                                                if (!canSingleAssetDownload || !displayAsset?.id) return
-                                                const url = typeof route !== 'undefined' ? route('assets.download.single', { asset: displayAsset.id }) : `/app/assets/${displayAsset.id}/download`
-                                                const csrf = document.querySelector('meta[name="csrf-token"]')?.content
-                                                setToastMessage('Preparing download…')
-                                                setToastType('success')
-                                                try {
-                                                    const res = await fetch(url, {
-                                                        method: 'POST',
-                                                        headers: {
-                                                            'Content-Type': 'application/json',
-                                                            'Accept': 'application/json',
-                                                            'X-Requested-With': 'XMLHttpRequest',
-                                                            'X-CSRF-TOKEN': csrf || '',
-                                                        },
-                                                        credentials: 'same-origin',
-                                                    })
-                                                    const data = await res.json().catch(() => ({}))
-                                                    if (!res.ok) {
-                                                        setToastMessage(data?.message || 'Download failed')
+                                        {/* Row 2: Download (full width) — Edit asset lives in the stats row above as a text link */}
+                                        <div>
+                                            <button
+                                                type="button"
+                                                disabled={!canSingleAssetDownload}
+                                                onClick={async () => {
+                                                    if (!canSingleAssetDownload || !displayAsset?.id) return
+                                                    const url = typeof route !== 'undefined' ? route('assets.download.single', { asset: displayAsset.id }) : `/app/assets/${displayAsset.id}/download`
+                                                    const csrf = document.querySelector('meta[name="csrf-token"]')?.content
+                                                    setToastMessage('Preparing download…')
+                                                    setToastType('success')
+                                                    try {
+                                                        const res = await fetch(url, {
+                                                            method: 'POST',
+                                                            headers: {
+                                                                'Content-Type': 'application/json',
+                                                                'Accept': 'application/json',
+                                                                'X-Requested-With': 'XMLHttpRequest',
+                                                                'X-CSRF-TOKEN': csrf || '',
+                                                            },
+                                                            credentials: 'same-origin',
+                                                        })
+                                                        const data = await res.json().catch(() => ({}))
+                                                        if (!res.ok) {
+                                                            setToastMessage(data?.message || 'Download failed')
+                                                            setToastType('error')
+                                                            setTimeout(() => setToastMessage(null), 4000)
+                                                            return
+                                                        }
+                                                        const fileUrl = data?.file_url || data?.public_url || data?.download_url
+                                                        if (fileUrl) {
+                                                            window.location.href = fileUrl
+                                                        } else {
+                                                            setToastMessage('Download started')
+                                                        }
+                                                    } catch (e) {
+                                                        setToastMessage('Download failed')
                                                         setToastType('error')
-                                                        setTimeout(() => setToastMessage(null), 4000)
-                                                        return
                                                     }
-                                                    const fileUrl = data?.file_url || data?.public_url || data?.download_url
-                                                    if (fileUrl) {
-                                                        window.location.href = fileUrl
-                                                    } else {
-                                                        setToastMessage('Download started')
-                                                    }
-                                                } catch (e) {
-                                                    setToastMessage('Download failed')
-                                                    setToastType('error')
+                                                    setTimeout(() => setToastMessage(null), 3000)
+                                                }}
+                                                className={`inline-flex h-10 w-full min-w-0 items-center justify-center gap-2 rounded-md px-3 text-sm font-semibold shadow-sm transition-opacity focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${
+                                                    canSingleAssetDownload
+                                                        ? 'text-white hover:opacity-90'
+                                                        : 'cursor-not-allowed border border-gray-200 bg-gray-50 text-gray-400'
+                                                }`}
+                                                style={
+                                                    canSingleAssetDownload
+                                                        ? { backgroundColor: brandPrimary, outlineColor: brandPrimary }
+                                                        : undefined
                                                 }
-                                                setTimeout(() => setToastMessage(null), 3000)
-                                            }}
-                                            className={`w-full inline-flex items-center justify-center rounded-md px-3 py-2 text-sm font-medium text-white shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 ${
-                                                canSingleAssetDownload
-                                                    ? 'hover:opacity-90'
-                                                    : 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                                            }`}
-                                            style={canSingleAssetDownload ? { backgroundColor: brandPrimary, ['--tw-ring-color']: brandPrimary } : {}}
-                                            title={!isEligibleForDownload ? 'Publish this asset to download' : singleAssetDisabledByPolicy ? 'Your organization requires downloads to be packaged.' : 'Download this asset (tracked)'}
-                                        >
-                                            <ArrowDownTrayIcon className="h-4 w-4 mr-2" />
-                                            Download
-                                        </button>
+                                                title={!isEligibleForDownload ? 'Publish this asset to download' : singleAssetDisabledByPolicy ? 'Your organization requires downloads to be packaged.' : 'Download this asset (tracked)'}
+                                            >
+                                                <ArrowDownTrayIcon className="h-4 w-4 shrink-0" aria-hidden />
+                                                Download
+                                            </button>
+                                        </div>
                                         {singleAssetDisabledByPolicy && (
                                             <p className="text-xs text-slate-500">Your organization&apos;s policy does not permit downloading individual assets. Use &quot;Add to download&quot; to create a packaged download.</p>
                                         )}
@@ -3655,16 +4383,468 @@ export default function AssetDrawer({
                                                 By downloading, you confirm you have the right to use this font. {auth?.activeBrand?.name || 'This brand'} does not provide font licensing or redistribution; you are responsible for complying with the font license.
                                             </p>
                                         )}
-                                        {showExecutionPreviewChrome && (
-                                            <div className="rounded-md border border-gray-200 bg-white px-3 py-2.5">
+                                    </div>
+                                )
+                            })()}
+                            </>
+                            )}
+                            </>
+                            )}
+                        </div>
+                    )}
+                </div>
+
+                {displayAsset?.id &&
+                    !isVirtualGoogleFont &&
+                    isVideo &&
+                    ['queued', 'processing'].includes(String(displayAsset.metadata?.ai_video_status || '')) && (
+                        <div className="px-4 md:px-6 pt-2" role="status" aria-live="polite">
+                            <div className="flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                                <ArrowPathIcon
+                                    className="h-3.5 w-3.5 flex-shrink-0 animate-spin text-amber-700"
+                                    aria-hidden
+                                />
+                                <span>Analyzing video content…</span>
+                            </div>
+                        </div>
+                    )}
+
+                {displayAsset?.id &&
+                    !isVirtualGoogleFont &&
+                    isVideo &&
+                    String(displayAsset.metadata?.ai_video_status || '') === 'failed' &&
+                    can('metadata.edit_post_upload') && (
+                        <div className="px-4 md:px-6 pt-2">
+                            <div className="flex flex-col gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-900 sm:flex-row sm:items-center sm:justify-between">
+                                <span className="min-w-0">
+                                    Video analysis failed
+                                    {displayAsset.metadata?.ai_video_insights_error
+                                        ? `: ${displayAsset.metadata.ai_video_insights_error}`
+                                        : '.'}
+                                </span>
+                                <button
+                                    type="button"
+                                    onClick={handleRetryVideoInsights}
+                                    disabled={videoInsightsRetryLoading}
+                                    className="shrink-0 rounded-md border border-red-300 bg-white px-3 py-1.5 text-xs font-semibold text-red-900 hover:bg-red-100 disabled:opacity-50"
+                                >
+                                    {videoInsightsRetryLoading ? 'Queuing…' : 'Retry analysis'}
+                                </button>
+                            </div>
+                        </div>
+                    )}
+
+                {displayAsset?.id &&
+                    !isVirtualGoogleFont &&
+                    isVideo &&
+                    displayAsset.metadata?.ai_video_insights_completed_at &&
+                    videoAiShowCost &&
+                    typeof displayAsset.metadata?.ai_video_insights_total_cost_usd === 'number' &&
+                    displayAsset.metadata.ai_video_insights_total_cost_usd > 0 && (
+                        <div className="px-4 md:px-6 pt-2">
+                            <p className="text-xs text-gray-400">
+                                AI cost (cumulative): $
+                                {Number(displayAsset.metadata.ai_video_insights_total_cost_usd).toFixed(4)}
+                            </p>
+                        </div>
+                    )}
+
+                {displayAsset?.id &&
+                    !isVirtualGoogleFont &&
+                    isVideo &&
+                    Array.isArray(displayAsset.metadata?.ai_video_insights?.moments) &&
+                    displayAsset.metadata.ai_video_insights.moments.length > 0 && (
+                        <div className="px-4 md:px-6 pt-2">
+                            <h4 className="text-xs font-semibold text-gray-700 mb-1.5">Key moments</h4>
+                            <ul className="space-y-1">
+                                {displayAsset.metadata.ai_video_insights.moments.map((m, idx) => (
+                                    <li key={`${m.timestamp ?? idx}-${idx}`}>
+                                        <button
+                                            type="button"
+                                            className="w-full text-left rounded px-1 -mx-1 text-xs text-gray-600 hover:bg-gray-50 hover:text-gray-900"
+                                            onClick={() => {
+                                                const interval =
+                                                    typeof displayAsset.metadata?.ai_video_frame_interval_seconds ===
+                                                    'number'
+                                                        ? displayAsset.metadata.ai_video_frame_interval_seconds
+                                                        : 3
+                                                const sec =
+                                                    typeof m.seconds === 'number'
+                                                        ? m.seconds
+                                                        : typeof m.frame_index === 'number'
+                                                          ? Math.max(0, (m.frame_index - 1) * interval)
+                                                          : 0
+                                                setPendingLightboxSeekSeconds(sec)
+                                                setShowZoomModal(true)
+                                            }}
+                                        >
+                                            <span className="font-mono text-gray-500">{m.timestamp}</span>
+                                            <span className="text-gray-400"> — </span>
+                                            {m.label}
+                                        </button>
+                                    </li>
+                                ))}
+                            </ul>
+                            <p className="mt-1 text-[10px] text-gray-400">Opens fullscreen and jumps to that time.</p>
+                        </div>
+                    )}
+
+                {/* Brand intelligence / reference CTA + Actions (EBI) */}
+                {showBrandIntelDrawerStrip && (
+                    <div className="border-t border-gray-200">
+                        <div className="space-y-4">
+                            {brandIntelActivityBanner && (
+                                <div
+                                    className="flex items-center gap-2 rounded-md border border-gray-200 bg-white px-3 py-2 text-xs text-slate-700"
+                                    role="status"
+                                    aria-live="polite"
+                                >
+                                    <ArrowPathIcon
+                                        className="h-3.5 w-3.5 flex-shrink-0 animate-spin text-slate-600"
+                                        aria-hidden
+                                    />
+                                    <span>{brandIntelActivityBanner}</span>
+                                </div>
+                            )}
+                            {can('brand_settings.manage') && showBrandReferenceCard && (
+                                <div className="rounded-md border border-gray-200 bg-white p-3">
+                                    <div className="flex gap-2.5">
+                                        <RectangleStackIcon
+                                            className="h-4 w-4 text-slate-500 flex-shrink-0 mt-0.5"
+                                            aria-hidden
+                                        />
+                                        <div className="min-w-0 flex-1">
+                                            <h3 className="text-xs font-semibold text-gray-900">Use as a brand reference</h3>
+                                            <p className="text-xs text-gray-600 mt-1 leading-snug">
+                                                We surface this for assets that look like strong references: starred, rated above 3★,
+                                                or with meaningful views or downloads. Promoting one helps Brand Intelligence learn
+                                                what on-brand looks like—especially next to others in this category.
+                                            </p>
+                                            {displayAsset.reference_promotion ? (
+                                                <div className="flex flex-wrap items-center gap-2 mt-2.5">
+                                                    <span
+                                                        className={`inline-flex items-center rounded-md px-2.5 py-1 text-xs font-medium ${
+                                                            displayAsset.reference_promotion.kind === 'guideline'
+                                                                ? 'bg-violet-100 text-violet-800'
+                                                                : 'bg-sky-100 text-sky-800'
+                                                        }`}
+                                                    >
+                                                        {displayAsset.reference_promotion.kind === 'guideline'
+                                                            ? 'Guideline'
+                                                            : 'Reference'}
+                                                    </span>
+                                                    {displayAsset.reference_promotion.category && (
+                                                        <span className="text-xs text-gray-500">
+                                                            {displayAsset.reference_promotion.category}
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            ) : (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setPromoteModalOpen(true)}
+                                                    className="mt-2.5 inline-flex justify-center rounded-md px-3 py-1.5 text-xs font-medium text-white shadow-sm hover:opacity-95 focus:outline-none focus:ring-2 focus:ring-offset-2"
+                                                    style={{
+                                                        backgroundColor: brandPrimary,
+                                                        ['--tw-ring-color']: brandPrimary,
+                                                    }}
+                                                >
+                                                    Add reference
+                                                </button>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                )}
+
+                {/* Tags and Metadata — virtual Google Fonts: read-only summary (no asset API id) */}
+                {displayAsset?.id && isVirtualGoogleFont && (
+                    <div className="border-t border-gray-200">
+                        <CollapsibleSection contentInset="flush" title="Metadata" defaultExpanded={false}>
+                            <dl className="space-y-3 text-sm text-gray-700">
+                                <div>
+                                    <dt className="font-medium text-gray-900">Source</dt>
+                                    <dd className="mt-0.5 text-gray-600">Google Fonts (referenced from Brand Guidelines; not stored as a file)</dd>
+                                </div>
+                                {(displayAsset.metadata?.fields?.font_role || displayAsset.google_font_role_label) && (
+                                    <div>
+                                        <dt className="font-medium text-gray-900">Typographic role</dt>
+                                        <dd className="mt-0.5 text-gray-600">
+                                            {displayAsset.google_font_role_label
+                                                || (displayAsset.metadata?.fields?.font_role === 'body_copy'
+                                                    ? 'Body'
+                                                    : displayAsset.metadata?.fields?.font_role === 'headline'
+                                                        ? 'Headline'
+                                                        : displayAsset.metadata?.fields?.font_role)}
+                                        </dd>
+                                    </div>
+                                )}
+                            </dl>
+                            <p className="mt-4 text-xs text-gray-500">
+                                To edit font families and roles, use Brand Guidelines → Standards (typography).
+                            </p>
+                        </CollapsibleSection>
+                    </div>
+                )}
+
+                {/* Tags and Metadata */}
+                {displayAsset?.id && !isVirtualGoogleFont && (
+                    <div className="border-t border-gray-200 space-y-4">
+                        {displayAsset?.id &&
+                            !externalCollectionGuest &&
+                            !isVirtualGoogleFont &&
+                            showRevueCollapsible && (
+                                <CollapsibleSection
+                                    contentInset="flush"
+                                    title="Review"
+                                    defaultExpanded={true}
+                                >
+                                    <div className="space-y-4 px-3 py-2">
+                                        {pipelineBannerForRevue && (
+                                            <MetadataAnalysisRunningBanner
+                                                metadataHealth={drawerPipelineBanner?.metadataHealth}
+                                                analysisStatus={drawerPipelineBanner?.analysisStatus}
+                                                thumbnailStatus={drawerPipelineBanner?.thumbnailStatus}
+                                            />
+                                        )}
+                                        {ebiEnabledForAsset && (
+                                            <AssetBrandIntelligenceBlock
+                                                asset={displayAsset}
+                                                onAssetUpdate={onAssetUpdate}
+                                                primaryColor={brandPrimary}
+                                                drawerInsightGroup
+                                                onActivityBannerChange={setBrandIntelActivityBanner}
+                                            />
+                                        )}
+                                        <MetadataCandidateReview
+                                            assetId={displayAsset.id}
+                                            primaryColor={brandPrimary}
+                                            uploadedByUserId={displayAsset.user_id}
+                                            compactDrawerReview
+                                        />
+                                        <AiTagSuggestionsInline
+                                            key={`drawer-revue-ai-tags-${displayAsset.id}`}
+                                            assetId={displayAsset.id}
+                                            uploadedByUserId={displayAsset.user_id}
+                                            analysisStatus={displayAsset.analysis_status}
+                                            primaryColor={brandPrimary}
+                                            drawerInsightGroup
+                                            unifiedDrawerReview
+                                        />
+                                    </div>
+                                </CollapsibleSection>
+                            )}
+
+                        <CollapsibleSection contentInset="flush" title="Metadata" defaultExpanded={false}>
+                            <div className="space-y-3">
+                            {/* Step 2: Pending Metadata Section - Moved above standard metadata list */}
+                            {/* Phase M-2: Only show pending metadata if metadata approval is enabled for company + brand */}
+                            {auth?.metadata_approval_features?.metadata_approval_enabled && 
+                             displayAsset?.id && 
+                             pendingMetadataCount > 0 && 
+                             canApproveMetadata && (
+                                <div className="mb-4 pb-4 border-b border-gray-200">
+                                    <PendingMetadataList assetId={displayAsset.id} />
+                                </div>
+                            )}
+                            
+                            {/* Step 3: Contributor Pending Feedback (Read-only) */}
+                            {/* Show notice for contributors (users without approval permission) */}
+                            {auth?.metadata_approval_features?.metadata_approval_enabled && 
+                             pendingMetadataCount > 0 && 
+                             !canApproveMetadata && (
+                                <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-md">
+                                    <p className="text-sm text-amber-800">
+                                        Metadata submitted for approval
+                                    </p>
+                                </div>
+                            )}
+                            
+                            {/* Category as first line */}
+                            {categoryName && categoryName !== 'Uncategorized' && (
+                                <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-1 md:gap-4 md:flex-nowrap mb-2 md:mb-3">
+                                    <dt className="text-sm text-gray-500 mb-1 md:mb-0 md:w-32 md:flex-shrink-0 flex items-center md:items-start">
+                                        <span className="flex items-center flex-wrap gap-1 md:gap-1.5">
+                                            Category
+                                        </span>
+                                    </dt>
+                                    <dd className="text-sm font-semibold text-gray-900 md:flex-1 md:min-w-0 break-words">
+                                        {categoryName}
+                                    </dd>
+                                </div>
+                            )}
+
+                            <AssetMetadataDisplay
+                                assetId={displayAsset.id}
+                                onPendingCountChange={setPendingMetadataCount}
+                                primaryColor={brandPrimary}
+                                readOnly={!can('metadata.edit_post_upload')}
+                                suppressAnalysisRunningBanner={suppressAnalysisRunningBannerInMetadata}
+                                onAnalysisPipelineStateChange={
+                                    showRevueCollapsible && !externalCollectionGuest && !isVirtualGoogleFont
+                                        ? handleAnalysisPipelineState
+                                        : undefined
+                                }
+                                onToggleFieldSaved={(detail) => {
+                                    const fk = String(detail.fieldKey || '').toLowerCase()
+                                    if (
+                                        fk === 'starred' &&
+                                        onAssetUpdate &&
+                                        displayAsset?.id === detail.assetId
+                                    ) {
+                                        onAssetUpdate({
+                                            id: displayAsset.id,
+                                            starred: Boolean(detail.value),
+                                        })
+                                    }
+                                    if (
+                                        fk === 'starred' &&
+                                        typeof window !== 'undefined' &&
+                                        window.toast
+                                    ) {
+                                        window.toast(
+                                            detail.value ? 'Starred' : 'Unstarred',
+                                            'success',
+                                        )
+                                    }
+                                }}
+                                collectionDisplay={{
+                                    collections: assetCollections,
+                                    loading: assetCollectionsLoading,
+                                    showEditButton:
+                                        can('metadata.edit_post_upload') && !collectionFieldVisible,
+                                    onEdit:
+                                        can('metadata.edit_post_upload') && !collectionFieldVisible
+                                            ? () => setShowCollectionsModal(true)
+                                            : undefined,
+                                    inlineContent:
+                                        can('metadata.edit_post_upload') && collectionFieldVisible ? (
+                                            dropdownCollectionsLoading ? (
+                                                <span className="text-sm font-normal text-gray-400">
+                                                    Loading collections…
+                                                </span>
+                                            ) : (
+                                                <CollectionSelector
+                                                    collections={dropdownCollections}
+                                                    selectedIds={(assetCollections || [])
+                                                        .filter(Boolean)
+                                                        .map((c) => c?.id)
+                                                        .filter(Boolean)}
+                                                    maxHeight="240px"
+                                                    onChange={handleDrawerCollectionsChange}
+                                                    disabled={
+                                                        addToCollectionLoading || dropdownCollectionsLoading
+                                                    }
+                                                    placeholder="Select collections…"
+                                                    showCreateButton
+                                                    onCreateClick={() => setShowCreateCollectionModal(true)}
+                                                />
+                                            )
+                                        ) : undefined,
+                                }}
+                            />
+
+                            <div
+                                className={`mt-4 pt-4 border-t border-gray-100 ${
+                                    can('metadata.edit_post_upload') ? 'pb-4' : ''
+                                }`}
+                            >
+                                <AssetTagManager
+                                    key={`tag-manager-${displayAsset.id}`}
+                                    asset={displayAsset}
+                                    showTitle
+                                    showInput={can('metadata.edit_post_upload')}
+                                    readOnly={!can('metadata.edit_post_upload')}
+                                    compact
+                                    inline
+                                    primaryColor={brandPrimary}
+                                />
+                            </div>
+                            </div>
+                        </CollapsibleSection>
+
+                        {showPreviewContentSection && (
+                            <CollapsibleSection
+                                contentInset="flush"
+                                title="Preview & AI"
+                                defaultExpanded={drawerExpandPreviewOrProcessingSections}
+                            >
+                                <div className="space-y-3">
+                                    {(canRegeneratePreviewInProcessingSection || showExecutionPreviewChrome) && (
+                                        <div className="space-y-2">
+                                            <div className="text-[11px] font-medium uppercase tracking-wide text-gray-400 mb-2">
+                                                Preview
+                                            </div>
+                                            <div className="space-y-2">
+
+                                                {canRegeneratePreviewInProcessingSection && (
+                                                    <ProcessingActionCard
+                                                        icon="photo"
+                                                        title="Refresh previews"
+                                                        description="Rebuild thumbnails and preview images"
+                                                        onClick={() => {
+                                                            if (canGenerateThumbnail) {
+                                                                void handleGenerateThumbnail()
+                                                            } else {
+                                                                void handleDrawerRegenerateThumbnailsStyles()
+                                                            }
+                                                        }}
+                                                        disabled={
+                                                            !canRegeneratePreviewInProcessingSection ||
+                                                            isProcessingDrawerBusy ||
+                                                            (canGenerateThumbnail
+                                                                ? generateLoading || guardBlocksThumbnails
+                                                                : regeneratingThumbnailsStylesDrawer ||
+                                                                  guardBlocksThumbnails)
+                                                        }
+                                                        loading={
+                                                            (canGenerateThumbnail && generateLoading) ||
+                                                            (!canGenerateThumbnail &&
+                                                                regeneratingThumbnailsStylesDrawer)
+                                                        }
+                                                        buttonTitle={
+                                                            cooldownHintThumb ||
+                                                            (thumbnailStatus === 'processing'
+                                                                ? 'A processing job is already running.'
+                                                                : undefined)
+                                                        }
+                                                        footer={
+                                                            (cooldownMinutesThumb > 0 ||
+                                                                drawerLastRunLine('thumbnails')) ? (
+                                                                <div className="space-y-0.5">
+                                                                    {cooldownMinutesThumb > 0 && (
+                                                                        <div className="text-yellow-600">
+                                                                            Available in {cooldownMinutesThumb}{' '}
+                                                                            minute
+                                                                            {cooldownMinutesThumb !== 1 ? 's' : ''}
+                                                                        </div>
+                                                                    )}
+                                                                    {lastRunFooter('thumbnails')}
+                                                                </div>
+                                                            ) : false
+                                                        }
+                                                    />
+                                                )}
+                                                {showExecutionPreviewChrome && (
+                                                    <div
+                                                        className={
+                                                            canRegeneratePreviewInProcessingSection
+                                                                ? 'space-y-3 border-t border-gray-100 pt-3'
+                                                                : 'space-y-3'
+                                                        }
+                                                    >
+                                            <div className="space-y-3">
                                                 <button
                                                     type="button"
                                                     onClick={() => setPreviewOptionsExpanded((o) => !o)}
                                                     className="flex w-full items-center justify-between gap-2 text-left"
                                                     aria-expanded={previewOptionsExpanded}
                                                 >
-                                                    <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                                                        Preview Options
+                                                    <span className="text-[11px] font-medium uppercase tracking-wide text-gray-400">
+                                                        Preview options
                                                     </span>
                                                     <ChevronDownIcon
                                                         className={`h-4 w-4 shrink-0 text-gray-500 transition-transform ${
@@ -3675,13 +4855,8 @@ export default function AssetDrawer({
                                                 </button>
                                                 {previewOptionsExpanded && (
                                                     <div className="mt-3 space-y-3 border-t border-gray-100 pt-3">
-                                                        <p className="text-xs text-gray-500">
-                                                            Tap a tile to use it as the main preview and as your preference
-                                                            when the grid is on{' '}
-                                                            <span className="font-medium text-gray-700">Standard</span>{' '}
-                                                            (View → Grid thumbnails). Regenerate from{' '}
-                                                            <span className="font-medium text-gray-700">Compare all versions</span>{' '}
-                                                            or fullscreen <span className="font-medium text-gray-700">Versions</span>.
+                                                        <p className="text-xs text-gray-500 leading-snug">
+                                                            Choose a tile for the main preview; use Compare for regenerates.
                                                         </p>
                                                         <div className="grid grid-cols-3 gap-2">
                                                             {(['original', 'enhanced', 'presentation']).map((tier) => {
@@ -3846,6 +5021,30 @@ export default function AssetDrawer({
                                                                                         Not available
                                                                                     </p>
                                                                                 )}
+                                                                                {executionDrawerEnhancedDownloadUrl && (
+                                                                                    <button
+                                                                                        type="button"
+                                                                                        onClick={() =>
+                                                                                            void handleDownloadPreviewMode(
+                                                                                                'enhanced',
+                                                                                            )
+                                                                                        }
+                                                                                        disabled={
+                                                                                            previewModeDownloadLoading ===
+                                                                                            'enhanced'
+                                                                                        }
+                                                                                        className="inline-flex w-full items-center justify-center gap-1 rounded-md border border-gray-200 bg-white px-2 py-1.5 text-[10px] font-semibold text-gray-800 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                                                                    >
+                                                                                        <ArrowDownTrayIcon
+                                                                                            className="h-3 w-3 shrink-0"
+                                                                                            aria-hidden
+                                                                                        />
+                                                                                        {previewModeDownloadLoading ===
+                                                                                        'enhanced'
+                                                                                            ? 'Downloading…'
+                                                                                            : 'Download'}
+                                                                                    </button>
+                                                                                )}
                                                                             </div>
                                                                         )}
                                                                         {tier === 'presentation' && (
@@ -3936,6 +5135,30 @@ export default function AssetDrawer({
                                                                                         Not available
                                                                                     </p>
                                                                                 )}
+                                                                                {executionDrawerPresentationDownloadUrl && (
+                                                                                    <button
+                                                                                        type="button"
+                                                                                        onClick={() =>
+                                                                                            void handleDownloadPreviewMode(
+                                                                                                'presentation',
+                                                                                            )
+                                                                                        }
+                                                                                        disabled={
+                                                                                            previewModeDownloadLoading ===
+                                                                                            'presentation'
+                                                                                        }
+                                                                                        className="inline-flex w-full items-center justify-center gap-1 rounded-md border border-gray-200 bg-white px-2 py-1.5 text-[10px] font-semibold text-gray-800 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                                                                    >
+                                                                                        <ArrowDownTrayIcon
+                                                                                            className="h-3 w-3 shrink-0"
+                                                                                            aria-hidden
+                                                                                        />
+                                                                                        {previewModeDownloadLoading ===
+                                                                                        'presentation'
+                                                                                            ? 'Downloading…'
+                                                                                            : 'Download'}
+                                                                                    </button>
+                                                                                )}
                                                                             </div>
                                                                         )}
                                                                     </div>
@@ -3952,251 +5175,384 @@ export default function AssetDrawer({
                                                     </div>
                                                 )}
                                             </div>
-                                        )}
-                                    </div>
-                                )
-                            })()}
-                            </>
-                            )}
-                            </>
-                            )}
-                        </div>
-                    )}
-                </div>
-
-                {/* Phase B9: Metadata Candidate Review (moved up from bottom) */}
-                {displayAsset?.id && !isVirtualGoogleFont && (
-                    <MetadataCandidateReview
-                        assetId={displayAsset.id}
-                        primaryColor={brandPrimary}
-                        uploadedByUserId={displayAsset.user_id}
-                    />
-                )}
-
-                {/* Brand insight stack: AI suggested tags + reference promotion + Brand Intelligence (aligned, shared panel) */}
-                {displayAsset?.id && !isVirtualGoogleFont &&
-                    (can('brand_settings.manage') ||
-                        displayAsset.category?.ebi_enabled === true ||
-                        can('metadata.suggestions.view') ||
-                        (isOwnUpload && can('metadata.edit_post_upload'))) && (
-                    <div className="border-t border-gray-200 bg-gradient-to-b from-slate-50/80 to-white">
-                        <div className="px-4 md:px-6 py-3 space-y-3">
-                            {brandIntelActivityBanner && (
-                                <div
-                                    className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700 shadow-sm"
-                                    role="status"
-                                    aria-live="polite"
-                                >
-                                    <ArrowPathIcon
-                                        className="h-3.5 w-3.5 flex-shrink-0 animate-spin text-slate-600"
-                                        aria-hidden
-                                    />
-                                    <span>{brandIntelActivityBanner}</span>
-                                </div>
-                            )}
-                            <AiTagSuggestionsInline
-                                key={`ai-tags-${displayAsset.id}`}
-                                assetId={displayAsset.id}
-                                uploadedByUserId={displayAsset.user_id}
-                                analysisStatus={displayAsset.analysis_status}
-                                primaryColor={brandPrimary}
-                                drawerInsightGroup
-                            />
-                            {can('brand_settings.manage') && showBrandReferenceCard && (
-                                <div className="rounded-md border border-gray-200 bg-white p-3 shadow-sm">
-                                    <div className="flex gap-2.5">
-                                        <RectangleStackIcon
-                                            className="h-4 w-4 text-slate-500 flex-shrink-0 mt-0.5"
-                                            aria-hidden
-                                        />
-                                        <div className="min-w-0 flex-1">
-                                            <h3 className="text-xs font-semibold text-gray-900">Use as a brand reference</h3>
-                                            <p className="text-xs text-gray-600 mt-1 leading-snug">
-                                                We surface this for assets that look like strong references: starred, rated above 3★,
-                                                or with meaningful views or downloads. Promoting one helps Brand Intelligence learn
-                                                what on-brand looks like—especially next to others in this category.
-                                            </p>
-                                            {displayAsset.reference_promotion ? (
-                                                <div className="flex flex-wrap items-center gap-2 mt-2.5">
-                                                    <span
-                                                        className={`inline-flex items-center rounded-md px-2.5 py-1 text-xs font-medium ${
-                                                            displayAsset.reference_promotion.kind === 'guideline'
-                                                                ? 'bg-violet-100 text-violet-800'
-                                                                : 'bg-sky-100 text-sky-800'
-                                                        }`}
-                                                    >
-                                                        {displayAsset.reference_promotion.kind === 'guideline'
-                                                            ? 'Guideline'
-                                                            : 'Reference'}
-                                                    </span>
-                                                    {displayAsset.reference_promotion.category && (
-                                                        <span className="text-xs text-gray-500">
-                                                            {displayAsset.reference_promotion.category}
-                                                        </span>
-                                                    )}
-                                                </div>
-                                            ) : (
-                                                <button
-                                                    type="button"
-                                                    onClick={() => setPromoteModalOpen(true)}
-                                                    className="mt-2.5 inline-flex justify-center rounded-md px-3 py-1.5 text-xs font-medium text-white shadow-sm hover:opacity-95 focus:outline-none focus:ring-2 focus:ring-offset-2"
-                                                    style={{
-                                                        backgroundColor: brandPrimary,
-                                                        ['--tw-ring-color']: brandPrimary,
-                                                    }}
-                                                >
-                                                    Add reference
-                                                </button>
-                                            )}
+                                                    </div>
+                                                )}
+                                            </div>
                                         </div>
-                                    </div>
-                                </div>
-                            )}
-                            <AssetBrandIntelligenceBlock
-                                asset={displayAsset}
-                                onAssetUpdate={onAssetUpdate}
-                                primaryColor={brandPrimary}
-                                drawerInsightGroup
-                                onActivityBannerChange={setBrandIntelActivityBanner}
-                            />
-                        </div>
-                    </div>
-                )}
+                                    )}
 
-                {/* Tags and Metadata — virtual Google Fonts: read-only summary (no asset API id) */}
-                {displayAsset?.id && isVirtualGoogleFont && (
-                    <div className="border-t border-gray-200">
-                        <CollapsibleSection title="Metadata" defaultExpanded>
-                            <dl className="space-y-3 text-sm text-gray-700">
-                                <div>
-                                    <dt className="font-medium text-gray-900">Source</dt>
-                                    <dd className="mt-0.5 text-gray-600">Google Fonts (referenced from Brand Guidelines; not stored as a file)</dd>
+                                    {isPdf && (
+                                        <div className="space-y-2">
+                                            <div className="mb-2 text-[11px] font-medium uppercase tracking-wide text-gray-400">
+                                                PDF
+                                            </div>
+                                            <div className="space-y-2">
+                                <div className="rounded-md border border-gray-200 bg-gray-50 p-3 space-y-2">
+                                    <p className="text-[11px] font-medium uppercase tracking-wide text-gray-500">
+                                        Extract all pages
+                                    </p>
+                                    <p className="text-xs text-gray-700">
+                                        Render all pages for deep review and ingestion workflows.
+                                    </p>
+                                    {displayAsset.pdf_page_count ? (
+                                        <p className="text-xs text-gray-500">
+                                            Detected pages: {displayAsset.pdf_page_count}
+                                        </p>
+                                    ) : null}
+                                    {extractAllBatchId ? (
+                                        <p className="text-xs text-gray-600 font-mono break-all">
+                                            Batch: {extractAllBatchId}
+                                        </p>
+                                    ) : null}
+                                    {extractAllError ? (
+                                        <p className="text-xs text-red-700">{extractAllError}</p>
+                                    ) : null}
+                                    <button
+                                        type="button"
+                                        onClick={handleExtractAllPdfPages}
+                                        disabled={extractAllLoading}
+                                        className="inline-flex w-full items-center justify-center rounded-md px-3 py-2 text-xs font-semibold text-white shadow-sm transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                                        style={{ backgroundColor: brandPrimary }}
+                                    >
+                                        {extractAllLoading ? (
+                                            <>
+                                                <ArrowPathIcon className="h-4 w-4 mr-2 animate-spin" aria-hidden />
+                                                Starting…
+                                            </>
+                                        ) : (
+                                            <>Extract all pages</>
+                                        )}
+                                    </button>
                                 </div>
-                                {(displayAsset.metadata?.fields?.font_role || displayAsset.google_font_role_label) && (
-                                    <div>
-                                        <dt className="font-medium text-gray-900">Typographic role</dt>
-                                        <dd className="mt-0.5 text-gray-600">
-                                            {displayAsset.google_font_role_label
-                                                || (displayAsset.metadata?.fields?.font_role === 'body_copy'
-                                                    ? 'Body'
-                                                    : displayAsset.metadata?.fields?.font_role === 'headline'
-                                                        ? 'Headline'
-                                                        : displayAsset.metadata?.fields?.font_role)}
-                                        </dd>
-                                    </div>
-                                )}
-                            </dl>
-                            <p className="mt-4 text-xs text-gray-500">
-                                To edit font families and roles, use Brand Guidelines → Standards (typography).
-                            </p>
-                        </CollapsibleSection>
-                    </div>
-                )}
-
-                {/* Tags and Metadata */}
-                {displayAsset?.id && !isVirtualGoogleFont && (
-                    <div className="border-t border-gray-200">
-                        {!import.meta.env.PROD && (
-                            <CollapsibleSection
-                                title="Pipeline state (dev)"
-                                defaultExpanded={false}
-                                className="border-b border-amber-100/90 bg-amber-50/25"
-                            >
-                                {pipelineDevSnap ? (
-                                    <div className="rounded border border-amber-300 bg-amber-50/90 p-3 font-mono text-xs text-amber-950">
-                                        <pre className="whitespace-pre-wrap break-all">
-                                            analysis_status: {pipelineDevSnap.analysisStatus}
-                                            {'\n'}
-                                            thumbnail_status: {pipelineDevSnap.thumbnailStatus}
-                                            {'\n'}
-                                            metadata_health:{' '}
-                                            {pipelineDevSnap.metadataHealth
-                                                ? JSON.stringify(pipelineDevSnap.metadataHealth)
-                                                : 'null'}
-                                        </pre>
-                                    </div>
+                                {useDrawerThumbnailModeOverride ? (
+                                    <p className="text-xs text-gray-600">
+                                        Styled preview uses the PDF cover thumbnail. Choose{' '}
+                                        <span className="font-medium text-gray-800">Original</span> in Preview Options to
+                                        page through the document.
+                                    </p>
                                 ) : (
-                                    <p className="text-xs text-amber-900/80">Loading pipeline state…</p>
+                                    <div className="flex items-center justify-between">
+                                        <button
+                                            type="button"
+                                            onClick={() => handlePdfPageNavigate(pdfCurrentPage - 1)}
+                                            disabled={pdfCurrentPage <= 1 || pdfPageLoading}
+                                            className="inline-flex items-center rounded border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                        >
+                                            Previous
+                                        </button>
+                                        <div className="text-xs text-gray-600">
+                                            Page {pdfCurrentPage} of {effectivePdfPageCount}
+                                        </div>
+                                        <button
+                                            type="button"
+                                            onClick={() => handlePdfPageNavigate(pdfCurrentPage + 1)}
+                                            disabled={pdfCurrentPage >= effectivePdfPageCount || pdfPageLoading}
+                                            className="inline-flex items-center rounded border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                        >
+                                            Next
+                                        </button>
+                                    </div>
                                 )}
+                                    {canRequestFullPdfExtraction && effectivePdfPageCount > 1 && (
+                                    <div className="flex items-center justify-between gap-2 border-t border-gray-100 pt-2">
+                                    <p className="text-xs text-gray-500">
+                                        Render all pages for AI ingestion and faster navigation.
+                                    </p>
+                                    <button
+                                        type="button"
+                                        onClick={handleRequestFullPdfExtraction}
+                                        disabled={pdfFullExtractionLoading || pdfFullExtractionRequested}
+                                        className="inline-flex shrink-0 items-center rounded border border-indigo-300 px-2 py-1 text-xs font-medium text-indigo-700 hover:bg-indigo-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                    >
+                                        {pdfFullExtractionLoading
+                                            ? 'Queueing...'
+                                            : pdfFullExtractionRequested
+                                                ? 'Queued'
+                                                : 'Render all pages'}
+                                    </button>
+                                    </div>
+                                )}
+                                    {canRequestFullPdfExtraction && (
+                                    <div className="flex flex-wrap items-center justify-between gap-2 border-t border-gray-100 pt-2">
+                                    <p className="text-xs text-gray-500">
+                                        Extract text from PDF for search and AI (pdftotext).
+                                    </p>
+                                    <div className="flex shrink-0 items-center gap-2">
+                                        {pdfTextExtraction?.status === 'complete' && (
+                                            <button
+                                                type="button"
+                                                onClick={() => setShowPdfTextModal(true)}
+                                                className="inline-flex items-center rounded border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                                            >
+                                                View
+                                            </button>
+                                        )}
+                                        {pdfTextExtraction?.status && (
+                                            <span className={[
+                                                'inline-flex rounded-full px-2 py-0.5 text-xs font-medium',
+                                                pdfTextExtraction.status === 'complete' && 'bg-green-100 text-green-700',
+                                                pdfTextExtraction.status === 'failed' && 'bg-red-100 text-red-700',
+                                                pdfTextExtraction.status === 'processing' && 'bg-amber-100 text-amber-700',
+                                                pdfTextExtraction.status === 'pending' && 'bg-gray-100 text-gray-600',
+                                            ].filter(Boolean).join(' ') || 'bg-gray-100 text-gray-600'}>
+                                                {pdfTextExtraction.status === 'complete' && 'Complete'}
+                                                {pdfTextExtraction.status === 'failed' && 'Failed'}
+                                                {pdfTextExtraction.status === 'processing' && 'Processing'}
+                                                {pdfTextExtraction.status === 'pending' && 'Pending'}
+                                            </span>
+                                        )}
+                                        <button
+                                            type="button"
+                                            onClick={handleTriggerPdfOcr}
+                                            disabled={pdfOcrTriggerLoading || pdfTextExtractionLoading}
+                                            className="inline-flex shrink-0 items-center rounded border border-emerald-300 px-2 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                        >
+                                            {pdfOcrTriggerLoading ? 'Starting...' : pdfTextExtraction ? 'Re-Extract Text' : 'Extract Text (OCR)'}
+                                        </button>
+                                    </div>
+                                    </div>
+                                )}
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {isVideo && (
+                                        <div className="space-y-2">
+                                            <div className="mb-2 text-[11px] font-medium uppercase tracking-wide text-gray-400">
+                                                Video
+                                            </div>
+                                            <div className="space-y-2">
+
+                                            {['queued', 'processing'].includes(
+                                                String(displayAsset.metadata?.ai_video_status || ''),
+                                            ) && (
+                                                    <div className="space-y-2" role="status" aria-live="polite">
+                                                        <div className="flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                                                            <ArrowPathIcon
+                                                                className="h-3.5 w-3.5 flex-shrink-0 animate-spin text-amber-700"
+                                                                aria-hidden
+                                                            />
+                                                            <span>Analyzing video content…</span>
+                                                        </div>
+                                                    </div>
+                                                )}
+
+                                            {String(displayAsset.metadata?.ai_video_status || '') === 'failed' &&
+                                                can('metadata.edit_post_upload') && (
+                                                    <div className="flex flex-col gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-900 sm:flex-row sm:items-center sm:justify-between">
+                                                        <span className="min-w-0">
+                                                            Video analysis failed
+                                                            {displayAsset.metadata?.ai_video_insights_error
+                                                                ? `: ${displayAsset.metadata.ai_video_insights_error}`
+                                                                : '.'}
+                                                        </span>
+                                                        <button
+                                                            type="button"
+                                                            onClick={handleRetryVideoInsights}
+                                                            disabled={videoInsightsRetryLoading}
+                                                            className="shrink-0 rounded-md border border-red-300 bg-white px-3 py-1.5 text-xs font-semibold text-red-900 hover:bg-red-100 disabled:opacity-50"
+                                                        >
+                                                            {videoInsightsRetryLoading ? 'Queuing…' : 'Retry analysis'}
+                                                        </button>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
                             </CollapsibleSection>
                         )}
-                        <CollapsibleSection 
-                            title="Metadata"
-                            defaultExpanded={true}
-                        >
-                            {/* Step 2: Pending Metadata Section - Moved above standard metadata list */}
-                            {/* Phase M-2: Only show pending metadata if metadata approval is enabled for company + brand */}
-                            {auth?.metadata_approval_features?.metadata_approval_enabled && 
-                             displayAsset?.id && 
-                             pendingMetadataCount > 0 && 
-                             canApproveMetadata && (
-                                <div className="mb-4 pb-4 border-b border-gray-200">
-                                    <PendingMetadataList assetId={displayAsset.id} />
-                                </div>
-                            )}
-                            
-                            {/* Step 3: Contributor Pending Feedback (Read-only) */}
-                            {/* Show notice for contributors (users without approval permission) */}
-                            {auth?.metadata_approval_features?.metadata_approval_enabled && 
-                             pendingMetadataCount > 0 && 
-                             !canApproveMetadata && (
-                                <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-md">
-                                    <p className="text-sm text-amber-800">
-                                        Metadata submitted for approval
-                                    </p>
-                                </div>
-                            )}
-                            
-                            {/* Category as first line */}
-                            {categoryName && categoryName !== 'Uncategorized' && (
-                                <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-1 md:gap-4 md:flex-nowrap mb-2 md:mb-3">
-                                    <dt className="text-sm text-gray-500 mb-1 md:mb-0 md:w-32 md:flex-shrink-0 flex items-center md:items-start">
-                                        <span className="flex items-center flex-wrap gap-1 md:gap-1.5">
-                                            Category
+
+                        {/* Processing — primary operations (status, safe actions, admin tools) */}
+                        {showProcessingAutomationSection && (
+                                <CollapsibleSection
+                                    contentInset="flush"
+                                    title={
+                                        <span className="flex w-full min-w-0 items-center justify-between gap-2">
+                                            <span className="min-w-0 truncate">Processing & Automation</span>
+                                            {aiPipelineCompleteForDrawer ? (
+                                                <CheckCircleIcon
+                                                    className="h-4 w-4 shrink-0 text-green-500"
+                                                    aria-label="Pipeline complete"
+                                                />
+                                            ) : null}
                                         </span>
-                                    </dt>
-                                    <dd className="text-sm font-semibold text-gray-900 md:flex-1 md:min-w-0 break-words">
-                                        {categoryName}
-                                    </dd>
-                                </div>
+                                    }
+                                    defaultExpanded={drawerExpandPreviewOrProcessingSections}
+                                >
+                                    <div className="space-y-3">
+                                        <div className="text-xs leading-snug text-gray-500 mb-2">
+                                            {processingStatusSummaryEl}
+                                            {isProcessingDrawerBusy && (
+                                                <span className="mt-1 block text-blue-600">
+                                                    Processing in progress…
+                                                </span>
+                                            )}
+                                        </div>
+
+                                        {showDrawerYourProcessingActions && (
+                                            <div className="border-t border-gray-100 pt-3">
+                                                <div className="mb-2 text-[11px] font-medium uppercase tracking-wide text-gray-400">
+                                                    Your actions
+                                                </div>
+                                                <div className="grid grid-cols-1 gap-3">
+                                                    {canRegenerateAiMetadataForTroubleshooting && (
+                                                        <ProcessingActionCard
+                                                            icon="sparkles"
+                                                            title="Improve AI tags"
+                                                            description="Refresh AI suggestions and tags"
+                                                            onClick={() => void handleDrawerRegenerateAiAnalysis()}
+                                                            disabled={
+                                                                regeneratingAiAnalysisDrawer ||
+                                                                isProcessingDrawerBusy ||
+                                                                guardBlocksAiMetadata
+                                                            }
+                                                            loading={regeneratingAiAnalysisDrawer}
+                                                            buttonTitle={cooldownHintAi || undefined}
+                                                            footer={
+                                                                (cooldownMinutesAi > 0 ||
+                                                                    drawerLastRunLine('ai_metadata')) ? (
+                                                                    <div className="space-y-0.5">
+                                                                        {cooldownMinutesAi > 0 && (
+                                                                            <div className="text-yellow-600">
+                                                                                Available in {cooldownMinutesAi}{' '}
+                                                                                minute
+                                                                                {cooldownMinutesAi !== 1 ? 's' : ''}
+                                                                            </div>
+                                                                        )}
+                                                                        {lastRunFooter('ai_metadata')}
+                                                                    </div>
+                                                                ) : false
+                                                            }
+                                                        />
+                                                    )}
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {isTenantAdminForProcessing && (
+                                            <div className="border-t border-gray-100 pt-3">
+                                                <div className="mb-2 text-[11px] font-medium uppercase tracking-wide text-gray-400">
+                                                    Data &amp; Metadata
+                                                </div>
+                                                <div className="grid grid-cols-1 gap-3">
+                                                    <ProcessingActionCard
+                                                        icon="refresh"
+                                                        title="Re-run metadata extraction"
+                                                        description="Technical file metadata only"
+                                                        onClick={() => void handleDrawerRegenerateSystemMetadata()}
+                                                        disabled={
+                                                            regeneratingSystemMetadataDrawer || isProcessingDrawerBusy
+                                                        }
+                                                        loading={regeneratingSystemMetadataDrawer}
+                                                        footer={lastRunFooter('system_metadata')}
+                                                    />
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {canSiteAdminPipeline && (
+                                            <div className="border-t border-gray-100 pt-3">
+                                                <div className="mb-2 text-xs font-semibold text-red-600">Admin</div>
+                                                <div className="grid grid-cols-1 gap-3">
+                                                    {isVideo && (
+                                                        <ProcessingActionCard
+                                                            icon="video"
+                                                            title="Generate video previews"
+                                                            description="Create preview clips for video assets"
+                                                            onClick={() => void handleDrawerRegenerateVideoPreview()}
+                                                            disabled={
+                                                                regeneratingVideoPreviewDrawer ||
+                                                                isProcessingDrawerBusy ||
+                                                                !canRetryThumbnails
+                                                            }
+                                                            loading={regeneratingVideoPreviewDrawer}
+                                                            buttonTitle={
+                                                                !canRetryThumbnails
+                                                                    ? 'You need permission to retry thumbnails for this company.'
+                                                                    : undefined
+                                                            }
+                                                            footer={lastRunFooter('video_preview')}
+                                                        />
+                                                    )}
+                                                    <ProcessingActionCard
+                                                        icon="refreshDanger"
+                                                        title="Reprocess entire asset"
+                                                        description="Full pipeline — resource intensive"
+                                                        variant="danger"
+                                                        onClick={() => void handleReprocessAsset()}
+                                                        disabled={
+                                                            reprocessLoading ||
+                                                            generateLoading ||
+                                                            thumbnailStatus === 'processing' ||
+                                                            isAssetAnalysisPipelineRunning ||
+                                                            guardBlocksFullPipeline ||
+                                                            !canRetryThumbnails
+                                                        }
+                                                        loading={reprocessLoading}
+                                                        buttonTitle={
+                                                            !canRetryThumbnails
+                                                                ? 'You need permission to retry thumbnails for this company.'
+                                                                : cooldownHintFull ||
+                                                                  (thumbnailStatus === 'processing'
+                                                                      ? 'A processing job is already running.'
+                                                                      : undefined)
+                                                        }
+                                                        footer={
+                                                            (cooldownMinutesFull > 0 ||
+                                                                drawerLastRunLine('full_pipeline')) ? (
+                                                                <div className="space-y-0.5">
+                                                                    {cooldownMinutesFull > 0 && (
+                                                                        <div className="text-yellow-600">
+                                                                            Available in {cooldownMinutesFull} minute
+                                                                            {cooldownMinutesFull !== 1 ? 's' : ''}
+                                                                        </div>
+                                                                    )}
+                                                                    {lastRunFooter('full_pipeline')}
+                                                                </div>
+                                                            ) : false
+                                                        }
+                                                    />
+                                                    {supportsThumbnail(
+                                                        displayAsset.mime_type,
+                                                        displayAsset.file_extension ||
+                                                            displayAsset.original_filename?.split?.('.')?.pop(),
+                                                    ) && (
+                                                        <ProcessingActionCard
+                                                            icon="trash"
+                                                            title="Remove preview"
+                                                            description="Deletes generated preview"
+                                                            variant="danger"
+                                                            onClick={() => void handleAdminRemovePreview()}
+                                                            disabled={adminRemovePreviewLoading}
+                                                            loading={adminRemovePreviewLoading}
+                                                            footer={lastRunFooter('remove_preview')}
+                                                        />
+                                                    )}
+                                                </div>
+                                                <p className="mt-3 text-xs text-gray-500 leading-snug">
+                                                    Bulk: select assets in the grid →{' '}
+                                                    <span className="font-medium">Actions</span> →{' '}
+                                                    <span className="font-medium">Processing &amp; Automation</span>{' '}
+                                                    (site admin).
+                                                </p>
+                                            </div>
+                                        )}
+                                        {generateError && canGenerateThumbnail && (
+                                            <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2">
+                                                <p className="text-xs text-red-800">{generateError}</p>
+                                            </div>
+                                        )}
+                                    </div>
+                                </CollapsibleSection>
                             )}
-                            
-                            <AssetMetadataDisplay 
-                                assetId={displayAsset.id} 
-                                onPendingCountChange={setPendingMetadataCount}
-                                primaryColor={brandPrimary}
-                                suppressAnalysisRunningBanner={assetIncidents?.length > 0 || (displayAsset?.analysis_status ?? '') === 'promotion_failed'}
-                                onPipelineDebugStateChange={import.meta.env.PROD ? undefined : setPipelineDevSnap}
-                                collectionDisplay={{
-                                    collections: assetCollections,
-                                    loading: assetCollectionsLoading,
-                                    onEdit: () => setShowCollectionsModal(true),
-                                    showEditButton: collectionFieldVisible,
-                                }}
-                            />
-                            
-                            {/* C9.1: Old inline Collections section removed - now integrated into AssetMetadataDisplay after Scene Classification */}
-                            
-                            {/* Tags at bottom of metadata */}
-                            <div className="mt-4 pt-4 border-t border-gray-100">
-                                <AssetTagManager 
-                                    key={`tag-manager-${displayAsset.id}`} 
-                                    asset={displayAsset}
-                                    showTitle={true}
-                                    showInput={true}
-                                    compact={true}
-                                    inline={true}
-                                    primaryColor={brandPrimary}
-                                />
-                            </div>
-                        </CollapsibleSection>
                     </div>
                 )}
 
                 {/* C9.1: Old Collections section removed - now inline in Metadata section above */}
 
                 {/* C9.2: Collections Edit Modal (inline in Metadata section, only if field is visible) */}
-                {showCollectionsModal && collectionFieldVisible && (
+                {showCollectionsModal && (
                     <div className="fixed inset-0 z-[10055] overflow-y-auto" aria-labelledby="modal-title" role="dialog" aria-modal="true">
                         <div className="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
                             <div className="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity z-[10055]" onClick={() => setShowCollectionsModal(false)}></div>
@@ -4216,40 +5572,7 @@ export default function AssetDrawer({
                                                         collections={dropdownCollections}
                                                         selectedIds={(assetCollections || []).filter(Boolean).map((c) => c?.id).filter(Boolean)}
                                                         maxHeight="320px"
-                                                        onChange={async (newCollectionIds) => {
-                                                            if (!asset?.id || addToCollectionLoading) return
-                                                            setAddToCollectionLoading(true)
-                                                            try {
-                                                                // C9.1: Use sync endpoint for full state update
-                                                                await window.axios.put(
-                                                                    `/app/assets/${asset.id}/collections`,
-                                                                    { collection_ids: newCollectionIds },
-                                                                    { headers: { Accept: 'application/json' } }
-                                                                )
-                                                                // Refresh collections from backend to reflect truth
-                                                                const res = await window.axios.get(`/app/assets/${asset.id}/collections`, { headers: { Accept: 'application/json' } })
-                                                                setAssetCollections((res.data?.collections ?? []).filter(Boolean))
-                                                                // Notify parent if callback provided
-                                                                const added = newCollectionIds.filter((id) => !(assetCollections || []).filter(Boolean).some((c) => c?.id === id))
-                                                                const removed = (assetCollections || []).filter(Boolean).filter((c) => !newCollectionIds.includes(c?.id)).map((c) => c?.id).filter(Boolean)
-                                                                if (collectionContext) {
-                                                                    added.forEach((id) => collectionContext.onAssetAddedToCollection?.(asset.id, id))
-                                                                    removed.forEach((id) => collectionContext.onAssetRemovedFromCollection?.(asset.id, id))
-                                                                }
-                                                                setToastMessage('Collections updated')
-                                                                setToastType('success')
-                                                                setTimeout(() => setToastMessage(null), 3000)
-                                                            } catch (err) {
-                                                                const errorMsg = err.response?.data?.message || err.response?.data?.errors?.collection_ids?.[0] || 'Failed to update collections'
-                                                                setToastMessage(errorMsg)
-                                                                setToastType('error')
-                                                                // Refresh to restore backend truth on error
-                                                                const res = await window.axios.get(`/app/assets/${asset.id}/collections`, { headers: { Accept: 'application/json' } })
-                                                                setAssetCollections((res.data?.collections ?? []).filter(Boolean))
-                                                            } finally {
-                                                                setAddToCollectionLoading(false)
-                                                            }
-                                                        }}
+                                                        onChange={(newCollectionIds) => void handleDrawerCollectionsChange(newCollectionIds)}
                                                         disabled={addToCollectionLoading || dropdownCollectionsLoading}
                                                         placeholder="Select collections…"
                                                         showCreateButton={true} // C9.1: Always show create button in modal
@@ -4326,7 +5649,7 @@ export default function AssetDrawer({
                 {/* Phase AF-5: Only show approval history if approvals are enabled */}
                 {auth?.approval_features?.approvals_enabled && displayAsset?.id && (displayAsset.approval_status === 'pending' || displayAsset.approval_status === 'rejected' || displayAsset.approval_status === 'approved') && (
                     <div className="border-t border-gray-200">
-                        <CollapsibleSection title="Approval History" defaultExpanded={false}>
+                        <CollapsibleSection contentInset="flush" title="Approval History" defaultExpanded={false}>
                             {/* Phase AF-6: Approval Summary (AI-generated) */}
                             {auth?.approval_features?.approval_summaries_enabled && displayAsset?.approval_summary && (
                                 <div className="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
@@ -4363,7 +5686,7 @@ export default function AssetDrawer({
 
                 {/* File Information */}
                 <div className="border-t border-gray-200">
-                    <CollapsibleSection title="File Information" defaultExpanded={false}>
+                    <CollapsibleSection contentInset="flush" title="File Information" defaultExpanded={false}>
                     
                     {/* Created By - moved below preview, at top of file info */}
                     {/* Use displayAsset (with live updates) instead of prop asset */}
@@ -4648,180 +5971,6 @@ export default function AssetDrawer({
                         )}
                     </dl>
 
-                {/* Processing State - Skipped or Pending (e.g. after Remove Preview) */}
-                {/* Show Regenerate/Generate only after pipeline has finished a first pass (not while analysis is still uploading/generating_thumbnails) */}
-                {(thumbnailsSkipped ||
-                    (thumbnailStatus === 'pending' && canGenerateThumbnail && !isAssetAnalysisPipelineRunning)) && (
-                    <div className="border-t border-gray-200 pt-6">
-                        <h3 className="text-sm font-medium text-gray-900 mb-2">Preview Status</h3>
-                        
-                        {/* Generate Preview Button - For PDFs that can now be processed */}
-                        {canGenerateThumbnail ? (
-                            <div className="bg-indigo-50 border border-indigo-200 rounded-md p-4">
-                                <p className="text-sm font-medium text-indigo-900 mb-2">
-                                    {(thumbnailStatus === 'pending' && (displayAsset?.analysis_status ?? '') === 'complete')
-                                        ? 'Preview removed — ready to regenerate'
-                                        : 'Preview not generated yet'}
-                                </p>
-                                <p className="text-xs text-indigo-700 mb-3">
-                                    {(thumbnailStatus === 'pending' && (displayAsset?.analysis_status ?? '') === 'complete')
-                                        ? 'Reprocess Asset runs the full pipeline (thumbnails, metadata, color analysis). Use when Regenerate Preview doesn&apos;t work.'
-                                        : displayAsset.mime_type === 'application/pdf' || displayAsset.original_filename?.toLowerCase().endsWith('.pdf')
-                                            ? 'PDF previews generate from page 1'
-                                            : 'Thumbnail generation is now available for this file type'}
-                                </p>
-                                
-                                {/* PDF Size Limit Info */}
-                                {(displayAsset.mime_type === 'application/pdf' || displayAsset.original_filename?.toLowerCase().endsWith('.pdf')) && (
-                                    <p className="text-xs text-indigo-600 mb-3">
-                                        Maximum file size: 150 MB
-                                    </p>
-                                )}
-                                
-                                {generateError && (
-                                    <div className="mb-3 bg-red-50 border border-red-200 rounded-md p-2">
-                                        <p className="text-xs text-red-800">{generateError}</p>
-                                    </div>
-                                )}
-                                
-                                <div className="flex flex-wrap gap-2">
-                                    <button
-                                        type="button"
-                                        onClick={handleReprocessAsset}
-                                        disabled={reprocessLoading || generateLoading}
-                                        className="inline-flex items-center rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed"
-                                    >
-                                        {reprocessLoading ? (
-                                            <>
-                                                <ArrowPathIcon className="h-4 w-4 mr-2 animate-spin" />
-                                                Reprocessing...
-                                            </>
-                                        ) : (
-                                            <>Reprocess Asset</>
-                                        )}
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={handleGenerateThumbnail}
-                                        disabled={generateLoading || reprocessLoading}
-                                        className="inline-flex items-center rounded-md border border-indigo-600 bg-white px-4 py-2 text-sm font-semibold text-indigo-600 hover:bg-indigo-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed"
-                                    >
-                                        {generateLoading ? (
-                                            <>
-                                                <ArrowPathIcon className="h-4 w-4 mr-2 animate-spin" />
-                                                Generating...
-                                            </>
-                                        ) : (
-                                            <>{(thumbnailStatus === 'pending' && (displayAsset?.analysis_status ?? '') === 'complete') ? 'Regenerate Preview' : 'Generate Preview'}</>
-                                        )}
-                                    </button>
-                                </div>
-                            </div>
-                        ) : (
-                            /* Truly unsupported file types - show static message */
-                            <div className="bg-blue-50 border border-blue-200 rounded-md p-3">
-                                <p className="text-sm font-medium text-blue-800 mb-1">
-                                    Preview not available for this file type.
-                                </p>
-                                {/* Show skip reason if available in metadata */}
-                                {/* Use displayAsset (with live updates) instead of prop asset */}
-                                {(displayAsset.metadata?.thumbnail_skip_reason || displayAsset.metadata?.thumbnail_skip_message) && (
-                                    <>
-                                        <p className="text-xs text-blue-600 mt-1">
-                                            {displayAsset.metadata?.thumbnail_skip_message
-                                                || (displayAsset.metadata.thumbnail_skip_reason === 'unsupported_format:tiff' 
-                                                    ? 'Unsupported file type (TIFF)' 
-                                                    : displayAsset.metadata.thumbnail_skip_reason === 'unsupported_format:avif'
-                                                    ? 'Unsupported file type (AVIF)'
-                                                    : displayAsset.metadata.thumbnail_skip_reason === 'unsupported_format:cr2'
-                                                    ? 'Unsupported file type (Canon RAW / CR2)'
-                                                    : displayAsset.metadata.thumbnail_skip_reason === 'unsupported_format:bmp'
-                                                    ? 'Unsupported file type (BMP)'
-                                                    : displayAsset.metadata.thumbnail_skip_reason === 'unsupported_format:svg'
-                                                    ? 'Unsupported file type (SVG)'
-                                                    : displayAsset.metadata.thumbnail_skip_reason === 'unsupported_format:ico'
-                                                    ? 'Thumbnail generation is not supported for this file type.'
-                                                    : displayAsset.metadata.thumbnail_skip_reason === 'unsupported_format:zip'
-                                                    ? 'Thumbnail generation is not supported for this file type.'
-                                                    : 'Unsupported file type')}
-                                        </p>
-                                        {/* Show regeneration option for TIFF/AVIF/SVG if retry is allowed */}
-                                        {(displayAsset.metadata.thumbnail_skip_reason === 'unsupported_format:tiff' || 
-                                          displayAsset.metadata.thumbnail_skip_reason === 'unsupported_format:avif' ||
-                                          displayAsset.metadata.thumbnail_skip_reason === 'unsupported_format:cr2' ||
-                                          displayAsset.metadata.thumbnail_skip_reason === 'unsupported_format:svg') && 
-                                         canRetryThumbnail && (
-                                            <div className="mt-2">
-                                                <p className="text-xs text-green-700 font-medium">
-                                                    💡 {displayAsset.metadata.thumbnail_skip_reason === 'unsupported_format:svg' 
-                                                        ? 'SVG support is now available (rasterized via Imagick).'
-                                                        : displayAsset.metadata.thumbnail_skip_reason === 'unsupported_format:cr2'
-                                                            ? 'CR2 support is now available (Imagick + ImageMagick RAW/LibRaw).'
-                                                        : 'TIFF/AVIF support is now available via Imagick.'}
-                                                </p>
-                                                <p className="text-xs text-green-600 mt-1">
-                                                    Use &quot;Retry Pipeline&quot; or &quot;Attempt Repair&quot; to regenerate thumbnails.
-                                                </p>
-                                            </div>
-                                        )}
-                                    </>
-                                )}
-                                {/* Fallback to thumbnail_error if skip_reason not in metadata */}
-                                {!displayAsset.metadata?.thumbnail_skip_reason && displayAsset.thumbnail_error && (
-                                    <p className="text-xs text-blue-600 mt-1">
-                                        {displayAsset.thumbnail_error}
-                                    </p>
-                                )}
-                            </div>
-                        )}
-                    </div>
-                )}
-
-
-                {isPdfAsset && (
-                    <div className="border-t border-gray-200 pt-6">
-                        <h3 className="text-sm font-medium text-gray-900 mb-2">PDF Pages</h3>
-                        <div className="bg-gray-50 border border-gray-200 rounded-md p-4">
-                            <p className="text-sm text-gray-700">
-                                Render all pages for deep review and ingestion workflows.
-                            </p>
-                            {displayAsset.pdf_page_count ? (
-                                <p className="mt-1 text-xs text-gray-500">
-                                    Detected pages: {displayAsset.pdf_page_count}
-                                </p>
-                            ) : null}
-
-                            {extractAllBatchId ? (
-                                <p className="mt-2 text-xs text-gray-600 font-mono break-all">
-                                    Batch: {extractAllBatchId}
-                                </p>
-                            ) : null}
-
-                            {extractAllError ? (
-                                <p className="mt-2 text-xs text-red-700">{extractAllError}</p>
-                            ) : null}
-
-                            <div className="mt-3">
-                                <button
-                                    type="button"
-                                    onClick={handleExtractAllPdfPages}
-                                    disabled={extractAllLoading}
-                                    className="inline-flex items-center rounded-md bg-gray-900 px-3 py-2 text-sm font-semibold text-white hover:bg-black disabled:opacity-50"
-                                >
-                                    {extractAllLoading ? (
-                                        <>
-                                            <ArrowPathIcon className="h-4 w-4 mr-2 animate-spin" />
-                                            Starting...
-                                        </>
-                                    ) : (
-                                        <>Extract All Pages</>
-                                    )}
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                )}
-
                 {/* Processing State - Failed (error with details) */}
                 {/* Use displayAsset (with live updates) instead of prop asset */}
                 {thumbnailsFailed && displayAsset.thumbnail_error && (
@@ -4845,23 +5994,23 @@ export default function AssetDrawer({
                                 </div>
                             )}
                             
-                            <div className="flex items-center gap-2 flex-wrap">
+                            <div className="flex flex-wrap items-center gap-2">
                                 <button
                                     type="button"
-                                    onClick={handleReprocessAsset}
+                                    onClick={() => void handleReprocessAsset()}
                                     disabled={reprocessLoading}
-                                    className="inline-flex items-center rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:opacity-50"
+                                    className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-indigo-600 px-4 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:cursor-not-allowed disabled:opacity-50"
                                 >
-                                    {reprocessLoading ? <ArrowPathIcon className="h-4 w-4 mr-2 animate-spin" /> : null}
+                                    {reprocessLoading ? <ArrowPathIcon className="h-4 w-4 shrink-0 animate-spin" aria-hidden /> : null}
                                     Reprocess Asset
                                 </button>
                                 {canRetryThumbnail && (
                                     <button
                                         type="button"
                                         onClick={() => setShowRetryModal(true)}
-                                        className="inline-flex items-center rounded-md border border-red-600 bg-white px-3 py-2 text-sm font-semibold text-red-600 hover:bg-red-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600"
+                                        className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-red-600 bg-white px-4 text-sm font-semibold text-red-600 shadow-sm transition-colors hover:bg-red-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600"
                                     >
-                                        <ArrowPathIcon className="h-4 w-4 mr-2" />
+                                        <ArrowPathIcon className="h-4 w-4 shrink-0" aria-hidden />
                                         Retry Thumbnails Only
                                     </button>
                                 )}
@@ -4884,6 +6033,7 @@ export default function AssetDrawer({
                 {!reliabilityTimelineLoading && reliabilityTimeline.length > 0 && (
                 <div className="border-t border-gray-200">
                     <CollapsibleSection
+                        contentInset="flush"
                         title="Reliability Timeline"
                         defaultExpanded={false}
                     >
@@ -4922,7 +6072,7 @@ export default function AssetDrawer({
 
                 {/* Asset Timeline */}
                 <div className="border-t border-gray-200">
-                    <CollapsibleSection title="Timeline" defaultExpanded={false}>
+                    <CollapsibleSection contentInset="flush" title="Timeline" defaultExpanded={false}>
                         <AssetTimeline 
                             events={activityEvents} 
                             loading={activityLoading}
@@ -4989,53 +6139,25 @@ export default function AssetDrawer({
                 }
             />
 
-            {/* Phase 3.1: Lightbox + optional details column (same content as former slide-out AssetDetailPanel) — portaled for Safari fixed/z-index inside overflow ancestors */}
+            {/* Lightbox: media + optional right column (AssetDetailPanel) */}
             {showZoomModal && (hasThumbnailSupport || isVideo || displayAsset?.is_virtual_google_font) && (currentCarouselAsset?.id || displayAsset?.id) && typeof document !== 'undefined' && createPortal(
                 <div
                     className="fixed inset-0 z-[10050] isolate flex min-h-0 w-full max-h-[100dvh] flex-col overflow-hidden md:flex-row md:items-stretch"
                     style={{ backgroundColor: 'rgb(0 0 0 / 0.92)' }}
-                    onClick={() => setShowZoomModal(false)}
+                    onClick={closeLightboxAndFocusDrawer}
                 >
                     <div
-                        className={`relative order-1 flex min-h-0 min-w-0 flex-col overflow-hidden bg-black/90 md:self-stretch ${
-                            showLightboxDetails ? 'flex-1 md:flex-[1_1_55%]' : 'flex-1'
-                        }`}
+                        className="relative order-1 flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-black/90 md:self-stretch"
                         onClick={(e) => e.stopPropagation()}
                     >
-                        <div className="absolute right-4 top-4 z-20 flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-                            <button
-                                type="button"
-                                onClick={() => setShowLightboxDetails((v) => !v)}
-                                className={`rounded-md px-3 py-2 text-sm font-semibold shadow-sm transition-colors ${
-                                    showLightboxDetails
-                                        ? 'bg-white text-gray-900 ring-2 ring-white'
-                                        : 'bg-white/15 text-white hover:bg-white/25'
-                                }`}
-                                aria-pressed={showLightboxDetails}
-                            >
-                                Details
-                            </button>
-                            {showExecutionPreviewChrome &&
-                                isExecutionDrawer &&
-                                currentCarouselAsset?.id === displayAsset?.id && (
-                                    <button
-                                        type="button"
-                                        onClick={() => setExecutionTripleCompareOpen(true)}
-                                        className="rounded-md bg-white/15 px-3 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-white/25"
-                                    >
-                                        Versions
-                                    </button>
-                                )}
-                            <button
-                                type="button"
-                                onClick={() => setShowZoomModal(false)}
-                                className="rounded-md p-2 text-white transition-colors hover:bg-white/10"
-                                aria-label="Close"
-                            >
-                                <XMarkIcon className="h-8 w-8" />
-                            </button>
-                        </div>
-
+                        <button
+                            type="button"
+                            onClick={closeLightboxAndFocusDrawer}
+                            className="absolute right-4 top-4 z-20 rounded-full p-2 text-white/85 transition-colors hover:bg-white/10"
+                            aria-label="Close fullscreen"
+                        >
+                            <XMarkIcon className="h-7 w-7" />
+                        </button>
                         {canNavigateLeft && (
                             <button
                                 type="button"
@@ -5101,14 +6223,10 @@ export default function AssetDrawer({
                                             </p>
                                         )}
                                         {specimen && (
-                                            <a
-                                                href={specimen}
-                                                target="_blank"
-                                                rel="noopener noreferrer"
-                                                className="mt-8 inline-flex items-center rounded-md bg-sky-500 px-4 py-2.5 text-sm font-semibold text-white hover:bg-sky-400"
-                                            >
-                                                Open on Google Fonts
-                                            </a>
+                                            <p className="mt-8 max-w-sm text-xs text-white/60">
+                                                Open this family on Google Fonts from the asset sidebar after closing fullscreen (lightbox is
+                                                view-only).
+                                            </p>
                                         )}
                                     </div>
                                 )
@@ -5181,20 +6299,14 @@ export default function AssetDrawer({
                                     <PDFViewer asset={currentCarouselAsset} />
                                 )
                             } else {
-                                // Raster preview URL — placeholder if missing or not displayable in-browser
-                                const carouselImgUrl =
-                                    currentCarouselAsset.thumbnail_url_large ??
-                                    currentCarouselAsset.final_thumbnail_url ??
-                                    currentCarouselAsset.thumbnail_url ??
-                                    currentCarouselAsset.preview_thumbnail_url ??
-                                    ''
-                                const trimmedUrl = String(carouselImgUrl).trim()
+                                // Raster: use pipeline thumbnails (`thumbnail_mode_urls`) — avoids empty lightbox when flat fields are unset
+                                const trimmedUrl = String(lightboxRasterDisplayUrl || '').trim()
                                 if (!trimmedUrl || lightboxImageError) {
                                     return <LightboxPreviewPlaceholder asset={currentCarouselAsset} />
                                 }
                                 return (
                                     <img
-                                        key={currentCarouselAsset.id}
+                                        key={`${currentCarouselAsset.id}-${lightboxRasterMode}-${trimmedUrl.slice(0, 96)}`}
                                         src={trimmedUrl}
                                         alt={currentCarouselAsset.title || currentCarouselAsset.original_filename || 'Asset preview'}
                                         className="h-auto w-auto max-h-full max-w-full object-contain transition-all duration-300 ease-in-out"
@@ -5206,6 +6318,7 @@ export default function AssetDrawer({
                                                   : 'translateX(0)',
                                             opacity: transitionDirection ? 0 : 1,
                                         }}
+                                        onLoad={() => setLightboxImageError(false)}
                                         onError={() => setLightboxImageError(true)}
                                     />
                                 )
@@ -5223,71 +6336,49 @@ export default function AssetDrawer({
                         </p>
                     </div>
                     </div>
-
-                    {showLightboxDetails && currentCarouselAsset?.id && (
+                    {currentCarouselAsset?.id && !currentCarouselAsset.is_virtual_google_font && (
                         <div
-                            className="order-2 flex max-h-[min(50vh,520px)] w-full min-h-0 flex-col overflow-hidden bg-neutral-950 md:max-h-none md:h-full md:min-h-0 md:w-[min(500px,50vw)] md:flex-shrink-0 md:self-stretch"
+                            className="order-2 flex h-[min(44vh,380px)] w-full min-h-0 shrink-0 flex-col border-t border-white/10 md:h-auto md:max-h-[100dvh] md:w-[min(440px,42vw)] md:min-w-[300px] md:border-l md:border-t-0"
                             onClick={(e) => e.stopPropagation()}
                         >
-                            {currentCarouselAsset.is_virtual_google_font ? (
-                                <div className="flex h-full flex-col gap-4 overflow-y-auto p-6 text-left text-white">
-                                    <div>
-                                        <h3 className="text-lg font-semibold text-white">About this font</h3>
-                                        <p className="mt-2 text-sm text-white/70">
-                                            This family is referenced from your Brand Guidelines (Google Fonts). It is loaded from Google&apos;s servers for previews; we do not store a font file in your asset library.
-                                        </p>
-                                    </div>
-                                    {currentCarouselAsset.google_font_role_label && (
-                                        <div>
-                                            <p className="text-xs font-semibold uppercase tracking-wide text-white/40">Role in guidelines</p>
-                                            <p className="mt-1 text-sm text-white/90">{currentCarouselAsset.google_font_role_label}</p>
-                                        </div>
-                                    )}
-                                    {googleFontSpecimenUrl && (
-                                        <a
-                                            href={googleFontSpecimenUrl}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            className="inline-flex items-center justify-center rounded-md border border-white/20 bg-white/10 px-4 py-2.5 text-sm font-semibold text-white hover:bg-white/15"
-                                        >
-                                            Download / license on Google Fonts
-                                        </a>
-                                    )}
-                                    {auth?.activeBrand?.id && (
-                                        <Link
-                                            href={typeof route === 'function'
-                                                ? route('brands.brand-guidelines.builder', { brand: auth.activeBrand.id, step: 'standards' })
-                                                : `/app/brands/${auth.activeBrand.id}/brand-guidelines/builder?step=standards`}
-                                            className="inline-flex items-center justify-center rounded-md px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:opacity-95"
-                                            style={{ backgroundColor: brandPrimary }}
-                                        >
-                                            Edit typography in Brand Guidelines
-                                        </Link>
-                                    )}
-                                    <p className="text-xs text-white/45">
-                                        To change roles (e.g. primary vs body) or swap families, use the typography step in Brand Guidelines.
+                            {lightboxCarouselIsRasterImage && lightboxRasterPreviewOptions.length > 1 && (
+                                <div className="pointer-events-auto shrink-0 border-b border-white/10 bg-neutral-950/95 px-2 py-2 md:px-3">
+                                    <p className="mb-1.5 text-[10px] font-medium uppercase tracking-wide text-white/45">
+                                        Preview
                                     </p>
+                                    <div className="flex gap-1">
+                                        {lightboxRasterPreviewOptions.map(({ id, label }) => {
+                                            const active = lightboxRasterMode === id
+                                            return (
+                                                <button
+                                                    key={id}
+                                                    type="button"
+                                                    onClick={() => setLightboxRasterMode(id)}
+                                                    className={`min-w-0 flex-1 rounded-md px-1.5 py-1.5 text-center text-[10px] font-semibold leading-tight transition-colors sm:px-2 ${
+                                                        active
+                                                            ? 'bg-white text-neutral-900'
+                                                            : 'bg-white/10 text-white/90 hover:bg-white/15'
+                                                    }`}
+                                                >
+                                                    {label}
+                                                </button>
+                                            )
+                                        })}
+                                    </div>
                                 </div>
-                            ) : (
-                            <AssetDetailPanel
-                                asset={currentCarouselAsset}
-                                isOpen
-                                embeddedInLightbox
-                                onClose={() => setShowLightboxDetails(false)}
-                                activityEvents={activityEvents}
-                                activityLoading={activityLoading}
-                                onReplaceFile={() => setShowReplaceFileModal(true)}
-                                onDelete={canDelete ? () => setShowDeleteConfirm(true) : undefined}
-                                onReprocessAsset={canRetryThumbnails ? handleReprocessAsset : undefined}
-                                reprocessLoading={reprocessLoading}
-                                onToast={(msg, type) => {
-                                    setToastMessage(msg ?? null)
-                                    setToastType(type || 'success')
-                                    if (msg) setTimeout(() => setToastMessage(null), 3000)
-                                }}
-                                primaryColor={brandPrimary}
-                            />
                             )}
+                            <div className="min-h-0 flex-1 overflow-y-auto">
+                                <AssetDetailPanel
+                                    asset={currentCarouselAsset}
+                                    isOpen
+                                    embeddedInLightbox
+                                    mode="readonly"
+                                    onManageInDrawer={closeLightboxAndFocusDrawer}
+                                    onClose={closeLightboxAndFocusDrawer}
+                                    onToast={lightboxDetailOnToast}
+                                    primaryColor={brandPrimary}
+                                />
+                            </div>
                         </div>
                     )}
                 </div>,
@@ -5933,6 +7024,16 @@ export default function AssetDrawer({
                             router.reload({ preserveState: true, preserveScroll: true })
                         }, 500)
                     }}
+                />
+            )}
+
+            {displayAsset?.id && (
+                <ManageAssetModal
+                    asset={displayAsset}
+                    isOpen={manageAssetModalOpen}
+                    onClose={() => setManageAssetModalOpen(false)}
+                    onSaved={() => onAssetUpdate?.()}
+                    primaryColor={brandPrimary}
                 />
             )}
 

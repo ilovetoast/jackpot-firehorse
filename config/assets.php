@@ -418,4 +418,40 @@ return [
         'process_asset_job_timeout_heavy_seconds' => (int) env('PROCESS_ASSET_JOB_TIMEOUT_HEAVY_SECONDS', 1780),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Video AI (async insights — tags, summary, structured hints)
+    |--------------------------------------------------------------------------
+    |
+    | Triggered after upload via GenerateVideoInsightsJob (non-blocking).
+    | Frames are sampled locally with FFmpeg; not stored in S3 unless
+    | video.store_frames is enabled (off by default).
+    |
+    */
+    'video_ai' => [
+        'enabled' => (bool) env('ASSET_VIDEO_AI_ENABLED', true),
+        'max_frames' => (int) env('ASSET_VIDEO_AI_MAX_FRAMES', 20),
+        'frame_interval_seconds' => (int) env('ASSET_VIDEO_AI_FRAME_INTERVAL', 3),
+        'max_duration_seconds' => (int) env('ASSET_VIDEO_AI_MAX_DURATION', 120),
+        /** When true, transcribe audio via OpenAI (Whisper); cheap add-on when key is configured. */
+        'transcription_enabled' => (bool) env('ASSET_VIDEO_AI_TRANSCRIPTION', true),
+        /** Batch dispatcher: jobs per chunk and pause between chunks (seconds). */
+        'batch_size' => (int) env('ASSET_VIDEO_AI_BATCH_SIZE', 5),
+        'batch_delay_seconds' => (int) env('ASSET_VIDEO_AI_BATCH_DELAY', 2),
+        /** Queue for {@see \App\Jobs\GenerateVideoInsightsJob} (default ai-low for throughput). */
+        'queue' => env('ASSET_VIDEO_AI_QUEUE', null),
+        /** Surface cumulative video AI USD in asset drawer (metadata-backed). */
+        'show_cost_in_drawer' => (bool) env('ASSET_VIDEO_AI_SHOW_COST_IN_DRAWER', true),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Video-derived files (optional persistence)
+    |--------------------------------------------------------------------------
+    */
+    'video' => [
+        /** When true, persist sampled frames under tenant system prefix (excluded from user storage billing). */
+        'store_frames' => (bool) env('ASSET_VIDEO_STORE_FRAMES', false),
+    ],
+
 ];

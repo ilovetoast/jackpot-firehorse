@@ -15,16 +15,20 @@ import {
 import { usePermission } from '../hooks/usePermission'
 import { usePage } from '@inertiajs/react'
 
-export default function MetadataCandidateReview({ assetId, primaryColor, uploadedByUserId = null }) {
+export default function MetadataCandidateReview({
+    assetId,
+    primaryColor,
+    uploadedByUserId = null,
+    /** When true: flat card style for Metadata Review collapsible (no outer title strip / border-t). */
+    compactDrawerReview = false,
+}) {
     const [reviewItems, setReviewItems] = useState([])
     const [loading, setLoading] = useState(true)
     const [processing, setProcessing] = useState(new Set())
-    const [showConfirmApprove, setShowConfirmApprove] = useState(null)
     const [showConfirmReject, setShowConfirmReject] = useState(null)
     
     const { auth } = usePage().props
     const brandColor = primaryColor || auth?.activeBrand?.primary_color || '#6366f1'
-    const brandColorTint = brandColor.startsWith('#') ? `${brandColor}18` : `#${brandColor}18`
 
     const { can } = usePermission()
     const brandRole = (auth?.brand_role || '').toLowerCase()
@@ -107,7 +111,6 @@ export default function MetadataCandidateReview({ assetId, primaryColor, uploade
         }
 
         setProcessing((prev) => new Set(prev).add(candidateId))
-        setShowConfirmApprove(null)
 
         try {
             const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content
@@ -375,7 +378,7 @@ export default function MetadataCandidateReview({ assetId, primaryColor, uploade
     // Format producer badge
     const formatProducer = (producer) => {
         const badges = {
-            ai: { label: 'AI', class: 'bg-purple-100 text-purple-800' },
+            ai: { label: 'AI', class: 'bg-gray-100 text-gray-800' },
             exif: { label: 'EXIF', class: 'bg-blue-100 text-blue-800' },
             system: { label: 'System', class: 'bg-gray-100 text-gray-800' },
             user: { label: 'User', class: 'bg-green-100 text-green-800' },
@@ -403,7 +406,7 @@ export default function MetadataCandidateReview({ assetId, primaryColor, uploade
 
     if (loading) {
         return (
-            <div className="px-4 py-3 border-t border-gray-200">
+            <div className={compactDrawerReview ? '' : 'px-4 py-3 border-t border-gray-200'}>
                 <div className="text-xs text-gray-500">Loading metadata candidates for review...</div>
             </div>
         )
@@ -413,20 +416,17 @@ export default function MetadataCandidateReview({ assetId, primaryColor, uploade
         return null // Hide if no reviewable candidates
     }
 
-    return (
-        <>
-            <div className="px-4 py-3 border-t border-gray-200">
-                <h3 className="text-xs font-semibold text-gray-900 mb-1 flex items-center gap-1.5">
-                    <InformationCircleIcon className="h-3.5 w-3.5 flex-shrink-0" style={{ color: brandColor }} />
-                    Metadata Candidate Review
-                </h3>
-                <p className="text-[11px] text-gray-500 mb-3">
-                    Review and approve or reject metadata suggestions (AI or embedded file metadata). Approved values are
-                    written to the asset; source is recorded where applicable.
-                </p>
-                <div className="space-y-3">
-                    {reviewItems.map((item) => (
-                        <div key={item.metadata_field_id} className="rounded-md p-2.5 border" style={{ borderColor: `${brandColor}40`, backgroundColor: brandColorTint }}>
+    const list = (
+        <div className="space-y-3">
+            {reviewItems.map((item) => (
+                <div
+                    key={item.metadata_field_id}
+                    className={
+                        compactDrawerReview
+                            ? 'rounded-md border border-gray-200 bg-white p-3'
+                            : 'rounded-md border border-gray-200 bg-white p-2.5'
+                    }
+                >
                             <div>
                                 <dt className="text-xs font-medium text-gray-900 mb-1.5">
                                     {item.field_label}
@@ -486,7 +486,7 @@ export default function MetadataCandidateReview({ assetId, primaryColor, uploade
                                                     <div className="flex items-center gap-1.5 flex-shrink-0">
                                                         <button
                                                             type="button"
-                                                            onClick={() => setShowConfirmApprove(candidate)}
+                                                            onClick={() => handleApprove(candidate)}
                                                             disabled={processing.has(candidate.id)}
                                                             className="inline-flex items-center px-2 py-1 text-[11px] font-medium text-white bg-green-600 hover:bg-green-700 rounded focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
                                                         >
@@ -520,29 +520,13 @@ export default function MetadataCandidateReview({ assetId, primaryColor, uploade
                                     ))}
                                 </div>
                             </div>
-                        </div>
-                    ))}
                 </div>
-            </div>
+            ))}
+        </div>
+    )
 
-            {/* Confirm Approve Modal */}
-            {showConfirmApprove && (
-                <ConfirmModal
-                    title="Approve suggestion"
-                    message={
-                        showConfirmApprove.ephemeral
-                            ? 'This value will be applied to the asset from embedded file metadata (not AI).'
-                            : 'This AI suggestion will be approved and applied to the asset, maintaining its AI attribution and confidence score.'
-                    }
-                    confirmText="Approve"
-                    confirmClass="bg-green-600 hover:bg-green-700"
-                    onConfirm={() => handleApprove(showConfirmApprove)}
-                    onCancel={() => setShowConfirmApprove(null)}
-                    processing={processing.has(showConfirmApprove.id)}
-                />
-            )}
-
-            {/* Confirm Reject Modal */}
+    const modals = (
+        <>
             {showConfirmReject && (
                 <ConfirmModal
                     title={showConfirmReject.ephemeral ? 'Dismiss suggestion' : 'Reject Candidate'}
@@ -558,6 +542,32 @@ export default function MetadataCandidateReview({ assetId, primaryColor, uploade
                     processing={processing.has(showConfirmReject.id)}
                 />
             )}
+        </>
+    )
+
+    if (compactDrawerReview) {
+        return (
+            <>
+                {list}
+                {modals}
+            </>
+        )
+    }
+
+    return (
+        <>
+            <div className="px-4 py-3 border-t border-gray-200">
+                <h3 className="text-xs font-semibold text-gray-900 mb-1 flex items-center gap-1.5">
+                    <InformationCircleIcon className="h-3.5 w-3.5 flex-shrink-0" style={{ color: brandColor }} />
+                    Metadata Candidate Review
+                </h3>
+                <p className="text-[11px] text-gray-500 mb-3">
+                    Review and approve or reject metadata suggestions (AI or embedded file metadata). Approved values are
+                    written to the asset; source is recorded where applicable.
+                </p>
+                {list}
+            </div>
+            {modals}
         </>
     )
 }

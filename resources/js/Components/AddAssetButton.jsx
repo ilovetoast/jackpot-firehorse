@@ -5,7 +5,7 @@
 import { usePage } from '@inertiajs/react'
 import { usePermission } from '../hooks/usePermission'
 import { DELIVERABLES_PAGE_LABEL_SINGULAR } from '../utils/uiLabels'
-import { getWorkspaceButtonColor } from '../utils/colorUtils'
+import { getWorkspaceButtonColor, getContrastTextColor, darkenColor } from '../utils/colorUtils'
 
 /**
  * AddAssetButton - Button to trigger upload dialog (gated by permissions)
@@ -39,31 +39,30 @@ export default function AddAssetButton({
         : `Add ${DELIVERABLES_PAGE_LABEL_SINGULAR}`
 
     const btnColor = getWorkspaceButtonColor(auth.activeBrand)
+    const labelColor = getContrastTextColor(btnColor)
+    const hoverBg = darkenColor(btnColor, 20)
+    const hoverLabelColor = getContrastTextColor(hoverBg)
 
     return (
         <button
             type="button"
             onClick={disabled ? undefined : (onClick || (() => {}))}
             disabled={disabled}
-            className={`inline-flex items-center rounded-md px-4 py-2.5 text-sm font-semibold text-white shadow-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 transition-colors ${disabled ? 'opacity-50 cursor-not-allowed' : ''} ${className}`}
+            className={`inline-flex items-center rounded-md px-4 py-2.5 text-sm font-semibold shadow-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 transition-colors ${disabled ? 'opacity-50 cursor-not-allowed' : ''} ${className}`}
             style={{
-                backgroundColor: btnColor
+                backgroundColor: btnColor,
+                color: labelColor,
             }}
             onMouseEnter={(e) => {
-                if (btnColor) {
-                    const hex = (btnColor.startsWith('#') ? btnColor.slice(1) : btnColor).replace('#', '')
-                    let r = parseInt(hex.substring(0, 2), 16)
-                    let g = parseInt(hex.substring(2, 4), 16)
-                    let b = parseInt(hex.substring(4, 6), 16)
-                    r = Math.max(0, r - 20)
-                    g = Math.max(0, g - 20)
-                    b = Math.max(0, b - 20)
-                    e.currentTarget.style.backgroundColor = `rgb(${r}, ${g}, ${b})`
+                if (!disabled && btnColor) {
+                    e.currentTarget.style.backgroundColor = hoverBg
+                    e.currentTarget.style.color = hoverLabelColor
                 }
             }}
             onMouseLeave={(e) => {
-                if (btnColor) {
+                if (!disabled && btnColor) {
                     e.currentTarget.style.backgroundColor = btnColor
+                    e.currentTarget.style.color = labelColor
                 }
             }}
         >

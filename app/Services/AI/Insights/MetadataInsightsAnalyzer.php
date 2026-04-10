@@ -769,4 +769,229 @@ class MetadataInsightsAnalyzer
 
         return strtolower(trim(json_encode($decoded)));
     }
+
+    /**
+     * Distinct assets per normalized (lower trim) tag within a library category.
+     *
+     * @return array<string, int> tag lower => distinct asset count
+     */
+    public function distinctAssetCountsPerLowerTagInCategory(int $tenantId, int $categoryId): array
+    {
+        $q = DB::table('asset_tags')
+            ->join('assets', 'asset_tags.asset_id', '=', 'assets.id')
+            ->where('assets.tenant_id', $tenantId)
+            ->whereNull('assets.deleted_at');
+        $this->applyAssetCategoryIdFilter($q, $categoryId, 'assets');
+
+        $expr = 'LOWER(TRIM(asset_tags.tag))';
+        $rows = $q
+            ->selectRaw("{$expr} as t, COUNT(DISTINCT asset_tags.asset_id) as c")
+            ->groupBy(DB::raw($expr))
+            ->get();
+
+        $out = [];
+        foreach ($rows as $row) {
+            $t = strtolower(trim((string) ($row->t ?? '')));
+            if ($t === '') {
+                continue;
+            }
+            $out[$t] = (int) ($row->c ?? 0);
+        }
+
+        return $out;
+    }
+
+    /**
+     * Co-occurring tag labels among assets that carry the anchor (tag, approved metadata, or candidate),
+     * scored by lift vs category-wide frequency so generic category noise drops out.
+     *
+     * @param  array<string, int>  $categoryTagCounts  from {@see distinctAssetCountsPerLowerTagInCategory()}
+     * @param  callable(string): bool  $isNoise  return true to drop a candidate label
+     * @return list<string>
+     */
+    public function coOccurringOptionLabelsForAnchor(
+        int $tenantId,
+        int $categoryId,
+        string $anchorLower,
+        int $minOccurrence,
+        int $maxOptions,
+        float $minLift,
+        array $stopTags,
+        int $totalAssetsInCategory,
+        array $categoryTagCounts,
+        callable $isNoise
+    ): array {
+        $anchorLower = strtolower(trim($anchorLower));
+        if ($anchorLower === '' || $totalAssetsInCategory < 1) {
+            return [];
+        }
+
+        $anchorAssetIds = $this->assetIdsCarryingAnchorValueInCategory($tenantId, $categoryId, $anchorLower);
+        $anchorN = count($anchorAssetIds);
+        if ($anchorN < 1) {
+            return [];
+        }
+
+        $coCounts = $this->distinctLowerTagCountsAmongAssets($anchorAssetIds, $anchorLower);
+        $denomCat = max($totalAssetsInCategory, 1);
+        $denomAnchor = max($anchorN, 1);
+
+        $scored = [];
+        foreach ($coCounts as $tag => $coOnAnchor) {
+            if ($coOnAnchor < $minOccurrence) {
+                continue;
+            }
+            if (in_array($tag, $stopTags, true)) {
+                continue;
+            }
+            if ($isNoise($tag)) {
+                continue;
+            }
+            $coInCat = (int) ($categoryTagCounts[$tag] ?? 0);
+            $pCoAnchor = $coOnAnchor / $denomAnchor;
+            $pCoCat = $coInCat / $denomCat;
+            $lift = $pCoAnchor / max($pCoCat, 1e-6);
+            if ($lift < $minLift) {
+                continue;
+            }
+            $scored[$tag] = $coOnAnchor * min($lift, 3.0);
+        }
+
+        arsort($scored);
+
+        return array_slice(array_keys($scored), 0, max(1, $maxOptions));
+    }
+
+    /**
+     * @return list<string> asset UUIDs
+     */
+    public function assetIdsCarryingAnchorValueInCategory(int $tenantId, int $categoryId, string $anchorLower): array
+    {
+        $anchorLower = strtolower(trim($anchorLower));
+        if ($anchorLower === '') {
+            return [];
+        }
+
+        $ids = [];
+
+        $tagQ = DB::table('asset_tags')
+            ->join('assets', 'asset_tags.asset_id', '=', 'assets.id')
+            ->where('assets.tenant_id', $tenantId)
+            ->whereNull('assets.deleted_at')
+            ->whereRaw('LOWER(TRIM(asset_tags.tag)) = ?', [$anchorLower]);
+        $this->applyAssetCategoryIdFilter($tagQ, $categoryId, 'assets');
+        foreach ($tagQ->pluck('assets.id') as $id) {
+            $ids[(string) $id] = true;
+        }
+
+        $this->mergeAssetIdsWithMetadataAnchor($tenantId, $categoryId, $anchorLower, $ids, approvedOnly: true);
+        $this->mergeAssetIdsWithMetadataAnchor($tenantId, $categoryId, $anchorLower, $ids, approvedOnly: false);
+
+        return array_keys($ids);
+    }
+
+    /**
+     * @param  array<string, true>  $ids
+     */
+    protected function mergeAssetIdsWithMetadataAnchor(
+        int $tenantId,
+        int $categoryId,
+        string $anchorLower,
+        array &$ids,
+        bool $approvedOnly
+    ): void {
+        $query = $approvedOnly
+            ? DB::table('asset_metadata')
+                ->join('assets', 'asset_metadata.asset_id', '=', 'assets.id')
+                ->join('metadata_fields', 'asset_metadata.metadata_field_id', '=', 'metadata_fields.id')
+                ->where('assets.tenant_id', $tenantId)
+                ->whereNull('assets.deleted_at')
+                ->whereNotNull('asset_metadata.approved_at')
+            : DB::table('asset_metadata_candidates')
+                ->join('assets', 'asset_metadata_candidates.asset_id', '=', 'assets.id')
+                ->join('metadata_fields', 'asset_metadata_candidates.metadata_field_id', '=', 'metadata_fields.id')
+                ->where('assets.tenant_id', $tenantId)
+                ->whereNull('assets.deleted_at')
+                ->whereNull('asset_metadata_candidates.resolved_at');
+
+        if (! $approvedOnly && $this->hasCandidatesDismissedAtColumn()) {
+            $query->whereNull('asset_metadata_candidates.dismissed_at');
+        }
+
+        $this->applyAssetCategoryIdFilter($query, $categoryId, 'assets');
+
+        if ($approvedOnly) {
+            $query->select(['assets.id as asset_id', 'asset_metadata.value_json as value_json']);
+        } else {
+            $query->select(['assets.id as asset_id', 'asset_metadata_candidates.value_json as value_json']);
+        }
+
+        $query->orderBy('assets.id')->chunk(2500, function ($rows) use (&$ids, $anchorLower): void {
+            foreach ($rows as $row) {
+                if ($this->normalizeMergedValue($row->value_json ?? null) === $anchorLower) {
+                    $ids[(string) $row->asset_id] = true;
+                }
+            }
+        });
+    }
+
+    /**
+     * @param  list<string>  $assetIds
+     * @return array<string, int> lower tag => count of distinct assets (one increment per asset per tag)
+     */
+    protected function distinctLowerTagCountsAmongAssets(array $assetIds, string $anchorLower): array
+    {
+        if ($assetIds === []) {
+            return [];
+        }
+
+        $perAssetTags = [];
+        foreach (array_chunk($assetIds, 400) as $chunk) {
+            $rows = DB::table('asset_tags')
+                ->whereIn('asset_id', $chunk)
+                ->select(['asset_id', DB::raw('LOWER(TRIM(tag)) as t')])
+                ->get();
+            foreach ($rows as $row) {
+                $t = strtolower(trim((string) ($row->t ?? '')));
+                if ($t === '' || $t === $anchorLower) {
+                    continue;
+                }
+                $aid = (string) $row->asset_id;
+                if (! isset($perAssetTags[$aid])) {
+                    $perAssetTags[$aid] = [];
+                }
+                $perAssetTags[$aid][$t] = true;
+            }
+        }
+
+        $counts = [];
+        foreach ($perAssetTags as $tags) {
+            foreach (array_keys($tags) as $t) {
+                $counts[$t] = ($counts[$t] ?? 0) + 1;
+            }
+        }
+
+        return $counts;
+    }
+
+    protected function applyAssetCategoryIdFilter($query, int $categoryId, string $alias): void
+    {
+        $driver = DB::getDriverName();
+        if ($driver === 'mysql') {
+            $query->whereRaw(
+                'CAST(JSON_UNQUOTE(JSON_EXTRACT('.$alias.'.metadata, "$.category_id")) AS UNSIGNED) = ?',
+                [$categoryId]
+            );
+        } elseif ($driver === 'pgsql') {
+            $query->whereRaw(
+                'NULLIF(TRIM('.$alias.".metadata->>'category_id'), '')::bigint = ?",
+                [$categoryId]
+            );
+        } else {
+            $query->whereRaw(
+                'CAST(json_extract('.$alias.'.metadata, \'$.category_id\') AS INTEGER) = ?',
+                [$categoryId]
+            );
+        }
+    }
 }

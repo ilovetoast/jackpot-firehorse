@@ -9,33 +9,25 @@
  * - Section 2: Metadata (grouped; form-based edit per section if metadata.edit_post_upload)
  * - Section 3: File Information (read-only except filename if allowed)
  * - Section 4: Activity (collapsed by default)
- * - Section 5: Versions (stub)
- * - Section 6: Approval Workflow (stub)
- * - Section 7: Download History (admin/manager only)
+ * - Section 5: Versions (plan-gated)
+ * - Download history: admin/manager only, shown only when activity includes download events
  *
  * Reusable as full page in admin contexts via prop fullPage.
  */
-import { useEffect, useState, useRef, useMemo, Fragment } from 'react'
+import { useEffect, useState, useRef, useMemo, useCallback, Fragment } from 'react'
 import {
     XMarkIcon,
     ChevronDownIcon,
     ChevronRightIcon,
-    ArrowPathIcon,
-    TrashIcon,
     LockClosedIcon,
-    CheckCircleIcon,
-    XCircleIcon,
-    ArchiveBoxIcon,
-    ArrowUturnLeftIcon,
     PlayIcon,
-    StarIcon as StarIconOutline,
     PencilIcon,
     ArrowsPointingOutIcon,
     ArrowsPointingInIcon,
     CheckIcon,
-    CloudArrowUpIcon,
+    ArrowDownTrayIcon,
+    RectangleStackIcon,
 } from '@heroicons/react/24/outline'
-import { StarIcon as StarIconSolid } from '@heroicons/react/24/solid'
 import ThumbnailPreview from './ThumbnailPreview'
 import FileTypeIcon from './FileTypeIcon'
 import DominantColorsSwatches from './DominantColorsSwatches'
@@ -47,8 +39,9 @@ import PermissionGate from './PermissionGate'
 import StarRating from './StarRating'
 import CollectionSelector from './Collections/CollectionSelector'
 import { usePermission } from '../hooks/usePermission'
+import { useBucketOptional } from '../contexts/BucketContext'
+import { useSelectionOptional } from '../contexts/SelectionContext'
 import { router, usePage } from '@inertiajs/react'
-import { supportsThumbnail } from '../utils/thumbnailUtils'
 import { resolve, isExcludedFromGenericLoop, hasCollectionField, CONTEXT, WIDGET } from '../utils/widgetResolver'
 
 const GROUP_LABELS = {
@@ -100,45 +93,32 @@ export default function AssetDetailPanel({
     onClose,
     activityEvents: externalActivityEvents = null,
     activityLoading: externalActivityLoading = false,
-    onReplaceFile = null,
-    onDelete = null,
-    onReprocessAsset = null,
-    reprocessLoading = false,
     onToast = null,
     primaryColor,
     fullPage = false,
     /** Render inside lightbox right column (no slide-out overlay, no backdrop) */
     embeddedInLightbox = false,
+    /** 'readonly' = view-only (lightbox); no actions, edits, or processing triggers */
+    mode = 'default',
+    /** Lightbox CTA: return user to drawer (parent closes lightbox and focuses drawer) */
+    onManageInDrawer = null,
 }) {
-    const { auth } = usePage().props
+    const { auth, download_policy_disable_single_asset: policyDisableSingleAsset = false } = usePage().props
     const brandPrimary = primaryColor || auth?.activeBrand?.primary_color || '#6366f1'
+    const readonlyMode = mode === 'readonly'
+    const selection = useSelectionOptional()
+    const bucket = useBucketOptional()
 
     // Permissions
     const { can } = usePermission()
     const canViewAsset = can('asset.view')
     const canEditMetadata = can('metadata.edit_post_upload')
     const canRegenerateAiMetadata = can('assets.ai_metadata.regenerate')
-    const canRegenerateThumbnailsAdmin = can('assets.regenerate_thumbnails_admin')
-    const canRetryThumbnails = can('assets.retry_thumbnails')
-    const canPublish = can('asset.publish')
-    const canUnpublish = can('asset.unpublish')
-    const canArchive = can('asset.archive')
-    const canRestore = can('asset.restore')
 
     const tenantRole = auth?.tenant_role || null
     const brandRole = auth?.brand_role || null
     const isOwnerOrAdmin = tenantRole === 'owner' || tenantRole === 'admin'
     const canRegenerateAiMetadataForTroubleshooting = canRegenerateAiMetadata || isOwnerOrAdmin
-    const isContributor =
-        auth?.user?.brand_role === 'contributor' &&
-        !['owner', 'admin'].includes(auth?.user?.tenant_role?.toLowerCase() || '')
-    const approvalsEnabled = auth?.approval_features?.approvals_enabled
-    const contributorBlocked = isContributor && approvalsEnabled
-
-    const canPublishWithFallback = (canPublish || isOwnerOrAdmin) && !contributorBlocked
-    const canUnpublishWithFallback = canUnpublish || isOwnerOrAdmin
-    const canArchiveWithFallback = (canArchive || isOwnerOrAdmin) && !contributorBlocked
-    const canRestoreWithFallback = canRestore || isOwnerOrAdmin
     const canRestoreVersion = tenantRole === 'admin' || tenantRole === 'owner'
 
     const showDownloadHistory =
@@ -165,20 +145,6 @@ export default function AssetDetailPanel({
     const [expandedVersionId, setExpandedVersionId] = useState(null)
     const [showVersionsWideModal, setShowVersionsWideModal] = useState(false)
 
-    const [showActionsDropdown, setShowActionsDropdown] = useState(false)
-    const actionsDropdownRef = useRef(null)
-    const [lifecycleError, setLifecycleError] = useState(null)
-    const [publishing, setPublishing] = useState(false)
-    const [unpublishing, setUnpublishing] = useState(false)
-    const [archiving, setArchiving] = useState(false)
-    const [restoring, setRestoring] = useState(false)
-    const [regeneratingAiAnalysis, setRegeneratingAiAnalysis] = useState(false)
-    const [regeneratingSystemMetadata, setRegeneratingSystemMetadata] = useState(false)
-    const [regeneratingThumbnails, setRegeneratingThumbnails] = useState(false)
-    const [regeneratingVideoThumbnail, setRegeneratingVideoThumbnail] = useState(false)
-    const [regeneratingVideoPreview, setRegeneratingVideoPreview] = useState(false)
-    const [removePreviewLoading, setRemovePreviewLoading] = useState(false)
-
     const [metadataEditGroup, setMetadataEditGroup] = useState(null)
     const [metadataDirty, setMetadataDirty] = useState({})
     /** Details panel (not quick view): schema fields vs embedded file metadata */
@@ -192,6 +158,8 @@ export default function AssetDetailPanel({
     const titleInputRef = useRef(null)
     const [editingFilename, setEditingFilename] = useState(false)
     const [filenameEditValue, setFilenameEditValue] = useState('')
+    const [quickDownloadLoading, setQuickDownloadLoading] = useState(false)
+    const [bucketToggleLoading, setBucketToggleLoading] = useState(false)
 
     const isVideo = useMemo(() => {
         if (!asset) return false
@@ -342,144 +310,6 @@ export default function AssetDetailPanel({
         }
     }
 
-    useEffect(() => {
-        const handleClickOutside = (e) => {
-            if (actionsDropdownRef.current && !actionsDropdownRef.current.contains(e.target)) {
-                setShowActionsDropdown(false)
-            }
-        }
-        if (showActionsDropdown) {
-            document.addEventListener('mousedown', handleClickOutside)
-            return () => document.removeEventListener('mousedown', handleClickOutside)
-        }
-    }, [showActionsDropdown])
-
-    const handlePublish = async () => {
-        if (!asset?.id || !canPublishWithFallback) return
-        setPublishing(true)
-        setLifecycleError(null)
-        try {
-            await window.axios.post(`/app/assets/${asset.id}/publish`)
-            router.reload({ preserveState: true, preserveScroll: true })
-        } catch (err) {
-            setLifecycleError(err.response?.data?.message || err.message || 'Failed to publish')
-        } finally {
-            setPublishing(false)
-        }
-    }
-    const handleUnpublish = async () => {
-        if (!asset?.id || !canUnpublishWithFallback) return
-        setUnpublishing(true)
-        setLifecycleError(null)
-        try {
-            await window.axios.post(`/app/assets/${asset.id}/unpublish`)
-            router.reload({ preserveState: true, preserveScroll: true })
-        } catch (err) {
-            setLifecycleError(err.response?.data?.message || err.message || 'Failed to unpublish')
-        } finally {
-            setUnpublishing(false)
-        }
-    }
-    const handleArchive = async () => {
-        if (!asset?.id || !canArchiveWithFallback) return
-        setArchiving(true)
-        setLifecycleError(null)
-        try {
-            await window.axios.post(`/app/assets/${asset.id}/archive`)
-            router.reload({ preserveState: true, preserveScroll: true })
-        } catch (err) {
-            setLifecycleError(err.response?.data?.message || err.message || 'Failed to archive')
-        } finally {
-            setArchiving(false)
-        }
-    }
-    const handleRestore = async () => {
-        if (!asset?.id || !canRestoreWithFallback) return
-        setRestoring(true)
-        setLifecycleError(null)
-        try {
-            await window.axios.post(`/app/assets/${asset.id}/restore`)
-            router.reload({ preserveState: true, preserveScroll: true })
-        } catch (err) {
-            setLifecycleError(err.response?.data?.message || err.message || 'Failed to restore')
-        } finally {
-            setRestoring(false)
-        }
-    }
-    /** Vision/metadata fields (AiMetadataGenerationJob) + tag pipeline (AITaggingJob) — two backend steps, one action. */
-    const handleRegenerateAiAnalysis = async () => {
-        if (!asset?.id || !canRegenerateAiMetadataForTroubleshooting) return
-        setRegeneratingAiAnalysis(true)
-        try {
-            const metaRes = await window.axios.post(`/app/assets/${asset.id}/ai-metadata/regenerate`)
-            if (!metaRes.data?.success) return
-            try {
-                await window.axios.post(`/app/assets/${asset.id}/ai-tagging/regenerate`)
-            } catch (err) {
-                const msg = err.response?.data?.message || err.message || 'AI tagging regenerate failed'
-                onToast?.(`Metadata queued; AI tagging step: ${msg}`, 'warning')
-            }
-            setTimeout(fetchMetadata, 1500)
-        } finally {
-            setRegeneratingAiAnalysis(false)
-        }
-    }
-    const handleRegenerateSystemMetadata = async () => {
-        if (!asset?.id || !canRegenerateAiMetadataForTroubleshooting) return
-        setRegeneratingSystemMetadata(true)
-        try {
-            const res = await window.axios.post(`/app/assets/${asset.id}/system-metadata/regenerate`)
-            if (res.data?.success) setTimeout(fetchMetadata, 1500)
-        } finally {
-            setRegeneratingSystemMetadata(false)
-        }
-    }
-    const handleRegenerateThumbnails = async () => {
-        if (!asset?.id || !canRegenerateThumbnailsAdmin) return
-        setRegeneratingThumbnails(true)
-        try {
-            await window.axios.post(`/app/assets/${asset.id}/thumbnails/regenerate-styles`, {
-                styles: ['thumb', 'medium', 'large'],
-                force_imagick: false,
-            })
-            fetchMetadata()
-            router.reload({ only: ['asset', 'auth'], preserveState: false })
-        } finally {
-            setRegeneratingThumbnails(false)
-        }
-    }
-    const handleRegenerateVideoThumbnail = async () => {
-        if (!asset?.id) return
-        setRegeneratingVideoThumbnail(true)
-        try {
-            await window.axios.post(`/app/assets/${asset.id}/thumbnails/regenerate-video-thumbnail`)
-            router.reload({ preserveState: true, preserveScroll: true })
-        } finally {
-            setRegeneratingVideoThumbnail(false)
-        }
-    }
-    const handleRegenerateVideoPreview = async () => {
-        if (!asset?.id) return
-        setRegeneratingVideoPreview(true)
-        try {
-            await window.axios.post(`/app/assets/${asset.id}/thumbnails/regenerate-video-preview`)
-            router.reload({ preserveState: true, preserveScroll: true })
-        } finally {
-            setRegeneratingVideoPreview(false)
-        }
-    }
-    const handleRemovePreview = async () => {
-        if (!asset?.id) return
-        setRemovePreviewLoading(true)
-        try {
-            await window.axios.delete(`/app/assets/${asset.id}/thumbnails/preview`)
-            fetchMetadata()
-            router.reload({ preserveScroll: true, only: ['asset', 'auth'] })
-        } finally {
-            setRemovePreviewLoading(false)
-        }
-    }
-
     const hasValue = (value, type) => {
         if (value === null || value === undefined) return false
         if (type === 'multiselect' && Array.isArray(value)) return value.length > 0
@@ -594,6 +424,115 @@ export default function AssetDetailPanel({
     const displayActivityEvents = externalActivityEvents !== null ? externalActivityEvents : activityEvents
     const displayActivityLoading = externalActivityEvents !== null ? externalActivityLoading : activityLoading
 
+    const downloadActivityTypes = useMemo(
+        () =>
+            new Set([
+                'asset.download.created',
+                'asset.download.completed',
+                'asset.download.failed',
+            ]),
+        [],
+    )
+
+    const downloadHistoryEvents = useMemo(() => {
+        const events = displayActivityEvents || []
+        return events.filter((e) => downloadActivityTypes.has(e.event_type))
+    }, [displayActivityEvents, downloadActivityTypes])
+
+    const showDownloadHistorySection =
+        showDownloadHistory && !displayActivityLoading && downloadHistoryEvents.length > 0
+
+    const isEligibleForDownload = Boolean(asset && asset.is_published !== false && !asset.archived_at)
+    const canSingleAssetDownload = Boolean(isEligibleForDownload && !policyDisableSingleAsset)
+
+    const isInDownloadBasket = useMemo(() => {
+        if (!asset?.id) return false
+        if (selection?.isSelected?.(asset.id)) return true
+        const ids = bucket?.bucketAssetIds ?? []
+        return ids.some((x) => String(x) === String(asset.id))
+    }, [asset?.id, bucket?.bucketAssetIds, selection?.isSelected, selection?.selectedCount])
+
+    const showDownloadBasketToggle = Boolean(selection || bucket)
+
+    const handleQuickDownload = useCallback(async () => {
+        if (!canSingleAssetDownload || !asset?.id || quickDownloadLoading) return
+        setQuickDownloadLoading(true)
+        try {
+            const url =
+                typeof route !== 'undefined' ? route('assets.download.single', { asset: asset.id }) : `/app/assets/${asset.id}/download`
+            const csrf = document.querySelector('meta[name="csrf-token"]')?.content
+            onToast?.('Preparing download…', 'success')
+            const res = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Accept: 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'X-CSRF-TOKEN': csrf || '',
+                },
+                credentials: 'same-origin',
+            })
+            const data = await res.json().catch(() => ({}))
+            if (!res.ok) {
+                onToast?.(data?.message || 'Download failed', 'error')
+                return
+            }
+            const fileUrl = data?.file_url || data?.public_url || data?.download_url
+            if (fileUrl) {
+                window.location.href = fileUrl
+            } else {
+                onToast?.('Download started', 'success')
+            }
+        } catch {
+            onToast?.('Download failed', 'error')
+        } finally {
+            setQuickDownloadLoading(false)
+        }
+    }, [asset?.id, canSingleAssetDownload, quickDownloadLoading, onToast])
+
+    const handleToggleDownloadBasket = useCallback(async () => {
+        if (!asset?.id || bucketToggleLoading || !isEligibleForDownload) return
+        if (!selection && !bucket) return
+        setBucketToggleLoading(true)
+        try {
+            if (selection) {
+                selection.toggleItem({
+                    id: asset.id,
+                    type: 'asset',
+                    name: asset.title ?? asset.original_filename ?? '',
+                    thumbnail_url:
+                        asset.final_thumbnail_url ?? asset.thumbnail_url ?? asset.preview_thumbnail_url ?? null,
+                    category_id: asset.metadata?.category_id ?? asset.category_id ?? null,
+                })
+            } else if (bucket) {
+                if (isInDownloadBasket) {
+                    await bucket.bucketRemove(asset.id)
+                } else {
+                    await bucket.bucketAdd(asset.id)
+                }
+            }
+        } catch {
+            onToast?.('Could not update download list', 'error')
+        } finally {
+            setBucketToggleLoading(false)
+        }
+    }, [
+        asset?.id,
+        asset?.title,
+        asset?.original_filename,
+        asset?.final_thumbnail_url,
+        asset?.thumbnail_url,
+        asset?.preview_thumbnail_url,
+        asset?.metadata?.category_id,
+        asset?.category_id,
+        bucket,
+        bucketToggleLoading,
+        isEligibleForDownload,
+        isInDownloadBasket,
+        onToast,
+        selection,
+    ])
+
     if (!isOpen) return null
     if (!canViewAsset) return null
 
@@ -630,16 +569,11 @@ export default function AssetDetailPanel({
     const dtClass = lb ? 'font-semibold text-neutral-400' : 'font-semibold text-gray-700'
     const ddClass = lb ? 'text-xs text-neutral-200' : 'text-sm text-gray-900'
     const collapsibleVariant = lb ? 'dark' : 'default'
-    const dropdownItemClass = lb
-        ? 'w-full text-left px-3 py-2 text-sm rounded-md flex items-center gap-2 text-neutral-200 hover:bg-neutral-800'
-        : 'w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 rounded-md flex items-center gap-2'
-    const dropdownDividerClass = lb ? 'border-t border-neutral-700 my-2' : 'border-t border-gray-100 my-2'
     const metaTabListClass = lb ? 'flex gap-1 border-b border-neutral-800/50 mb-3' : 'flex gap-1 border-b border-gray-200 mb-4'
     const metaTabInactive = lb ? 'border-transparent text-neutral-500 hover:text-neutral-200' : 'border-transparent text-gray-500 hover:text-gray-800'
     const metaMuted = lb ? 'text-neutral-400' : 'text-gray-500'
-    const reprocessBtnClass = lb
-        ? 'w-full text-left px-3 py-2 text-sm font-medium text-neutral-200 hover:bg-neutral-800 rounded-md flex items-center gap-2'
-        : 'w-full text-left px-3 py-2 text-sm font-medium text-indigo-700 hover:bg-indigo-50 rounded-md flex items-center gap-2'
+    /** Fullscreen lightbox column: keep accordions closed until the user expands (quick view). */
+    const detailSectionDefaultExpanded = embeddedInLightbox ? false : true
     const metaFieldInputClass = lb
         ? 'mt-1 block w-full max-w-xs rounded-md border-neutral-600 bg-neutral-900 text-neutral-100 text-sm shadow-sm focus:border-neutral-500 focus:outline-none focus:ring-1 focus:ring-neutral-500 [color-scheme:dark]'
         : 'mt-1 block w-full max-w-xs rounded-md border-gray-300 bg-white text-gray-900 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500'
@@ -677,7 +611,7 @@ export default function AssetDetailPanel({
     }
 
     const renderAssetNameOverview = (isLightbox) => {
-        const showEdit = canEditAssetTitle && metadata
+        const showEdit = !readonlyMode && canEditAssetTitle && metadata
         const labelClass = isLightbox ? 'sr-only' : dtClass
         const nameDdClass = isLightbox ? `${ddClass} sm:col-span-2` : `${ddClass} min-w-0 sm:col-span-2`
         const nameTextClass = isLightbox
@@ -764,254 +698,6 @@ export default function AssetDetailPanel({
                     onClick={lb ? (e) => e.stopPropagation() : undefined}
                 >
                     <div className={lb ? 'space-y-4 px-5 py-4' : 'space-y-3 p-4'}>
-                        {/* Row: star, actions, close — asset name is in Overview */}
-                        <div className="flex items-start justify-between gap-3">
-                            <div className="flex-1 min-w-0" aria-hidden="true" />
-                            <div className="flex items-center gap-2 flex-shrink-0">
-                                {metadata?.fields && (() => {
-                                    const starredField = metadata.fields.find((f) => (f.key || f.field_key) === 'starred')
-                                    const canToggleStar = starredField && canEditMetadata && !starredField.readonly
-                                    const isStarred = asset?.starred === true
-                                    const toggleStar = async () => {
-                                        if (!canToggleStar || !asset?.id || !starredField) return
-                                        const fid = starredField.metadata_field_id ?? starredField.field_id
-                                        const csrf = document.querySelector('meta[name="csrf-token"]')?.content
-                                        try {
-                                            await fetch(`/app/assets/${asset.id}/metadata/edit`, {
-                                                method: 'POST',
-                                                headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrf || '' },
-                                                credentials: 'same-origin',
-                                                body: JSON.stringify({ metadata_field_id: fid, value: !isStarred }),
-                                            })
-                                            router.reload({ preserveState: true, preserveScroll: true })
-                                        } catch (e) {
-                                            console.error('Failed to toggle star', e)
-                                        }
-                                    }
-                                    return canToggleStar ? (
-                                        <button
-                                            type="button"
-                                            onClick={(e) => {
-                                                e.stopPropagation()
-                                                e.preventDefault()
-                                                toggleStar()
-                                            }}
-                                            onMouseDown={(e) => e.stopPropagation()}
-                                            className={`p-1.5 rounded-md focus:outline-none focus:ring-2 focus:ring-offset-1 ${lb ? 'hover:bg-white/10' : 'hover:bg-gray-100'}`}
-                                            aria-label={isStarred ? 'Unstar' : 'Star'}
-                                        >
-                                            {isStarred ? (
-                                                <StarIconSolid className="h-5 w-5 text-amber-500" />
-                                            ) : (
-                                                <StarIconOutline className={`h-5 w-5 hover:text-amber-500 ${lb ? 'text-neutral-500' : 'text-gray-400'}`} />
-                                            )}
-                                        </button>
-                                    ) : isStarred ? (
-                                        <StarIconSolid className="h-5 w-5 text-amber-500" aria-hidden />
-                                    ) : null
-                                })()}
-                                {lifecycleError && (
-                                    <p className="text-sm text-red-400 max-w-[10rem] truncate" title={lifecycleError}>
-                                        {lifecycleError}
-                                    </p>
-                                )}
-                                <div className="relative" ref={actionsDropdownRef}>
-                                    <button
-                                        type="button"
-                                        onClick={() => setShowActionsDropdown(!showActionsDropdown)}
-                                        className={
-                                            lb
-                                                ? 'inline-flex items-center rounded-md border border-neutral-600 bg-neutral-900 px-3 py-2 text-sm font-medium text-neutral-100 shadow-sm hover:bg-neutral-800'
-                                                : 'inline-flex items-center rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50'
-                                        }
-                                    >
-                                        Actions
-                                        <ChevronDownIcon
-                                            className={`ml-2 h-4 w-4 ${showActionsDropdown ? 'rotate-180' : ''}`}
-                                        />
-                                    </button>
-                                    {showActionsDropdown && (
-                                        <div
-                                            className={
-                                                lb
-                                                    ? 'absolute right-0 z-20 mt-2 w-60 origin-top-right rounded-lg border border-neutral-700 bg-neutral-900 py-2 shadow-xl'
-                                                    : 'absolute right-0 z-20 mt-2 w-60 origin-top-right rounded-lg bg-white py-2 shadow-lg ring-1 ring-black ring-opacity-5'
-                                            }
-                                        >
-                                            {/* Section 1 — Primary Actions */}
-                                            <div className="px-2 py-1">
-                                                {canPublishWithFallback && asset?.is_published === false && !asset?.archived_at && (
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => { setShowActionsDropdown(false); handlePublish(); }}
-                                                        disabled={publishing}
-                                                        className={dropdownItemClass}
-                                                    >
-                                                        <CheckCircleIcon className="h-4 w-4 flex-shrink-0" />
-                                                        Publish
-                                                    </button>
-                                                )}
-                                                {canUnpublishWithFallback && asset?.is_published === true && !asset?.archived_at && (
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => { setShowActionsDropdown(false); handleUnpublish(); }}
-                                                        disabled={unpublishing}
-                                                        className={dropdownItemClass}
-                                                    >
-                                                        <XCircleIcon className="h-4 w-4 flex-shrink-0" />
-                                                        Unpublish
-                                                    </button>
-                                                )}
-                                                {canArchiveWithFallback && !asset?.archived_at && (
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => { setShowActionsDropdown(false); handleArchive(); }}
-                                                        disabled={archiving}
-                                                        className={dropdownItemClass}
-                                                    >
-                                                        <ArchiveBoxIcon className="h-4 w-4 flex-shrink-0" />
-                                                        Archive
-                                                    </button>
-                                                )}
-                                                {canRestoreWithFallback && asset?.archived_at && (
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => { setShowActionsDropdown(false); handleRestore(); }}
-                                                        disabled={restoring}
-                                                        className={dropdownItemClass}
-                                                    >
-                                                        <ArrowUturnLeftIcon className="h-4 w-4 flex-shrink-0" />
-                                                        Restore
-                                                    </button>
-                                                )}
-                                                {/* Phase 6.5: Replace file only when Starter (no versioning). Pro/Enterprise use Upload New Version in Versions section. */}
-                                                {onReplaceFile && !planAllowsVersions && (
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => { setShowActionsDropdown(false); onReplaceFile(); }}
-                                                        className={dropdownItemClass}
-                                                    >
-                                                        <ArrowPathIcon className="h-4 w-4 flex-shrink-0" />
-                                                        Replace file
-                                                    </button>
-                                                )}
-                                            </div>
-                                            {(canRegenerateAiMetadataForTroubleshooting || canRegenerateThumbnailsAdmin || (canRetryThumbnails && onReprocessAsset)) && (
-                                                <>
-                                                    <div className={dropdownDividerClass} />
-                                                    <div className="px-2 py-1">
-                                                        <p className={`px-3 py-1 text-xs font-medium uppercase tracking-wider ${lb ? 'text-neutral-500' : 'text-gray-400'}`}>Reprocess</p>
-                                                        {canRetryThumbnails && onReprocessAsset && (
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => { setShowActionsDropdown(false); onReprocessAsset(); }}
-                                                                disabled={reprocessLoading}
-                                                                className={reprocessBtnClass}
-                                                            >
-                                                                <ArrowPathIcon className={`h-4 w-4 flex-shrink-0 ${reprocessLoading ? 'animate-spin' : ''}`} />
-                                                                Reprocess asset (full pipeline)
-                                                            </button>
-                                                        )}
-                                                        {canRegenerateAiMetadataForTroubleshooting && (
-                                                            <>
-                                                                <button
-                                                                    type="button"
-                                                                    onClick={() => { setShowActionsDropdown(false); handleRegenerateAiAnalysis(); }}
-                                                                    disabled={regeneratingAiAnalysis}
-                                                                    className={dropdownItemClass}
-                                                                >
-                                                                    <ArrowPathIcon className={`h-4 w-4 flex-shrink-0 ${regeneratingAiAnalysis ? 'animate-spin' : ''}`} />
-                                                                    Re-run AI analysis (metadata & tags)
-                                                                </button>
-                                                                <button
-                                                                    type="button"
-                                                                    onClick={() => { setShowActionsDropdown(false); handleRegenerateSystemMetadata(); }}
-                                                                    disabled={regeneratingSystemMetadata}
-                                                                    className={dropdownItemClass}
-                                                                >
-                                                                    <ArrowPathIcon className="h-4 w-4 flex-shrink-0" />
-                                                                    Reprocess metadata
-                                                                </button>
-                                                            </>
-                                                        )}
-                                                        {canRegenerateThumbnailsAdmin && (
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => { setShowActionsDropdown(false); handleRegenerateThumbnails(); }}
-                                                                disabled={regeneratingThumbnails}
-                                                                className={dropdownItemClass}
-                                                            >
-                                                                <ArrowPathIcon className="h-4 w-4 flex-shrink-0" />
-                                                                Regenerate previews
-                                                            </button>
-                                                        )}
-                                                    </div>
-                                                </>
-                                            )}
-                                            {(supportsThumbnail(asset?.mime_type, asset?.file_extension || asset?.original_filename?.split?.('.')?.pop()) || isVideo) && (
-                                                <>
-                                                    <div className={dropdownDividerClass} />
-                                                    <div className="px-2 py-1">
-                                                        {supportsThumbnail(asset?.mime_type, asset?.file_extension || asset?.original_filename?.split?.('.')?.pop()) && (
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => { setShowActionsDropdown(false); handleRemovePreview(); }}
-                                                                disabled={removePreviewLoading}
-                                                                className={dropdownItemClass}
-                                                            >
-                                                                <TrashIcon className="h-4 w-4 flex-shrink-0" />
-                                                                Remove preview
-                                                            </button>
-                                                        )}
-                                                        {isVideo && (
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => { setShowActionsDropdown(false); handleRegenerateVideoPreview(); }}
-                                                                disabled={regeneratingVideoPreview}
-                                                                className={dropdownItemClass}
-                                                            >
-                                                                <ArrowPathIcon className="h-4 w-4 flex-shrink-0" />
-                                                                Regenerate video preview
-                                                            </button>
-                                                        )}
-                                                    </div>
-                                                </>
-                                            )}
-                                            {onDelete && (
-                                                <>
-                                                    <div className={dropdownDividerClass} />
-                                                    <div className="px-2 py-1">
-                                                        <p className={`px-3 py-1 text-xs font-medium uppercase tracking-wider ${lb ? 'text-red-400' : 'text-red-600'}`}>Danger zone</p>
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => { setShowActionsDropdown(false); onDelete(); }}
-                                                            className={
-                                                                lb
-                                                                    ? 'w-full text-left px-3 py-2 text-sm text-red-300 hover:bg-red-950/50 rounded-md flex items-center gap-2 font-medium'
-                                                                    : 'w-full text-left px-3 py-2 text-sm text-red-700 hover:bg-red-50 rounded-md flex items-center gap-2 font-medium'
-                                                            }
-                                                        >
-                                                            <TrashIcon className="h-4 w-4 flex-shrink-0" />
-                                                            Delete asset
-                                                        </button>
-                                                    </div>
-                                                </>
-                                            )}
-                                        </div>
-                                    )}
-                                </div>
-                                {!fullPage && (
-                                    <button
-                                        type="button"
-                                        onClick={handleRequestClose}
-                                        className={`rounded-md p-2 ${lb ? 'text-neutral-400 hover:text-white' : 'text-gray-400 hover:text-gray-600'}`}
-                                        aria-label="Close"
-                                    >
-                                        <XMarkIcon className="h-6 w-6" />
-                                    </button>
-                                )}
-                            </div>
-                        </div>
                         {/* Filename in header — hidden in lightbox (still editable under File information) */}
                         {!lb && (
                         <div className="flex items-center gap-2">
@@ -1157,13 +843,100 @@ export default function AssetDetailPanel({
                             </div>
                         )}
 
+                        {readonlyMode && embeddedInLightbox && (
+                            <div className="mb-3 rounded-lg border border-neutral-800 bg-neutral-900/70 px-4 py-3">
+                                <div className="flex items-start justify-between gap-3">
+                                    <h2 className="min-w-0 flex-1 text-base font-semibold leading-snug text-neutral-100">
+                                        {asset?.title || asset?.original_filename || 'Untitled asset'}
+                                    </h2>
+                                    <button
+                                        type="button"
+                                        onClick={handleRequestClose}
+                                        className="flex-shrink-0 rounded-md p-1.5 text-neutral-400 transition hover:bg-neutral-800 hover:text-neutral-100"
+                                        aria-label="Close fullscreen view"
+                                    >
+                                        <XMarkIcon className="h-5 w-5" />
+                                    </button>
+                                </div>
+                                <p className="mt-2 text-xs text-neutral-400">
+                                    {typeof onManageInDrawer === 'function'
+                                        ? 'Manage this asset in the sidebar to edit or run processing.'
+                                        : 'View only — open the asset from the library to edit or run processing.'}
+                                </p>
+                                <div className="mt-3 flex flex-wrap gap-2">
+                                    <button
+                                        type="button"
+                                        disabled={!canSingleAssetDownload || quickDownloadLoading}
+                                        onClick={() => handleQuickDownload()}
+                                        className={`inline-flex flex-1 min-w-[8rem] items-center justify-center gap-2 rounded-md border px-3 py-2 text-sm font-semibold transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${
+                                            canSingleAssetDownload
+                                                ? 'border-white/70 bg-transparent text-white shadow-none hover:bg-white/10 focus-visible:outline-white'
+                                                : 'cursor-not-allowed border-neutral-700 bg-neutral-900 text-neutral-500'
+                                        }`}
+                                        title={
+                                            !isEligibleForDownload
+                                                ? 'Publish this asset to download'
+                                                : policyDisableSingleAsset
+                                                  ? 'Your organization requires downloads to be packaged.'
+                                                  : 'Download this asset'
+                                        }
+                                    >
+                                        <ArrowDownTrayIcon className="h-4 w-4 shrink-0" aria-hidden />
+                                        {quickDownloadLoading ? 'Preparing…' : 'Download'}
+                                    </button>
+                                    {showDownloadBasketToggle && (
+                                        <button
+                                            type="button"
+                                            disabled={!isEligibleForDownload || bucketToggleLoading}
+                                            onClick={() => handleToggleDownloadBucket()}
+                                            className={`inline-flex flex-1 min-w-[8rem] items-center justify-center gap-2 rounded-md border px-3 py-2 text-sm font-semibold transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${
+                                                isInDownloadBasket
+                                                    ? 'border-emerald-400/80 bg-transparent text-emerald-100 shadow-none hover:bg-emerald-500/15 focus-visible:outline-emerald-300'
+                                                    : isEligibleForDownload
+                                                      ? 'border-white/70 bg-transparent text-white shadow-none hover:bg-white/10 focus-visible:outline-white'
+                                                      : 'cursor-not-allowed border-neutral-800 bg-neutral-950 text-neutral-600'
+                                            }`}
+                                            title={
+                                                !isEligibleForDownload
+                                                    ? 'Publish this asset to add to download'
+                                                    : isInDownloadBasket
+                                                      ? 'Remove from download list'
+                                                      : 'Add to download list'
+                                            }
+                                        >
+                                            {isInDownloadBasket ? (
+                                                <>
+                                                    <CheckIcon className="h-4 w-4 shrink-0" aria-hidden />
+                                                    {bucketToggleLoading ? '…' : 'In download'}
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <RectangleStackIcon className="h-4 w-4 shrink-0" aria-hidden />
+                                                    {bucketToggleLoading ? '…' : 'Add to download'}
+                                                </>
+                                            )}
+                                        </button>
+                                    )}
+                                </div>
+                                {typeof onManageInDrawer === 'function' && (
+                                    <button
+                                        type="button"
+                                        onClick={() => onManageInDrawer()}
+                                        className="mt-3 text-sm font-medium text-blue-400 hover:text-blue-300"
+                                    >
+                                        Manage asset →
+                                    </button>
+                                )}
+                            </div>
+                        )}
+
                         {/* Section 1 — Overview (expanded by default) */}
                         <section className={sectionClass} aria-labelledby="section-overview">
                             <CollapsibleSection
                                 variant={collapsibleVariant}
                                 titleInCard={lb}
                                 title="Overview"
-                                defaultExpanded={true}
+                                defaultExpanded={detailSectionDefaultExpanded}
                             >
                                 {lb ? (
                                     <dl className="grid grid-cols-1 gap-y-2.5 sm:grid-cols-2 sm:gap-x-4">
@@ -1266,7 +1039,7 @@ export default function AssetDetailPanel({
                         {/* Section 2 — Metadata (grouped, section-based edit; expanded by default) */}
                         {!loading && !error && metadata && (
                             <section className={sectionClass} aria-labelledby="section-metadata">
-                                <CollapsibleSection variant={collapsibleVariant} titleInCard={lb} title="Metadata" defaultExpanded={true}>
+                                <CollapsibleSection variant={collapsibleVariant} titleInCard={lb} title="Metadata" defaultExpanded={detailSectionDefaultExpanded}>
                                 <div className={metaTabListClass} role="tablist" aria-label="Metadata sections">
                                     <button
                                         type="button"
@@ -1321,7 +1094,10 @@ export default function AssetDetailPanel({
                                 {metadataByGroup.map(({ key: groupKey, fields }) => {
                                     const isEditing = metadataEditGroup === groupKey
                                     const dirty = metadataDirty[groupKey]
-                                    const canEdit = canEditMetadata && fields.some((f) => !f.readonly && f.population_mode !== 'automatic')
+                                    const canEdit =
+                                        !readonlyMode &&
+                                        canEditMetadata &&
+                                        fields.some((f) => !f.readonly && f.population_mode !== 'automatic')
                                     return (
                                         <div
                                             key={groupKey}
@@ -1375,7 +1151,10 @@ export default function AssetDetailPanel({
                                                 {fields.map((field) => {
                                                     const metadataFieldId = field.metadata_field_id ?? field.field_id
                                                     const isEditableField =
-                                                        canEditMetadata && !field.readonly && field.population_mode !== 'automatic'
+                                                        !readonlyMode &&
+                                                        canEditMetadata &&
+                                                        !field.readonly &&
+                                                        field.population_mode !== 'automatic'
                                                     const isSystemField = field.readonly || field.population_mode === 'automatic'
                                                     const widget = resolve(field, CONTEXT.DISPLAY)
                                                     const isDominantColors =
@@ -1421,7 +1200,11 @@ export default function AssetDetailPanel({
                                                             }}
                                                             className={`flex items-start justify-between gap-2 ${
                                                                 lb ? 'py-2' : 'border-b last:border-b-0 border-gray-100 py-3'
-                                                            } ${!isSystemField ? `group cursor-pointer rounded-md px-2 -mx-2 transition ${lb ? 'hover:bg-neutral-800/60' : 'hover:bg-gray-50'}` : ''}`}
+                                                            } ${
+                                                                !isSystemField && isEditableField && !isEditing
+                                                                    ? `group cursor-pointer rounded-md px-2 -mx-2 transition ${lb ? 'hover:bg-neutral-800/60' : 'hover:bg-gray-50'}`
+                                                                    : ''
+                                                            }`}
                                                             title={
                                                                 isSystemField
                                                                     ? 'Automatically generated. Cannot be edited.'
@@ -1569,7 +1352,7 @@ export default function AssetDetailPanel({
                                                                 ) : (
                                                                     <>
                                                                         {getSourceBadge(field)}
-                                                                        {canEditMetadata && !isEditing && (
+                                                                        {canEditMetadata && !isEditing && isEditableField && (
                                                                             <span className="opacity-0 group-hover:opacity-100 transition" aria-hidden>
                                                                                 <PencilIcon className={`h-3.5 w-3.5 ${lb ? 'text-neutral-500' : 'text-gray-400'}`} />
                                                                             </span>
@@ -1684,7 +1467,7 @@ export default function AssetDetailPanel({
 
                         {/* Section 3 — File Information (at least quick-view parity: status + tooltip, publish/who, filename editable) */}
                         <section className={sectionClass} aria-labelledby="section-file">
-                            <CollapsibleSection variant={collapsibleVariant} titleInCard={lb} title="File information" defaultExpanded={true}>
+                            <CollapsibleSection variant={collapsibleVariant} titleInCard={lb} title="File information" defaultExpanded={detailSectionDefaultExpanded}>
                                 <div className={lb ? '' : cardClass}>
                                     <dl className={`grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3 ${lb ? 'gap-y-2.5' : 'text-sm'}`}>
                                         {/* Filename (editable when permission) */}
@@ -1749,7 +1532,7 @@ export default function AssetDetailPanel({
                                                 ) : (
                                                     <span className="font-mono break-all">
                                                         {asset?.original_filename || '—'}
-                                                        {canEditMetadata && (
+                                                        {canEditMetadata && !readonlyMode && (
                                                             <button
                                                                 type="button"
                                                                 onClick={() => { setFilenameEditValue(asset?.original_filename || ''); setEditingFilename(true) }}
@@ -1946,32 +1729,14 @@ export default function AssetDetailPanel({
                                         defaultExpanded={false}
                                     >
                                         <div className={lb ? '' : cardClass}>
-                                            {onReplaceFile && (
-                                                <div
-                                                    className={`mb-4 flex flex-col gap-2 ${lb ? 'items-stretch pt-3' : 'items-end justify-end'}`}
+                                            {lb && versions.length > 0 && (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setShowVersionsWideModal(true)}
+                                                    className="mb-3 text-left text-xs font-medium text-neutral-300 hover:text-white hover:underline decoration-neutral-600 underline-offset-2"
                                                 >
-                                                    <button
-                                                        type="button"
-                                                        onClick={onReplaceFile}
-                                                        className={
-                                                            lb
-                                                                ? 'inline-flex w-full items-center justify-center gap-2 rounded-lg border border-neutral-600 bg-neutral-200 px-4 py-2.5 text-sm font-semibold text-neutral-900 shadow-sm hover:bg-white focus:outline-none focus:ring-2 focus:ring-neutral-500 focus:ring-offset-2 focus:ring-offset-neutral-950 sm:w-auto sm:justify-start'
-                                                                : 'inline-flex items-center px-3 py-1.5 text-sm font-medium text-indigo-600 hover:text-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-1 rounded'
-                                                        }
-                                                    >
-                                                        <CloudArrowUpIcon className="h-5 w-5 shrink-0" />
-                                                        Upload New Version
-                                                    </button>
-                                                    {lb && versions.length > 0 && (
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => setShowVersionsWideModal(true)}
-                                                            className="text-left text-xs font-medium text-neutral-300 hover:text-white hover:underline decoration-neutral-600 underline-offset-2"
-                                                        >
-                                                            View full version history ({versions.length})
-                                                        </button>
-                                                    )}
-                                                </div>
+                                                    View full version history ({versions.length})
+                                                </button>
                                             )}
                                             {versionsLoading ? (
                                                 <div className="animate-pulse space-y-3">
@@ -1996,7 +1761,7 @@ export default function AssetDetailPanel({
                                                                 <th className="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Uploaded</th>
                                                                 <th className="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500">User</th>
                                                                 <th className="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Current</th>
-                                                                {canRestoreVersion && (
+                                                                {canRestoreVersion && !readonlyMode && (
                                                                     <th className="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Actions</th>
                                                                 )}
                                                             </tr>
@@ -2082,7 +1847,7 @@ export default function AssetDetailPanel({
                                                                                     </span>
                                                                                 )}
                                                                             </td>
-                                                                            {canRestoreVersion && (
+                                                                            {canRestoreVersion && !readonlyMode && (
                                                                                 <td className="px-4 py-3 text-sm">
                                                                                     {!v.is_current && (
                                                                                         isArchived ? (
@@ -2112,7 +1877,7 @@ export default function AssetDetailPanel({
                                                                         </tr>
                                                                         {isExpanded && (
                                                                             <tr key={`${v.id}-expanded`}>
-                                                                                <td colSpan={canRestoreVersion ? 9 : 8} className={`px-4 py-3 text-sm border-b ${lb ? 'bg-neutral-900/80 border-neutral-700 text-neutral-300' : 'bg-gray-50 border-gray-200 text-gray-600'}`}>
+                                                                                <td colSpan={canRestoreVersion && !readonlyMode ? 9 : 8} className={`px-4 py-3 text-sm border-b ${lb ? 'bg-neutral-900/80 border-neutral-700 text-neutral-300' : 'bg-gray-50 border-gray-200 text-gray-600'}`}>
                                                                                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                                                                                         {v.change_note && <div><span className={`font-medium ${lb ? 'text-neutral-200' : 'text-gray-700'}`}>Comment:</span> {v.change_note}</div>}
                                                                                         {restoredFrom && <div><span className={`font-medium ${lb ? 'text-neutral-200' : 'text-gray-700'}`}>Restored from:</span> v{restoredFrom.version_number}</div>}
@@ -2172,47 +1937,49 @@ export default function AssetDetailPanel({
                                                     })}
                                                 </div>
                                             )}
-                                            {lb && versions.length > 0 && !onReplaceFile && (
-                                                <button
-                                                    type="button"
-                                                    onClick={() => setShowVersionsWideModal(true)}
-                                                    className="mt-2 text-left text-xs font-medium text-neutral-300 hover:text-white hover:underline decoration-neutral-600 underline-offset-2"
-                                                >
-                                                    View full version history ({versions.length})
-                                                </button>
-                                            )}
                                         </div>
                                     </CollapsibleSection>
                                 </section>
                             </PermissionGate>
                         )}
 
-                        {/* Section 6 — Approval Workflow (stub, collapsed by default) */}
-                        <PermissionGate permission="asset.view">
-                            <section className={sectionClass} aria-labelledby="section-approval">
-                                <CollapsibleSection variant={collapsibleVariant} titleInCard={lb} title="Approval workflow" defaultExpanded={false}>
-                                    {lb ? (
-                                        <p className="text-sm text-neutral-500">Coming soon.</p>
-                                    ) : (
-                                        <div className={cardClass}>
-                                            <p className="text-sm text-gray-500">Coming soon.</p>
-                                        </div>
-                                    )}
-                                </CollapsibleSection>
-                            </section>
-                        </PermissionGate>
-
-                        {/* Section 7 — Download History (collapsed by default; Tenant Owner/Admin, Brand Manager/Admin only) */}
-                        {showDownloadHistory && (
+                        {/* Download history: same roles as before; only rendered when activity includes download events */}
+                        {showDownloadHistorySection && (
                             <section className={sectionClass} aria-labelledby="section-downloads">
                                 <CollapsibleSection variant={collapsibleVariant} titleInCard={lb} title="Download history" defaultExpanded={false}>
-                                    {lb ? (
-                                        <p className="text-sm text-neutral-500">No download history available for this asset.</p>
-                                    ) : (
-                                        <div className={cardClass}>
-                                            <p className="text-sm text-gray-500">No download history available for this asset.</p>
-                                        </div>
-                                    )}
+                                    <div className={lb ? 'space-y-2' : `${cardClass} space-y-2`}>
+                                        {downloadHistoryEvents.map((ev) => {
+                                            const label =
+                                                ev.event_type === 'asset.download.created'
+                                                    ? 'Download requested'
+                                                    : ev.event_type === 'asset.download.completed'
+                                                      ? 'Download completed'
+                                                      : ev.event_type === 'asset.download.failed'
+                                                        ? 'Download failed'
+                                                        : 'Download'
+                                            const when = ev.created_at
+                                                ? (() => {
+                                                      try {
+                                                          return new Date(ev.created_at).toLocaleString(undefined, {
+                                                              dateStyle: 'medium',
+                                                              timeStyle: 'short',
+                                                          })
+                                                      } catch {
+                                                          return '—'
+                                                      }
+                                                  })()
+                                                : '—'
+                                            return (
+                                                <div
+                                                    key={ev.id}
+                                                    className={`flex flex-wrap items-baseline justify-between gap-2 border-b pb-2 last:border-0 last:pb-0 ${lb ? 'border-neutral-800' : 'border-gray-100'}`}
+                                                >
+                                                    <span className={`text-sm ${lb ? 'text-neutral-200' : 'text-gray-900'}`}>{label}</span>
+                                                    <span className={`text-xs ${lb ? 'text-neutral-500' : 'text-gray-500'}`}>{when}</span>
+                                                </div>
+                                            )
+                                        })}
+                                    </div>
                                 </CollapsibleSection>
                             </section>
                         )}
@@ -2310,7 +2077,7 @@ export default function AssetDetailPanel({
                                                     <th className="px-3 py-2 text-left font-medium uppercase tracking-wider text-neutral-500">Uploaded</th>
                                                     <th className="px-3 py-2 text-left font-medium uppercase tracking-wider text-neutral-500">User</th>
                                                     <th className="px-3 py-2 text-left font-medium uppercase tracking-wider text-neutral-500">Current</th>
-                                                    {canRestoreVersion && (
+                                                    {canRestoreVersion && !readonlyMode && (
                                                         <th className="px-3 py-2 text-left font-medium uppercase tracking-wider text-neutral-500">Actions</th>
                                                     )}
                                                 </tr>
@@ -2387,7 +2154,7 @@ export default function AssetDetailPanel({
                                                                     </span>
                                                                 )}
                                                             </td>
-                                                            {canRestoreVersion && (
+                                                            {canRestoreVersion && !readonlyMode && (
                                                                 <td className="px-3 py-2.5">
                                                                     {!v.is_current &&
                                                                         (isArchived ? (
@@ -2434,6 +2201,7 @@ export default function AssetDetailPanel({
                                 showTitle
                                 showInput={false}
                                 detailed
+                                readOnly={readonlyMode}
                                 primaryColor={lb ? lbAccent : brandPrimary}
                                 variant={lb ? 'dark' : 'default'}
                             />
@@ -2456,7 +2224,7 @@ export default function AssetDetailPanel({
                                     : 'rounded-md bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50'
                             }
                         >
-                            {embeddedInLightbox ? 'Hide details' : 'Close'}
+                            {embeddedInLightbox ? (readonlyMode ? 'Close' : 'Hide details') : 'Close'}
                         </button>
                     </div>
                 )}

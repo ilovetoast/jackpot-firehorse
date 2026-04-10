@@ -26,6 +26,7 @@ class GetProstaffDashboardData
 
     /**
      * @return list<array{
+     *     prostaff_membership_id: int,
      *     user_id: int,
      *     name: string,
      *     email: string,
@@ -491,6 +492,8 @@ class GetProstaffDashboardData
             ->limit($approvedLimit)
             ->get();
 
+        $totalAssetsUploaded = (int) $this->prostaffAssetQuery($brand, (int) $user->id)->count();
+
         return [
             'target_uploads' => $row['target_uploads'],
             'actual_uploads' => $row['actual_uploads'],
@@ -508,6 +511,10 @@ class GetProstaffDashboardData
             'creator_rank_percentile' => $rankPercentile,
             'creator_rank_position' => $rankPosition,
             'total_creators' => $totalCreators,
+            'total_assets_uploaded' => $totalAssetsUploaded,
+            'display_name' => $user->name,
+            'avatar_url' => $user->avatar_url,
+            'last_login_at' => $user->last_login_at?->toIso8601String(),
         ];
     }
 
@@ -647,6 +654,7 @@ class GetProstaffDashboardData
     /**
      * @param  array{period_start: Carbon, period_end: Carbon}  $bounds
      * @return array{
+     *     prostaff_membership_id: int,
      *     user_id: int,
      *     name: string,
      *     target_uploads: int|null,
@@ -680,6 +688,7 @@ class GetProstaffDashboardData
         $periodStartStr = $bounds['period_start']->toDateString();
 
         return [
+            'prostaff_membership_id' => (int) $membership->id,
             'user_id' => (int) $user->id,
             'name' => (string) $user->name,
             'email' => (string) $user->email,

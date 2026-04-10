@@ -10,14 +10,50 @@ return [
     /** Minimum share of category assets that must carry the anchor tag (0–1). */
     'min_ratio' => 0.6,
 
-    /** Minimum distinct co-occurring tags to list as suggested select options. */
-    'min_co_occurring_tags' => 3,
+    /** Minimum distinct co-occurring tags to list as suggested select options (after lift + noise filters). */
+    'min_co_occurring_tags' => (int) env('AI_FIELD_SUGGEST_MIN_CO_TAGS', 4),
 
-    /** Max suggested option labels stored on the row. */
-    'max_suggested_options' => 25,
+    /** Max suggested option labels stored on the row (keep small — options must be anchor-relevant). */
+    'max_suggested_options' => (int) env('AI_FIELD_SUGGEST_MAX_OPTIONS', 12),
 
     /** Max anchor tags (strongest by ratio) evaluated per category per sync. */
     'max_anchors_per_category' => 5,
+
+    /**
+     * Minimum lift: P(co-tag | anchor assets) / P(co-tag | category) must exceed this.
+     * Filters values that are frequent in the category but not especially tied to the anchor.
+     */
+    'min_co_lift_ratio' => (float) env('AI_FIELD_SUGGEST_MIN_LIFT', 1.35),
+
+    /**
+     * Regex patterns (case-insensitive); co-options matching any are dropped.
+     *
+     * @var list<string>
+     */
+    'co_option_noise_regexes' => [
+        '/^\d+x\d+$/i',
+        '/^\d+\s*x\s*\d+$/',
+        '/^\d{3,5}\s*x\s*\d{3,5}$/',
+        '/^[#]?[0-9a-f]{6}$/i',
+        '/^(srgb|adobe\\s*rgb|prophoto|display\\s*p3|p3)$/i',
+        '/^\d+$/',
+    ],
+
+    /**
+     * Substrings; if the normalized co-option equals or contains these (word-ish), drop.
+     *
+     * @var list<string>
+     */
+    'co_option_blocklist_substrings' => [
+        'photoshop',
+        'lightroom',
+        'illustrator',
+        'capture one',
+        'emerge-pdp',
+        'jan-2026',
+        '-select',
+        'selects',
+    ],
 
     /**
      * Skip if this fraction of co-occurring tags already match existing select/multiselect
@@ -36,6 +72,11 @@ return [
         'photo',
         'image',
         'asset',
+        'jpg',
+        'jpeg',
+        'png',
+        'webp',
+        'raw',
     ],
 
     /**

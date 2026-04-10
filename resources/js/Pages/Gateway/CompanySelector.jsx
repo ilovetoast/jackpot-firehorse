@@ -1,13 +1,19 @@
 import { router, usePage } from '@inertiajs/react'
 import { useState } from 'react'
+import { refreshCsrfTokenFromServer } from '../../utils/csrf'
 
 export default function CompanySelector({ companies }) {
     const { theme } = usePage().props
     const [processing, setProcessing] = useState(false)
 
-    const handleSelect = (company) => {
+    const handleSelect = async (company) => {
         if (processing) return
         setProcessing(true)
+        try {
+            await refreshCsrfTokenFromServer()
+        } catch {
+            /* still attempt */
+        }
         router.post('/gateway/select-company', { tenant_id: company.id }, {
             onFinish: () => setProcessing(false),
         })

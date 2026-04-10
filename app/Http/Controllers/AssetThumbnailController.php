@@ -8,6 +8,7 @@ use App\Jobs\GeneratePresentationPreviewJob;
 use App\Models\Asset;
 use App\Models\Collection;
 use App\Models\Download;
+use App\Services\Assets\AssetProcessingGuardService;
 use App\Services\FeatureGate;
 use App\Services\ThumbnailEnhancementAiTaskRecorder;
 use App\Support\PipelineQueueResolver;
@@ -970,6 +971,8 @@ class AssetThumbnailController extends Controller
             ], 422);
         }
 
+        app(AssetProcessingGuardService::class)->assertCanDispatch($user, $asset, AssetProcessingGuardService::ACTION_THUMBNAILS);
+
         // Reset thumbnail status to PENDING to allow generation
         // This is safe because we're explicitly triggering generation
         // IMPORTANT: We do NOT mutate Asset.status (status represents visibility only)
@@ -985,6 +988,8 @@ class AssetThumbnailController extends Controller
         // The job ID will be available inside the job execution via $this->job->getJobId()
         $asset->loadMissing('currentVersion');
         \App\Jobs\GenerateThumbnailsJob::dispatch($asset->id)->onQueue(PipelineQueueResolver::imagesQueueForAsset($asset));
+
+        app(AssetProcessingGuardService::class)->markDispatched($user, $asset, AssetProcessingGuardService::ACTION_THUMBNAILS);
 
         Log::info('[AssetThumbnailController] Thumbnail generation job dispatched (manual request)', [
             'asset_id' => $asset->id,

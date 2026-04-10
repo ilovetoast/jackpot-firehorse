@@ -94,7 +94,7 @@ const AI_REVIEW_TAB_CONTEXT = {
     values:
         'Think apparel (**Product category**) or tackle (**Lure type**): when many assets keep getting labeled the same way—e.g. “jeans” or “crankbait”—but that label is not on the official dropdown yet, we may suggest adding it.',
     fields:
-        'When lots of assets in a category share a tag or usage pattern and nothing in your schema covers it, we may suggest a new field with starter options you can edit before creating.',
+        'When many assets in a category share the same anchor tag (or metadata value) and your schema has no field for it, we suggest a field whose starter dropdown options are other tags that tend to appear on the same assets—not every frequent tag in the category.',
 }
 const PER_PAGE = 50
 
@@ -237,7 +237,7 @@ function ReviewInsightStructuralEmptyState({ variant, onLibraryScanQueued }) {
                         <p className="mt-3 max-w-xl text-sm leading-relaxed text-slate-600">
                             {isValues
                                 ? 'We look across your library for labels that keep showing up on the same kind of field—on tags, approved metadata, or AI drafts—but are not on the field’s official dropdown list yet. When enough assets line up, we queue a suggestion here for you to accept or reject. Nothing changes until you say yes.'
-                                : 'We look category by category at tags and metadata. When a large share of assets keeps carrying the same idea (often a tag) and your schema does not already have a field for it, we may suggest a new field with a few starter dropdown options you can edit before anything is created.'}
+                                : 'We look category by category. When a strong share of assets carries the same anchor (usually a tag), we may propose a new field. Starter options are co-tagged values on those same assets that are unusually tied to the anchor compared with the rest of the category—so lists stay short and on-theme. You can always edit before creating.'}
                         </p>
                         <ul className="mx-auto mt-5 max-w-xl space-y-2.5 text-left text-sm text-slate-700 sm:mx-0">
                             <li className="flex gap-2.5">
