@@ -526,11 +526,16 @@ export default function AssetMetadataDisplay({
                                     key={field.metadata_field_id} 
                                     className={`flex flex-col md:flex-row md:items-start md:justify-between gap-1 md:gap-4 md:flex-nowrap ${
                                         workspaceMode && fieldOpensEditModal
-                                            ? 'cursor-pointer rounded-lg -mx-2 px-2 py-1.5 transition-colors hover:bg-gray-50'
+                                            ? 'group cursor-pointer rounded-lg border border-transparent -mx-2 px-2 py-1.5 transition-colors hover:border-gray-200 hover:bg-gray-50 focus-visible:border-indigo-300 focus-visible:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-200'
                                             : ''
                                     }`}
                                     role={workspaceMode && fieldOpensEditModal ? 'button' : undefined}
                                     tabIndex={workspaceMode && fieldOpensEditModal ? 0 : undefined}
+                                    aria-label={
+                                        workspaceMode && fieldOpensEditModal
+                                            ? `Edit ${field.display_label || 'field'}`
+                                            : undefined
+                                    }
                                     onClick={
                                         workspaceMode && fieldOpensEditModal
                                             ? (e) => {
@@ -560,8 +565,13 @@ export default function AssetMetadataDisplay({
                                                 {field.display_label}
                                             </span>
                                         </dt>
-                                        {/* Show the value if there is one; system fields show label even when empty */}
-                                        {(displayValue || dominantColorsArray || isRating || isToggle || isSystemField) ? (
+                                        {/* Show the value if there is one; system fields show label even when empty; workspace editable rows show a hint when empty */}
+                                        {(displayValue ||
+                                            dominantColorsArray ||
+                                            isRating ||
+                                            isToggle ||
+                                            isSystemField ||
+                                            (workspaceMode && fieldOpensEditModal)) ? (
                                             <dd className="text-sm font-semibold text-gray-900 md:flex-1 md:min-w-0 break-words">
                                                 {isToggle &&
                                                 !readOnly &&
@@ -696,6 +706,10 @@ export default function AssetMetadataDisplay({
                                                     displayValue
                                                 ) : isSystemField ? (
                                                     <span className="text-gray-400 italic">—</span>
+                                                ) : workspaceMode && fieldOpensEditModal ? (
+                                                    <span className="font-normal text-gray-400 italic">
+                                                        Click to set…
+                                                    </span>
                                                 ) : null}
                                             </dd>
                                         ) : null}
@@ -709,7 +723,18 @@ export default function AssetMetadataDisplay({
                                             <span className="italic">Auto</span>
                                         </div>
                                     ) : !readOnly && field.can_edit !== false && field.is_user_editable !== false ? (
-                                        workspaceMode ? null : (
+                                        workspaceMode && fieldOpensEditModal ? (
+                                            <div
+                                                className="pointer-events-none self-start md:self-center ml-auto flex-shrink-0 select-none inline-flex items-center gap-1.5 rounded-md border border-gray-200 bg-white px-2 py-1 text-xs font-medium text-gray-600 shadow-sm group-hover:border-indigo-200 group-hover:text-gray-800"
+                                                aria-hidden="true"
+                                            >
+                                                <PencilIcon
+                                                    className="h-3.5 w-3.5 shrink-0"
+                                                    style={{ color: brandPrimary }}
+                                                />
+                                                <span>{fieldHasValue ? 'Edit' : 'Set'}</span>
+                                            </div>
+                                        ) : workspaceMode ? null : (
                                         <div className="self-start md:self-auto ml-auto md:ml-0 flex-shrink-0 flex items-center gap-2">
                                             {/* Step 1: Inline approval buttons removed - all approval actions consolidated in Pending Metadata section */}
                                             <button

@@ -40,9 +40,14 @@ final class VideoDisplayProbe
         }
 
         foreach ($videoStream['side_data_list'] ?? [] as $sd) {
-            $type = (string) ($sd['side_data_type'] ?? '');
-            if ($type === 'Display Matrix' && isset($sd['rotation'])) {
-                return self::normalizeRotationDegrees((int) round((float) $sd['rotation']));
+            $type = strtolower((string) ($sd['side_data_type'] ?? ''));
+            if (! str_contains($type, 'matrix')) {
+                continue;
+            }
+            foreach (['rotation', 'display_rotation'] as $rk) {
+                if (isset($sd[$rk]) && $sd[$rk] !== '') {
+                    return self::normalizeRotationDegrees((int) round((float) $sd[$rk]));
+                }
             }
         }
 

@@ -18,7 +18,7 @@ import ThumbnailPreview from './ThumbnailPreview'
 import { filterActiveCategories } from '../utils/categoryUtils'
 import { getAssetCategoryId } from '../utils/assetUtils'
 import { getThumbnailUrl, getThumbnailVersion } from '../utils/thumbnailUtils'
-import { modeHasRenderableThumbnails } from '../utils/thumbnailModes'
+import { getThumbnailModesStatus, modeHasRenderableThumbnails } from '../utils/thumbnailModes'
 
 function SectionTitle({ children, className = '' }) {
     return <div className={`text-sm font-semibold text-gray-900 ${className}`.trim()}>{children}</div>
@@ -71,35 +71,18 @@ function manageModalOriginalFileUrl(asset) {
 }
 
 /**
- * Show pipeline "Original" chip only when it adds value: videos (poster variants), any asset with
- * enhanced/presentation, SVG, or when original-mode URL differs from the grid final thumbnail.
+ * Enhanced / presentation chips: only when that mode finished and we have URLs (not processing/failed).
+ * Empty status + URLs is treated as ready (legacy payloads).
  */
-function shouldShowPipelineOriginalChip(asset) {
-    if (!asset || !modeHasRenderableThumbnails(asset, 'original')) {
+function isPipelineModeGeneratedForManageModal(asset, mode) {
+    if (!asset || !modeHasRenderableThumbnails(asset, mode)) {
         return false
     }
-    const mime = (asset.mime_type || '').toLowerCase()
-    if (mime.startsWith('video/')) {
-        return true
+    const st = String(getThumbnailModesStatus(asset)?.[mode] ?? '').toLowerCase()
+    if (st === 'processing' || st === 'failed' || st === 'skipped' || st === 'pending') {
+        return false
     }
-    if (modeHasRenderableThumbnails(asset, 'enhanced') || modeHasRenderableThumbnails(asset, 'presentation')) {
-        return true
-    }
-    const isSvg =
-        mime === 'image/svg+xml' ||
-        (asset.original_filename || '').toLowerCase().endsWith('.svg') ||
-        asset.file_extension === 'svg'
-    if (isSvg) {
-        return true
-    }
-    if (mime.startsWith('image/')) {
-        const orig = getThumbnailUrl(asset, 'large', 'original')
-        const fin = asset.final_thumbnail_url || asset.thumbnail_url_large || null
-        if (orig && fin && orig === fin) {
-            return false
-        }
-    }
-    return true
+    return st === 'complete' || st === ''
 }
 
 /** Source file chip: video, PDF, audio, etc. — not redundant static rasters (JPG/PNG/WebP…). */
@@ -126,7 +109,15 @@ function renderSourceFilePreview(asset, originalFileUrl, brandPrimary) {
         return <p className="text-sm text-gray-500">Source file URL not available.</p>
     }
     if (isVideo) {
-        return <video src={originalFileUrl} controls className="max-h-full max-w-full object-contain" playsInline />
+        return (
+            <video
+                src={originalFileUrl}
+                controls
+                playsInline
+                preload="metadata"
+                className="max-h-[min(48vh,480px)] w-full max-w-full object-contain"
+            />
+        )
     }
     if (isImage || isSvg) {
         return <img src={originalFileUrl} alt="" className="max-h-full max-w-full object-contain" />
@@ -581,21 +572,19 @@ export default function ManageAssetModal({
     const originalFileUrl = manageModalOriginalFileUrl(asset)
     const mimeLower = (asset?.mime_type || '').toLowerCase()
     const isVideoAsset = mimeLower.startsWith('video/')
-    const showPipelineOriginal = asset ? shouldShowPipelineOriginalChip(asset) : false
-    const showEnhanced = asset ? modeHasRenderableThumbnails(asset, 'enhanced') : false
-    const showPresentation = asset ? modeHasRenderableThumbnails(asset, 'presentation') : false
+    const showEnhanced = asset ? isPipelineModeGeneratedForManageModal(asset, 'enhanced') : false
+    const showPresentation = asset ? isPipelineModeGeneratedForManageModal(asset, 'presentation') : false
     const showSource = asset ? shouldShowSourceFileChip(asset) : false
     const showQuickPreview = isVideoAsset && Boolean(asset?.video_preview_url)
 
     const previewVariantAllowed = useMemo(() => {
         const set = new Set(['default'])
-        if (showPipelineOriginal) set.add('original')
         if (showEnhanced) set.add('enhanced')
         if (showPresentation) set.add('presentation')
         if (showSource) set.add('source')
         if (showQuickPreview) set.add('quick')
         return set
-    }, [showPipelineOriginal, showEnhanced, showPresentation, showSource, showQuickPreview])
+    }, [showEnhanced, showPresentation, showSource, showQuickPreview])
 
     useEffect(() => {
         if (!previewVariantAllowed.has(previewVariant)) {
@@ -605,7 +594,7 @@ export default function ManageAssetModal({
 
     const forcedModeUrl =
         asset &&
-        (previewVariant === 'original' || previewVariant === 'enhanced' || previewVariant === 'presentation')
+        (previewVariant === 'enhanced' || previewVariant === 'presentation')
             ? getThumbnailUrl(asset, 'large', previewVariant)
             : null
 
@@ -648,7 +637,7 @@ export default function ManageAssetModal({
                         className={`group flex min-w-0 flex-1 items-center gap-2 rounded-lg border px-3 py-2 transition-colors ${
                             !canEditMetadata || isVirtualGoogleFont
                                 ? 'border-transparent'
-                                : 'border-dashed border-gray-200 bg-gray-50/70 hover:border-gray-300 focus-within:border-solid focus-within:border-indigo-300 focus-within:bg-white focus-within:ring-1 focus-within:ring-indigo-200'
+                                : 'border border-gray-200 bg-white shadow-sm hover:border-indigo-200 hover:shadow focus-within:border-indigo-400 focus-within:ring-2 focus-within:ring-indigo-100'
                         }`}
                     >
                         {canEditMetadata && !isVirtualGoogleFont && (
@@ -703,8 +692,8 @@ export default function ManageAssetModal({
                         </div>
                     ) : (
                         <>
-                            <div className="flex min-h-[280px] max-h-[min(48vh,440px)] w-full items-center justify-center overflow-hidden bg-gray-100 px-4 py-4">
-                                <div className="flex h-full w-full max-h-full max-w-full items-center justify-center">
+                            <div className="flex min-h-[280px] w-full items-center justify-center overflow-x-hidden overflow-y-auto bg-gray-100 px-4 py-4 pb-8">
+                                <div className="flex w-full max-w-full flex-col items-center justify-center [&_img]:!h-auto [&_img]:!w-auto [&_img]:max-h-[min(48vh,480px)] [&_img]:max-w-full [&_img]:object-contain [&_video]:max-h-[min(48vh,480px)] [&_video]:w-full [&_video]:max-w-full [&_video]:object-contain">
                                     {previewVariant === 'quick' && showQuickPreview ? (
                                         <video
                                             key={asset.video_preview_url}
@@ -712,8 +701,8 @@ export default function ManageAssetModal({
                                             controls
                                             muted
                                             playsInline
-                                            className="max-h-full max-w-full object-contain"
                                             preload="metadata"
+                                            className="max-h-[min(48vh,480px)] w-full max-w-full object-contain"
                                         />
                                     ) : previewVariant === 'source' && showSource ? (
                                         renderSourceFilePreview(asset, originalFileUrl, brandPrimary)
@@ -724,7 +713,7 @@ export default function ManageAssetModal({
                                             size="lg"
                                             preferLargeForVector
                                             forcedImageUrl={forcedModeUrl}
-                                            className="h-full w-full max-h-[min(48vh,440px)]"
+                                            className="!h-auto max-h-[min(48vh,480px)] w-full max-w-full min-h-0"
                                             primaryColor={brandPrimary}
                                             forceObjectFit="contain"
                                         />
@@ -734,7 +723,7 @@ export default function ManageAssetModal({
                                             thumbnailVersion={thumbnailVersion}
                                             size="lg"
                                             preferLargeForVector
-                                            className="h-full w-full max-h-[min(48vh,440px)]"
+                                            className="!h-auto max-h-[min(48vh,480px)] w-full max-w-full min-h-0"
                                             primaryColor={brandPrimary}
                                             forceObjectFit="contain"
                                         />
@@ -752,14 +741,6 @@ export default function ManageAssetModal({
                                         onClick={() => setPreviewVariant('default')}
                                         brandPrimary={brandPrimary}
                                     />
-                                    {showPipelineOriginal && (
-                                        <PreviewVariantChip
-                                            label="Original"
-                                            selected={previewVariant === 'original'}
-                                            onClick={() => setPreviewVariant('original')}
-                                            brandPrimary={brandPrimary}
-                                        />
-                                    )}
                                     {showEnhanced && (
                                         <PreviewVariantChip
                                             label="Enhanced"
@@ -794,8 +775,10 @@ export default function ManageAssetModal({
                                     )}
                                 </div>
                                 <p className="mt-2 text-xs text-gray-500">
-                                    Modes appear when generated. <span className="font-medium text-gray-600">Quick preview</span> is
-                                    the short hover MP4. Raster images have no source tab — use Details for the file name.
+                                    <span className="font-medium text-gray-600">Enhanced</span> and{' '}
+                                    <span className="font-medium text-gray-600">Presentation</span> appear only after those
+                                    renditions finish. <span className="font-medium text-gray-600">Quick preview</span> is the
+                                    short hover MP4. Raster images have no source tab — use Details for the file name.
                                 </p>
                             </div>
                         </>

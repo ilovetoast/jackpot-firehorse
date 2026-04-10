@@ -217,8 +217,10 @@ class VideoPreviewGenerationService
         ]));
         $vf = implode(',', $vfParts);
 
+        // -noautorotate: decode coded frames as stored. Otherwise the decoder may rotate before -vf,
+        // and our transpose (from ffprobe tags) doubles rotation or scales the wrong dimensions.
         $command = sprintf(
-            '%s -ss %.2f -i %s -t %.2f -vf %s -an -c:v libx264 -preset fast -crf 28 -movflags +faststart -y %s 2>&1',
+            '%s -ss %.2f -noautorotate -i %s -t %.2f -vf %s -an -c:v libx264 -preset fast -crf 28 -movflags +faststart -y %s 2>&1',
             escapeshellarg($ffmpegPath),
             $startTime,
             escapeshellarg($sourcePath),

@@ -485,23 +485,33 @@ export default function AssetDetailModal({ data, onClose, onAction, onRefresh, s
                                         Same clip used on the main asset grid on desktop hover. URL updates when the asset row changes so you are not stuck on a cached file after regeneration.
                                     </p>
                                     {asset.video_preview_view_url ? (
-                                        <div
-                                            className="mt-3 flex max-h-96 w-full max-w-lg justify-center rounded-md border border-slate-200 bg-black"
-                                            style={
-                                                asset.video_width && asset.video_height
-                                                    ? { aspectRatio: `${asset.video_width} / ${asset.video_height}` }
-                                                    : undefined
-                                            }
-                                        >
-                                            <video
-                                                key={asset.video_preview_view_url}
-                                                className="h-full w-full object-contain"
-                                                src={asset.video_preview_view_url}
-                                                controls
-                                                muted
-                                                playsInline
-                                                preload="metadata"
-                                            />
+                                        <div className="mt-3 flex w-full justify-center px-1">
+                                            <div
+                                                className="relative mx-auto max-w-lg overflow-visible rounded-md border border-slate-200 bg-black shadow-inner"
+                                                style={
+                                                    asset.video_width && asset.video_height
+                                                        ? {
+                                                              aspectRatio: `${Number(asset.video_width)} / ${Number(asset.video_height)}`,
+                                                              height: 'min(24rem, 72vh)',
+                                                              width: 'auto',
+                                                              maxWidth: '100%',
+                                                          }
+                                                        : {
+                                                              height: 'min(24rem, 72vh)',
+                                                              width: 'min(100%, 32rem)',
+                                                          }
+                                                }
+                                            >
+                                                <video
+                                                    key={asset.video_preview_view_url}
+                                                    className="absolute inset-0 m-auto h-full w-full object-contain"
+                                                    src={asset.video_preview_view_url}
+                                                    controls
+                                                    muted
+                                                    playsInline
+                                                    preload="metadata"
+                                                />
+                                            </div>
                                         </div>
                                     ) : (
                                         <p className="mt-3 text-sm text-amber-800 bg-amber-50 border border-amber-100 rounded-md px-3 py-2">
