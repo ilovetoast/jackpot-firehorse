@@ -67,6 +67,21 @@
             "@php artisan config:clear --ansi",
             "@php artisan test"
         ],
+        "test:unit": [
+            "@php artisan config:clear --ansi",
+            "@php vendor/bin/phpunit --testsuite=Unit"
+        ],
+        "test:unit:fast": [
+            "@php artisan config:clear --ansi",
+            "@php vendor/bin/phpunit --testsuite=Unit --exclude-group=ffmpeg"
+        ],
+        "test:feature": [
+            "@php artisan config:clear --ansi",
+            "@php vendor/bin/phpunit --testsuite=Feature"
+        ],
+        "test:preflight": [
+            "@php vendor/bin/phpunit tests/Unit/Support/VideoInsights/VideoInsightsJobPreflightTest.php"
+        ],
         "test:sail": [
             "./vendor/bin/sail test"
         ],

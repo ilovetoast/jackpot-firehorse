@@ -21,6 +21,7 @@ export default function MarketingHome() {
     return (
         <MarketingLayout>
             <HeroSection
+                logo={{ src: '/jp-wordmark-inverted.svg', alt: 'Jackpot', variant: 'inverted' }}
                 title="Brand execution, not asset management"
                 subtitle="One place to run creative work so every deliverable stays on-brand — from intake to approval — without the chaos of folders and one-off requests."
                 primaryCta={{ text: primaryLabel, href: primaryHref }}

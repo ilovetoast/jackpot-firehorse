@@ -6,6 +6,7 @@ use App\Models\Asset;
 use App\Models\AssetVersion;
 use App\Models\StorageBucket;
 use App\Support\ThumbnailMode;
+use App\Support\VideoDisplayProbe;
 use Aws\S3\Exception\S3Exception;
 use Aws\S3\S3Client;
 use Illuminate\Support\Facades\Log;
@@ -2861,9 +2862,17 @@ class ThumbnailGenerationService
     /**
      * Generate thumbnail for video files (poster frame extraction).
      *
-     * Uses FFmpeg to extract a poster frame from the video.
-     * Frame timestamp: 25-40% of video duration (defaults to 30%).
-     * Output format: JPG or WebP (based on config).
+     * 🔒 VIDEO POSTER / STATIC THUMBNAIL LOCK — Do not change FFmpeg strategy casually.
+     *
+     * Single implementation for grid/drawer **static** video thumbnails (not hover MP4). Used by
+     * {@see GenerateThumbnailsJob}, bulk regenerate, admin regenerate-styles, and
+     * {@see \App\Http\Controllers\AssetThumbnailController::regenerateVideoThumbnail}.
+     *
+     * Orientation contract: (1) plain frame extract (FFmpeg default input autorotation, matches QuickTime/VLC);
+     * (2) on failure, -noautorotate + manual {@see VideoDisplayProbe::ffmpegTransposeFilters()} from
+     * {@see self::getVideoInfo()} / {@see VideoDisplayProbe::dimensionsFromFfprobe()}.
+     *
+     * Frame timestamp: ~30% of duration. Output is resized below to style (WebP/JPEG per config).
      *
      * @param  string  $sourcePath  Local path to video file
      * @param  array  $styleConfig  Thumbnail style configuration (width, height, quality, fit)
@@ -2925,29 +2934,67 @@ class ThumbnailGenerationService
             // Extract frame at calculated timestamp
             $tempImagePath = tempnam(sys_get_temp_dir(), 'video_thumb_').'.jpg';
 
-            // FFmpeg command to extract frame
-            // -ss: seek to timestamp
-            // -i: input file
-            // -vframes 1: extract only 1 frame
-            // -q:v 2: high quality JPEG (1-31, lower is better)
-            // -y: overwrite output file
-            $command = sprintf(
+            // Static grid poster: prefer FFmpeg’s default input autorotation first (matches QuickTime/VLC for
+            // typical MOV/MP4 metadata). Manual ffprobe + -noautorotate is the fallback when that fails or
+            // returns empty output — avoids “success” with wrong rotation when our probe picked the wrong stream.
+            $rotationDeg = (int) ($videoInfo['rotation'] ?? 0);
+            $transpose = VideoDisplayProbe::ffmpegTransposeFilters($rotationDeg);
+            $codedW = (int) ($videoInfo['coded_width'] ?? 0);
+            $codedH = (int) ($videoInfo['coded_height'] ?? 0);
+            $dispW = (int) ($videoInfo['width'] ?? 0);
+            $dispH = (int) ($videoInfo['height'] ?? 0);
+            $vfParts = array_values(array_filter([
+                $transpose !== '' ? $transpose : null,
+                $rotationDeg === 0 && $codedW > 0 && $codedH > 0 && ($dispW !== $codedW || $dispH !== $codedH)
+                    ? sprintf('scale=%d:%d:flags=lanczos', $dispW, $dispH)
+                    : null,
+            ]));
+            $vfClause = $vfParts !== [] ? sprintf('-vf %s ', escapeshellarg(implode(',', $vfParts))) : '';
+
+            $cmdAutorotate = sprintf(
                 '%s -ss %.2f -i %s -vframes 1 -q:v 2 -y %s 2>&1',
                 escapeshellarg($ffmpegPath),
                 $timestamp,
                 escapeshellarg($sourcePath),
                 escapeshellarg($tempImagePath)
             );
-
-            Log::info('[ThumbnailGenerationService] Extracting video frame', [
-                'source_path' => $sourcePath,
-                'timestamp' => $timestamp,
-                'command' => $command,
-            ]);
+            $cmdManual = sprintf(
+                '%s -ss %.2f -noautorotate -i %s %s-vframes 1 -q:v 2 -y %s 2>&1',
+                escapeshellarg($ffmpegPath),
+                $timestamp,
+                escapeshellarg($sourcePath),
+                $vfClause,
+                escapeshellarg($tempImagePath)
+            );
 
             $output = [];
             $returnCode = 0;
-            exec($command, $output, $returnCode);
+            Log::info('[ThumbnailGenerationService] Extracting video frame (autorotate first)', [
+                'source_path' => $sourcePath,
+                'timestamp' => $timestamp,
+                'command' => $cmdAutorotate,
+            ]);
+            exec($cmdAutorotate, $output, $returnCode);
+
+            if ($returnCode !== 0 || ! file_exists($tempImagePath) || filesize($tempImagePath) === 0) {
+                $errorOutput = implode("\n", $output);
+                Log::warning('[ThumbnailGenerationService] Autorotate frame extract failed; retrying with noautorotate + manual rotation', [
+                    'source_path' => $sourcePath,
+                    'return_code' => $returnCode,
+                    'output_tail' => substr($errorOutput, -800),
+                ]);
+                if (file_exists($tempImagePath)) {
+                    @unlink($tempImagePath);
+                }
+                Log::info('[ThumbnailGenerationService] Extracting video frame (manual rotation)', [
+                    'source_path' => $sourcePath,
+                    'timestamp' => $timestamp,
+                    'command' => $cmdManual,
+                    'rotation_deg' => $rotationDeg,
+                ]);
+                $output = [];
+                exec($cmdManual, $output, $returnCode);
+            }
 
             if ($returnCode !== 0 || ! file_exists($tempImagePath) || filesize($tempImagePath) === 0) {
                 $errorOutput = implode("\n", $output);
@@ -3169,28 +3216,21 @@ class ThumbnailGenerationService
             throw new \RuntimeException('Failed to parse video information from FFprobe output');
         }
 
-        // Find video stream
-        $videoStream = null;
-        foreach ($videoData['streams'] ?? [] as $stream) {
-            if (isset($stream['codec_type']) && $stream['codec_type'] === 'video') {
-                $videoStream = $stream;
-                break;
-            }
-        }
+        $dims = VideoDisplayProbe::dimensionsFromFfprobe($videoData);
 
-        if (! $videoStream) {
+        if (! $dims) {
             throw new \RuntimeException('No video stream found in file');
         }
 
-        // Extract duration, width, height
         $duration = (float) ($videoData['format']['duration'] ?? 0);
-        $width = (int) ($videoStream['width'] ?? 0);
-        $height = (int) ($videoStream['height'] ?? 0);
 
         return [
             'duration' => $duration,
-            'width' => $width,
-            'height' => $height,
+            'width' => $dims['display_width'],
+            'height' => $dims['display_height'],
+            'coded_width' => $dims['width'],
+            'coded_height' => $dims['height'],
+            'rotation' => $dims['rotation'],
         ];
     }
 

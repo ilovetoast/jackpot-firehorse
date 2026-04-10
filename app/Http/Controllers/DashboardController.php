@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\ApprovalStatus;
 use App\Enums\AssetStatus;
 use App\Enums\AssetType;
 use App\Enums\DownloadStatus;
@@ -308,14 +309,11 @@ class DashboardController extends Controller
         $contributorRejectedCount = 0;
 
         if ($isTenantOwnerOrAdmin || $isBrandManager) {
-            // Approvers: Count all pending/rejected assets in brand
+            // Approvers: only assets still awaiting approve / request-changes (not rejected).
             $pendingAssetsCount = Asset::where('tenant_id', $tenant->id)
                 ->where('brand_id', $brand->id)
                 ->where('type', \App\Enums\AssetType::ASSET)
-                ->where(function ($query) {
-                    $query->where('approval_status', \App\Enums\ApprovalStatus::PENDING)
-                        ->orWhere('approval_status', \App\Enums\ApprovalStatus::REJECTED);
-                })
+                ->where('approval_status', ApprovalStatus::PENDING)
                 ->whereNull('deleted_at')
                 ->count();
         } elseif ($isContributor) {
@@ -337,6 +335,14 @@ class DashboardController extends Controller
                 ->count();
 
             $pendingAssetsCount = $contributorPendingCount + $contributorRejectedCount;
+        }
+
+        // Uploader-owned rejected submissions (any role) — shown on brand dashboard for next steps.
+        $rejectedMyUploadsCount = 0;
+        if ($user->hasPermissionForBrand($brand, 'asset.view')) {
+            $rejectedMyUploadsCount = (int) Asset::query()
+                ->rejectedPublicationForUploader($user, $tenant, $brand)
+                ->count();
         }
 
         $recentActivity = app(BrandActivityFeedService::class)->getRecentActivity($tenant, $brand, $user, 5);
@@ -496,6 +502,7 @@ class DashboardController extends Controller
             // Phase J.3: Contributor-specific counts (informational only)
             'contributor_pending_count' => $contributorPendingCount, // Contributor's own pending assets
             'contributor_rejected_count' => $contributorRejectedCount, // Contributor's own rejected assets
+            'rejected_my_uploads_count' => $rejectedMyUploadsCount, // Current user's rejected uploads (action: replace or delete)
             'dashboard_links' => $dashboardLinks, // Subtle header links on cinematic Overview (permission-gated)
         ];
     }

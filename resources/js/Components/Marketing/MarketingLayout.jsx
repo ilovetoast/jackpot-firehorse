@@ -1,5 +1,4 @@
 import { Link, usePage } from '@inertiajs/react'
-import JackpotLogo from '../JackpotLogo'
 
 const NAV = [
     { label: 'Home', href: '/' },
@@ -52,7 +51,12 @@ export default function MarketingLayout({ children }) {
                 <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
                     <div className="flex h-16 items-center justify-between gap-4">
                         <Link href="/" className="flex shrink-0 items-center">
-                            <JackpotLogo className="h-8 w-auto" textClassName="text-xl font-bold text-white tracking-tight" />
+                            <img
+                                src="/jp-wordmark-inverted.svg"
+                                alt="Jackpot"
+                                className="h-7 w-auto sm:h-8"
+                                decoding="async"
+                            />
                         </Link>
                         <div className="hidden md:flex items-center gap-1">
                             {NAV.map((item) => {
@@ -125,7 +129,12 @@ export default function MarketingLayout({ children }) {
             <footer className="relative z-10 border-t border-white/[0.06] mt-0">
                 <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-14">
                     <div className="flex flex-col sm:flex-row items-center justify-between gap-6">
-                        <JackpotLogo className="h-7 w-auto opacity-90" textClassName="text-lg font-semibold text-white/90" />
+                        <img
+                            src="/jp-wordmark-inverted.svg"
+                            alt="Jackpot"
+                            className="h-7 w-auto opacity-90"
+                            decoding="async"
+                        />
                         <div className="flex flex-wrap justify-center gap-x-6 gap-y-2 text-sm text-white/45">
                             {NAV.map((item) => (
                                 <Link key={item.href} href={item.href} className="hover:text-white/80 transition-colors">

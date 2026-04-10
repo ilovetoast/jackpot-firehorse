@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
-import { usePage, router } from '@inertiajs/react'
+import { usePage, router, Link } from '@inertiajs/react'
 import AppHead from '../../Components/AppHead'
 import AppNav from '../../Components/AppNav'
 import AddAssetButton from '../../Components/AddAssetButton'
@@ -32,6 +32,7 @@ import axios from 'axios'
 import { motion } from 'framer-motion'
 import {
     ClockIcon,
+    ExclamationTriangleIcon,
     DocumentTextIcon,
     FolderIcon,
     TagIcon,
@@ -59,6 +60,7 @@ const ASSET_GRID_QUERY_KEYS = [
     'grid_folder_total',
     'content_type',
     'pending_publication_review_count',
+    'rejected_my_uploads_count',
 ]
 
 export default function AssetsIndex({
@@ -85,6 +87,7 @@ export default function AssetsIndex({
     reference_materials_count = 0,
     staged_count = 0,
     pending_publication_review_count = 0,
+    rejected_my_uploads_count = 0,
 }) {
     const pageProps = usePage().props
     const { auth } = pageProps
@@ -953,6 +956,14 @@ export default function AssetsIndex({
         !isPendingPublicationFilter &&
         pendingReviewTotal > 0
 
+    const rejectedMyUploadsTotal = Number(rejected_my_uploads_count) || 0
+    const showRejectedUploadsBanner =
+        can('asset.view') &&
+        lifecycle !== 'deleted' &&
+        source !== 'staged' &&
+        source !== 'reference_materials' &&
+        rejectedMyUploadsTotal > 0
+
     const handleShowPendingReview = useCallback(() => {
         const urlParams = new URLSearchParams(window.location.search)
         urlParams.set('lifecycle', 'pending_publication')
@@ -1232,7 +1243,8 @@ export default function AssetsIndex({
                                             {pendingReviewTotal === 1 ? 'asset' : 'assets'} awaiting your review
                                         </p>
                                         <p className="mt-0.5 text-sm text-gray-600">
-                                            Filter the library to pending and rejected submissions so you can approve or request changes.
+                                            These submissions are waiting for your approve or request-changes decision.
+                                            Rejected uploads are handled by the creator on their dashboard.
                                         </p>
                                     </div>
                                 </div>
@@ -1244,6 +1256,35 @@ export default function AssetsIndex({
                                 >
                                     Review pending
                                 </button>
+                            </div>
+                        ) : null}
+                        {showRejectedUploadsBanner ? (
+                            <div
+                                className="mb-6 flex flex-col gap-3 rounded-xl border border-amber-200 bg-amber-50/90 px-4 py-3.5 shadow-sm sm:flex-row sm:items-center sm:justify-between sm:gap-4"
+                                role="status"
+                            >
+                                <div className="flex min-w-0 items-start gap-3">
+                                    <ExclamationTriangleIcon
+                                        className="h-6 w-6 shrink-0 text-amber-600 mt-0.5"
+                                        aria-hidden
+                                    />
+                                    <div className="min-w-0">
+                                        <p className="text-sm font-semibold text-amber-950">
+                                            {rejectedMyUploadsTotal === 1
+                                                ? '1 submission was rejected'
+                                                : `${rejectedMyUploadsTotal} submissions were rejected`}
+                                        </p>
+                                        <p className="mt-0.5 text-sm text-amber-900/90">
+                                            Upload a new version or delete the asset from your pending submissions.
+                                        </p>
+                                    </div>
+                                </div>
+                                <Link
+                                    href="/app/assets?lifecycle=pending_publication"
+                                    className="inline-flex w-full shrink-0 items-center justify-center rounded-lg border border-amber-800/20 bg-white px-4 py-2.5 text-sm font-semibold text-amber-950 shadow-sm transition hover:bg-amber-100/80 sm:w-auto"
+                                >
+                                    Open my submissions
+                                </Link>
                             </div>
                         ) : null}
                         {/* Brief feedback when an asset can't be added to the download bucket (e.g. not published) */}

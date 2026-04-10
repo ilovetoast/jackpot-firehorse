@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\ApprovalStatus;
 use App\Enums\AssetStatus;
 use App\Enums\AssetType;
 use App\Enums\ThumbnailStatus;
@@ -35,8 +36,8 @@ use App\Services\Prostaff\GetProstaffDamFilterOptions;
 use App\Services\SystemCategoryService;
 use App\Services\UploadInitiationService;
 use App\Support\AssetVariant;
-use App\Support\Metadata\CategoryTypeResolver;
 use App\Support\DeliveryContext;
+use App\Support\Metadata\CategoryTypeResolver;
 use App\Support\ThumbnailMetadata;
 use App\Support\ThumbnailModeDeliveryUrls;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
@@ -455,7 +456,16 @@ class AssetController extends Controller
                 ->whereIn(DB::raw(Asset::categoryIdMetadataCastExpression()), array_map('intval', $viewableCategoryIds));
 
             $this->lifecycleResolver->apply($pendingPubQuery, 'pending_publication', $user, $tenant, $brand);
+            // Banner = items still awaiting an approver decision (exclude rejected — creator’s turn).
+            $pendingPubQuery->where('approval_status', ApprovalStatus::PENDING);
             $pendingPublicationReviewCount = (int) $pendingPubQuery->count();
+        }
+
+        $rejectedMyUploadsCount = 0;
+        if ($user && $user->hasPermissionForBrand($brand, 'asset.view')) {
+            $rejectedMyUploadsCount = (int) Asset::query()
+                ->rejectedPublicationForUploader($user, $tenant, $brand)
+                ->count();
         }
 
         // Phase L.5.1: Apply lifecycle filtering via LifecycleResolver
@@ -1651,6 +1661,7 @@ class AssetController extends Controller
             'prostaff_filter_options' => app(GetProstaffDamFilterOptions::class)->activeMemberOptionsForBrand($brand),
             'dam_prostaff_filter_config' => GetProstaffDamFilterOptions::damProstaffFilterConfig(),
             'pending_publication_review_count' => $pendingPublicationReviewCount,
+            'rejected_my_uploads_count' => $rejectedMyUploadsCount,
         ]);
     }
 

@@ -641,13 +641,13 @@ class AiMetadataGenerationService
         $prompt .= "- Prefer concrete nouns and simple descriptors\n";
         $prompt .= "- Tags should help someone FIND this exact image\n\n";
 
-        $prompt .= "ALLOWED TAG TYPES:\n";
-        $prompt .= "- Objects (e.g. \"person\", \"car\", \"fishing rod\")\n";
-        $prompt .= "- People (e.g. \"man\", \"woman\", \"child\", \"group\")\n";
-        $prompt .= "- Setting/location (e.g. \"lake\", \"studio\", \"outdoor\")\n";
-        $prompt .= "- Activity (only if clearly visible, e.g. \"fishing\", \"casting\")\n";
-        $prompt .= "- Asset type (e.g. \"logo\", \"product\", \"catalog page\")\n";
-        $prompt .= "- Composition (e.g. \"close up\", \"wide shot\")\n\n";
+        $prompt .= "TAG COVERAGE (describe only what is visible—do not copy hypothetical examples from instructions):\n";
+        $prompt .= "- Objects and props actually in frame\n";
+        $prompt .= "- People when clear (e.g. solo vs group; avoid vague labels unless obvious)\n";
+        $prompt .= "- Setting or location type only when the environment is evident (indoor/outdoor, studio, office, gym, etc.)\n";
+        $prompt .= "- Activity only when unambiguous from pixels (do not guess)\n";
+        $prompt .= "- Asset type when obvious (logo, product, screenshot, document, etc.)\n";
+        $prompt .= "- Composition when clear (close-up, wide shot, etc.)\n\n";
 
         $prompt .= "NORMALIZATION RULES:\n";
         $prompt .= "- Use lowercase\n";
@@ -663,10 +663,9 @@ class AiMetadataGenerationService
         $prompt .= "OUTPUT FORMAT:\n";
         $prompt .= "{\n";
         $prompt .= "  \"fields\": {},\n";
-        $prompt .= "  \"tags\": [\n";
-        $prompt .= "    {\"value\": \"example tag\", \"confidence\": 0.95}\n";
-        $prompt .= "  ]\n";
-        $prompt .= "}\n\n";
+        $prompt .= "  \"tags\": []\n";
+        $prompt .= "}\n";
+        $prompt .= "Populate \"tags\" with objects {\"value\": string, \"confidence\": number} derived only from the image—never placeholder or illustrative strings from this prompt.\n\n";
 
         $prompt .= "If the image clearly shows concrete subjects, include multiple specific tags (not an empty array) whenever they meet the confidence rule.\n";
         $prompt .= "Return ONLY valid JSON. No explanation.\n";

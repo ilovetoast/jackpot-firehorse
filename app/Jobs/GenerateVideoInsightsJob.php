@@ -17,6 +17,8 @@ use App\Services\VideoAiMinuteEstimator;
 use App\Services\VideoInsightsSearchIndexWriter;
 use App\Services\VideoInsightsService;
 use App\Support\AiErrorSanitizer;
+use App\Support\VideoInsights\VideoInsightsJobPreflight;
+use App\Support\VideoInsights\VideoInsightsPreflightOutcome;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -77,15 +79,15 @@ class GenerateVideoInsightsJob implements ShouldQueue
         }
 
         $fileType = $fileTypeService->detectFileTypeFromAsset($asset);
-        if ($fileType !== 'video') {
-            $this->clearQueuedFlag($asset);
-
-            return;
-        }
-
         $meta = $asset->metadata ?? [];
-        if (! empty($meta['_skip_ai_video_insights'])) {
-            $this->markSkipped($asset, 'upload_opt_out');
+        $preflight = VideoInsightsJobPreflight::evaluate(
+            $fileType,
+            (bool) config('assets.video_ai.enabled', true),
+            $meta,
+        );
+
+        if ($preflight !== VideoInsightsPreflightOutcome::Proceed) {
+            $this->applyPreflightOutcome($asset, $preflight, $meta);
 
             return;
         }
@@ -94,10 +96,6 @@ class GenerateVideoInsightsJob implements ShouldQueue
         if (! $policy['should_proceed']) {
             $this->markSkipped($asset, $policy['reason'] ?? 'policy');
 
-            return;
-        }
-
-        if (! empty($meta['ai_video_insights_completed_at'])) {
             return;
         }
 
@@ -265,10 +263,35 @@ class GenerateVideoInsightsJob implements ShouldQueue
         }
     }
 
+    /**
+     * @param  array<string, mixed>  $meta  Snapshot of asset metadata at preflight time.
+     */
+    protected function applyPreflightOutcome(Asset $asset, VideoInsightsPreflightOutcome $outcome, array $meta): void
+    {
+        match ($outcome) {
+            VideoInsightsPreflightOutcome::NotVideoClearQueue => $this->clearQueuedFlag($asset),
+            VideoInsightsPreflightOutcome::FeatureDisabled => $this->markSkipped($asset, 'video_ai_disabled'),
+            VideoInsightsPreflightOutcome::UploadOptOut => $this->markSkipped($asset, 'upload_opt_out'),
+            VideoInsightsPreflightOutcome::InsightsAlreadyComplete => $this->normalizeCompletedInsightsStatus($asset, $meta),
+            VideoInsightsPreflightOutcome::Proceed => null,
+        };
+    }
+
+    /**
+     * @param  array<string, mixed>  $meta
+     */
+    protected function normalizeCompletedInsightsStatus(Asset $asset, array $meta): void
+    {
+        if (VideoInsightsJobPreflight::shouldPatchStatusToCompleted($meta)) {
+            $this->patchMetadata($asset, ['ai_video_status' => 'completed']);
+        }
+    }
+
     protected function clearQueuedFlag(Asset $asset): void
     {
         $meta = $asset->metadata ?? [];
-        if (($meta['ai_video_status'] ?? null) === 'queued') {
+        $st = $meta['ai_video_status'] ?? null;
+        if (in_array($st, ['queued', 'processing'], true)) {
             unset($meta['ai_video_status']);
             $asset->update(['metadata' => $meta]);
         }

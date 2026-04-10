@@ -1143,6 +1143,25 @@ class Asset extends Model
     }
 
     /**
+     * Scope: assets rejected in the publication workflow for a given uploader (creator action: replace or delete).
+     */
+    public function scopeRejectedPublicationForUploader(
+        \Illuminate\Database\Eloquent\Builder $query,
+        User $user,
+        Tenant $tenant,
+        Brand $brand
+    ): void {
+        $query->normalIntakeOnly()
+            ->excludeBuilderStaged()
+            ->where('tenant_id', $tenant->id)
+            ->where('brand_id', $brand->id)
+            ->where('type', AssetType::ASSET)
+            ->where('user_id', $user->id)
+            ->where('approval_status', ApprovalStatus::REJECTED)
+            ->whereNull('deleted_at');
+    }
+
+    /**
      * Scope: only builder-staged assets (Brand Guidelines reference materials).
      *
      * @deprecated Prefer scopeReferenceMaterialsOnly for new code.

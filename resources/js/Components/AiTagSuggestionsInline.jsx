@@ -27,6 +27,8 @@ export default function AiTagSuggestionsInline({
     drawerInsightGroup = false,
     /** Flat card with section label (Metadata Review drawer) — no shadow */
     unifiedDrawerReview = false,
+    /** Asset drawer: report loading / empty / content / hidden for coordinated empty states */
+    onDrawerReviewSlotState = null,
 }) {
     const { auth } = usePage().props
     const brandColor = primaryColor || auth?.activeBrand?.primary_color || '#6366f1'
@@ -202,6 +204,21 @@ export default function AiTagSuggestionsInline({
             cancelled = true
         }
     }, [assetId, canView, fetchNonce])
+
+    useEffect(() => {
+        if (typeof onDrawerReviewSlotState !== 'function') {
+            return
+        }
+        if (!canView) {
+            onDrawerReviewSlotState('hidden')
+            return
+        }
+        if (loading) {
+            onDrawerReviewSlotState('loading')
+            return
+        }
+        onDrawerReviewSlotState(suggestions.length > 0 ? 'content' : 'empty')
+    }, [onDrawerReviewSlotState, canView, loading, suggestions.length])
 
     // Get confidence indicator color
     const getConfidenceColor = (confidence) => {

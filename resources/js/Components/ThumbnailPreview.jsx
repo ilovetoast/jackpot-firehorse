@@ -501,27 +501,11 @@ export default function ThumbnailPreview({
                     />
                 ) : null}
                 {showForcedOverlaySpinner && (
-                    <div
-                        className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-black/20"
+                    <span
+                        className="pointer-events-none absolute bottom-2 right-2 z-10 h-2.5 w-2.5 rounded-full bg-white/90 shadow-sm ring-2 ring-black/25 animate-pulse"
+                        title="Processing thumbnail"
                         aria-hidden
-                    >
-                        <svg
-                            className="h-10 w-10 animate-spin text-white drop-shadow-md"
-                            style={{ animationDuration: '1.2s' }}
-                            xmlns="http://www.w3.org/2000/svg"
-                            fill="none"
-                            viewBox="0 0 24 24"
-                            stroke="currentColor"
-                            aria-hidden
-                        >
-                            <path
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                strokeWidth={2}
-                                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                            />
-                        </svg>
-                    </div>
+                    />
                 )}
             </div>
         )
@@ -666,37 +650,14 @@ export default function ThumbnailPreview({
                     onError={handleImageError}
                 />
 
-                {/* Preview spinner overlay - bottom-right corner */}
-                {/* ONLY render when actively processing (strict terminal-aware condition) */}
+                {/* Preview processing: small dot (matches asset grid chrome) */}
                 {isActivelyProcessing && (
-                    <div 
-                        className="absolute bottom-2 right-2 pointer-events-none flex items-center justify-center rounded-full"
-                        style={{
-                            width: '28px',
-                            height: '28px',
-                            backgroundColor: brandPrimaryColor,
-                            boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
-                        }}
-                    >
-                        <svg
-                            className="w-4 h-4 animate-spin"
-                            style={{
-                                color: 'rgba(255, 255, 255, 0.8)',
-                                animationDuration: '1.2s',
-                            }}
-                            xmlns="http://www.w3.org/2000/svg"
-                            fill="none"
-                            viewBox="0 0 24 24"
-                            stroke="currentColor"
-                        >
-                            <path
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                strokeWidth={2}
-                                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                            />
-                        </svg>
-                    </div>
+                    <span
+                        className="pointer-events-none absolute bottom-2 right-2 z-10 h-2.5 w-2.5 rounded-full shadow-sm ring-2 ring-white/80 animate-pulse"
+                        style={{ backgroundColor: brandPrimaryColor }}
+                        title="Processing thumbnail"
+                        aria-hidden
+                    />
                 )}
             </div>
         )
@@ -767,37 +728,13 @@ export default function ThumbnailPreview({
                     onError={handleImageError}
                 />
 
-                {/* Preview spinner overlay - bottom-right corner */}
-                {/* ONLY render when actively processing (strict terminal-aware condition) */}
                 {isActivelyProcessing && (
-                    <div 
-                        className="absolute bottom-2 right-2 pointer-events-none flex items-center justify-center rounded-full"
-                        style={{
-                            width: '28px',
-                            height: '28px',
-                            backgroundColor: brandPrimaryColor,
-                            boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
-                        }}
-                    >
-                        <svg
-                            className="w-4 h-4 animate-spin"
-                            style={{
-                                color: 'rgba(255, 255, 255, 0.8)',
-                                animationDuration: '1.2s',
-                            }}
-                            xmlns="http://www.w3.org/2000/svg"
-                            fill="none"
-                            viewBox="0 0 24 24"
-                            stroke="currentColor"
-                        >
-                            <path
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                strokeWidth={2}
-                                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                            />
-                        </svg>
-                    </div>
+                    <span
+                        className="pointer-events-none absolute bottom-2 right-2 z-10 h-2.5 w-2.5 rounded-full shadow-sm ring-2 ring-white/80 animate-pulse"
+                        style={{ backgroundColor: brandPrimaryColor }}
+                        title="Processing thumbnail"
+                        aria-hidden
+                    />
                 )}
             </div>
         )

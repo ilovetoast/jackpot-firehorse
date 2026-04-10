@@ -299,7 +299,7 @@ function getConfirmSummaryText(actionId, count) {
         return `This will improve AI-suggested tags and metadata for ${count} selected asset${count !== 1 ? 's' : ''}. Assets without completed thumbnails will be skipped. Uses tenant AI tagging quota.${batchNote}`
     }
     if (actionId === SITE_GENERATE_VIDEO_PREVIEWS) {
-        return `This will queue hover video preview generation for video assets in your selection (${count} selected). Non-video assets and items without a poster/thumbnail will be skipped.${batchNote}`
+        return `This will queue hover/quick preview MP4 regeneration for video assets in your selection (${count} selected), including correct orientation from metadata. Non-video assets and items without a poster/thumbnail will be skipped.${batchNote}`
     }
     if (actionId === SITE_REPROCESS_SYSTEM_METADATA) {
         return `This will re-run technical metadata extraction for ${count} selected asset${count !== 1 ? 's' : ''}. Requires admin or the right permission on this company.${batchNote}`
@@ -760,7 +760,7 @@ export default function BulkActionsModal({
                                         <ProcessingActionCard
                                             icon="video"
                                             title="Generate video previews"
-                                            description="Create preview clips for video assets"
+                                            description="Rebuild hover/quick preview MP4s with correct phone/MOV rotation"
                                             onClick={() => handleSelectAction(SITE_GENERATE_VIDEO_PREVIEWS)}
                                             disabled={pipelineSelectionOverLimit}
                                         />

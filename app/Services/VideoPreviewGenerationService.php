@@ -3,18 +3,20 @@
 namespace App\Services;
 
 use App\Models\Asset;
-use App\Support\VideoDisplayProbe;
 use App\Models\StorageBucket;
-use Aws\S3\S3Client;
+use App\Support\VideoDisplayProbe;
 use Aws\S3\Exception\S3Exception;
+use Aws\S3\S3Client;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Storage;
 
 /**
  * Video Preview Generation Service
  *
- * Generates short, muted MP4 preview videos for hover previews in the asset grid.
- * 
+ * Generates short, muted MP4 preview videos for hover / “quick” previews (asset grid + drawer).
+ * Orientation matches static video posters: try FFmpeg default autorotation + scale first; on failure use
+ * -noautorotate with {@see VideoDisplayProbe::ffmpegTransposeFilters()} (same idea as
+ * {@see ThumbnailGenerationService::generateVideoThumbnail}).
+ *
  * Preview specs:
  * - Duration: 2-4 seconds
  * - Resolution: ~320px width (maintains aspect ratio)
@@ -36,7 +38,7 @@ class VideoPreviewGenerationService
     /**
      * Create a new VideoPreviewGenerationService instance.
      *
-     * @param S3Client|null $s3Client Optional S3 client for testing
+     * @param  S3Client|null  $s3Client  Optional S3 client for testing
      */
     public function __construct(
         ?S3Client $s3Client = null
@@ -63,13 +65,14 @@ class VideoPreviewGenerationService
      * Downloads the video from S3, extracts a short segment, encodes it as
      * an optimized preview, and uploads it back to S3.
      *
-     * @param Asset $asset The asset to generate preview for
+     * @param  Asset  $asset  The asset to generate preview for
      * @return string S3 key path for the preview video
+     *
      * @throws \RuntimeException If preview generation fails
      */
     public function generatePreview(Asset $asset): string
     {
-        if (!$asset->storage_root_path || !$asset->storageBucket) {
+        if (! $asset->storage_root_path || ! $asset->storageBucket) {
             throw new \RuntimeException('Asset missing storage path or bucket');
         }
 
@@ -85,14 +88,14 @@ class VideoPreviewGenerationService
         // Download original video to temporary location
         $tempPath = $this->downloadSourceToTemp($asset);
 
-        if (!file_exists($tempPath) || filesize($tempPath) === 0) {
+        if (! file_exists($tempPath) || filesize($tempPath) === 0) {
             throw new \RuntimeException('Downloaded source video file is invalid or empty');
         }
 
         try {
             // Get video information
             $ffmpegPath = $this->findFFmpegPath();
-            if (!$ffmpegPath) {
+            if (! $ffmpegPath) {
                 throw new \RuntimeException('FFmpeg is not installed or not found in PATH. Video processing requires FFmpeg.');
             }
 
@@ -140,14 +143,13 @@ class VideoPreviewGenerationService
             // Longest side capped ~320px after rotation is baked; keeps portrait and landscape correct
             $targetBox = 320;
 
-            // Generate preview video
             $previewPath = $this->extractPreviewSegment(
                 $tempPath,
                 $ffmpegPath,
                 $startTime,
                 $previewDuration,
                 $targetBox,
-                $rotation
+                (int) $rotation
             );
 
             // Upload preview to S3
@@ -176,13 +178,16 @@ class VideoPreviewGenerationService
     /**
      * Extract preview segment from video.
      *
-     * @param string $sourcePath Local path to source video
-     * @param string $ffmpegPath Path to FFmpeg executable
-     * @param float $startTime Start time in seconds
-     * @param float $duration Duration in seconds
-     * @param int $targetBox Max width and height of bounding box; video fits inside preserving aspect
-     * @param int $rotationDeg 0/90/180/270 from VideoDisplayProbe (baked with transpose before scale)
+     * 🔒 HOVER MP4 ENCODE LOCK — Attempt order is paired with {@see ThumbnailGenerationService::generateVideoThumbnail}.
+     *
+     * @param  string  $sourcePath  Local path to source video
+     * @param  string  $ffmpegPath  Path to FFmpeg executable
+     * @param  float  $startTime  Start time in seconds
+     * @param  float  $duration  Duration in seconds
+     * @param  int  $targetBox  Max width and height of bounding box; video fits inside preserving aspect
+     * @param  int  $rotationDeg  0/90/180/270 from ffprobe ({@see VideoDisplayProbe::dimensionsFromFfprobe})
      * @return string Path to generated preview video
+     *
      * @throws \RuntimeException If extraction fails
      */
     protected function extractPreviewSegment(
@@ -193,87 +198,116 @@ class VideoPreviewGenerationService
         int $targetBox,
         int $rotationDeg
     ): string {
-        $previewPath = tempnam(sys_get_temp_dir(), 'video_preview_') . '.mp4';
+        $previewPath = tempnam(sys_get_temp_dir(), 'video_preview_').'.mp4';
 
-        // FFmpeg command to extract and encode preview
-        // -ss: seek to start time
-        // -i: input file
-        // -t: duration
-        // -vf: transpose* (if rotation tag) then scale to fit inside targetBox×targetBox (portrait-safe)
-        // -an: no audio (hover clip only — full source + audio is lightbox / ORIGINAL stream)
-        // -c:v libx264: H.264 codec
-        // -preset fast: encoding speed/quality balance
-        // -crf 28: quality (lower is better, 28 is good for previews)
-        // -movflags +faststart: optimize for web streaming
-        // -y: overwrite output file
+        // Match {@see ThumbnailGenerationService::generateVideoThumbnail}: try default input autorotation
+        // first (scale-only vf), then -noautorotate + ffprobe-derived transpose so probe drift does not
+        // “win” when FFmpeg would have oriented the clip correctly.
         $fps = 10; // 10 FPS for preview (smooth enough, smaller file)
 
+        $vfScaleOnly = sprintf(
+            'scale=%d:%d:force_original_aspect_ratio=decrease:flags=lanczos,setsar=1,fps=%d',
+            $targetBox,
+            $targetBox,
+            $fps
+        );
+
         $transpose = VideoDisplayProbe::ffmpegTransposeFilters($rotationDeg);
-        $vfParts = array_values(array_filter([
+        $vfManual = implode(',', array_values(array_filter([
             $transpose !== '' ? $transpose : null,
             sprintf('scale=%d:%d:force_original_aspect_ratio=decrease:flags=lanczos', $targetBox, $targetBox),
             'setsar=1',
             sprintf('fps=%d', $fps),
-        ]));
-        $vf = implode(',', $vfParts);
+        ])));
 
-        // -noautorotate: decode coded frames as stored. Otherwise the decoder may rotate before -vf,
-        // and our transpose (from ffprobe tags) doubles rotation or scales the wrong dimensions.
-        $command = sprintf(
-            '%s -ss %.2f -noautorotate -i %s -t %.2f -vf %s -an -c:v libx264 -preset fast -crf 28 -movflags +faststart -y %s 2>&1',
-            escapeshellarg($ffmpegPath),
-            $startTime,
-            escapeshellarg($sourcePath),
-            $duration,
-            escapeshellarg($vf),
-            escapeshellarg($previewPath)
-        );
+        $attempts = [
+            [
+                'label' => 'autorotate_scale_only',
+                'cmd' => sprintf(
+                    '%s -ss %.2f -i %s -t %.2f -vf %s -an -c:v libx264 -preset fast -crf 28 -movflags +faststart -y %s 2>&1',
+                    escapeshellarg($ffmpegPath),
+                    $startTime,
+                    escapeshellarg($sourcePath),
+                    $duration,
+                    escapeshellarg($vfScaleOnly),
+                    escapeshellarg($previewPath)
+                ),
+            ],
+            [
+                'label' => 'noautorotate_manual_rotation',
+                'cmd' => sprintf(
+                    '%s -ss %.2f -noautorotate -i %s -t %.2f -vf %s -an -c:v libx264 -preset fast -crf 28 -movflags +faststart -y %s 2>&1',
+                    escapeshellarg($ffmpegPath),
+                    $startTime,
+                    escapeshellarg($sourcePath),
+                    $duration,
+                    escapeshellarg($vfManual),
+                    escapeshellarg($previewPath)
+                ),
+            ],
+        ];
 
-        Log::info('[VideoPreviewGenerationService] Extracting preview segment', [
-            'source_path' => $sourcePath,
-            'start_time' => $startTime,
-            'duration' => $duration,
-            'target_box' => $targetBox,
-            'rotation_deg' => $rotationDeg,
-            'vf' => $vf,
-            'fps' => $fps,
-        ]);
-
-        $output = [];
-        $returnCode = 0;
-        exec($command, $output, $returnCode);
-
-        if ($returnCode !== 0 || !file_exists($previewPath) || filesize($previewPath) === 0) {
-            $errorOutput = implode("\n", $output);
-            Log::error('[VideoPreviewGenerationService] FFmpeg preview extraction failed', [
-                'source_path' => $sourcePath,
-                'return_code' => $returnCode,
-                'output' => $errorOutput,
-            ]);
-            
-            // Clean up failed output file
+        $lastOutput = '';
+        $lastRc = -1;
+        foreach ($attempts as $idx => $attempt) {
             if (file_exists($previewPath)) {
                 @unlink($previewPath);
             }
-            
-            throw new \RuntimeException("Failed to extract preview segment: FFmpeg returned error code {$returnCode}");
+
+            Log::info('[VideoPreviewGenerationService] Extracting preview segment', [
+                'source_path' => $sourcePath,
+                'start_time' => $startTime,
+                'duration' => $duration,
+                'target_box' => $targetBox,
+                'rotation_deg' => $rotationDeg,
+                'attempt' => $attempt['label'],
+                'vf' => $idx === 0 ? $vfScaleOnly : $vfManual,
+                'fps' => $fps,
+            ]);
+
+            $output = [];
+            $returnCode = 0;
+            exec($attempt['cmd'], $output, $returnCode);
+            $lastOutput = implode("\n", $output);
+            $lastRc = $returnCode;
+
+            if ($returnCode === 0 && file_exists($previewPath) && filesize($previewPath) > 0) {
+                Log::info('[VideoPreviewGenerationService] Preview segment extracted', [
+                    'preview_path' => $previewPath,
+                    'preview_size_bytes' => filesize($previewPath),
+                    'attempt' => $attempt['label'],
+                ]);
+
+                return $previewPath;
+            }
+
+            if ($idx === 0) {
+                Log::warning('[VideoPreviewGenerationService] Autorotate preview encode failed; retrying with -noautorotate + manual rotation', [
+                    'source_path' => $sourcePath,
+                    'return_code' => $returnCode,
+                    'output_tail' => substr($lastOutput, -800),
+                ]);
+            }
         }
 
-        Log::info('[VideoPreviewGenerationService] Preview segment extracted', [
-            'preview_path' => $previewPath,
-            'preview_size_bytes' => filesize($previewPath),
+        if (file_exists($previewPath)) {
+            @unlink($previewPath);
+        }
+
+        Log::error('[VideoPreviewGenerationService] FFmpeg preview extraction failed (all attempts)', [
+            'source_path' => $sourcePath,
+            'return_code' => $lastRc,
+            'output' => $lastOutput,
         ]);
 
-        return $previewPath;
+        throw new \RuntimeException("Failed to extract preview segment: FFmpeg returned error code {$lastRc}");
     }
 
     /**
      * Upload preview video to S3.
      *
-     * @param StorageBucket $bucket
-     * @param Asset $asset
-     * @param string $localPreviewPath
      * @return string S3 key path for the preview
+     *
      * @throws \RuntimeException If upload fails
      */
     protected function uploadPreviewToS3(
@@ -314,9 +348,8 @@ class VideoPreviewGenerationService
     /**
      * Download file from S3 to temporary location.
      *
-     * @param StorageBucket $bucket
-     * @param string $s3Key
      * @return string Path to temporary file
+     *
      * @throws \RuntimeException If download fails
      */
     protected function downloadFromS3(StorageBucket $bucket, string $s3Key): string
@@ -337,14 +370,14 @@ class VideoPreviewGenerationService
             $contentLength = strlen($bodyContents);
 
             if ($contentLength === 0) {
-                throw new \RuntimeException("Downloaded file from S3 is empty (size: 0 bytes)");
+                throw new \RuntimeException('Downloaded file from S3 is empty (size: 0 bytes)');
             }
 
             $tempPath = tempnam(sys_get_temp_dir(), 'video_preview_');
             file_put_contents($tempPath, $bodyContents);
 
-            if (!file_exists($tempPath) || filesize($tempPath) !== $contentLength) {
-                throw new \RuntimeException("Failed to write downloaded file to temp location");
+            if (! file_exists($tempPath) || filesize($tempPath) !== $contentLength) {
+                throw new \RuntimeException('Failed to write downloaded file to temp location');
             }
 
             return $tempPath;
@@ -377,7 +410,7 @@ class VideoPreviewGenerationService
                 $output = [];
                 $returnCode = 0;
                 exec('which ffmpeg 2>&1', $output, $returnCode);
-                if ($returnCode === 0 && !empty($output[0]) && file_exists($output[0])) {
+                if ($returnCode === 0 && ! empty($output[0]) && file_exists($output[0])) {
                     return $output[0];
                 }
             } elseif (file_exists($path) && is_executable($path)) {
@@ -391,15 +424,16 @@ class VideoPreviewGenerationService
     /**
      * Get video information using FFprobe.
      *
-     * @param string $videoPath Path to video file
-     * @param string $ffmpegPath Path to FFmpeg executable
+     * @param  string  $videoPath  Path to video file
+     * @param  string  $ffmpegPath  Path to FFmpeg executable
      * @return array Video information (duration, width, height)
+     *
      * @throws \RuntimeException If FFprobe fails
      */
     protected function getVideoInfo(string $videoPath, string $ffmpegPath): array
     {
         $ffprobePath = str_replace('ffmpeg', 'ffprobe', $ffmpegPath);
-        if (!file_exists($ffprobePath) || !is_executable($ffprobePath)) {
+        if (! file_exists($ffprobePath) || ! is_executable($ffprobePath)) {
             $ffprobePath = $ffmpegPath;
         }
 
@@ -421,24 +455,17 @@ class VideoPreviewGenerationService
         $jsonOutput = implode("\n", $output);
         $videoData = json_decode($jsonOutput, true);
 
-        if (!$videoData || !isset($videoData['format'])) {
+        if (! $videoData || ! isset($videoData['format'])) {
             throw new \RuntimeException('Failed to parse video information from FFprobe output');
         }
 
-        $videoStream = null;
-        foreach ($videoData['streams'] ?? [] as $stream) {
-            if (isset($stream['codec_type']) && $stream['codec_type'] === 'video') {
-                $videoStream = $stream;
-                break;
-            }
-        }
+        $dims = VideoDisplayProbe::dimensionsFromFfprobe($videoData);
 
-        if (!$videoStream) {
+        if (! $dims) {
             throw new \RuntimeException('No video stream found in file');
         }
 
         $duration = (float) ($videoData['format']['duration'] ?? 0);
-        $dims = VideoDisplayProbe::dimensionsFromStream($videoStream);
 
         return [
             'duration' => $duration,
@@ -452,12 +479,10 @@ class VideoPreviewGenerationService
 
     /**
      * Create S3 client instance.
-     *
-     * @return S3Client
      */
     protected function createS3Client(): S3Client
     {
-        if (!class_exists(S3Client::class)) {
+        if (! class_exists(S3Client::class)) {
             throw new \RuntimeException('AWS SDK not installed. Install aws/aws-sdk-php.');
         }
 

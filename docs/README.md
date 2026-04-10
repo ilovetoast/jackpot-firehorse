@@ -60,4 +60,5 @@ Phase-specific write-ups are **merged into** the operations guides above (see PH
 | Document | Contents |
 |----------|----------|
 | [TESTING.md](TESTING.md) | Manual / QA scenarios |
+| [testing.md](testing.md) | PHPUnit: Unit vs Feature, Sail, Xdebug, `@group ffmpeg`, composer scripts |
 | [TESTING_DATABASE.md](TESTING_DATABASE.md) | Test database setup |

@@ -4,9 +4,9 @@ namespace App\Jobs;
 
 use App\Enums\DerivativeProcessor;
 use App\Enums\DerivativeType;
+use App\Jobs\Concerns\QueuesOnImagesChannel;
 use App\Models\Asset;
 use App\Services\AssetDerivativeFailureService;
-use App\Jobs\Concerns\QueuesOnImagesChannel;
 use App\Services\VideoPreviewGenerationService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -14,7 +14,6 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Schema;
 
 /**
  * Generate Video Preview Job
@@ -62,7 +61,7 @@ class GenerateVideoPreviewJob implements ShouldQueue
 
         try {
             $asset = Asset::findOrFail($this->assetId);
-            
+
             // Log activity: Video preview generation started
             try {
                 \App\Services\ActivityRecorder::logAsset(
@@ -89,7 +88,7 @@ class GenerateVideoPreviewJob implements ShouldQueue
                 \App\Services\UploadDiagnosticLogger::jobSkip('GenerateVideoPreviewJob', $asset->id, 'not_a_video', [
                     'file_type' => $fileType,
                 ]);
-                
+
                 // Log activity: Video preview skipped (not a video)
                 try {
                     \App\Services\ActivityRecorder::logAsset(
@@ -106,7 +105,7 @@ class GenerateVideoPreviewJob implements ShouldQueue
                         'error' => $e->getMessage(),
                     ]);
                 }
-                
+
                 return;
             }
 
@@ -119,7 +118,7 @@ class GenerateVideoPreviewJob implements ShouldQueue
                     'asset_id' => $asset->id,
                     'preview_path' => $rawPreviewUrl,
                 ]);
-                
+
                 // Log activity: Video preview skipped (already generated)
                 try {
                     \App\Services\ActivityRecorder::logAsset(
@@ -135,7 +134,7 @@ class GenerateVideoPreviewJob implements ShouldQueue
                         'error' => $e->getMessage(),
                     ]);
                 }
-                
+
                 return;
             }
 
@@ -145,18 +144,18 @@ class GenerateVideoPreviewJob implements ShouldQueue
             // Verify preview file exists in S3 before marking as complete
             $bucket = $asset->storageBucket;
             $s3Client = $this->createS3Client();
-            
+
             try {
                 $result = $s3Client->headObject([
                     'Bucket' => $bucket->name,
                     'Key' => $previewPath,
                 ]);
-                
+
                 $fileSize = $result['ContentLength'] ?? 0;
                 if ($fileSize < 1000) { // Minimum 1KB for valid video file
                     throw new \RuntimeException("Preview file too small (likely corrupted): {$fileSize} bytes");
                 }
-                
+
                 Log::info('[GenerateVideoPreviewJob] Preview file verified in S3', [
                     'asset_id' => $asset->id,
                     'preview_path' => $previewPath,
@@ -183,7 +182,7 @@ class GenerateVideoPreviewJob implements ShouldQueue
             \App\Services\UploadDiagnosticLogger::jobComplete('GenerateVideoPreviewJob', $asset->id, [
                 'preview_path' => $previewPath,
             ]);
-            
+
             // Log activity: Video preview generation completed
             // IMPORTANT: Log completion event AFTER successful generation and update
             // This ensures the timeline shows completion even if there are subsequent errors
@@ -195,7 +194,7 @@ class GenerateVideoPreviewJob implements ShouldQueue
                         'preview_path' => $previewPath,
                     ]
                 );
-                
+
                 Log::info('[GenerateVideoPreviewJob] Video preview completed event logged', [
                     'asset_id' => $asset->id,
                 ]);
@@ -210,7 +209,7 @@ class GenerateVideoPreviewJob implements ShouldQueue
         } catch (\Illuminate\Database\QueryException $e) {
             // Handle database errors (like missing column)
             $errorMessage = $e->getMessage();
-            
+
             // Check if error is about missing column
             if (str_contains($errorMessage, "Unknown column 'video_preview_url'")) {
                 Log::error('[GenerateVideoPreviewJob] Video preview column missing (QueryException)', [
@@ -218,28 +217,27 @@ class GenerateVideoPreviewJob implements ShouldQueue
                     'error' => $errorMessage,
                     'message' => 'video_preview_url column does not exist in assets table. Please run migrations.',
                 ]);
-            // Phase T-1: Record derivative failure for observability
-            $asset = Asset::find($this->assetId);
-            if ($asset) {
-                try {
-                    app(AssetDerivativeFailureService::class)->recordFailure(
-                        $asset,
-                        DerivativeType::PREVIEW,
-                        DerivativeProcessor::FFMPEG,
-                        $e,
-                        'schema_error'
-                    );
-                } catch (\Throwable $t1Ex) {
-                    Log::warning('[GenerateVideoPreviewJob] AssetDerivativeFailureService recording failed', ['error' => $t1Ex->getMessage()]);
+
+                $asset = Asset::find($this->assetId);
+                if ($asset) {
+                    try {
+                        app(AssetDerivativeFailureService::class)->recordFailure(
+                            $asset,
+                            DerivativeType::PREVIEW,
+                            DerivativeProcessor::FFMPEG,
+                            $e,
+                            'schema_error'
+                        );
+                    } catch (\Throwable $t1Ex) {
+                        Log::warning('[GenerateVideoPreviewJob] AssetDerivativeFailureService recording failed', ['error' => $t1Ex->getMessage()]);
+                    }
                 }
+
+                return;
             }
 
-            // Don't throw - preview generation failure should not block upload completion
-            return;
-        }
-
-        // Other database errors
-        Log::error('[GenerateVideoPreviewJob] Job failed with database exception', [
+            // Other database errors
+            Log::error('[GenerateVideoPreviewJob] Job failed with database exception', [
                 'asset_id' => $this->assetId,
                 'exception' => get_class($e),
                 'message' => $errorMessage,
@@ -268,7 +266,7 @@ class GenerateVideoPreviewJob implements ShouldQueue
                     'asset_id' => $asset->id,
                     'error' => $e->getMessage(),
                 ]);
-                
+
                 // Log activity: Video preview generation failed
                 try {
                     \App\Services\ActivityRecorder::logAsset(
@@ -348,12 +346,10 @@ class GenerateVideoPreviewJob implements ShouldQueue
 
     /**
      * Create S3 client instance for file verification.
-     *
-     * @return \Aws\S3\S3Client
      */
     protected function createS3Client(): \Aws\S3\S3Client
     {
-        if (!class_exists(\Aws\S3\S3Client::class)) {
+        if (! class_exists(\Aws\S3\S3Client::class)) {
             throw new \RuntimeException('AWS SDK not installed. Install aws/aws-sdk-php.');
         }
 

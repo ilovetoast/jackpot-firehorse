@@ -44,7 +44,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense } from 'react'
 import { createPortal } from 'react-dom'
-import { XMarkIcon, ArrowPathIcon, ChevronLeftIcon, ChevronRightIcon, ChevronDownIcon, ExclamationTriangleIcon, EyeIcon, ArrowDownTrayIcon, CheckCircleIcon, CheckIcon, ArrowUturnLeftIcon, ClockIcon, XCircleIcon, CloudArrowUpIcon, RectangleStackIcon, TicketIcon, InformationCircleIcon, PhotoIcon } from '@heroicons/react/24/outline'
+import { XMarkIcon, ArrowPathIcon, ChevronLeftIcon, ChevronRightIcon, ChevronDownIcon, ExclamationTriangleIcon, EyeIcon, ArrowDownTrayIcon, CheckCircleIcon, CheckIcon, ArrowUturnLeftIcon, ClockIcon, XCircleIcon, CloudArrowUpIcon, RectangleStackIcon, TicketIcon, InformationCircleIcon, PhotoIcon, SparklesIcon, InboxIcon } from '@heroicons/react/24/outline'
 import { usePage, router, Link } from '@inertiajs/react'
 import AssetImage from './AssetImage'
 import AssetTimeline from './AssetTimeline'
@@ -375,8 +375,8 @@ export default function AssetDrawer({
     const [presentationPreviewLoading, setPresentationPreviewLoading] = useState(false)
     /** Preview styles: enhanced / presentation one-file download */
     const [previewModeDownloadLoading, setPreviewModeDownloadLoading] = useState(null)
-    /** Deliverables: collapsible “Preview styles” (enhanced controls) */
-    const [previewOptionsExpanded, setPreviewOptionsExpanded] = useState(false)
+    /** Preview & Styles sidebar: “Actions” (thumbnail rebuild) collapsed by default. */
+    const [previewSidebarActionsExpanded, setPreviewSidebarActionsExpanded] = useState(false)
     const [executionTripleCompareOpen, setExecutionTripleCompareOpen] = useState(false)
     // Thumbnail retry state
     const [showRetryModal, setShowRetryModal] = useState(false)
@@ -459,6 +459,7 @@ export default function AssetDrawer({
     const [pdfTextExtractionLoading, setPdfTextExtractionLoading] = useState(false)
     const [pdfOcrTriggerLoading, setPdfOcrTriggerLoading] = useState(false)
     const [showPdfTextModal, setShowPdfTextModal] = useState(false)
+    const [showVideoInsightsModal, setShowVideoInsightsModal] = useState(false)
     const pdfOcrPollRef = useRef(null)
     /** C9.2: Collection field visibility (category-driven, matches Tags behavior) */
     // Collections follow the same visibility resolution as Tags - check if collection field appears in metadata schema
@@ -1007,6 +1008,51 @@ export default function AssetDrawer({
         assetIncidents?.length === 0 &&
         (displayAsset?.analysis_status ?? '') !== 'promotion_failed'
 
+    /** Metadata + tag suggestion panels report loading/empty/content so the Review section can show one empty state */
+    const [drawerReviewSlots, setDrawerReviewSlots] = useState({
+        metadata_candidates: 'loading',
+        ai_tags: 'loading',
+    })
+
+    useEffect(() => {
+        setDrawerReviewSlots({ metadata_candidates: 'loading', ai_tags: 'loading' })
+    }, [displayAsset?.id])
+
+    const onMetadataDrawerReviewSlotState = useCallback((state) => {
+        setDrawerReviewSlots((s) => ({ ...s, metadata_candidates: state }))
+    }, [])
+
+    const onAiTagsDrawerReviewSlotState = useCallback((state) => {
+        setDrawerReviewSlots((s) => ({ ...s, ai_tags: state }))
+    }, [])
+
+    const showDrawerReviewEmptyState = useMemo(() => {
+        if (!showRevueCollapsible || externalCollectionGuest || isVirtualGoogleFont) {
+            return false
+        }
+        if (pipelineBannerForRevue) {
+            return false
+        }
+        if (ebiEnabledForAsset) {
+            return false
+        }
+        const { metadata_candidates: m, ai_tags: t } = drawerReviewSlots
+        if (m === 'loading' || t === 'loading') {
+            return false
+        }
+        if (m === 'content' || t === 'content') {
+            return false
+        }
+        return true
+    }, [
+        showRevueCollapsible,
+        externalCollectionGuest,
+        isVirtualGoogleFont,
+        pipelineBannerForRevue,
+        ebiEnabledForAsset,
+        drawerReviewSlots,
+    ])
+
     /** Show “Use as a brand reference” only for strong signals (curation or usage), or when already promoted */
     const showBrandReferenceCard = useMemo(() => {
         if (!displayAsset?.id || displayAsset.is_virtual_google_font) {
@@ -1146,6 +1192,22 @@ export default function AssetDrawer({
 
         return mimeType.includes('pdf') || ext === 'pdf'
     }, [displayAsset])
+
+    /** Match grid tiles (AssetCard): checkerboard behind transparent logos/graphics */
+    const drawerPreviewCheckerboardStyle = useMemo(() => {
+        if (isVirtualGoogleFont || isVideo || isPdf) {
+            return undefined
+        }
+        const slug = String(drawerCategory?.slug || '').toLowerCase()
+        if (slug !== 'logos' && slug !== 'graphics') {
+            return undefined
+        }
+        return {
+            backgroundColor: '#f3f4f6',
+            backgroundImage: 'repeating-conic-gradient(#e5e7eb 0% 25%, #ffffff 0% 50%)',
+            backgroundSize: '12px 12px',
+        }
+    }, [drawerCategory?.slug, isVirtualGoogleFont, isVideo, isPdf])
     const tenantRoleForPdfActions = String(auth?.tenant_role || auth?.user?.tenant_role || '').toLowerCase()
     const canRequestFullPdfExtraction = ['owner', 'admin'].includes(tenantRoleForPdfActions)
 
@@ -1195,6 +1257,25 @@ export default function AssetDrawer({
     const [videoViewUrlLoading, setVideoViewUrlLoading] = useState(false)
     /** Seek lightbox to this time (seconds) once the source video is ready */
     const [pendingLightboxSeekSeconds, setPendingLightboxSeekSeconds] = useState(null)
+
+    const seekVideoFromInsightsMoment = useCallback(
+        (m) => {
+            const interval =
+                typeof displayAsset?.metadata?.ai_video_frame_interval_seconds === 'number'
+                    ? displayAsset.metadata.ai_video_frame_interval_seconds
+                    : 3
+            const sec =
+                typeof m?.seconds === 'number'
+                    ? m.seconds
+                    : typeof m?.frame_index === 'number'
+                      ? Math.max(0, (m.frame_index - 1) * interval)
+                      : 0
+            setShowVideoInsightsModal(false)
+            setPendingLightboxSeekSeconds(sec)
+            setShowZoomModal(true)
+        },
+        [displayAsset?.metadata?.ai_video_frame_interval_seconds],
+    )
 
     // Use displayAsset for carousel (with live updates)
     const currentCarouselAsset = imageAssets[carouselIndex] || displayAsset
@@ -2129,7 +2210,7 @@ export default function AssetDrawer({
     }, [showPreferredPreviewOption, showEnhancedPreviewRadio, showPresentationPreviewRadio])
 
     useEffect(() => {
-        setPreviewOptionsExpanded(false)
+        setPreviewSidebarActionsExpanded(false)
     }, [displayAsset?.id])
 
     useEffect(() => {
@@ -2596,6 +2677,26 @@ export default function AssetDrawer({
             }
             return <span className={cls}>{label}</span>
         }
+        const videoAiRaw = String(displayAsset?.metadata?.ai_video_status || '')
+        const videoAiLower = videoAiRaw.toLowerCase()
+        const videoAiWord = () => {
+            if (videoAiLower === 'completed') {
+                return <span className="text-green-600">Complete</span>
+            }
+            if (videoAiLower === 'queued' || videoAiLower === 'processing') {
+                return <span className="text-blue-600">Processing</span>
+            }
+            if (videoAiLower === 'failed') {
+                return <span className="text-red-600">Failed</span>
+            }
+            if (videoAiLower === 'skipped') {
+                return <span className="text-amber-700">Skipped</span>
+            }
+            if (videoAiRaw.trim() !== '') {
+                return <span className="text-gray-600">{videoAiRaw}</span>
+            }
+            return <span className="text-gray-500">Not run</span>
+        }
         return (
             <>
                 <span className="text-gray-600">Previews: </span>
@@ -2603,14 +2704,36 @@ export default function AssetDrawer({
                 <span className="text-gray-400"> • </span>
                 <span className="text-gray-600">AI: </span>
                 {statusWord(analysisStatusForPanel)}
+                {isVideo && (
+                    <>
+                        <span className="text-gray-400"> • </span>
+                        <span className="text-gray-600">Video AI: </span>
+                        {videoAiWord()}
+                    </>
+                )}
             </>
         )
-    }, [thumbnailStatusForPanel, analysisStatusForPanel])
+    }, [thumbnailStatusForPanel, analysisStatusForPanel, isVideo, displayAsset?.metadata?.ai_video_status])
 
     const aiPipelineCompleteForDrawer = useMemo(() => {
         const x = String(analysisStatusForPanel || '').toLowerCase()
         return x === 'complete' || x === 'completed'
     }, [analysisStatusForPanel])
+
+    /** Green header check: hide when video insights are in a bad or in-flight state */
+    const processingDrawerPipelineGreen = useMemo(() => {
+        if (!aiPipelineCompleteForDrawer) {
+            return false
+        }
+        if (!isVideo) {
+            return true
+        }
+        const v = String(displayAsset?.metadata?.ai_video_status || '').toLowerCase()
+        if (v === 'queued' || v === 'processing' || v === 'failed') {
+            return false
+        }
+        return true
+    }, [aiPipelineCompleteForDrawer, isVideo, displayAsset?.metadata?.ai_video_status])
 
     const showPreviewContentSection = useMemo(
         () =>
@@ -2697,7 +2820,7 @@ export default function AssetDrawer({
     ])
 
     /**
-     * Quick View accordion: Metadata stays collapsed by default; open Preview & AI and Processing & Automation
+     * Quick View accordion: Metadata stays collapsed by default; open Preview & Styles and Processing & Automation
      * when previews/AI/video/execution need attention (matches “expand when there are processing issues”).
      */
     const drawerExpandPreviewOrProcessingSections = useMemo(() => {
@@ -3514,22 +3637,25 @@ export default function AssetDrawer({
                     
                     {/* Phase 3.0C: Thumbnail preview with state machine and fade-in — responsive width */}
                     <div
-                        className={`w-full max-w-full min-w-0 bg-gray-50 rounded-lg overflow-hidden border border-gray-200 relative ${
+                        className={`w-full max-w-full min-w-0 rounded-lg overflow-hidden border border-gray-200 relative ${
+                            drawerPreviewCheckerboardStyle ? '' : 'bg-gray-50'
+                        } ${
                             isVideo &&
                             Number(displayAsset?.video_width) > 0 &&
                             Number(displayAsset?.video_height) > 0
                                 ? ''
                                 : 'aspect-video'
                         }`}
-                        style={
-                            isVideo &&
+                        style={{
+                            ...(drawerPreviewCheckerboardStyle || {}),
+                            ...(isVideo &&
                             Number(displayAsset?.video_width) > 0 &&
                             Number(displayAsset?.video_height) > 0
                                 ? {
                                       aspectRatio: `${Number(displayAsset.video_width)} / ${Number(displayAsset.video_height)}`,
                                   }
-                                : undefined
-                        }
+                                : {}),
+                        }}
                     >
                         {ebiEnabledForAsset && displayAsset?.brand_intelligence && (
                             <button
@@ -3630,13 +3756,13 @@ export default function AssetDrawer({
                                         setVideoPreviewLoaded(false)
                                     }}
                                 >
-                                    {/* Hover clip: muted short MP4 only here + grid card; aspect matches source (object-contain) */}
+                                    {/* Hover clip: short MP4 fills preview frame (object-cover); poster unchanged */}
                                     {isHoveringVideo && displayAsset.video_preview_url && !isMobile && !videoPreviewFailed && (
-                                        <div className="absolute inset-0 z-10 flex items-center justify-center overflow-hidden bg-black">
+                                        <div className="absolute inset-0 z-10 overflow-hidden bg-black">
                                             <video
                                                 ref={videoPreviewRef}
                                                 src={displayAsset.video_preview_url}
-                                                className="block h-auto w-auto max-h-full max-w-full object-contain"
+                                                className="absolute inset-0 h-full w-full object-cover"
                                                 autoPlay
                                                 muted
                                                 loop
@@ -3676,48 +3802,11 @@ export default function AssetDrawer({
                                     </div>
                                 </div>
                             ) : isPdf && displayAsset.id ? (
-                                useDrawerThumbnailModeOverride ? (
+                                <div className="flex h-full min-h-0 w-full flex-col bg-white">
                                     <div
-                                        className="relative h-full w-full cursor-pointer bg-white group"
-                                        onClick={() => {
-                                            const { state } = getThumbnailState(displayAsset, thumbnailRetryCount)
-                                            const canZoom =
-                                                Boolean(drawerForcedPreviewUrl) || state === 'AVAILABLE'
-                                            if (canZoom) {
-                                                setShowZoomModal(true)
-                                            }
-                                        }}
-                                    >
-                                        <ThumbnailPreview
-                                            asset={displayAsset}
-                                            alt={displayAsset.title || displayAsset.original_filename || 'PDF preview'}
-                                            className="h-full w-full"
-                                            retryCount={thumbnailRetryCount}
-                                            onRetry={() => {
-                                                if (thumbnailRetryCount < 2) {
-                                                    setThumbnailRetryCount((prev) => prev + 1)
-                                                }
-                                            }}
-                                            size="lg"
-                                            thumbnailVersion={thumbnailVersion}
-                                            shouldAnimateThumbnail={shouldAnimateThumbnail}
-                                            preferLargeForVector
-                                            forceObjectFit={drawerPreviewForceObjectFit || undefined}
-                                            forcedImageUrl={drawerForcedPreviewUrl}
-                                            forcedImageSpinnerOverlay={drawerForcedModeSpinnerOverlay}
-                                        />
-                                        {(drawerForcedPreviewUrl ||
-                                            displayAsset.thumbnail_url ||
-                                            displayAsset.final_thumbnail_url ||
-                                            displayAsset.preview_thumbnail_url) && (
-                                            <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/0 opacity-0 transition-colors group-hover:bg-black/10 group-hover:opacity-100">
-                                                <span className="text-sm font-medium text-white">Click to zoom</span>
-                                            </div>
-                                        )}
-                                    </div>
-                                ) : (
-                                    <div
-                                        className={`relative w-full h-full bg-white ${pdfPageCache[pdfCurrentPage] || pdfPageCache[1] ? 'cursor-pointer group' : ''}`}
+                                        className={`relative min-h-0 flex-1 w-full overflow-hidden ${
+                                            pdfPageCache[pdfCurrentPage] || pdfPageCache[1] ? 'cursor-pointer group' : ''
+                                        }`}
                                         onClick={() => {
                                             if (pdfPageCache[pdfCurrentPage] || pdfPageCache[1]) {
                                                 setShowZoomModal(true)
@@ -3726,7 +3815,10 @@ export default function AssetDrawer({
                                         role={pdfPageCache[pdfCurrentPage] || pdfPageCache[1] ? 'button' : undefined}
                                         tabIndex={pdfPageCache[pdfCurrentPage] || pdfPageCache[1] ? 0 : undefined}
                                         onKeyDown={(e) => {
-                                            if ((pdfPageCache[pdfCurrentPage] || pdfPageCache[1]) && (e.key === 'Enter' || e.key === ' ')) {
+                                            if (
+                                                (pdfPageCache[pdfCurrentPage] || pdfPageCache[1]) &&
+                                                (e.key === 'Enter' || e.key === ' ')
+                                            ) {
                                                 e.preventDefault()
                                                 setShowZoomModal(true)
                                             }
@@ -3773,7 +3865,36 @@ export default function AssetDrawer({
                                             </div>
                                         )}
                                     </div>
-                                )
+                                    {effectivePdfPageCount > 1 && (
+                                        <div className="flex shrink-0 items-center justify-between gap-2 border-t border-gray-200 bg-slate-50/90 px-2 py-1.5">
+                                            <button
+                                                type="button"
+                                                onClick={(e) => {
+                                                    e.stopPropagation()
+                                                    handlePdfPageNavigate(pdfCurrentPage - 1)
+                                                }}
+                                                disabled={pdfCurrentPage <= 1 || pdfPageLoading}
+                                                className="inline-flex items-center rounded border border-gray-300 bg-white px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                            >
+                                                Previous
+                                            </button>
+                                            <div className="text-xs font-medium text-gray-600">
+                                                Page {pdfCurrentPage} of {effectivePdfPageCount}
+                                            </div>
+                                            <button
+                                                type="button"
+                                                onClick={(e) => {
+                                                    e.stopPropagation()
+                                                    handlePdfPageNavigate(pdfCurrentPage + 1)
+                                                }}
+                                                disabled={pdfCurrentPage >= effectivePdfPageCount || pdfPageLoading}
+                                                className="inline-flex items-center rounded border border-gray-300 bg-white px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                            >
+                                                Next
+                                            </button>
+                                        </div>
+                                    )}
+                                </div>
                             ) : hasThumbnailSupport && displayAsset.id ? (
                                 // Assets with thumbnail support (images and PDFs): Use ThumbnailPreview with state machine
                                 // Use displayAsset (with live updates) instead of prop asset
@@ -3881,12 +4002,11 @@ export default function AssetDrawer({
                                     )}
                                 </button>
                             </div>
-                            {useDrawerThumbnailModeOverride ? (
+                            {effectivePdfPageCount > 1 ? (
                                 <p className="mt-2 border-t border-slate-200/70 pt-2 text-[10px] leading-snug text-slate-500">
-                                    Styled preview uses the PDF cover thumbnail. Choose{' '}
-                                    <span className="font-medium text-slate-700">Original</span> in{' '}
-                                    <span className="font-medium text-slate-700">Preview styles</span> (below) to page
-                                    through the document.
+                                    Use <span className="font-medium text-slate-700">Previous</span> /{' '}
+                                    <span className="font-medium text-slate-700">Next</span> under the main preview to
+                                    change pages.
                                 </p>
                             ) : null}
                         </div>
@@ -4451,46 +4571,6 @@ export default function AssetDrawer({
                 {displayAsset?.id &&
                     !isVirtualGoogleFont &&
                     isVideo &&
-                    ['queued', 'processing'].includes(String(displayAsset.metadata?.ai_video_status || '')) && (
-                        <div className="px-4 md:px-6 pt-2" role="status" aria-live="polite">
-                            <div className="flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-                                <ArrowPathIcon
-                                    className="h-3.5 w-3.5 flex-shrink-0 animate-spin text-amber-700"
-                                    aria-hidden
-                                />
-                                <span>Analyzing video content…</span>
-                            </div>
-                        </div>
-                    )}
-
-                {displayAsset?.id &&
-                    !isVirtualGoogleFont &&
-                    isVideo &&
-                    String(displayAsset.metadata?.ai_video_status || '') === 'failed' &&
-                    can('metadata.edit_post_upload') && (
-                        <div className="px-4 md:px-6 pt-2">
-                            <div className="flex flex-col gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-900 sm:flex-row sm:items-center sm:justify-between">
-                                <span className="min-w-0">
-                                    Video analysis failed
-                                    {displayAsset.metadata?.ai_video_insights_error
-                                        ? `: ${displayAsset.metadata.ai_video_insights_error}`
-                                        : '.'}
-                                </span>
-                                <button
-                                    type="button"
-                                    onClick={handleRetryVideoInsights}
-                                    disabled={videoInsightsRetryLoading}
-                                    className="shrink-0 rounded-md border border-red-300 bg-white px-3 py-1.5 text-xs font-semibold text-red-900 hover:bg-red-100 disabled:opacity-50"
-                                >
-                                    {videoInsightsRetryLoading ? 'Queuing…' : 'Retry analysis'}
-                                </button>
-                            </div>
-                        </div>
-                    )}
-
-                {displayAsset?.id &&
-                    !isVirtualGoogleFont &&
-                    isVideo &&
                     displayAsset.metadata?.ai_video_insights_completed_at &&
                     videoAiShowCost &&
                     typeof displayAsset.metadata?.ai_video_insights_total_cost_usd === 'number' &&
@@ -4516,21 +4596,7 @@ export default function AssetDrawer({
                                         <button
                                             type="button"
                                             className="w-full text-left rounded px-1 -mx-1 text-xs text-gray-600 hover:bg-gray-50 hover:text-gray-900"
-                                            onClick={() => {
-                                                const interval =
-                                                    typeof displayAsset.metadata?.ai_video_frame_interval_seconds ===
-                                                    'number'
-                                                        ? displayAsset.metadata.ai_video_frame_interval_seconds
-                                                        : 3
-                                                const sec =
-                                                    typeof m.seconds === 'number'
-                                                        ? m.seconds
-                                                        : typeof m.frame_index === 'number'
-                                                          ? Math.max(0, (m.frame_index - 1) * interval)
-                                                          : 0
-                                                setPendingLightboxSeekSeconds(sec)
-                                                setShowZoomModal(true)
-                                            }}
+                                            onClick={() => seekVideoFromInsightsMoment(m)}
                                         >
                                             <span className="font-mono text-gray-500">{m.timestamp}</span>
                                             <span className="text-gray-400"> — </span>
@@ -4657,6 +4723,95 @@ export default function AssetDrawer({
                                     defaultExpanded={true}
                                 >
                                     <div className="space-y-4 px-3 py-2">
+                                        {isVideo &&
+                                            ['queued', 'processing'].includes(
+                                                String(displayAsset.metadata?.ai_video_status || ''),
+                                            ) && (
+                                                <div className="space-y-2" role="status" aria-live="polite">
+                                                    <div className="flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                                                        <ArrowPathIcon
+                                                            className="h-3.5 w-3.5 flex-shrink-0 animate-spin text-amber-700"
+                                                            aria-hidden
+                                                        />
+                                                        <span>Analyzing video content…</span>
+                                                    </div>
+                                                </div>
+                                            )}
+
+                                        {isVideo &&
+                                            String(displayAsset.metadata?.ai_video_status || '') === 'failed' &&
+                                            can('metadata.edit_post_upload') && (
+                                                <div className="flex flex-col gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-900 sm:flex-row sm:items-center sm:justify-between">
+                                                    <span className="min-w-0">
+                                                        Video analysis failed
+                                                        {displayAsset.metadata?.ai_video_insights_error
+                                                            ? `: ${displayAsset.metadata.ai_video_insights_error}`
+                                                            : '.'}
+                                                    </span>
+                                                    <button
+                                                        type="button"
+                                                        onClick={handleRetryVideoInsights}
+                                                        disabled={videoInsightsRetryLoading}
+                                                        className="shrink-0 rounded-md border border-red-300 bg-white px-3 py-1.5 text-xs font-semibold text-red-900 hover:bg-red-100 disabled:opacity-50"
+                                                    >
+                                                        {videoInsightsRetryLoading ? 'Queuing…' : 'Retry analysis'}
+                                                    </button>
+                                                </div>
+                                            )}
+
+                                        {isVideo &&
+                                            String(displayAsset.metadata?.ai_video_status || '') === 'completed' &&
+                                            displayAsset.metadata?.ai_video_insights_completed_at && (
+                                                <div role="status">
+                                                    <div className="flex flex-col gap-2.5 rounded-md border border-emerald-200 bg-emerald-50/95 px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between">
+                                                        <div className="flex min-w-0 items-start gap-2">
+                                                            <CheckCircleIcon
+                                                                className="h-5 w-5 shrink-0 text-emerald-600"
+                                                                aria-hidden
+                                                            />
+                                                            <div className="min-w-0">
+                                                                <p className="text-sm font-semibold text-emerald-950">
+                                                                    Video insights finished
+                                                                </p>
+                                                                <p className="mt-0.5 text-xs leading-snug text-emerald-900/90">
+                                                                    Summary, suggested tags, and transcript cues are saved
+                                                                    for search. Open results to review everything in one
+                                                                    place.
+                                                                </p>
+                                                                {formatIsoDateTimeLocal(
+                                                                    displayAsset.metadata.ai_video_insights_completed_at,
+                                                                ) ? (
+                                                                    <p className="mt-1 text-[11px] text-emerald-800/85">
+                                                                        Completed{' '}
+                                                                        {formatIsoDateTimeLocal(
+                                                                            displayAsset.metadata
+                                                                                .ai_video_insights_completed_at,
+                                                                        )}
+                                                                    </p>
+                                                                ) : null}
+                                                            </div>
+                                                        </div>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setShowVideoInsightsModal(true)}
+                                                            className="inline-flex shrink-0 items-center justify-center rounded-md border border-emerald-700/30 bg-white px-3 py-1.5 text-xs font-semibold text-emerald-900 shadow-sm hover:bg-emerald-100/80"
+                                                        >
+                                                            View results
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            )}
+
+                                        {isVideo &&
+                                            String(displayAsset.metadata?.ai_video_status || '') === 'skipped' && (
+                                                <div className="rounded-md border border-amber-100 bg-amber-50/80 px-3 py-2 text-[11px] leading-snug text-amber-950">
+                                                    <span className="font-semibold">Video AI skipped.</span>{' '}
+                                                    {displayAsset.metadata?.ai_video_insights_skip_reason
+                                                        ? `Reason: ${String(displayAsset.metadata.ai_video_insights_skip_reason).replace(/_/g, ' ')}.`
+                                                        : 'Limits, policy, or opt-out prevented a run.'}
+                                                </div>
+                                            )}
+
                                         {pipelineBannerForRevue && (
                                             <MetadataAnalysisRunningBanner
                                                 metadataHealth={drawerPipelineBanner?.metadataHealth}
@@ -4678,6 +4833,7 @@ export default function AssetDrawer({
                                             primaryColor={brandPrimary}
                                             uploadedByUserId={displayAsset.user_id}
                                             compactDrawerReview
+                                            onDrawerReviewSlotState={onMetadataDrawerReviewSlotState}
                                         />
                                         <AiTagSuggestionsInline
                                             key={`drawer-revue-ai-tags-${displayAsset.id}`}
@@ -4687,7 +4843,33 @@ export default function AssetDrawer({
                                             primaryColor={brandPrimary}
                                             drawerInsightGroup
                                             unifiedDrawerReview
+                                            onDrawerReviewSlotState={onAiTagsDrawerReviewSlotState}
                                         />
+                                        {showDrawerReviewEmptyState && (
+                                            <div className="rounded-lg border border-violet-100 bg-gradient-to-br from-violet-50/80 to-slate-50/90 p-4">
+                                                <div className="flex gap-3">
+                                                    <div
+                                                        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-violet-100 text-violet-700"
+                                                        aria-hidden
+                                                    >
+                                                        <InboxIcon className="h-5 w-5" />
+                                                    </div>
+                                                    <div className="min-w-0">
+                                                        <p className="text-[10px] font-semibold uppercase tracking-wide text-violet-700">
+                                                            Review
+                                                        </p>
+                                                        <p className="mt-1 text-sm font-semibold text-gray-900">
+                                                            Nothing to review right now
+                                                        </p>
+                                                        <p className="mt-1.5 text-xs leading-relaxed text-gray-600">
+                                                            There are no pending metadata suggestions or AI tag ideas for
+                                                            this file. When the system finds something to confirm, it will
+                                                            show up here—same as library-wide review flows.
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        )}
                                     </div>
                                 </CollapsibleSection>
                             )}
@@ -4824,94 +5006,25 @@ export default function AssetDrawer({
                         {showPreviewContentSection && (
                             <CollapsibleSection
                                 contentInset="flush"
-                                title="Preview & AI"
+                                title="Preview & Styles"
                                 defaultExpanded={drawerExpandPreviewOrProcessingSections}
                             >
                                 <div className="space-y-3">
                                     {(canRegeneratePreviewInProcessingSection || showExecutionPreviewChrome) && (
-                                        <div className="space-y-2">
-                                            <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-2">
-                                                Thumbnails
-                                            </div>
-                                            <div className="space-y-2">
-
-                                                {canRegeneratePreviewInProcessingSection && (
-                                                    <ProcessingActionCard
-                                                        icon="photo"
-                                                        title="Refresh thumbnails"
-                                                        description="Rebuild cover and standard preview images (not AI styles below)"
-                                                        onClick={() => {
-                                                            if (canGenerateThumbnail) {
-                                                                void handleGenerateThumbnail()
-                                                            } else {
-                                                                void handleDrawerRegenerateThumbnailsStyles()
-                                                            }
-                                                        }}
-                                                        disabled={
-                                                            !canRegeneratePreviewInProcessingSection ||
-                                                            isProcessingDrawerBusy ||
-                                                            (canGenerateThumbnail
-                                                                ? generateLoading || guardBlocksThumbnails
-                                                                : regeneratingThumbnailsStylesDrawer ||
-                                                                  guardBlocksThumbnails)
-                                                        }
-                                                        loading={
-                                                            (canGenerateThumbnail && generateLoading) ||
-                                                            (!canGenerateThumbnail &&
-                                                                regeneratingThumbnailsStylesDrawer)
-                                                        }
-                                                        buttonTitle={
-                                                            cooldownHintThumb ||
-                                                            (thumbnailStatus === 'processing'
-                                                                ? 'A processing job is already running.'
-                                                                : undefined)
-                                                        }
-                                                        footer={
-                                                            (cooldownMinutesThumb > 0 ||
-                                                                drawerLastRunLine('thumbnails')) ? (
-                                                                <div className="space-y-0.5">
-                                                                    {cooldownMinutesThumb > 0 && (
-                                                                        <div className="text-yellow-600">
-                                                                            Available in {cooldownMinutesThumb}{' '}
-                                                                            minute
-                                                                            {cooldownMinutesThumb !== 1 ? 's' : ''}
-                                                                        </div>
-                                                                    )}
-                                                                    {lastRunFooter('thumbnails')}
-                                                                </div>
-                                                            ) : false
-                                                        }
-                                                    />
-                                                )}
-                                                {showExecutionPreviewChrome && (
-                                                    <div
-                                                        className={
-                                                            canRegeneratePreviewInProcessingSection
-                                                                ? 'space-y-3 border-t border-gray-100 pt-3'
-                                                                : 'space-y-3'
-                                                        }
-                                                    >
-                                            <div className="space-y-3">
-                                                <button
-                                                    type="button"
-                                                    onClick={() => setPreviewOptionsExpanded((o) => !o)}
-                                                    className="flex w-full items-center justify-between gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2.5 text-left transition-colors hover:bg-slate-100/90"
-                                                    aria-expanded={previewOptionsExpanded}
-                                                >
-                                                    <span className="text-xs font-semibold text-slate-800">
-                                                        Preview styles
-                                                    </span>
-                                                    <ChevronDownIcon
-                                                        className={`h-4 w-4 shrink-0 text-slate-600 transition-transform ${
-                                                            previewOptionsExpanded ? 'rotate-180' : ''
-                                                        }`}
-                                                        aria-hidden
-                                                    />
-                                                </button>
-                                                {previewOptionsExpanded && (
-                                                    <div className="mt-3 space-y-3 border-t border-gray-100 pt-3">
+                                        <div className="space-y-3">
+                                            {showExecutionPreviewChrome && (
+                                                <div className="space-y-2">
+                                                    <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                                                        Styles
+                                                    </div>
+                                                    <div className="space-y-3">
                                                         <p className="text-xs text-gray-600 leading-snug">
-                                                            Original, Enhanced, and Presentation are <span className="font-medium text-gray-800">preview styles</span> for the main tile. Use Compare to regenerate AI styles. Thumbnail refresh is above.
+                                                            Original, Enhanced, and Presentation choose how the{' '}
+                                                            <span className="font-medium text-gray-800">main tile</span>{' '}
+                                                            looks. Use Compare to regenerate AI styles. Rebuilding base
+                                                            cover images lives under{' '}
+                                                            <span className="font-medium text-gray-800">Actions</span>{' '}
+                                                            below—only when previews look wrong or out of date.
                                                         </p>
                                                         <div className="grid grid-cols-3 gap-2">
                                                             {(['original', 'enhanced', 'presentation']).map((tier) => {
@@ -5270,11 +5383,116 @@ export default function AssetDrawer({
                                                             Compare all versions
                                                         </button>
                                                     </div>
-                                                )}
-                                            </div>
-                                                    </div>
-                                                )}
-                                            </div>
+                                                </div>
+                                            )}
+
+                                            {canRegeneratePreviewInProcessingSection && (
+                                                <div
+                                                    className={
+                                                        showExecutionPreviewChrome
+                                                            ? 'border-t border-gray-100 pt-3'
+                                                            : ''
+                                                    }
+                                                >
+                                                    <button
+                                                        type="button"
+                                                        onClick={() =>
+                                                            setPreviewSidebarActionsExpanded((o) => !o)
+                                                        }
+                                                        className="flex w-full items-center justify-between gap-2 rounded-md border border-dashed border-slate-300/90 bg-slate-50/60 px-3 py-2 text-left transition-colors hover:bg-slate-100/70"
+                                                        aria-expanded={previewSidebarActionsExpanded}
+                                                    >
+                                                        <span className="min-w-0">
+                                                            <span className="block text-xs font-semibold text-slate-700">
+                                                                Actions
+                                                            </span>
+                                                            <span className="mt-0.5 block text-[10px] leading-snug text-slate-500">
+                                                                Optional—standard cover & preview rebuild (not AI
+                                                                styles)
+                                                            </span>
+                                                        </span>
+                                                        <ChevronDownIcon
+                                                            className={`h-4 w-4 shrink-0 text-slate-500 transition-transform ${
+                                                                previewSidebarActionsExpanded
+                                                                    ? 'rotate-180'
+                                                                    : ''
+                                                            }`}
+                                                            aria-hidden
+                                                        />
+                                                    </button>
+                                                    {previewSidebarActionsExpanded && (
+                                                        <div className="mt-2 space-y-2">
+                                                            <p className="text-[10px] leading-snug text-slate-500">
+                                                                Skip this unless tiles look corrupted or never updated after
+                                                                a file change.
+                                                                {showExecutionPreviewChrome ? (
+                                                                    <>
+                                                                        {' '}
+                                                                        For enhanced / presentation issues, use{' '}
+                                                                        <span className="font-medium text-slate-600">
+                                                                            Compare
+                                                                        </span>{' '}
+                                                                        above.
+                                                                    </>
+                                                                ) : (
+                                                                    <>
+                                                                        {' '}
+                                                                        This does not regenerate AI presentation layouts.
+                                                                    </>
+                                                                )}
+                                                            </p>
+                                                            <ProcessingActionCard
+                                                                icon="photo"
+                                                                title="Refresh thumbnails"
+                                                                description="Rebuild cover and standard preview images (not AI styles above)"
+                                                                onClick={() => {
+                                                                    if (canGenerateThumbnail) {
+                                                                        void handleGenerateThumbnail()
+                                                                    } else {
+                                                                        void handleDrawerRegenerateThumbnailsStyles()
+                                                                    }
+                                                                }}
+                                                                disabled={
+                                                                    !canRegeneratePreviewInProcessingSection ||
+                                                                    isProcessingDrawerBusy ||
+                                                                    (canGenerateThumbnail
+                                                                        ? generateLoading || guardBlocksThumbnails
+                                                                        : regeneratingThumbnailsStylesDrawer ||
+                                                                          guardBlocksThumbnails)
+                                                                }
+                                                                loading={
+                                                                    (canGenerateThumbnail && generateLoading) ||
+                                                                    (!canGenerateThumbnail &&
+                                                                        regeneratingThumbnailsStylesDrawer)
+                                                                }
+                                                                buttonTitle={
+                                                                    cooldownHintThumb ||
+                                                                    (thumbnailStatus === 'processing'
+                                                                        ? 'A processing job is already running.'
+                                                                        : undefined)
+                                                                }
+                                                                footer={
+                                                                    cooldownMinutesThumb > 0 ||
+                                                                    drawerLastRunLine('thumbnails') ? (
+                                                                        <div className="space-y-0.5">
+                                                                            {cooldownMinutesThumb > 0 && (
+                                                                                <div className="text-yellow-600">
+                                                                                    Available in {cooldownMinutesThumb}{' '}
+                                                                                    minute
+                                                                                    {cooldownMinutesThumb !== 1
+                                                                                        ? 's'
+                                                                                        : ''}
+                                                                                </div>
+                                                                            )}
+                                                                            {lastRunFooter('thumbnails')}
+                                                                        </div>
+                                                                    ) : false
+                                                                }
+                                                            />
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            )}
                                         </div>
                                     )}
 
@@ -5284,147 +5502,75 @@ export default function AssetDrawer({
                                                 PDF
                                             </div>
                                             <div className="space-y-2">
-                                {useDrawerThumbnailModeOverride ? (
-                                    <p className="text-xs text-gray-600">
-                                        Styled preview uses the PDF cover thumbnail. Choose{' '}
-                                        <span className="font-medium text-gray-800">Original</span> in{' '}
-                                        <span className="font-medium text-gray-800">Preview styles</span> to page through
-                                        the document. Extract all pages is under the main preview above.
-                                    </p>
-                                ) : (
-                                    <>
-                                    <p className="text-[11px] leading-snug text-gray-500">
-                                        Extract all pages is under the main preview above.
-                                    </p>
-                                    <div className="flex items-center justify-between">
-                                        <button
-                                            type="button"
-                                            onClick={() => handlePdfPageNavigate(pdfCurrentPage - 1)}
-                                            disabled={pdfCurrentPage <= 1 || pdfPageLoading}
-                                            className="inline-flex items-center rounded border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
-                                        >
-                                            Previous
-                                        </button>
-                                        <div className="text-xs text-gray-600">
-                                            Page {pdfCurrentPage} of {effectivePdfPageCount}
-                                        </div>
-                                        <button
-                                            type="button"
-                                            onClick={() => handlePdfPageNavigate(pdfCurrentPage + 1)}
-                                            disabled={pdfCurrentPage >= effectivePdfPageCount || pdfPageLoading}
-                                            className="inline-flex items-center rounded border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
-                                        >
-                                            Next
-                                        </button>
-                                    </div>
-                                    </>
-                                )}
-                                    {canRequestFullPdfExtraction && effectivePdfPageCount > 1 && (
-                                    <div className="flex items-center justify-between gap-2 border-t border-gray-100 pt-2">
-                                    <p className="text-xs text-gray-500">
-                                        Render all pages for AI ingestion and faster navigation.
-                                    </p>
-                                    <button
-                                        type="button"
-                                        onClick={handleRequestFullPdfExtraction}
-                                        disabled={pdfFullExtractionLoading || pdfFullExtractionRequested}
-                                        className="inline-flex shrink-0 items-center rounded border border-indigo-300 px-2 py-1 text-xs font-medium text-indigo-700 hover:bg-indigo-50 disabled:cursor-not-allowed disabled:opacity-50"
-                                    >
-                                        {pdfFullExtractionLoading
-                                            ? 'Queueing...'
-                                            : pdfFullExtractionRequested
-                                                ? 'Queued'
-                                                : 'Render all pages'}
-                                    </button>
-                                    </div>
-                                )}
-                                    {canRequestFullPdfExtraction && (
-                                    <div className="flex flex-wrap items-center justify-between gap-2 border-t border-gray-100 pt-2">
-                                    <p className="text-xs text-gray-500">
-                                        Extract text from PDF for search and AI (pdftotext).
-                                    </p>
-                                    <div className="flex shrink-0 items-center gap-2">
-                                        {pdfTextExtraction?.status === 'complete' && (
-                                            <button
-                                                type="button"
-                                                onClick={() => setShowPdfTextModal(true)}
-                                                className="inline-flex items-center rounded border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50"
-                                            >
-                                                View
-                                            </button>
-                                        )}
-                                        {pdfTextExtraction?.status && (
-                                            <span className={[
-                                                'inline-flex rounded-full px-2 py-0.5 text-xs font-medium',
-                                                pdfTextExtraction.status === 'complete' && 'bg-green-100 text-green-700',
-                                                pdfTextExtraction.status === 'failed' && 'bg-red-100 text-red-700',
-                                                pdfTextExtraction.status === 'processing' && 'bg-amber-100 text-amber-700',
-                                                pdfTextExtraction.status === 'pending' && 'bg-gray-100 text-gray-600',
-                                            ].filter(Boolean).join(' ') || 'bg-gray-100 text-gray-600'}>
-                                                {pdfTextExtraction.status === 'complete' && 'Complete'}
-                                                {pdfTextExtraction.status === 'failed' && 'Failed'}
-                                                {pdfTextExtraction.status === 'processing' && 'Processing'}
-                                                {pdfTextExtraction.status === 'pending' && 'Pending'}
-                                            </span>
-                                        )}
-                                        <button
-                                            type="button"
-                                            onClick={handleTriggerPdfOcr}
-                                            disabled={pdfOcrTriggerLoading || pdfTextExtractionLoading}
-                                            className="inline-flex shrink-0 items-center rounded border border-emerald-300 px-2 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-50"
-                                        >
-                                            {pdfOcrTriggerLoading ? 'Starting...' : pdfTextExtraction ? 'Re-Extract Text' : 'Extract Text (OCR)'}
-                                        </button>
-                                    </div>
-                                    </div>
-                                )}
-                                            </div>
-                                        </div>
-                                    )}
-
-                                    {isVideo && (
-                                        <div className="space-y-2">
-                                            <div className="mb-2 text-[11px] font-medium uppercase tracking-wide text-gray-400">
-                                                Video
-                                            </div>
-                                            <div className="space-y-2">
-
-                                            {['queued', 'processing'].includes(
-                                                String(displayAsset.metadata?.ai_video_status || ''),
-                                            ) && (
-                                                    <div className="space-y-2" role="status" aria-live="polite">
-                                                        <div className="flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-                                                            <ArrowPathIcon
-                                                                className="h-3.5 w-3.5 flex-shrink-0 animate-spin text-amber-700"
-                                                                aria-hidden
-                                                            />
-                                                            <span>Analyzing video content…</span>
-                                                        </div>
-                                                    </div>
-                                                )}
-
-                                            {String(displayAsset.metadata?.ai_video_status || '') === 'failed' &&
-                                                can('metadata.edit_post_upload') && (
-                                                    <div className="flex flex-col gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-900 sm:flex-row sm:items-center sm:justify-between">
-                                                        <span className="min-w-0">
-                                                            Video analysis failed
-                                                            {displayAsset.metadata?.ai_video_insights_error
-                                                                ? `: ${displayAsset.metadata.ai_video_insights_error}`
-                                                                : '.'}
-                                                        </span>
+                                                <p className="text-[11px] leading-snug text-gray-500">
+                                                    Extract all pages is under the main preview above.
+                                                    {effectivePdfPageCount > 1
+                                                        ? ' Use Previous / Next under the main preview to change pages.'
+                                                        : ''}
+                                                </p>
+                                                {canRequestFullPdfExtraction && effectivePdfPageCount > 1 && (
+                                                    <div className="flex items-center justify-between gap-2 border-t border-gray-100 pt-2">
+                                                        <p className="text-xs text-gray-500">
+                                                            Render all pages for AI ingestion and faster navigation.
+                                                        </p>
                                                         <button
                                                             type="button"
-                                                            onClick={handleRetryVideoInsights}
-                                                            disabled={videoInsightsRetryLoading}
-                                                            className="shrink-0 rounded-md border border-red-300 bg-white px-3 py-1.5 text-xs font-semibold text-red-900 hover:bg-red-100 disabled:opacity-50"
+                                                            onClick={handleRequestFullPdfExtraction}
+                                                            disabled={pdfFullExtractionLoading || pdfFullExtractionRequested}
+                                                            className="inline-flex shrink-0 items-center rounded border border-indigo-300 px-2 py-1 text-xs font-medium text-indigo-700 hover:bg-indigo-50 disabled:cursor-not-allowed disabled:opacity-50"
                                                         >
-                                                            {videoInsightsRetryLoading ? 'Queuing…' : 'Retry analysis'}
+                                                            {pdfFullExtractionLoading
+                                                                ? 'Queueing...'
+                                                                : pdfFullExtractionRequested
+                                                                    ? 'Queued'
+                                                                    : 'Render all pages'}
                                                         </button>
                                                     </div>
                                                 )}
+                                                {canRequestFullPdfExtraction && (
+                                                    <div className="flex flex-wrap items-center justify-between gap-2 border-t border-gray-100 pt-2">
+                                                        <p className="text-xs text-gray-500">
+                                                            Extract text from PDF for search and AI (pdftotext).
+                                                        </p>
+                                                        <div className="flex shrink-0 items-center gap-2">
+                                                            {pdfTextExtraction?.status === 'complete' && (
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => setShowPdfTextModal(true)}
+                                                                    className="inline-flex items-center rounded border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                                                                >
+                                                                    View
+                                                                </button>
+                                                            )}
+                                                            {pdfTextExtraction?.status && (
+                                                                <span className={[
+                                                                    'inline-flex rounded-full px-2 py-0.5 text-xs font-medium',
+                                                                    pdfTextExtraction.status === 'complete' && 'bg-green-100 text-green-700',
+                                                                    pdfTextExtraction.status === 'failed' && 'bg-red-100 text-red-700',
+                                                                    pdfTextExtraction.status === 'processing' && 'bg-amber-100 text-amber-700',
+                                                                    pdfTextExtraction.status === 'pending' && 'bg-gray-100 text-gray-600',
+                                                                ].filter(Boolean).join(' ') || 'bg-gray-100 text-gray-600'}>
+                                                                    {pdfTextExtraction.status === 'complete' && 'Complete'}
+                                                                    {pdfTextExtraction.status === 'failed' && 'Failed'}
+                                                                    {pdfTextExtraction.status === 'processing' && 'Processing'}
+                                                                    {pdfTextExtraction.status === 'pending' && 'Pending'}
+                                                                </span>
+                                                            )}
+                                                            <button
+                                                                type="button"
+                                                                onClick={handleTriggerPdfOcr}
+                                                                disabled={pdfOcrTriggerLoading || pdfTextExtractionLoading}
+                                                                className="inline-flex shrink-0 items-center rounded border border-emerald-300 px-2 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                                            >
+                                                                {pdfOcrTriggerLoading ? 'Starting...' : pdfTextExtraction ? 'Re-Extract Text' : 'Extract Text (OCR)'}
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                )}
                                             </div>
                                         </div>
                                     )}
+
                                 </div>
                             </CollapsibleSection>
                         )}
@@ -5436,7 +5582,7 @@ export default function AssetDrawer({
                                     title={
                                         <span className="flex w-full min-w-0 items-center justify-between gap-2">
                                             <span className="min-w-0 truncate">Processing & Automation</span>
-                                            {aiPipelineCompleteForDrawer ? (
+                                            {processingDrawerPipelineGreen ? (
                                                 <CheckCircleIcon
                                                     className="h-4 w-4 shrink-0 text-green-500"
                                                     aria-label="Pipeline complete"
@@ -5525,7 +5671,7 @@ export default function AssetDrawer({
                                                         <ProcessingActionCard
                                                             icon="video"
                                                             title="Generate video previews"
-                                                            description="Create preview clips for video assets"
+                                                            description="Rebuild hover/quick preview MP4s (grid + drawer), including phone/MOV rotation from metadata"
                                                             onClick={() => void handleDrawerRegenerateVideoPreview()}
                                                             disabled={
                                                                 regeneratingVideoPreviewDrawer ||
@@ -5540,6 +5686,117 @@ export default function AssetDrawer({
                                                             }
                                                             footer={lastRunFooter('video_preview')}
                                                         />
+                                                    )}
+                                                    {isVideo && (
+                                                        <div className="rounded-xl border border-gray-200 bg-white p-3 shadow-sm">
+                                                            <div className="flex items-start gap-3">
+                                                                <span
+                                                                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-violet-100"
+                                                                    aria-hidden
+                                                                >
+                                                                    <SparklesIcon className="h-5 w-5 text-violet-700" />
+                                                                </span>
+                                                                <div className="min-w-0 flex-1">
+                                                                    <p className="text-sm font-medium text-gray-900">
+                                                                        Video AI insights
+                                                                    </p>
+                                                                    <p className="mt-1 text-xs leading-snug text-gray-600">
+                                                                        {(() => {
+                                                                            const st = String(
+                                                                                displayAsset?.metadata
+                                                                                    ?.ai_video_status || '',
+                                                                            ).toLowerCase()
+                                                                            if (st === 'completed') {
+                                                                                return 'Run finished successfully. Open results for summary, tags, transcript, and moments.'
+                                                                            }
+                                                                            if (st === 'queued' || st === 'processing') {
+                                                                                return 'Analysis is in progress on the AI queue.'
+                                                                            }
+                                                                            if (st === 'failed') {
+                                                                                return (
+                                                                                    displayAsset?.metadata
+                                                                                        ?.ai_video_insights_error ||
+                                                                                    'Last run failed.'
+                                                                                )
+                                                                            }
+                                                                            if (st === 'skipped') {
+                                                                                return `Skipped: ${String(displayAsset?.metadata?.ai_video_insights_skip_reason || 'policy or limits').replace(/_/g, ' ')}`
+                                                                            }
+                                                                            return 'No video AI run recorded yet for this asset.'
+                                                                        })()}
+                                                                    </p>
+                                                                    {displayAsset?.metadata
+                                                                        ?.ai_video_insights_completed_at &&
+                                                                        formatIsoDateTimeLocal(
+                                                                            displayAsset.metadata
+                                                                                .ai_video_insights_completed_at,
+                                                                        ) && (
+                                                                            <p className="mt-1 text-[11px] text-gray-500">
+                                                                                Completed{' '}
+                                                                                {formatIsoDateTimeLocal(
+                                                                                    displayAsset.metadata
+                                                                                        .ai_video_insights_completed_at,
+                                                                                )}
+                                                                            </p>
+                                                                        )}
+                                                                    {videoAiShowCost &&
+                                                                        typeof (displayAsset?.metadata
+                                                                            ?.ai_video_insights_total_cost_usd) ===
+                                                                            'number' &&
+                                                                        Number(
+                                                                            displayAsset.metadata
+                                                                                .ai_video_insights_total_cost_usd,
+                                                                        ) > 0 && (
+                                                                            <p className="mt-0.5 text-[11px] text-gray-500">
+                                                                                Cumulative cost: $
+                                                                                {Number(
+                                                                                    displayAsset.metadata
+                                                                                        .ai_video_insights_total_cost_usd,
+                                                                                ).toFixed(4)}
+                                                                            </p>
+                                                                        )}
+                                                                </div>
+                                                            </div>
+                                                            <div className="mt-3 flex flex-wrap gap-2">
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => setShowVideoInsightsModal(true)}
+                                                                    disabled={
+                                                                        String(
+                                                                            displayAsset?.metadata
+                                                                                ?.ai_video_status || '',
+                                                                        ).toLowerCase() !== 'completed'
+                                                                    }
+                                                                    className="inline-flex items-center rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-semibold text-gray-800 shadow-sm hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                                                >
+                                                                    View results
+                                                                </button>
+                                                                {String(
+                                                                    displayAsset?.metadata?.ai_video_status || '',
+                                                                ).toLowerCase() === 'failed' && (
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => void handleRetryVideoInsights()}
+                                                                        disabled={videoInsightsRetryLoading}
+                                                                        className="inline-flex items-center rounded-md border border-red-300 bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-900 hover:bg-red-100 disabled:opacity-50"
+                                                                    >
+                                                                        {videoInsightsRetryLoading
+                                                                            ? 'Queuing…'
+                                                                            : 'Queue analysis again'}
+                                                                    </button>
+                                                                )}
+                                                            </div>
+                                                            <p className="mt-2 text-[10px] leading-snug text-gray-500">
+                                                                System audit:{' '}
+                                                                <Link
+                                                                    href="/app/admin/ai/activity?task_type=video_insights"
+                                                                    className="font-medium text-indigo-600 hover:text-indigo-800"
+                                                                >
+                                                                    AI Activity (video_insights)
+                                                                </Link>{' '}
+                                                                for run history, tokens, and costs.
+                                                            </p>
+                                                        </div>
                                                     )}
                                                     <ProcessingActionCard
                                                         icon="refreshDanger"
@@ -6977,6 +7234,178 @@ export default function AssetDrawer({
                                 >
                                     Cancel
                                 </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Video AI insights — summary, tags, transcript, moments (above drawer z-[130]) */}
+            {showVideoInsightsModal && displayAsset?.id && isVideo && (
+                <div className="fixed inset-0 z-[10060] overflow-y-auto" role="dialog" aria-modal="true" aria-labelledby="video-insights-modal-title">
+                    <div className="flex min-h-full items-end justify-center p-4 text-center sm:items-center sm:p-0">
+                        <div
+                            className="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity"
+                            role="presentation"
+                            onClick={() => setShowVideoInsightsModal(false)}
+                        />
+                        <div className="relative max-h-[90vh] w-full transform overflow-hidden rounded-lg bg-white text-left shadow-xl transition-all sm:my-8 sm:max-w-2xl">
+                            <div className="flex max-h-[90vh] flex-col bg-white sm:max-h-[85vh]">
+                                <div className="flex shrink-0 items-center justify-between border-b border-gray-200 px-4 py-3 sm:px-6">
+                                    <h3 id="video-insights-modal-title" className="text-base font-semibold text-gray-900">
+                                        Video insights
+                                    </h3>
+                                    <button
+                                        type="button"
+                                        className="rounded-md text-gray-400 hover:text-gray-500"
+                                        onClick={() => setShowVideoInsightsModal(false)}
+                                    >
+                                        <XMarkIcon className="h-6 w-6" aria-hidden />
+                                    </button>
+                                </div>
+                                <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3 sm:px-6 sm:py-4">
+                                    {(() => {
+                                        const vi = displayAsset?.metadata?.ai_video_insights
+                                        const metaObj =
+                                            vi && typeof vi.metadata === 'object' && vi.metadata !== null
+                                                ? vi.metadata
+                                                : {}
+                                        const tagList = Array.isArray(vi?.tags) ? vi.tags : []
+                                        const moments = Array.isArray(vi?.moments) ? vi.moments : []
+                                        const hasBody =
+                                            Boolean(
+                                                (vi?.summary && String(vi.summary).trim() !== '') ||
+                                                    tagList.length > 0 ||
+                                                    (vi?.transcript && String(vi.transcript).trim() !== '') ||
+                                                    Object.keys(metaObj).length > 0 ||
+                                                    moments.length > 0 ||
+                                                    (vi?.suggested_category &&
+                                                        String(vi.suggested_category).trim() !== ''),
+                                            )
+                                        if (!hasBody) {
+                                            return (
+                                                <p className="text-sm text-gray-500">
+                                                    No detailed results are stored for this run. If analysis just
+                                                    finished, refresh the page; otherwise try queuing analysis again.
+                                                </p>
+                                            )
+                                        }
+                                        return (
+                                            <div className="space-y-5">
+                                                {vi?.summary && String(vi.summary).trim() !== '' && (
+                                                    <section>
+                                                        <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                                                            Summary
+                                                        </h4>
+                                                        <p className="mt-1.5 text-sm leading-relaxed text-gray-800">
+                                                            {String(vi.summary)}
+                                                        </p>
+                                                    </section>
+                                                )}
+                                                {vi?.suggested_category &&
+                                                    String(vi.suggested_category).trim() !== '' && (
+                                                        <section>
+                                                            <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                                                                Suggested category
+                                                            </h4>
+                                                            <p className="mt-1.5 text-sm text-gray-800">
+                                                                {String(vi.suggested_category)}
+                                                            </p>
+                                                        </section>
+                                                    )}
+                                                {tagList.length > 0 && (
+                                                    <section>
+                                                        <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                                                            Tags
+                                                        </h4>
+                                                        <div className="mt-2 flex flex-wrap gap-1.5">
+                                                            {tagList.map((t, i) => (
+                                                                <span
+                                                                    key={`${String(t)}-${i}`}
+                                                                    className="inline-flex rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-800"
+                                                                >
+                                                                    {String(t)}
+                                                                </span>
+                                                            ))}
+                                                        </div>
+                                                    </section>
+                                                )}
+                                                {Object.keys(metaObj).length > 0 && (
+                                                    <section>
+                                                        <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                                                            Scene and context
+                                                        </h4>
+                                                        <dl className="mt-2 space-y-1 text-sm">
+                                                            {Object.entries(metaObj).map(([k, val]) => (
+                                                                <div key={k} className="flex gap-2">
+                                                                    <dt className="w-28 shrink-0 font-medium capitalize text-gray-600">
+                                                                        {k.replace(/_/g, ' ')}
+                                                                    </dt>
+                                                                    <dd className="min-w-0 text-gray-800">
+                                                                        {val == null || val === ''
+                                                                            ? '—'
+                                                                            : typeof val === 'object'
+                                                                              ? JSON.stringify(val)
+                                                                              : String(val)}
+                                                                    </dd>
+                                                                </div>
+                                                            ))}
+                                                        </dl>
+                                                    </section>
+                                                )}
+                                                {vi?.transcript && String(vi.transcript).trim() !== '' && (
+                                                    <section>
+                                                        <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                                                            Transcript excerpt
+                                                        </h4>
+                                                        <p className="mt-1 text-[11px] text-gray-500">
+                                                            Stored excerpt may be truncated for size limits.
+                                                        </p>
+                                                        <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded border border-gray-200 bg-gray-50 p-3 font-sans text-xs text-gray-800">
+                                                            {String(vi.transcript)}
+                                                        </pre>
+                                                    </section>
+                                                )}
+                                                {moments.length > 0 && (
+                                                    <section>
+                                                        <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                                                            Key moments
+                                                        </h4>
+                                                        <ul className="mt-2 space-y-1">
+                                                            {moments.map((m, idx) => (
+                                                                <li key={`${m?.timestamp ?? idx}-${idx}`}>
+                                                                    <button
+                                                                        type="button"
+                                                                        className="w-full rounded px-1 py-0.5 text-left text-xs text-gray-700 hover:bg-gray-50"
+                                                                        onClick={() => seekVideoFromInsightsMoment(m)}
+                                                                    >
+                                                                        <span className="font-mono text-gray-500">
+                                                                            {m?.timestamp ?? '—'}
+                                                                        </span>
+                                                                        <span className="text-gray-400"> — </span>
+                                                                        {m?.label ?? ''}
+                                                                    </button>
+                                                                </li>
+                                                            ))}
+                                                        </ul>
+                                                        <p className="mt-1 text-[10px] text-gray-400">
+                                                            Opens fullscreen preview at that time.
+                                                        </p>
+                                                    </section>
+                                                )}
+                                            </div>
+                                        )
+                                    })()}
+                                </div>
+                                <div className="shrink-0 border-t border-gray-100 bg-gray-50 px-4 py-3 sm:px-6">
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowVideoInsightsModal(false)}
+                                        className="inline-flex w-full justify-center rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50 sm:w-auto"
+                                    >
+                                        Close
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     </div>

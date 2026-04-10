@@ -10,12 +10,37 @@ export default function HeroSection({
     secondaryCta,
     align = 'center',
     className = '',
+    /** Optional brand lockup above the headline. `variant: 'inverted'` = light wordmark on dark (no panel). */
+    logo,
 }) {
     const alignCls = align === 'left' ? 'text-left items-start' : 'text-center items-center'
+    const logoJustify = align === 'left' ? 'justify-start' : 'justify-center'
+    const inverted = logo?.variant === 'inverted'
 
     return (
         <section className={`relative px-6 pt-16 pb-20 sm:pt-20 sm:pb-28 lg:px-8 ${className}`}>
             <div className={`mx-auto max-w-4xl flex flex-col ${alignCls}`}>
+                {logo?.src ? (
+                    <div className={`mb-10 sm:mb-12 flex w-full ${logoJustify}`}>
+                        {inverted ? (
+                            <img
+                                src={logo.src}
+                                alt={logo.alt ?? 'Jackpot'}
+                                className="h-20 w-auto max-w-full sm:h-28 md:h-32 lg:h-40 xl:h-44"
+                                decoding="async"
+                            />
+                        ) : (
+                            <div className="inline-flex max-w-full rounded-2xl bg-white px-8 py-6 shadow-xl shadow-black/25 ring-1 ring-black/5 sm:px-12 sm:py-8 lg:px-14 lg:py-10">
+                                <img
+                                    src={logo.src}
+                                    alt={logo.alt ?? 'Jackpot'}
+                                    className="h-16 w-auto max-w-full sm:h-20 md:h-24 lg:h-28 xl:h-32"
+                                    decoding="async"
+                                />
+                            </div>
+                        )}
+                    </div>
+                ) : null}
                 <h1 className="text-4xl font-bold tracking-tight text-white sm:text-5xl lg:text-6xl text-balance leading-[1.08]">
                     {title}
                 </h1>

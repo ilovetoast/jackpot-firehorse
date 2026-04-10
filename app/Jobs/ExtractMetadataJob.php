@@ -3,11 +3,11 @@
 namespace App\Jobs;
 
 use App\Enums\AssetStatus;
+use App\Jobs\Concerns\QueuesOnImagesChannel;
 use App\Models\Asset;
 use App\Models\AssetEvent;
 use App\Models\AssetMetadata;
 use App\Models\AssetVersion;
-use App\Jobs\Concerns\QueuesOnImagesChannel;
 use App\Services\AssetProcessingFailureService;
 use App\Support\VideoDisplayProbe;
 use Illuminate\Bus\Queueable;
@@ -32,8 +32,8 @@ class ExtractMetadataJob implements ShouldQueue
     /**
      * Create a new job instance.
      *
-     * @param string $assetId Asset ID
-     * @param string|null $versionId Optional version ID for version-aware extraction (uses version->file_path)
+     * @param  string  $assetId  Asset ID
+     * @param  string|null  $versionId  Optional version ID for version-aware extraction (uses version->file_path)
      */
     public function __construct(
         public readonly string $assetId,
@@ -62,13 +62,14 @@ class ExtractMetadataJob implements ShouldQueue
         }
 
         // Idempotency: Skip only for legacy path (no version); version path always re-extracts
-        if (!$version) {
+        if (! $version) {
             $existingMetadata = $asset->metadata ?? [];
             if (isset($existingMetadata['metadata_extracted']) && $existingMetadata['metadata_extracted'] === true) {
                 Log::info('[ExtractMetadataJob] Metadata extraction skipped - already extracted', [
                     'asset_id' => $asset->id,
                 ]);
                 \App\Services\UploadDiagnosticLogger::jobSkip('ExtractMetadataJob', $asset->id, 'already_extracted');
+
                 return;
             }
         }
@@ -82,6 +83,7 @@ class ExtractMetadataJob implements ShouldQueue
             \App\Services\UploadDiagnosticLogger::jobSkip('ExtractMetadataJob', $asset->id, 'asset_not_visible', [
                 'status' => $asset->status->value,
             ]);
+
             return;
         }
 
@@ -127,9 +129,7 @@ class ExtractMetadataJob implements ShouldQueue
     /**
      * Extract metadata from asset.
      *
-     * @param Asset $asset
-     * @param AssetVersion|null $version When provided, uses version->file_path and version-derived fields
-     * @return array
+     * @param  AssetVersion|null  $version  When provided, uses version->file_path and version-derived fields
      */
     protected function extractMetadata(Asset $asset, ?AssetVersion $version = null): array
     {
@@ -158,17 +158,16 @@ class ExtractMetadataJob implements ShouldQueue
     /**
      * Extract video metadata (duration, width, height).
      *
-     * @param Asset $asset
-     * @param AssetVersion|null $version When provided, uses version->file_path
-     * @return array
+     * @param  AssetVersion|null  $version  When provided, uses version->file_path
      */
     protected function extractVideoMetadata(Asset $asset, ?AssetVersion $version = null): array
     {
         $sourceS3Path = $version ? $version->file_path : $asset->storage_root_path;
-        if (!$sourceS3Path || !$asset->storageBucket) {
+        if (! $sourceS3Path || ! $asset->storageBucket) {
             Log::warning('[ExtractMetadataJob] Cannot extract video metadata - missing storage path or bucket', [
                 'asset_id' => $asset->id,
             ]);
+
             return [];
         }
 
@@ -183,17 +182,18 @@ class ExtractMetadataJob implements ShouldQueue
             // Download video to temporary location
             $tempPath = $this->downloadFromS3($bucket, $sourceS3Path);
 
-            if (!file_exists($tempPath) || filesize($tempPath) === 0) {
+            if (! file_exists($tempPath) || filesize($tempPath) === 0) {
                 throw new \RuntimeException('Downloaded source video file is invalid or empty');
             }
 
             try {
                 // Get video information using FFprobe
                 $ffmpegPath = $this->findFFmpegPath();
-                if (!$ffmpegPath) {
+                if (! $ffmpegPath) {
                     Log::warning('[ExtractMetadataJob] FFmpeg not found - skipping video metadata extraction', [
                         'asset_id' => $asset->id,
                     ]);
+
                     return [];
                 }
 
@@ -232,6 +232,7 @@ class ExtractMetadataJob implements ShouldQueue
                 'asset_id' => $asset->id,
                 'error' => $e->getMessage(),
             ]);
+
             // Don't throw - metadata extraction failure should not block processing
             return [];
         }
@@ -240,14 +241,14 @@ class ExtractMetadataJob implements ShouldQueue
     /**
      * Download file from S3 to temporary location.
      *
-     * @param \App\Models\StorageBucket $bucket
-     * @param string $s3Key
+     * @param  \App\Models\StorageBucket  $bucket
      * @return string Path to temporary file
+     *
      * @throws \RuntimeException If download fails
      */
     protected function downloadFromS3($bucket, string $s3Key): string
     {
-        if (!class_exists(\Aws\S3\S3Client::class)) {
+        if (! class_exists(\Aws\S3\S3Client::class)) {
             throw new \RuntimeException('AWS SDK not installed. Install aws/aws-sdk-php.');
         }
 
@@ -272,14 +273,14 @@ class ExtractMetadataJob implements ShouldQueue
             $contentLength = strlen($bodyContents);
 
             if ($contentLength === 0) {
-                throw new \RuntimeException("Downloaded file from S3 is empty (size: 0 bytes)");
+                throw new \RuntimeException('Downloaded file from S3 is empty (size: 0 bytes)');
             }
 
             $tempPath = tempnam(sys_get_temp_dir(), 'video_metadata_');
             file_put_contents($tempPath, $bodyContents);
 
-            if (!file_exists($tempPath) || filesize($tempPath) !== $contentLength) {
-                throw new \RuntimeException("Failed to write downloaded file to temp location");
+            if (! file_exists($tempPath) || filesize($tempPath) !== $contentLength) {
+                throw new \RuntimeException('Failed to write downloaded file to temp location');
             }
 
             return $tempPath;
@@ -312,7 +313,7 @@ class ExtractMetadataJob implements ShouldQueue
                 $output = [];
                 $returnCode = 0;
                 exec('which ffmpeg 2>&1', $output, $returnCode);
-                if ($returnCode === 0 && !empty($output[0]) && file_exists($output[0])) {
+                if ($returnCode === 0 && ! empty($output[0]) && file_exists($output[0])) {
                     return $output[0];
                 }
             } elseif (file_exists($path) && is_executable($path)) {
@@ -326,15 +327,16 @@ class ExtractMetadataJob implements ShouldQueue
     /**
      * Get video information using FFprobe.
      *
-     * @param string $videoPath Path to video file
-     * @param string $ffmpegPath Path to FFmpeg executable
+     * @param  string  $videoPath  Path to video file
+     * @param  string  $ffmpegPath  Path to FFmpeg executable
      * @return array Video information (duration, width, height)
+     *
      * @throws \RuntimeException If FFprobe fails
      */
     protected function getVideoInfo(string $videoPath, string $ffmpegPath): array
     {
         $ffprobePath = str_replace('ffmpeg', 'ffprobe', $ffmpegPath);
-        if (!file_exists($ffprobePath) || !is_executable($ffprobePath)) {
+        if (! file_exists($ffprobePath) || ! is_executable($ffprobePath)) {
             $ffprobePath = $ffmpegPath;
         }
 
@@ -356,24 +358,17 @@ class ExtractMetadataJob implements ShouldQueue
         $jsonOutput = implode("\n", $output);
         $videoData = json_decode($jsonOutput, true);
 
-        if (!$videoData || !isset($videoData['format'])) {
+        if (! $videoData || ! isset($videoData['format'])) {
             throw new \RuntimeException('Failed to parse video information from FFprobe output');
         }
 
-        $videoStream = null;
-        foreach ($videoData['streams'] ?? [] as $stream) {
-            if (isset($stream['codec_type']) && $stream['codec_type'] === 'video') {
-                $videoStream = $stream;
-                break;
-            }
-        }
+        $dims = VideoDisplayProbe::dimensionsFromFfprobe($videoData);
 
-        if (!$videoStream) {
+        if (! $dims) {
             throw new \RuntimeException('No video stream found in file');
         }
 
         $duration = (float) ($videoData['format']['duration'] ?? 0);
-        $dims = VideoDisplayProbe::dimensionsFromStream($videoStream);
 
         return [
             'duration' => $duration,

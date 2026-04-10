@@ -2,11 +2,14 @@
 
 namespace App\Jobs;
 
+use App\Models\Asset;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\Log;
+
 /**
  * Dispatches {@see GenerateVideoInsightsJob} in chunks with delays to avoid queue spikes.
  *
@@ -35,6 +38,25 @@ class ProcessVideoInsightsBatchJob implements ShouldQueue
     {
         $ids = array_values(array_filter(array_map('strval', $this->assetIds)));
         if ($ids === []) {
+            return;
+        }
+
+        if (! config('assets.video_ai.enabled', true)) {
+            Log::info('[ProcessVideoInsightsBatchJob] Skipped — video AI disabled', ['count' => count($ids)]);
+            foreach ($ids as $assetId) {
+                $asset = Asset::find($assetId);
+                if ($asset === null) {
+                    continue;
+                }
+                $meta = $asset->metadata ?? [];
+                if (in_array($meta['ai_video_status'] ?? null, ['queued', 'processing'], true)) {
+                    $meta['ai_video_status'] = 'skipped';
+                    $meta['ai_video_insights_skip_reason'] = 'video_ai_disabled';
+                    $meta['ai_video_insights_skipped_at'] = now()->toIso8601String();
+                    $asset->update(['metadata' => $meta]);
+                }
+            }
+
             return;
         }
 

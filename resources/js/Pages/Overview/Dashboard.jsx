@@ -21,6 +21,7 @@ import {
     EyeIcon,
     ArrowTrendingUpIcon,
     ArrowLeftIcon,
+    ExclamationTriangleIcon,
 } from '@heroicons/react/24/outline'
 
 export default function Dashboard({
@@ -35,6 +36,8 @@ export default function Dashboard({
     pending_metadata_approvals_count = 0,
     unpublished_assets_count = 0,
     pending_assets_count = 0,
+    rejected_my_uploads_count = 0,
+    permissions: dashboardPermissions = {},
     most_viewed_assets = [],
     most_downloaded_assets = [],
     most_trending_assets = [],
@@ -171,6 +174,37 @@ export default function Dashboard({
                     </div>
                 </div>
 
+                {rejected_my_uploads_count > 0 && dashboardPermissions?.canViewBrandAssets && (
+                    <div
+                        className="mb-8 flex flex-col gap-3 rounded-xl border border-amber-200 bg-amber-50/90 px-4 py-3.5 shadow-sm sm:flex-row sm:items-center sm:justify-between"
+                        role="status"
+                    >
+                        <div className="flex min-w-0 items-start gap-3">
+                            <ExclamationTriangleIcon
+                                className="h-6 w-6 shrink-0 text-amber-600"
+                                aria-hidden
+                            />
+                            <div className="min-w-0">
+                                <p className="text-sm font-semibold text-amber-950">
+                                    {rejected_my_uploads_count === 1
+                                        ? '1 submission was rejected'
+                                        : `${rejected_my_uploads_count} submissions were rejected`}
+                                </p>
+                                <p className="mt-0.5 text-sm text-amber-900/90">
+                                    Reviewers are waiting on you: upload a new version or delete the asset from your
+                                    pending submissions.
+                                </p>
+                            </div>
+                        </div>
+                        <Link
+                            href="/app/assets?lifecycle=pending_publication"
+                            className="inline-flex w-full shrink-0 items-center justify-center rounded-lg border border-amber-800/20 bg-white px-4 py-2.5 text-sm font-semibold text-amber-950 shadow-sm transition hover:bg-amber-100/80 sm:w-auto"
+                        >
+                            Open my submissions
+                        </Link>
+                    </div>
+                )}
+
                 {/* Core metrics */}
                 <div className="mb-8">
                     <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-4">
@@ -251,7 +285,7 @@ export default function Dashboard({
                                 icon={DocumentCheckIcon}
                                 title="Pending Asset Approvals"
                                 value={pending_assets_count}
-                                subtext="Assets awaiting review"
+                                subtext="Awaiting your approve or request-changes decision"
                                 formatValue={(v) => v.toLocaleString()}
                             />
                         )}

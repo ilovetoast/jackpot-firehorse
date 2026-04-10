@@ -21,6 +21,8 @@ export default function MetadataCandidateReview({
     uploadedByUserId = null,
     /** When true: flat card style for Metadata Review collapsible (no outer title strip / border-t). */
     compactDrawerReview = false,
+    /** Asset drawer: report loading / empty / content / hidden for coordinated empty states */
+    onDrawerReviewSlotState = null,
 }) {
     const [reviewItems, setReviewItems] = useState([])
     const [loading, setLoading] = useState(true)
@@ -76,6 +78,21 @@ export default function MetadataCandidateReview({
                 setLoading(false)
             })
     }, [assetId, canViewSuggestions])
+
+    useEffect(() => {
+        if (typeof onDrawerReviewSlotState !== 'function') {
+            return
+        }
+        if (!canViewSuggestions) {
+            onDrawerReviewSlotState('hidden')
+            return
+        }
+        if (loading) {
+            onDrawerReviewSlotState('loading')
+            return
+        }
+        onDrawerReviewSlotState(reviewItems.length > 0 ? 'content' : 'empty')
+    }, [onDrawerReviewSlotState, canViewSuggestions, loading, reviewItems.length])
 
     // Refresh review items after actions
     const refreshReview = () => {

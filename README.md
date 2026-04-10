@@ -20,6 +20,7 @@
 ### Documentation
 
 - **[Documentation index](docs/README.md)** — table of contents for consolidated guides (use this for admin “Documents”)
+- [Testing](docs/testing.md) — PHPUnit layout, Sail commands, fast runs, Xdebug, groups (`ffmpeg`, etc.)
 - [Features](docs/FEATURES.md) — value proposition and product-level behavior
 - [Technical overview](docs/TECHNICAL_OVERVIEW.md) — architecture and stack
 - [Server requirements](docs/environments/SERVER_REQUIREMENTS.md) — third-party binaries for web/worker hosts

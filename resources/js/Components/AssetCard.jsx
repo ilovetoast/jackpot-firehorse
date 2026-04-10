@@ -243,6 +243,16 @@ export default function AssetCard({
         !isVirtualGoogleFont &&
         (thumbnailPipelineActive || analysisPipelineActive)
 
+    const aiVideoBusy =
+        isVideo && ['queued', 'processing'].includes(String(aiVideoStatus || ''))
+    const showProcessingDot = !isVirtualGoogleFont && (isProcessing || aiVideoBusy)
+    const processingDotTitle =
+        isProcessing && aiVideoBusy
+            ? 'Processing and analyzing video'
+            : aiVideoBusy
+              ? 'Analyzing video'
+              : 'Processing'
+
     // Phase 3.1E: Detect meaningful state transitions for thumbnail animation
     // Track previous state to detect transitions from non-AVAILABLE → AVAILABLE
     // Animation should ONLY trigger on meaningful state changes (e.g., after background reconciliation)
@@ -590,25 +600,6 @@ export default function AssetCard({
                     }
                 }}
             >
-                {/* Processing: dot-only by default; label expands on hover */}
-                {isProcessing && (
-                    <div
-                        className="group/procbadge pointer-events-auto absolute top-2 right-2 z-10 flex h-6 max-w-[1.375rem] items-center overflow-hidden rounded-full bg-amber-500/95 py-0.5 pl-1.5 pr-0 text-white shadow-sm ring-1 ring-white/20 transition-[max-width,padding] duration-300 ease-out hover:max-w-[9rem] hover:pr-2"
-                        title="Processing"
-                    >
-                        <span className="sr-only">Processing</span>
-                        <span
-                            className="h-1.5 w-1.5 shrink-0 rounded-full bg-white animate-pulse"
-                            aria-hidden
-                        />
-                        <span
-                            className="ml-0 max-w-0 overflow-hidden whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide opacity-0 transition-[max-width,margin-left,opacity] duration-300 ease-out group-hover/procbadge:ml-1.5 group-hover/procbadge:max-w-[6rem] group-hover/procbadge:opacity-100"
-                            aria-hidden
-                        >
-                            Processing
-                        </span>
-                    </div>
-                )}
                 {isExecutionEnhancedGrid && (
                     <span
                         className="pointer-events-none absolute left-2 top-2 z-10 select-none text-sm opacity-80 drop-shadow-sm"
@@ -648,11 +639,11 @@ export default function AssetCard({
                     <>
                         {/* Phase V-1: Video hover preview (desktop only, lazy load) */}
                         {isVideo && isHovering && asset.video_preview_url && !isMobile && !videoPreviewFailed && (
-                            <div className="absolute inset-0 z-10 flex items-center justify-center overflow-hidden bg-black">
+                            <div className="absolute inset-0 z-10 overflow-hidden bg-black">
                                 <video
                                     ref={videoPreviewRef}
                                     src={asset.video_preview_url}
-                                    className="block h-auto w-auto max-h-full max-w-full object-contain"
+                                    className="absolute inset-0 h-full w-full object-cover"
                                     autoPlay
                                     muted
                                     loop
@@ -806,6 +797,14 @@ export default function AssetCard({
                                 aria-label={asset.health_status === 'critical' ? 'Critical' : 'Warning'}
                             />
                         )}
+                        {showProcessingDot && (
+                            <span
+                                className="inline-block h-2.5 w-2.5 flex-shrink-0 rounded-full bg-violet-500 ring-2 ring-white/80 animate-pulse"
+                                title={processingDotTitle}
+                                role="status"
+                                aria-label={processingDotTitle}
+                            />
+                        )}
                         {showInfo && !isGuidelines && (
                             <span className="inline-flex items-center rounded-md bg-black/60 backdrop-blur-sm px-2 py-1 text-xs font-medium text-white uppercase tracking-wide">
                                 {fileExtension}
@@ -816,14 +815,6 @@ export default function AssetCard({
                                 Video
                             </span>
                         )}
-                        {showInfo &&
-                            !isGuidelines &&
-                            isVideo &&
-                            ['queued', 'processing'].includes(String(aiVideoStatus || '')) && (
-                                <span className="inline-flex items-center rounded-md bg-amber-600/90 backdrop-blur-sm px-2 py-1 text-xs font-medium text-white">
-                                    Analyzing
-                                </span>
-                            )}
                         {/* Starred: gold for visibility on varied image backgrounds (brand primary was too dark) */}
                         {asset.starred === true && (
                             <StarIcon className="h-3.5 w-3.5 text-amber-400 drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]" aria-label="Starred" />

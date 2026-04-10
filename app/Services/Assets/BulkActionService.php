@@ -16,14 +16,13 @@ use App\Jobs\ProcessAssetJob;
 use App\Jobs\ProcessVideoInsightsBatchJob;
 use App\Jobs\RegenerateSystemMetadataQueuedJob;
 use App\Models\Asset;
+use App\Models\Tenant;
 use App\Models\User;
 use App\Services\ActivityRecorder;
-use App\Models\Tenant;
 use App\Services\AiTagPolicyService;
 use App\Services\AiUsageService;
 use App\Services\BulkMetadataService;
 use App\Services\FileTypeService;
-use App\Services\Assets\AssetProcessingGuardService;
 use App\Support\PipelineQueueResolver;
 use App\Support\Roles\PermissionMap;
 use Illuminate\Auth\Access\AuthorizationException;
@@ -399,6 +398,16 @@ class BulkActionService
      */
     protected function executeBulkVideoInsights(array $assetIds, User $user, int $tenantId, ?int $brandId): BulkActionResult
     {
+        if (! config('assets.video_ai.enabled', true)) {
+            return new BulkActionResult(
+                totalSelected: count($assetIds),
+                processed: 0,
+                skipped: count($assetIds),
+                errors: [],
+                perActionSummary: ['skipped_feature_disabled' => count($assetIds)],
+            );
+        }
+
         $fileTypeService = app(FileTypeService::class);
         $policyService = app(AiTagPolicyService::class);
         $usageService = app(AiUsageService::class);

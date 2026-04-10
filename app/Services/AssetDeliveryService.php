@@ -25,16 +25,14 @@ class AssetDeliveryService
     public function __construct(
         protected AssetVariantPathResolver $pathResolver,
         protected CloudFrontSignedUrlService $signedUrlService
-    ) {
-    }
+    ) {}
 
     /**
      * Get delivery URL for an asset variant in the given context.
      *
-     * @param Asset $asset
-     * @param string $variant AssetVariant enum value (e.g. AssetVariant::THUMB_LARGE->value)
-     * @param string $context DeliveryContext enum value (e.g. DeliveryContext::PUBLIC_COLLECTION->value)
-     * @param array $options Optional (e.g. ['page' => 1] for PDF_PAGE)
+     * @param  string  $variant  AssetVariant enum value (e.g. AssetVariant::THUMB_LARGE->value)
+     * @param  string  $context  DeliveryContext enum value (e.g. DeliveryContext::PUBLIC_COLLECTION->value)
+     * @param  array  $options  Optional (e.g. ['page' => 1] for PDF_PAGE)
      * @return string CDN URL (plain or signed depending on context)
      *
      * @throws RuntimeException If path cannot be resolved
@@ -66,6 +64,7 @@ class AssetDeliveryService
             \Log::info('SIGNED URL GENERATED', [
                 'url' => $cdnUrl,
             ]);
+
             return $cdnUrl;
         }
 
@@ -195,9 +194,9 @@ class AssetDeliveryService
      * Get signed CDN URL for a raw storage path (e.g. ZIP file).
      * Used for public download file delivery when path is not asset variant.
      *
-     * @param string $path Storage path (S3 key)
-     * @param string $context DeliveryContext (PUBLIC_DOWNLOAD)
-     * @param array $options ['download' => Download, 'tenant' => Tenant] for TTL
+     * @param  string  $path  Storage path (S3 key)
+     * @param  string  $context  DeliveryContext (PUBLIC_DOWNLOAD)
+     * @param  array  $options  ['download' => Download, 'tenant' => Tenant] for TTL
      */
     public function urlForPath(string $path, string $context, array $options = []): string
     {
@@ -229,11 +228,19 @@ class AssetDeliveryService
 
     /**
      * Append a stable query param derived from asset updated_at so regenerated hover previews
-     * get a distinct URL without changing the storage key. Works with presigned URLs (extra query params).
+     * get a distinct URL without changing the storage key.
+     *
+     * Important: AWS SigV4 S3 presigned URLs (e.g. local {@see CdnUrl::url} via temporaryUrl) sign the
+     * exact query string — appending &pv= breaks the signature (403), so hover MP4 and admin preview
+     * players stay black and the grid removes the video element after onError. Skip cache-busting for those.
      */
     protected function appendVideoPreviewCacheBuster(string $url, Asset $asset): string
     {
         if ($url === '' || str_starts_with($url, 'data:')) {
+            return $url;
+        }
+
+        if (str_contains($url, 'X-Amz-Signature=') || str_contains($url, 'X-Amz-Credential=')) {
             return $url;
         }
 
