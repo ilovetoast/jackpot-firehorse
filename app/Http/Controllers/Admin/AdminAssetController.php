@@ -1452,6 +1452,9 @@ class AdminAssetController extends Controller
         $list['video_preview_view_url'] = $list['is_video'] ? $this->adminVideoPreviewViewUrl($asset) : null;
         $list['video_width'] = $asset->video_width;
         $list['video_height'] = $asset->video_height;
+        $list['admin_source_stream_url'] = $list['is_video']
+            ? route('admin.assets.download-source', $asset->id)
+            : null;
 
         // Resolve category_id to category name for Overview display
         $categoryId = $metadata['category_id'] ?? null;

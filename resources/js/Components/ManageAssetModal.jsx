@@ -5,7 +5,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { usePage, router } from '@inertiajs/react'
-import { CloudArrowUpIcon, XMarkIcon } from '@heroicons/react/24/outline'
+import { CloudArrowUpIcon, PencilSquareIcon, XMarkIcon } from '@heroicons/react/24/outline'
 import { usePermission } from '../hooks/usePermission'
 import AssetMetadataDisplay from './AssetMetadataDisplay'
 import AssetTagManager from './AssetTagManager'
@@ -17,7 +17,8 @@ import ConfirmDialog from './ConfirmDialog'
 import ThumbnailPreview from './ThumbnailPreview'
 import { filterActiveCategories } from '../utils/categoryUtils'
 import { getAssetCategoryId } from '../utils/assetUtils'
-import { getThumbnailVersion } from '../utils/thumbnailUtils'
+import { getThumbnailUrl, getThumbnailVersion } from '../utils/thumbnailUtils'
+import { modeHasRenderableThumbnails } from '../utils/thumbnailModes'
 
 function SectionTitle({ children, className = '' }) {
     return <div className={`text-sm font-semibold text-gray-900 ${className}`.trim()}>{children}</div>
@@ -31,69 +32,109 @@ function sortCollectionIdsKey(ids) {
         .join(',')
 }
 
+/** Technical file details (read-only). */
+function WorkspaceAssetDetailsContent({ asset }) {
+    return (
+        <div className="w-full max-w-xl px-4 text-sm">
+            <dl className="grid grid-cols-2 gap-x-6 gap-y-2">
+                <dt className="text-gray-500">File name</dt>
+                <dd className="text-right font-medium text-gray-900 truncate" title={asset?.original_filename}>
+                    {asset?.original_filename || '—'}
+                </dd>
+                <dt className="text-gray-500">MIME type</dt>
+                <dd className="text-right text-gray-900">{asset?.mime_type || '—'}</dd>
+                <dt className="text-gray-500">Size</dt>
+                <dd className="text-right text-gray-900">
+                    {asset?.file_size != null ? `${(asset.file_size / (1024 * 1024)).toFixed(2)} MB` : '—'}
+                </dd>
+                <dt className="text-gray-500">Asset ID</dt>
+                <dd className="text-right font-mono text-xs text-gray-700">{asset?.id ?? '—'}</dd>
+                <dt className="text-gray-500">Updated</dt>
+                <dd className="text-right text-gray-900">
+                    {asset?.updated_at
+                        ? (() => {
+                              try {
+                                  return new Date(asset.updated_at).toLocaleString()
+                              } catch {
+                                  return '—'
+                              }
+                          })()
+                        : '—'}
+                </dd>
+            </dl>
+        </div>
+    )
+}
+
+function manageModalOriginalFileUrl(asset) {
+    return asset?.download_url || (asset?.id ? `/app/assets/${asset.id}/download` : null)
+}
+
 /**
- * Preview / Original / Details for the workspace chrome.
- * @param {'preview'|'original'|'details'} props.tab
+ * Show pipeline "Original" chip only when it adds value: videos (poster variants), any asset with
+ * enhanced/presentation, SVG, or when original-mode URL differs from the grid final thumbnail.
  */
-function WorkspaceAssetPreview({ asset, tab, thumbnailVersion, brandPrimary }) {
-    // Original file for <img>/<video>: must use the download route (redirects to signed storage URL).
-    // GET /assets/{id}/view is the Inertia "open asset" page for humans — not a raw file, so img src shows empty.
-    const originalFileUrl =
-        asset?.download_url || (asset?.id ? `/app/assets/${asset.id}/download` : null)
+function shouldShowPipelineOriginalChip(asset) {
+    if (!asset || !modeHasRenderableThumbnails(asset, 'original')) {
+        return false
+    }
+    const mime = (asset.mime_type || '').toLowerCase()
+    if (mime.startsWith('video/')) {
+        return true
+    }
+    if (modeHasRenderableThumbnails(asset, 'enhanced') || modeHasRenderableThumbnails(asset, 'presentation')) {
+        return true
+    }
+    const isSvg =
+        mime === 'image/svg+xml' ||
+        (asset.original_filename || '').toLowerCase().endsWith('.svg') ||
+        asset.file_extension === 'svg'
+    if (isSvg) {
+        return true
+    }
+    if (mime.startsWith('image/')) {
+        const orig = getThumbnailUrl(asset, 'large', 'original')
+        const fin = asset.final_thumbnail_url || asset.thumbnail_url_large || null
+        if (orig && fin && orig === fin) {
+            return false
+        }
+    }
+    return true
+}
+
+/** Source file chip: video, PDF, audio, etc. — not redundant static rasters (JPG/PNG/WebP…). */
+function shouldShowSourceFileChip(asset) {
     const mime = (asset?.mime_type || '').toLowerCase()
-    const isImage = mime.startsWith('image/')
-    const isVideo = mime.startsWith('video/')
+    if (mime.startsWith('image/')) {
+        return false
+    }
+    return true
+}
+
+function renderSourceFilePreview(asset, originalFileUrl, brandPrimary) {
+    const mime = (asset?.mime_type || '').toLowerCase()
     const isSvg =
         mime === 'image/svg+xml' ||
         (asset?.original_filename || '').toLowerCase().endsWith('.svg') ||
         asset?.file_extension === 'svg'
+    const isImage = mime.startsWith('image/')
+    const isVideo = mime.startsWith('video/')
+    const isPdf =
+        mime.includes('pdf') || (asset?.original_filename || '').toLowerCase().endsWith('.pdf')
 
-    if (tab === 'details') {
-        return (
-            <div className="w-full max-w-xl px-4 text-sm">
-                <dl className="grid grid-cols-2 gap-x-6 gap-y-2">
-                    <dt className="text-gray-500">File name</dt>
-                    <dd className="text-right font-medium text-gray-900 truncate" title={asset?.original_filename}>
-                        {asset?.original_filename || '—'}
-                    </dd>
-                    <dt className="text-gray-500">MIME type</dt>
-                    <dd className="text-right text-gray-900">{asset?.mime_type || '—'}</dd>
-                    <dt className="text-gray-500">Size</dt>
-                    <dd className="text-right text-gray-900">
-                        {asset?.file_size != null ? `${(asset.file_size / (1024 * 1024)).toFixed(2)} MB` : '—'}
-                    </dd>
-                    <dt className="text-gray-500">Asset ID</dt>
-                    <dd className="text-right font-mono text-xs text-gray-700">{asset?.id ?? '—'}</dd>
-                    <dt className="text-gray-500">Updated</dt>
-                    <dd className="text-right text-gray-900">
-                        {asset?.updated_at
-                            ? (() => {
-                                  try {
-                                      return new Date(asset.updated_at).toLocaleString()
-                                  } catch {
-                                      return '—'
-                                  }
-                              })()
-                            : '—'}
-                    </dd>
-                </dl>
-            </div>
-        )
+    if (!originalFileUrl) {
+        return <p className="text-sm text-gray-500">Source file URL not available.</p>
     }
-
-    if (tab === 'original') {
-        if (!originalFileUrl) {
-            return <p className="text-sm text-gray-500">Original file URL not available.</p>
-        }
-        if (isImage || isSvg) {
-            return <img src={originalFileUrl} alt="" className="max-h-full max-w-full object-contain" />
-        }
-        if (isVideo) {
-            return <video src={originalFileUrl} controls className="max-h-full max-w-full object-contain" playsInline />
-        }
+    if (isVideo) {
+        return <video src={originalFileUrl} controls className="max-h-full max-w-full object-contain" playsInline />
+    }
+    if (isImage || isSvg) {
+        return <img src={originalFileUrl} alt="" className="max-h-full max-w-full object-contain" />
+    }
+    if (isPdf) {
         return (
-            <div className="flex flex-col items-center gap-2 px-4 text-center">
-                <p className="text-sm text-gray-600">Preview not shown for this file type.</p>
+            <div className="flex flex-col items-center gap-3 px-4 py-6 text-center">
+                <p className="text-sm text-gray-600">Open the PDF in a new tab to view the full source file.</p>
                 <a
                     href={originalFileUrl}
                     target="_blank"
@@ -101,21 +142,49 @@ function WorkspaceAssetPreview({ asset, tab, thumbnailVersion, brandPrimary }) {
                     className="text-sm font-medium underline"
                     style={{ color: brandPrimary }}
                 >
-                    Open original file
+                    Open PDF
                 </a>
             </div>
         )
     }
-
     return (
-        <ThumbnailPreview
-            asset={asset}
-            thumbnailVersion={thumbnailVersion}
-            size="lg"
-            preferLargeForVector
-            className="h-full w-full max-h-[260px]"
-            primaryColor={brandPrimary}
-        />
+        <div className="flex flex-col items-center gap-2 px-4 text-center">
+            <p className="text-sm text-gray-600">Preview not shown for this file type.</p>
+            <a
+                href={originalFileUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-sm font-medium underline"
+                style={{ color: brandPrimary }}
+            >
+                Open original file
+            </a>
+        </div>
+    )
+}
+
+function PreviewVariantChip({ label, selected, onClick, brandPrimary }) {
+    return (
+        <button
+            type="button"
+            onClick={onClick}
+            className={`rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
+                selected
+                    ? 'border-transparent shadow-sm'
+                    : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300 hover:bg-gray-50'
+            }`}
+            style={
+                selected
+                    ? {
+                          backgroundColor: `${brandPrimary}1a`,
+                          color: brandPrimary,
+                          borderColor: `${brandPrimary}66`,
+                      }
+                    : undefined
+            }
+        >
+            {label}
+        </button>
     )
 }
 
@@ -191,7 +260,13 @@ export default function ManageAssetModal({
     const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
 
     const [displayKey, setDisplayKey] = useState(0)
-    const [previewTab, setPreviewTab] = useState('preview')
+    /** Top bar: visual preview vs file details */
+    const [mainTab, setMainTab] = useState('preview')
+    /**
+     * Under-preview view: default grid thumbnail, pipeline modes, source file, or hover MP4.
+     * @type {'default'|'original'|'enhanced'|'presentation'|'source'|'quick'}
+     */
+    const [previewVariant, setPreviewVariant] = useState('default')
     const [dirtyBaseline, setDirtyBaseline] = useState(null)
 
     const isVirtualGoogleFont = Boolean(asset?.is_virtual_google_font)
@@ -213,7 +288,8 @@ export default function ManageAssetModal({
     useEffect(() => {
         if (!isOpen || !asset?.id) return
         resetLocalState()
-        setPreviewTab('preview')
+        setMainTab('preview')
+        setPreviewVariant('default')
         setDirtyBaseline(null)
     }, [isOpen, asset?.id, resetLocalState])
 
@@ -502,6 +578,37 @@ export default function ManageAssetModal({
         }
     }
 
+    const originalFileUrl = manageModalOriginalFileUrl(asset)
+    const mimeLower = (asset?.mime_type || '').toLowerCase()
+    const isVideoAsset = mimeLower.startsWith('video/')
+    const showPipelineOriginal = asset ? shouldShowPipelineOriginalChip(asset) : false
+    const showEnhanced = asset ? modeHasRenderableThumbnails(asset, 'enhanced') : false
+    const showPresentation = asset ? modeHasRenderableThumbnails(asset, 'presentation') : false
+    const showSource = asset ? shouldShowSourceFileChip(asset) : false
+    const showQuickPreview = isVideoAsset && Boolean(asset?.video_preview_url)
+
+    const previewVariantAllowed = useMemo(() => {
+        const set = new Set(['default'])
+        if (showPipelineOriginal) set.add('original')
+        if (showEnhanced) set.add('enhanced')
+        if (showPresentation) set.add('presentation')
+        if (showSource) set.add('source')
+        if (showQuickPreview) set.add('quick')
+        return set
+    }, [showPipelineOriginal, showEnhanced, showPresentation, showSource, showQuickPreview])
+
+    useEffect(() => {
+        if (!previewVariantAllowed.has(previewVariant)) {
+            setPreviewVariant('default')
+        }
+    }, [previewVariantAllowed, previewVariant])
+
+    const forcedModeUrl =
+        asset &&
+        (previewVariant === 'original' || previewVariant === 'enhanced' || previewVariant === 'presentation')
+            ? getThumbnailUrl(asset, 'large', previewVariant)
+            : null
+
     if (!isOpen || !asset?.id) {
         return null
     }
@@ -522,9 +629,8 @@ export default function ManageAssetModal({
         return `${(b / (1024 * 1024)).toFixed(1)} MB`
     }
 
-    const previewTabs = [
+    const mainTabs = [
         { id: 'preview', label: 'Preview' },
-        { id: 'original', label: 'Original' },
         { id: 'details', label: 'Details' },
     ]
 
@@ -538,15 +644,29 @@ export default function ManageAssetModal({
             />
             <div className="relative z-[201] flex h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-xl bg-white shadow-xl">
                 <div className="flex flex-shrink-0 items-center justify-between gap-4 border-b border-gray-200 px-6 py-4">
-                    <input
-                        type="text"
-                        value={titleDraft}
-                        onChange={(e) => setTitleDraft(e.target.value)}
-                        disabled={!canEditMetadata || isVirtualGoogleFont}
-                        className="min-w-0 flex-1 border-0 bg-transparent text-lg font-semibold text-gray-900 outline-none ring-0 placeholder:text-gray-400 focus:ring-0 disabled:opacity-60"
-                        placeholder="Asset name"
-                        aria-label="Asset name"
-                    />
+                    <div
+                        className={`group flex min-w-0 flex-1 items-center gap-2 rounded-lg border px-3 py-2 transition-colors ${
+                            !canEditMetadata || isVirtualGoogleFont
+                                ? 'border-transparent'
+                                : 'border-dashed border-gray-200 bg-gray-50/70 hover:border-gray-300 focus-within:border-solid focus-within:border-indigo-300 focus-within:bg-white focus-within:ring-1 focus-within:ring-indigo-200'
+                        }`}
+                    >
+                        {canEditMetadata && !isVirtualGoogleFont && (
+                            <PencilSquareIcon
+                                className="h-5 w-5 shrink-0 text-gray-400 transition-opacity group-focus-within:text-indigo-500 group-hover:text-gray-500"
+                                aria-hidden
+                            />
+                        )}
+                        <input
+                            type="text"
+                            value={titleDraft}
+                            onChange={(e) => setTitleDraft(e.target.value)}
+                            disabled={!canEditMetadata || isVirtualGoogleFont}
+                            className="min-w-0 flex-1 border-0 bg-transparent text-lg font-semibold text-gray-900 outline-none ring-0 placeholder:text-gray-400 focus:ring-0 disabled:cursor-not-allowed disabled:opacity-60"
+                            placeholder="Asset name — click to edit"
+                            aria-label="Asset name"
+                        />
+                    </div>
                     <button
                         type="button"
                         onClick={onClose}
@@ -559,32 +679,127 @@ export default function ManageAssetModal({
 
                 <div className="flex-shrink-0 border-b border-gray-100">
                     <div className="flex gap-6 px-6 pt-4 text-sm">
-                        {previewTabs.map((t) => (
+                        {mainTabs.map((t) => (
                             <button
                                 key={t.id}
                                 type="button"
-                                onClick={() => setPreviewTab(t.id)}
+                                onClick={() => setMainTab(t.id)}
                                 className={`border-b-2 pb-3 font-medium transition-colors ${
-                                    previewTab === t.id
+                                    mainTab === t.id
                                         ? 'text-gray-900'
                                         : 'border-transparent text-gray-500 hover:text-gray-700'
                                 }`}
                                 style={{
-                                    borderBottomColor: previewTab === t.id ? brandPrimary : 'transparent',
+                                    borderBottomColor: mainTab === t.id ? brandPrimary : 'transparent',
                                 }}
                             >
                                 {t.label}
                             </button>
                         ))}
                     </div>
-                    <div className="flex h-[280px] items-center justify-center bg-gray-100">
-                        <WorkspaceAssetPreview
-                            asset={asset}
-                            tab={previewTab}
-                            thumbnailVersion={thumbnailVersion}
-                            brandPrimary={brandPrimary}
-                        />
-                    </div>
+                    {mainTab === 'details' ? (
+                        <div className="flex min-h-[200px] items-center justify-center bg-gray-50 py-8">
+                            <WorkspaceAssetDetailsContent asset={asset} />
+                        </div>
+                    ) : (
+                        <>
+                            <div className="flex min-h-[280px] max-h-[min(48vh,440px)] w-full items-center justify-center overflow-hidden bg-gray-100 px-4 py-4">
+                                <div className="flex h-full w-full max-h-full max-w-full items-center justify-center">
+                                    {previewVariant === 'quick' && showQuickPreview ? (
+                                        <video
+                                            key={asset.video_preview_url}
+                                            src={asset.video_preview_url}
+                                            controls
+                                            muted
+                                            playsInline
+                                            className="max-h-full max-w-full object-contain"
+                                            preload="metadata"
+                                        />
+                                    ) : previewVariant === 'source' && showSource ? (
+                                        renderSourceFilePreview(asset, originalFileUrl, brandPrimary)
+                                    ) : forcedModeUrl ? (
+                                        <ThumbnailPreview
+                                            asset={asset}
+                                            thumbnailVersion={thumbnailVersion}
+                                            size="lg"
+                                            preferLargeForVector
+                                            forcedImageUrl={forcedModeUrl}
+                                            className="h-full w-full max-h-[min(48vh,440px)]"
+                                            primaryColor={brandPrimary}
+                                            forceObjectFit="contain"
+                                        />
+                                    ) : (
+                                        <ThumbnailPreview
+                                            asset={asset}
+                                            thumbnailVersion={thumbnailVersion}
+                                            size="lg"
+                                            preferLargeForVector
+                                            className="h-full w-full max-h-[min(48vh,440px)]"
+                                            primaryColor={brandPrimary}
+                                            forceObjectFit="contain"
+                                        />
+                                    )}
+                                </div>
+                            </div>
+                            <div className="border-t border-gray-200 bg-gray-50 px-6 py-3">
+                                <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+                                    View
+                                </p>
+                                <div className="flex flex-wrap items-center gap-2">
+                                    <PreviewVariantChip
+                                        label="Preview"
+                                        selected={previewVariant === 'default'}
+                                        onClick={() => setPreviewVariant('default')}
+                                        brandPrimary={brandPrimary}
+                                    />
+                                    {showPipelineOriginal && (
+                                        <PreviewVariantChip
+                                            label="Original"
+                                            selected={previewVariant === 'original'}
+                                            onClick={() => setPreviewVariant('original')}
+                                            brandPrimary={brandPrimary}
+                                        />
+                                    )}
+                                    {showEnhanced && (
+                                        <PreviewVariantChip
+                                            label="Enhanced"
+                                            selected={previewVariant === 'enhanced'}
+                                            onClick={() => setPreviewVariant('enhanced')}
+                                            brandPrimary={brandPrimary}
+                                        />
+                                    )}
+                                    {showPresentation && (
+                                        <PreviewVariantChip
+                                            label="Presentation"
+                                            selected={previewVariant === 'presentation'}
+                                            onClick={() => setPreviewVariant('presentation')}
+                                            brandPrimary={brandPrimary}
+                                        />
+                                    )}
+                                    {showQuickPreview && (
+                                        <PreviewVariantChip
+                                            label="Quick preview"
+                                            selected={previewVariant === 'quick'}
+                                            onClick={() => setPreviewVariant('quick')}
+                                            brandPrimary={brandPrimary}
+                                        />
+                                    )}
+                                    {showSource && (
+                                        <PreviewVariantChip
+                                            label={isVideoAsset ? 'Source video' : 'Source file'}
+                                            selected={previewVariant === 'source'}
+                                            onClick={() => setPreviewVariant('source')}
+                                            brandPrimary={brandPrimary}
+                                        />
+                                    )}
+                                </div>
+                                <p className="mt-2 text-xs text-gray-500">
+                                    Modes appear when generated. <span className="font-medium text-gray-600">Quick preview</span> is
+                                    the short hover MP4. Raster images have no source tab — use Details for the file name.
+                                </p>
+                            </div>
+                        </>
+                    )}
                 </div>
 
                 <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
@@ -600,22 +815,25 @@ export default function ManageAssetModal({
                                             {categoryFieldMeta && (
                                                 <div className="flex items-center justify-between gap-3 border-b border-gray-100 py-2">
                                                     <span className="shrink-0 text-sm text-gray-500">Category</span>
-                                                    <select
-                                                        value={categoryIdDraft ?? ''}
-                                                        onChange={(e) =>
-                                                            setCategoryIdDraft(
-                                                                e.target.value === '' ? '' : e.target.value,
-                                                            )
-                                                        }
-                                                        className="max-w-[70%] cursor-pointer border-0 bg-transparent text-right text-sm text-gray-900 outline-none focus:ring-0"
-                                                    >
-                                                        <option value="">Uncategorized</option>
-                                                        {categories.map((c) => (
-                                                            <option key={c.id} value={String(c.id)}>
-                                                                {c.name}
-                                                            </option>
-                                                        ))}
-                                                    </select>
+                                                    <div className="max-w-[70%] rounded-md border border-dashed border-gray-200 bg-gray-50/80 px-2 py-1 transition-colors hover:border-gray-300 focus-within:border-indigo-300 focus-within:bg-white focus-within:ring-1 focus-within:ring-indigo-200">
+                                                        <select
+                                                            value={categoryIdDraft ?? ''}
+                                                            onChange={(e) =>
+                                                                setCategoryIdDraft(
+                                                                    e.target.value === '' ? '' : e.target.value,
+                                                                )
+                                                            }
+                                                            className="w-full cursor-pointer border-0 bg-transparent text-right text-sm text-gray-900 outline-none focus:ring-0"
+                                                            aria-label="Category"
+                                                        >
+                                                            <option value="">Uncategorized</option>
+                                                            {categories.map((c) => (
+                                                                <option key={c.id} value={String(c.id)}>
+                                                                    {c.name}
+                                                                </option>
+                                                            ))}
+                                                        </select>
+                                                    </div>
                                                 </div>
                                             )}
 

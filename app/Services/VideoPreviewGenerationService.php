@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Asset;
+use App\Support\VideoDisplayProbe;
 use App\Models\StorageBucket;
 use Aws\S3\S3Client;
 use Aws\S3\Exception\S3Exception;
@@ -97,30 +98,47 @@ class VideoPreviewGenerationService
 
             $videoInfo = $this->getVideoInfo($tempPath, $ffmpegPath);
             $duration = $videoInfo['duration'] ?? 0;
-            $width = $videoInfo['width'] ?? 0;
-            $height = $videoInfo['height'] ?? 0;
+            $displayW = $videoInfo['display_width'] ?? 0;
+            $displayH = $videoInfo['display_height'] ?? 0;
+            $rotation = $videoInfo['rotation'] ?? 0;
 
             if ($duration <= 0) {
                 throw new \RuntimeException('Unable to determine video duration');
             }
 
-            if ($width === 0 || $height === 0) {
+            if ($displayW === 0 || $displayH === 0) {
                 throw new \RuntimeException('Unable to determine video dimensions');
             }
 
             Log::info('[VideoPreviewGenerationService] Video info extracted', [
                 'asset_id' => $asset->id,
                 'duration' => $duration,
-                'width' => $width,
-                'height' => $height,
+                'coded_width' => $videoInfo['coded_width'] ?? null,
+                'coded_height' => $videoInfo['coded_height'] ?? null,
+                'display_width' => $displayW,
+                'display_height' => $displayH,
+                'rotation_deg' => $rotation,
             ]);
+
+            // Keep DB in sync with display orientation (fixes admin UI + eligibility that use these columns).
+            try {
+                $asset->update([
+                    'video_width' => $displayW,
+                    'video_height' => $displayH,
+                ]);
+            } catch (\Throwable $e) {
+                Log::warning('[VideoPreviewGenerationService] Could not persist display video dimensions', [
+                    'asset_id' => $asset->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
 
             // Calculate preview segment: 2-4 seconds from middle of video
             $previewDuration = min(4.0, max(2.0, min($duration, 4.0))); // 2-4 seconds, or full video if shorter
             $startTime = max(0, ($duration - $previewDuration) / 2); // Start from middle
 
-            // ~320px wide; height from FFmpeg scale=…:-2 so display aspect matches source (incl. anamorphic / SAR)
-            $targetWidth = 320;
+            // Longest side capped ~320px after rotation is baked; keeps portrait and landscape correct
+            $targetBox = 320;
 
             // Generate preview video
             $previewPath = $this->extractPreviewSegment(
@@ -128,7 +146,8 @@ class VideoPreviewGenerationService
                 $ffmpegPath,
                 $startTime,
                 $previewDuration,
-                $targetWidth
+                $targetBox,
+                $rotation
             );
 
             // Upload preview to S3
@@ -142,7 +161,7 @@ class VideoPreviewGenerationService
                 'asset_id' => $asset->id,
                 's3_path' => $s3PreviewPath,
                 'preview_duration' => $previewDuration,
-                'preview_max_width' => $targetWidth,
+                'preview_max_box' => $targetBox,
             ]);
 
             return $s3PreviewPath;
@@ -161,7 +180,8 @@ class VideoPreviewGenerationService
      * @param string $ffmpegPath Path to FFmpeg executable
      * @param float $startTime Start time in seconds
      * @param float $duration Duration in seconds
-     * @param int $targetWidth Max width in pixels; height follows source display aspect (-2 = even)
+     * @param int $targetBox Max width and height of bounding box; video fits inside preserving aspect
+     * @param int $rotationDeg 0/90/180/270 from VideoDisplayProbe (baked with transpose before scale)
      * @return string Path to generated preview video
      * @throws \RuntimeException If extraction fails
      */
@@ -170,7 +190,8 @@ class VideoPreviewGenerationService
         string $ffmpegPath,
         float $startTime,
         float $duration,
-        int $targetWidth
+        int $targetBox,
+        int $rotationDeg
     ): string {
         $previewPath = tempnam(sys_get_temp_dir(), 'video_preview_') . '.mp4';
 
@@ -178,7 +199,7 @@ class VideoPreviewGenerationService
         // -ss: seek to start time
         // -i: input file
         // -t: duration
-        // -vf: scale width, auto height from display aspect; setsar=1 square output pixels; fps
+        // -vf: transpose* (if rotation tag) then scale to fit inside targetBox×targetBox (portrait-safe)
         // -an: no audio (hover clip only — full source + audio is lightbox / ORIGINAL stream)
         // -c:v libx264: H.264 codec
         // -preset fast: encoding speed/quality balance
@@ -186,15 +207,23 @@ class VideoPreviewGenerationService
         // -movflags +faststart: optimize for web streaming
         // -y: overwrite output file
         $fps = 10; // 10 FPS for preview (smooth enough, smaller file)
-        
+
+        $transpose = VideoDisplayProbe::ffmpegTransposeFilters($rotationDeg);
+        $vfParts = array_values(array_filter([
+            $transpose !== '' ? $transpose : null,
+            sprintf('scale=%d:%d:force_original_aspect_ratio=decrease:flags=lanczos', $targetBox, $targetBox),
+            'setsar=1',
+            sprintf('fps=%d', $fps),
+        ]));
+        $vf = implode(',', $vfParts);
+
         $command = sprintf(
-            '%s -ss %.2f -i %s -t %.2f -vf "scale=%d:-2:flags=lanczos,setsar=1,fps=%d" -an -c:v libx264 -preset fast -crf 28 -movflags +faststart -y %s 2>&1',
+            '%s -ss %.2f -i %s -t %.2f -vf %s -an -c:v libx264 -preset fast -crf 28 -movflags +faststart -y %s 2>&1',
             escapeshellarg($ffmpegPath),
             $startTime,
             escapeshellarg($sourcePath),
             $duration,
-            $targetWidth,
-            $fps,
+            escapeshellarg($vf),
             escapeshellarg($previewPath)
         );
 
@@ -202,7 +231,9 @@ class VideoPreviewGenerationService
             'source_path' => $sourcePath,
             'start_time' => $startTime,
             'duration' => $duration,
-            'target_max_width' => $targetWidth,
+            'target_box' => $targetBox,
+            'rotation_deg' => $rotationDeg,
+            'vf' => $vf,
             'fps' => $fps,
         ]);
 
@@ -405,13 +436,15 @@ class VideoPreviewGenerationService
         }
 
         $duration = (float) ($videoData['format']['duration'] ?? 0);
-        $width = (int) ($videoStream['width'] ?? 0);
-        $height = (int) ($videoStream['height'] ?? 0);
+        $dims = VideoDisplayProbe::dimensionsFromStream($videoStream);
 
         return [
             'duration' => $duration,
-            'width' => $width,
-            'height' => $height,
+            'coded_width' => $dims['width'],
+            'coded_height' => $dims['height'],
+            'display_width' => $dims['display_width'],
+            'display_height' => $dims['display_height'],
+            'rotation' => $dims['rotation'],
         ];
     }
 

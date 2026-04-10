@@ -169,6 +169,22 @@ export default function AssetDetailModal({ data, onClose, onAction, onRefresh, s
                                     </div>
                                 </div>
                             )}
+                            {asset?.is_video && asset?.admin_source_stream_url && !asset?.storage_missing && (
+                                <div className="rounded-lg border border-slate-200 bg-slate-900 p-4 shadow-sm">
+                                    <p className="text-sm font-semibold text-white">Source video (full file)</p>
+                                    <p className="mt-1 text-xs text-slate-400">
+                                        Streams the original upload for this asset (same as Download source file). Use this to confirm true orientation vs the hover clip.
+                                    </p>
+                                    <video
+                                        key={asset.admin_source_stream_url}
+                                        src={asset.admin_source_stream_url}
+                                        controls
+                                        playsInline
+                                        className="mt-3 max-h-[min(55vh,520px)] w-full rounded-md bg-black object-contain"
+                                        preload="metadata"
+                                    />
+                                </div>
+                            )}
                             <div className="grid grid-cols-2 gap-4 text-sm">
                                 <div><span className="text-slate-500">ID</span><br />{asset?.id}</div>
                                 <div>
@@ -220,6 +236,22 @@ export default function AssetDetailModal({ data, onClose, onAction, onRefresh, s
                                 </div>
                                 <div><span className="text-slate-500">Asset type</span><br />{asset?.asset_type?.label ?? '—'}</div>
                                 <div><span className="text-slate-500">Category</span><br />{asset?.category?.name ?? '—'}</div>
+                                {asset?.is_video && (
+                                    <div className="col-span-2">
+                                        <span className="text-slate-500">Video display size</span>
+                                        <span className="sr-only"> — width and height after rotation metadata (not raw coded frame size)</span>
+                                        <br />
+                                        {asset.video_width != null && asset.video_height != null ? (
+                                            <span className="tabular-nums text-slate-800">
+                                                {asset.video_width} × {asset.video_height} px
+                                            </span>
+                                        ) : (
+                                            <span className="text-amber-800 text-xs">
+                                                Not set — run <strong className="font-medium">Re-run Analysis</strong> or regenerate the hover preview to refresh from the file.
+                                            </span>
+                                        )}
+                                    </div>
+                                )}
                                 <div><span className="text-slate-500">Created by</span><br />{asset?.created_by?.name ?? '—'}</div>
                                 <div><span className="text-slate-500">Visible in grid</span><br />
                                     {asset?.visibility?.visible ? (
@@ -453,15 +485,24 @@ export default function AssetDetailModal({ data, onClose, onAction, onRefresh, s
                                         Same clip used on the main asset grid on desktop hover. URL updates when the asset row changes so you are not stuck on a cached file after regeneration.
                                     </p>
                                     {asset.video_preview_view_url ? (
-                                        <video
-                                            key={asset.video_preview_view_url}
-                                            className="mt-3 max-h-72 w-full max-w-lg rounded-md border border-slate-200 bg-black object-contain"
-                                            src={asset.video_preview_view_url}
-                                            controls
-                                            muted
-                                            playsInline
-                                            preload="metadata"
-                                        />
+                                        <div
+                                            className="mt-3 flex max-h-96 w-full max-w-lg justify-center rounded-md border border-slate-200 bg-black"
+                                            style={
+                                                asset.video_width && asset.video_height
+                                                    ? { aspectRatio: `${asset.video_width} / ${asset.video_height}` }
+                                                    : undefined
+                                            }
+                                        >
+                                            <video
+                                                key={asset.video_preview_view_url}
+                                                className="h-full w-full object-contain"
+                                                src={asset.video_preview_view_url}
+                                                controls
+                                                muted
+                                                playsInline
+                                                preload="metadata"
+                                            />
+                                        </div>
                                     ) : (
                                         <p className="mt-3 text-sm text-amber-800 bg-amber-50 border border-amber-100 rounded-md px-3 py-2">
                                             No hover preview file yet. Use <span className="font-medium">Regenerate hover video previews</span> in Asset Operations bulk actions (or the library grid bulk action <span className="font-medium">Generate video previews</span>) after thumbnails exist.
@@ -469,7 +510,9 @@ export default function AssetDetailModal({ data, onClose, onAction, onRefresh, s
                                     )}
                                     {(asset.video_width || asset.video_height) ? (
                                         <p className="mt-2 text-xs text-slate-500 tabular-nums">
-                                            Reported source dimensions: {asset.video_width ?? '—'} × {asset.video_height ?? '—'} px
+                                            Asset display dimensions (rotation-aware): {asset.video_width ?? '—'} ×{' '}
+                                            {asset.video_height ?? '—'} px — used for eligibility and preview layout; regenerate
+                                            hover preview to re-encode the clip if these were wrong.
                                         </p>
                                     ) : null}
                                 </div>

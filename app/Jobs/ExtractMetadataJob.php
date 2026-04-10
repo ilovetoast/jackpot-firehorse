@@ -9,6 +9,7 @@ use App\Models\AssetMetadata;
 use App\Models\AssetVersion;
 use App\Jobs\Concerns\QueuesOnImagesChannel;
 use App\Services\AssetProcessingFailureService;
+use App\Support\VideoDisplayProbe;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -372,13 +373,15 @@ class ExtractMetadataJob implements ShouldQueue
         }
 
         $duration = (float) ($videoData['format']['duration'] ?? 0);
-        $width = (int) ($videoStream['width'] ?? 0);
-        $height = (int) ($videoStream['height'] ?? 0);
+        $dims = VideoDisplayProbe::dimensionsFromStream($videoStream);
 
         return [
             'duration' => $duration,
-            'width' => $width,
-            'height' => $height,
+            'width' => $dims['display_width'],
+            'height' => $dims['display_height'],
+            'coded_width' => $dims['width'],
+            'coded_height' => $dims['height'],
+            'rotation' => $dims['rotation'],
         ];
     }
 
