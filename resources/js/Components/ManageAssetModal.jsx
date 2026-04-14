@@ -666,7 +666,7 @@ export default function ManageAssetModal({
                     </button>
                 </div>
 
-                <div className="flex-shrink-0 border-b border-gray-100">
+                <div className="flex min-h-0 flex-shrink-0 flex-col border-b border-gray-100">
                     <div className="flex gap-6 px-6 pt-4 text-sm">
                         {mainTabs.map((t) => (
                             <button
@@ -692,8 +692,8 @@ export default function ManageAssetModal({
                         </div>
                     ) : (
                         <>
-                            <div className="flex min-h-[280px] w-full items-center justify-center overflow-x-hidden overflow-y-auto bg-gray-100 px-4 py-4 pb-8">
-                                <div className="flex w-full max-w-full flex-col items-center justify-center [&_img]:!h-auto [&_img]:!w-auto [&_img]:max-h-[min(48vh,480px)] [&_img]:max-w-full [&_img]:object-contain [&_video]:max-h-[min(48vh,480px)] [&_video]:w-full [&_video]:max-w-full [&_video]:object-contain">
+                            <div className="flex h-[min(44vh,400px)] min-h-[280px] w-full flex-col overflow-x-hidden overflow-y-auto bg-gray-100 px-4 py-4 pb-8">
+                                <div className="flex h-full min-h-0 w-full flex-1 flex-col items-stretch [&_img]:max-h-full [&_img]:w-auto [&_img]:max-w-full [&_img]:object-contain [&_video]:max-h-full [&_video]:w-full [&_video]:max-w-full [&_video]:object-contain">
                                     {previewVariant === 'quick' && showQuickPreview ? (
                                         <video
                                             key={asset.video_preview_url}
@@ -702,10 +702,12 @@ export default function ManageAssetModal({
                                             muted
                                             playsInline
                                             preload="metadata"
-                                            className="max-h-[min(48vh,480px)] w-full max-w-full object-contain"
+                                            className="h-full min-h-0 w-full max-w-full flex-1 object-contain"
                                         />
                                     ) : previewVariant === 'source' && showSource ? (
-                                        renderSourceFilePreview(asset, originalFileUrl, brandPrimary)
+                                        <div className="flex min-h-[240px] flex-1 flex-col items-center justify-center">
+                                            {renderSourceFilePreview(asset, originalFileUrl, brandPrimary)}
+                                        </div>
                                     ) : forcedModeUrl ? (
                                         <ThumbnailPreview
                                             asset={asset}
@@ -713,7 +715,7 @@ export default function ManageAssetModal({
                                             size="lg"
                                             preferLargeForVector
                                             forcedImageUrl={forcedModeUrl}
-                                            className="!h-auto max-h-[min(48vh,480px)] w-full max-w-full min-h-0"
+                                            className="h-full w-full flex-1"
                                             primaryColor={brandPrimary}
                                             forceObjectFit="contain"
                                         />
@@ -723,7 +725,7 @@ export default function ManageAssetModal({
                                             thumbnailVersion={thumbnailVersion}
                                             size="lg"
                                             preferLargeForVector
-                                            className="!h-auto max-h-[min(48vh,480px)] w-full max-w-full min-h-0"
+                                            className="h-full w-full flex-1"
                                             primaryColor={brandPrimary}
                                             forceObjectFit="contain"
                                         />
@@ -790,7 +792,7 @@ export default function ManageAssetModal({
                         {!isVirtualGoogleFont && canEditMetadata && (
                             <>
                                 <section className="space-y-3 rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
-                                    <SectionTitle>Metadata</SectionTitle>
+                                    <SectionTitle>Fields</SectionTitle>
                                     {metadataSchemaLoading ? (
                                         <p className="text-sm text-gray-500">Loading…</p>
                                     ) : (

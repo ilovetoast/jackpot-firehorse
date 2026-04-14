@@ -1039,7 +1039,7 @@ export default function AssetDetailPanel({
                         {/* Section 2 — Metadata (grouped, section-based edit; expanded by default) */}
                         {!loading && !error && metadata && (
                             <section className={sectionClass} aria-labelledby="section-metadata">
-                                <CollapsibleSection variant={collapsibleVariant} titleInCard={lb} title="Metadata" defaultExpanded={detailSectionDefaultExpanded}>
+                                <CollapsibleSection variant={collapsibleVariant} titleInCard={lb} title="Fields" defaultExpanded={detailSectionDefaultExpanded}>
                                 <div className={metaTabListClass} role="tablist" aria-label="Metadata sections">
                                     <button
                                         type="button"

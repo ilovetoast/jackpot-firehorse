@@ -342,7 +342,7 @@ export default function AssetDetailDrawer({ asset, onClose }) {
                     {/* Metadata Section */}
                     {asset.metadata && asset.metadata.fields && Object.keys(asset.metadata.fields).length > 0 && (
                         <div className="space-y-3 border-t border-gray-200 pt-6">
-                            <h3 className="text-sm font-medium text-gray-900">Metadata</h3>
+                            <h3 className="text-sm font-medium text-gray-900">Fields</h3>
                             <dl className="space-y-3">
                                 {Object.entries(asset.metadata.fields).map(([key, value]) => (
                                     <div key={key}>

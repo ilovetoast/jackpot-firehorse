@@ -44,7 +44,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense } from 'react'
 import { createPortal } from 'react-dom'
-import { XMarkIcon, ArrowPathIcon, ChevronLeftIcon, ChevronRightIcon, ChevronDownIcon, ExclamationTriangleIcon, EyeIcon, ArrowDownTrayIcon, CheckCircleIcon, CheckIcon, ArrowUturnLeftIcon, ClockIcon, XCircleIcon, CloudArrowUpIcon, RectangleStackIcon, TicketIcon, InformationCircleIcon, PhotoIcon, SparklesIcon, InboxIcon } from '@heroicons/react/24/outline'
+import { XMarkIcon, ArrowPathIcon, ChevronLeftIcon, ChevronRightIcon, ChevronDownIcon, ExclamationTriangleIcon, EyeIcon, ArrowDownTrayIcon, CheckCircleIcon, CheckIcon, ArrowUturnLeftIcon, ClockIcon, XCircleIcon, CloudArrowUpIcon, RectangleStackIcon, TicketIcon, InformationCircleIcon, PhotoIcon, SparklesIcon } from '@heroicons/react/24/outline'
 import { usePage, router, Link } from '@inertiajs/react'
 import AssetImage from './AssetImage'
 import AssetTimeline from './AssetTimeline'
@@ -53,6 +53,7 @@ import AssetMetadataDisplay from './AssetMetadataDisplay'
 import PendingMetadataList from './PendingMetadataList'
 import ManageAssetModal from './ManageAssetModal'
 import ThumbnailPreview from './ThumbnailPreview'
+import UploadedFontSpecimenPreview, { isUploadedFontFileAsset } from './UploadedFontSpecimenPreview'
 import ReplaceFileModal from './ReplaceFileModal'
 import CollapsibleSection from './CollapsibleSection'
 import ProcessingActionCard, { formatProcessingLastRunLine } from './ProcessingActionCard'
@@ -106,6 +107,29 @@ import {
     getPreferredExecutionThumbnailTier,
     setPreferredExecutionThumbnailTier,
 } from '../utils/executionPreferredThumbnailStorage'
+
+/** Assets that can appear in the drawer fullscreen carousel / lightbox (includes fonts). */
+function assetSupportsLightboxCarousel(a) {
+    if (!a) {
+        return false
+    }
+    if (a.is_virtual_google_font) {
+        return true
+    }
+    if (isUploadedFontFileAsset(a)) {
+        return true
+    }
+    const ext = (a.file_extension || a.original_filename?.split('.').pop() || '').toUpperCase()
+    const mimeType = a.mime_type || ''
+    const isVideoFile = mimeType.startsWith('video/') || ['MP4', 'MOV', 'AVI', 'MKV', 'WEBM', 'M4V'].includes(ext)
+    return (
+        mimeType.startsWith('image/') ||
+        mimeType === 'application/pdf' ||
+        mimeType === 'image/vnd.adobe.photoshop' ||
+        (isVideoFile && (a.video_poster_url || a.thumbnail_url || a.final_thumbnail_url)) ||
+        ['JPG', 'JPEG', 'PNG', 'GIF', 'WEBP', 'SVG', 'BMP', 'TIF', 'TIFF', 'PDF', 'PSD', 'PSB'].includes(ext)
+    )
+}
 
 /**
  * Best delivery URL for a pipeline mode (large → medium → thumb). No fallback to original/preferred.
@@ -474,21 +498,11 @@ export default function AssetDrawer({
     const [toastType, setToastType] = useState('success')
     const [toastTicketUrl, setToastTicketUrl] = useState(null)
     
-    // Phase 3.1: Get assets with thumbnail support or video support for carousel (images, PDFs, PSDs, and videos)
+    // Phase 3.1: Carousel + fullscreen assets (images, PDFs, PSDs, videos with posters, Google Fonts rows, uploaded fonts)
     const imageAssets = useMemo(() => {
         const safe = (assets || []).filter(Boolean)
         if (safe.length === 0) return []
-        return safe.filter(a => {
-            const ext = (a.file_extension || a.original_filename?.split('.').pop() || '').toUpperCase()
-            const mimeType = a.mime_type || ''
-            const isVideoFile = mimeType.startsWith('video/') || ['MP4', 'MOV', 'AVI', 'MKV', 'WEBM', 'M4V'].includes(ext)
-            // Include images, PDFs, PSDs (all support thumbnail generation), and videos with posters
-            return mimeType.startsWith('image/') || 
-                   mimeType === 'application/pdf' ||
-                   mimeType === 'image/vnd.adobe.photoshop' || // PSD/PSB files
-                   (isVideoFile && (a.video_poster_url || a.thumbnail_url || a.final_thumbnail_url)) ||
-                   ['JPG', 'JPEG', 'PNG', 'GIF', 'WEBP', 'SVG', 'BMP', 'TIF', 'TIFF', 'PDF', 'PSD', 'PSB'].includes(ext)
-        })
+        return safe.filter((a) => assetSupportsLightboxCarousel(a))
     }, [assets])
 
     // Phase 3.1: Carousel state for zoom modal
@@ -1030,14 +1044,12 @@ export default function AssetDrawer({
         setDrawerReviewSlots((s) => ({ ...s, ai_tags: state }))
     }, [])
 
+    /** Shown when metadata/tag review slots are resolved and neither has items (EBI may still render above). */
     const showDrawerReviewEmptyState = useMemo(() => {
         if (!showRevueCollapsible || externalCollectionGuest || isVirtualGoogleFont) {
             return false
         }
         if (pipelineBannerForRevue) {
-            return false
-        }
-        if (ebiEnabledForAsset) {
             return false
         }
         const { metadata_candidates: m, ai_tags: t } = drawerReviewSlots
@@ -1053,7 +1065,6 @@ export default function AssetDrawer({
         externalCollectionGuest,
         isVirtualGoogleFont,
         pipelineBannerForRevue,
-        ebiEnabledForAsset,
         drawerReviewSlots,
     ])
 
@@ -1299,6 +1310,9 @@ export default function AssetDrawer({
 
     const lightboxCarouselIsRasterImage = useMemo(() => {
         if (!currentCarouselAsset?.id || currentCarouselAsset?.is_virtual_google_font) {
+            return false
+        }
+        if (isUploadedFontFileAsset(currentCarouselAsset)) {
             return false
         }
         const mime = currentCarouselAsset.mime_type || ''
@@ -2324,19 +2338,14 @@ export default function AssetDrawer({
         setPreviewStyleMode((p) => (p === 'preferred' ? 'original' : p))
     }, [isExecutionDrawer, displayAsset?.id])
 
-    const isFontFile = useMemo(() => {
-        if (!displayAsset || displayAsset.is_virtual_google_font) return false
-        const mime = (displayAsset.mime_type || '').toLowerCase()
-        const ext = (displayAsset.file_extension || displayAsset.original_filename?.split('.').pop() || '').toLowerCase()
-        return mime.startsWith('font/') || ['woff2', 'woff', 'ttf', 'otf', 'eot'].includes(ext)
-    }, [displayAsset])
+    const isFontFile = useMemo(() => isUploadedFontFileAsset(displayAsset), [displayAsset])
 
     // Grid double-click: jump straight to fullscreen zoom (same modal as "Click to zoom" in drawer)
     // Search moment match: same path + seek once the /view URL is ready (pendingLightboxSeekSeconds effect)
     useEffect(() => {
         if (!initialZoomOpen || !displayAsset?.id) return
         if (initialZoomAppliedRef.current) return
-        if (!(hasThumbnailSupport || isVideo || isVirtualGoogleFont)) {
+        if (!(hasThumbnailSupport || isVideo || isVirtualGoogleFont || isFontFile)) {
             initialZoomAppliedRef.current = true
             onInitialZoomConsumed?.()
             return
@@ -2361,6 +2370,7 @@ export default function AssetDrawer({
         hasThumbnailSupport,
         isVideo,
         isVirtualGoogleFont,
+        isFontFile,
         imageAssets,
         onInitialZoomConsumed,
         initialVideoSeekSeconds,
@@ -4082,6 +4092,12 @@ export default function AssetDrawer({
                                         </div>
                                     )}
                                 </div>
+                            ) : isFontFile && displayAsset.id ? (
+                                <UploadedFontSpecimenPreview
+                                    asset={displayAsset}
+                                    variant="drawer"
+                                    disableFontLoad={externalCollectionGuest}
+                                />
                             ) : hasThumbnailSupport && displayAsset.id ? (
                                 // Assets with thumbnail support (images and PDFs): Use ThumbnailPreview with state machine
                                 // Use displayAsset (with live updates) instead of prop asset
@@ -4880,10 +4896,10 @@ export default function AssetDrawer({
                     </div>
                 )}
 
-                {/* Tags and Metadata — virtual Google Fonts: read-only summary (no asset API id) */}
+                {/* Tags and Fields — virtual Google Fonts: read-only summary (no asset API id) */}
                 {displayAsset?.id && isVirtualGoogleFont && (
                     <div className="border-t border-gray-200">
-                        <CollapsibleSection contentInset="flush" title="Metadata" defaultExpanded={false}>
+                        <CollapsibleSection contentInset="flush" title="Fields" defaultExpanded={false}>
                             <dl className="space-y-3 text-sm text-gray-700">
                                 <div>
                                     <dt className="font-medium text-gray-900">Source</dt>
@@ -4911,7 +4927,7 @@ export default function AssetDrawer({
                     </div>
                 )}
 
-                {/* Tags and Metadata */}
+                {/* Tags and Fields */}
                 {displayAsset?.id && !isVirtualGoogleFont && (
                     <div className="border-t border-gray-200 space-y-4">
                         {displayAsset?.id &&
@@ -5047,35 +5063,31 @@ export default function AssetDrawer({
                                             onDrawerReviewSlotState={onAiTagsDrawerReviewSlotState}
                                         />
                                         {showDrawerReviewEmptyState && (
-                                            <div className="rounded-lg border border-violet-100 bg-gradient-to-br from-violet-50/80 to-slate-50/90 p-4">
-                                                <div className="flex gap-3">
-                                                    <div
-                                                        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-violet-100 text-violet-700"
-                                                        aria-hidden
-                                                    >
-                                                        <InboxIcon className="h-5 w-5" />
-                                                    </div>
-                                                    <div className="min-w-0">
-                                                        <p className="text-[10px] font-semibold uppercase tracking-wide text-violet-700">
-                                                            Review
-                                                        </p>
-                                                        <p className="mt-1 text-sm font-semibold text-gray-900">
-                                                            Nothing to review right now
-                                                        </p>
-                                                        <p className="mt-1.5 text-xs leading-relaxed text-gray-600">
-                                                            There are no pending metadata suggestions or AI tag ideas for
-                                                            this file. When the system finds something to confirm, it will
-                                                            show up here—same as library-wide review flows.
-                                                        </p>
-                                                    </div>
+                                            <div
+                                                className="flex flex-col items-center justify-center rounded-xl border border-slate-200/80 bg-slate-50/60 px-5 py-10 text-center"
+                                                role="status"
+                                            >
+                                                <div
+                                                    className="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl border border-slate-200/90 bg-white/80 text-slate-300"
+                                                    aria-hidden
+                                                >
+                                                    <SparklesIcon className="h-6 w-6 stroke-[1]" />
                                                 </div>
+                                                <p className="text-sm font-medium text-slate-700">
+                                                    Nothing to review for this asset right now
+                                                </p>
+                                                <p className="mt-2 max-w-sm text-xs leading-relaxed text-slate-500">
+                                                    There are no pending metadata suggestions or AI tag ideas here.
+                                                    When something needs your attention, it will appear in this
+                                                    section.
+                                                </p>
                                             </div>
                                         )}
                                     </div>
                                 </CollapsibleSection>
                             )}
 
-                        <CollapsibleSection contentInset="flush" title="Metadata" defaultExpanded={false}>
+                        <CollapsibleSection contentInset="flush" title="Fields" defaultExpanded={false}>
                             <div className="space-y-3">
                             {/* Step 2: Pending Metadata Section - Moved above standard metadata list */}
                             {/* Phase M-2: Only show pending metadata if metadata approval is enabled for company + brand */}
@@ -6457,7 +6469,11 @@ export default function AssetDrawer({
             />
 
             {/* Lightbox: media + optional right column (AssetDetailPanel) */}
-            {showZoomModal && (hasThumbnailSupport || isVideo || displayAsset?.is_virtual_google_font) && (currentCarouselAsset?.id || displayAsset?.id) && typeof document !== 'undefined' && createPortal(
+            {showZoomModal &&
+                assetSupportsLightboxCarousel(currentCarouselAsset || displayAsset) &&
+                (currentCarouselAsset?.id || displayAsset?.id) &&
+                typeof document !== 'undefined' &&
+                createPortal(
                 <div
                     className="fixed inset-0 z-[10050] isolate flex min-h-0 w-full max-h-[100dvh] flex-col overflow-hidden md:flex-row md:items-stretch"
                     style={{ backgroundColor: 'rgb(0 0 0 / 0.92)' }}
@@ -6546,6 +6562,15 @@ export default function AssetDrawer({
                                             </p>
                                         )}
                                     </div>
+                                )
+                            }
+                            if (isUploadedFontFileAsset(currentCarouselAsset)) {
+                                return (
+                                    <UploadedFontSpecimenPreview
+                                        asset={currentCarouselAsset}
+                                        variant="lightbox"
+                                        disableFontLoad={externalCollectionGuest}
+                                    />
                                 )
                             }
                             const currentMimeType = currentCarouselAsset.mime_type || ''
