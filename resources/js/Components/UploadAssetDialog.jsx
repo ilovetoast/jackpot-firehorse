@@ -4508,7 +4508,7 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                                         onCategoryChange={handleCategoryChangeV2}
                                         disabled={batchStatus === 'finalizing' || isFinalizeSuccess}
                                         inline
-                                        inputClassName="flex-1 min-w-0 max-w-sm"
+                                        inputClassName="min-w-0 flex-1"
                                     />
                                 </div>
 

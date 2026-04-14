@@ -11,14 +11,13 @@ use Illuminate\Database\Seeder;
  *
  * Seeds only system category templates (no brand categories).
  * New brands receive copies of templates where auto_provision=true via SystemCategoryService::syncToBrand.
- * Admin-created templates default to auto_provision=false (catalog-only) unless toggled in admin.
  *
- * Each seeded template sets auto_provision=true so core folders (Logos, Photography, …) stay on new brands.
- * Each template has explicit version = 1 (template rows are updated in place; no tenant version upgrade flow).
- * Default enabled fields (collection, tags) are configured in metadata_category_defaults.
+ * Broad noun categories; subtype detail lives in metadata fields (see metadata_category_defaults.php).
  *
- * ASSET: Logos, Photography, Graphics, Video, Fonts (hidden)
- * DELIVERABLE: Print, Digital, OOH, Events, Videos, Sales Collateral, PR, Packaging, Product Renders, Radio
+ * ASSET: Photography, Graphics, Logos, Video, Audio, Documents, Templates, Fonts, 3D Models, Illustrations, Brand Elements
+ * DELIVERABLE: Social, Digital, Print, Video Campaigns, Packaging, OOH / Environmental, Sales Collateral, PR / Communications,
+ *               Events / Experiential, Web / Landing Pages, Email
+ * LEGACY (no auto-provision): Product Renders, Radio
  */
 class SystemCategoryTemplateSeeder extends Seeder
 {
@@ -28,10 +27,10 @@ class SystemCategoryTemplateSeeder extends Seeder
     public function run(): void
     {
         $templates = [
-            // ASSET asset type system categories
+            // --- Assets ---
             [
-                'name' => 'Logos',
-                'slug' => 'logos',
+                'name' => 'Photography',
+                'slug' => 'photography',
                 'asset_type' => AssetType::ASSET,
                 'is_private' => false,
                 'is_hidden' => false,
@@ -39,8 +38,8 @@ class SystemCategoryTemplateSeeder extends Seeder
                 'version' => 1,
             ],
             [
-                'name' => 'Photography',
-                'slug' => 'photography',
+                'name' => 'Graphics',
+                'slug' => 'graphics',
                 'asset_type' => AssetType::ASSET,
                 'is_private' => false,
                 'is_hidden' => false,
@@ -48,8 +47,8 @@ class SystemCategoryTemplateSeeder extends Seeder
                 'version' => 1,
             ],
             [
-                'name' => 'Graphics',
-                'slug' => 'graphics',
+                'name' => 'Logos',
+                'slug' => 'logos',
                 'asset_type' => AssetType::ASSET,
                 'is_private' => false,
                 'is_hidden' => false,
@@ -66,18 +65,72 @@ class SystemCategoryTemplateSeeder extends Seeder
                 'version' => 1,
             ],
             [
+                'name' => 'Audio',
+                'slug' => 'audio',
+                'asset_type' => AssetType::ASSET,
+                'is_private' => false,
+                'is_hidden' => false,
+                'sort_order' => 4,
+                'version' => 1,
+            ],
+            [
+                'name' => 'Documents',
+                'slug' => 'documents',
+                'asset_type' => AssetType::ASSET,
+                'is_private' => false,
+                'is_hidden' => false,
+                'sort_order' => 5,
+                'version' => 1,
+            ],
+            [
+                'name' => 'Templates',
+                'slug' => 'templates',
+                'asset_type' => AssetType::ASSET,
+                'is_private' => false,
+                'is_hidden' => false,
+                'sort_order' => 6,
+                'version' => 1,
+            ],
+            [
                 'name' => 'Fonts',
                 'slug' => 'fonts',
                 'asset_type' => AssetType::ASSET,
                 'is_private' => false,
                 'is_hidden' => true,
-                'sort_order' => 4,
+                'sort_order' => 7,
                 'version' => 1,
             ],
-            // Execution/Deliverable asset type system categories (exactly 10)
             [
-                'name' => 'Print',
-                'slug' => 'print',
+                'name' => '3D Models',
+                'slug' => 'model-3d',
+                'asset_type' => AssetType::ASSET,
+                'is_private' => false,
+                'is_hidden' => false,
+                'sort_order' => 8,
+                'version' => 1,
+            ],
+            [
+                'name' => 'Illustrations',
+                'slug' => 'illustrations',
+                'asset_type' => AssetType::ASSET,
+                'is_private' => false,
+                'is_hidden' => false,
+                'sort_order' => 9,
+                'version' => 1,
+            ],
+            [
+                'name' => 'Brand Elements',
+                'slug' => 'brand-elements',
+                'asset_type' => AssetType::ASSET,
+                'is_private' => false,
+                'is_hidden' => false,
+                'sort_order' => 10,
+                'version' => 1,
+            ],
+            // --- Deliverables / executions ---
+            [
+                'name' => 'Social',
+                'slug' => 'social',
                 'asset_type' => AssetType::DELIVERABLE,
                 'is_private' => false,
                 'is_hidden' => false,
@@ -94,8 +147,8 @@ class SystemCategoryTemplateSeeder extends Seeder
                 'version' => 1,
             ],
             [
-                'name' => 'OOH',
-                'slug' => 'ooh',
+                'name' => 'Print',
+                'slug' => 'print',
                 'asset_type' => AssetType::DELIVERABLE,
                 'is_private' => false,
                 'is_hidden' => false,
@@ -103,39 +156,12 @@ class SystemCategoryTemplateSeeder extends Seeder
                 'version' => 1,
             ],
             [
-                'name' => 'Events',
-                'slug' => 'events',
-                'asset_type' => AssetType::DELIVERABLE,
-                'is_private' => false,
-                'is_hidden' => false,
-                'sort_order' => 3,
-                'version' => 1,
-            ],
-            [
-                'name' => 'Videos',
+                'name' => 'Video Campaigns',
                 'slug' => 'videos',
                 'asset_type' => AssetType::DELIVERABLE,
                 'is_private' => false,
                 'is_hidden' => false,
-                'sort_order' => 4,
-                'version' => 1,
-            ],
-            [
-                'name' => 'Sales Collateral',
-                'slug' => 'sales-collateral',
-                'asset_type' => AssetType::DELIVERABLE,
-                'is_private' => false,
-                'is_hidden' => false,
-                'sort_order' => 5,
-                'version' => 1,
-            ],
-            [
-                'name' => 'PR',
-                'slug' => 'pr',
-                'asset_type' => AssetType::DELIVERABLE,
-                'is_private' => false,
-                'is_hidden' => false,
-                'sort_order' => 6,
+                'sort_order' => 3,
                 'version' => 1,
             ],
             [
@@ -144,12 +170,39 @@ class SystemCategoryTemplateSeeder extends Seeder
                 'asset_type' => AssetType::DELIVERABLE,
                 'is_private' => false,
                 'is_hidden' => false,
+                'sort_order' => 4,
+                'version' => 1,
+            ],
+            [
+                'name' => 'OOH / Environmental',
+                'slug' => 'ooh',
+                'asset_type' => AssetType::DELIVERABLE,
+                'is_private' => false,
+                'is_hidden' => false,
+                'sort_order' => 5,
+                'version' => 1,
+            ],
+            [
+                'name' => 'Sales Collateral',
+                'slug' => 'sales-collateral',
+                'asset_type' => AssetType::DELIVERABLE,
+                'is_private' => false,
+                'is_hidden' => false,
+                'sort_order' => 6,
+                'version' => 1,
+            ],
+            [
+                'name' => 'PR / Communications',
+                'slug' => 'pr',
+                'asset_type' => AssetType::DELIVERABLE,
+                'is_private' => false,
+                'is_hidden' => false,
                 'sort_order' => 7,
                 'version' => 1,
             ],
             [
-                'name' => 'Product Renders',
-                'slug' => 'product-renders',
+                'name' => 'Events / Experiential',
+                'slug' => 'events',
                 'asset_type' => AssetType::DELIVERABLE,
                 'is_private' => false,
                 'is_hidden' => false,
@@ -157,15 +210,43 @@ class SystemCategoryTemplateSeeder extends Seeder
                 'version' => 1,
             ],
             [
-                'name' => 'Radio',
-                'slug' => 'radio',
+                'name' => 'Web / Landing Pages',
+                'slug' => 'web',
                 'asset_type' => AssetType::DELIVERABLE,
                 'is_private' => false,
                 'is_hidden' => false,
                 'sort_order' => 9,
                 'version' => 1,
             ],
-            // REFERENCE asset type: Brand Builder reference materials (hidden from normal libraries)
+            [
+                'name' => 'Email',
+                'slug' => 'email',
+                'asset_type' => AssetType::DELIVERABLE,
+                'is_private' => false,
+                'is_hidden' => false,
+                'sort_order' => 10,
+                'version' => 1,
+            ],
+            // Legacy deliverable folders (existing tenants only; not auto-provisioned for new brands)
+            [
+                'name' => 'Product Renders',
+                'slug' => 'product-renders',
+                'asset_type' => AssetType::DELIVERABLE,
+                'is_private' => false,
+                'is_hidden' => true,
+                'sort_order' => 11,
+                'version' => 1,
+            ],
+            [
+                'name' => 'Radio',
+                'slug' => 'radio',
+                'asset_type' => AssetType::DELIVERABLE,
+                'is_private' => false,
+                'is_hidden' => true,
+                'sort_order' => 12,
+                'version' => 1,
+            ],
+            // Reference (Brand Builder)
             [
                 'name' => 'Reference Material',
                 'slug' => 'reference_material',
@@ -178,7 +259,10 @@ class SystemCategoryTemplateSeeder extends Seeder
         ];
 
         foreach ($templates as $template) {
-            $row = array_merge($template, ['auto_provision' => true]);
+            $autoProvision = ! ($template['asset_type'] === AssetType::DELIVERABLE
+                && in_array($template['slug'], ['product-renders', 'radio'], true));
+
+            $row = array_merge($template, ['auto_provision' => $autoProvision]);
 
             SystemCategory::firstOrCreate(
                 [
@@ -190,17 +274,19 @@ class SystemCategoryTemplateSeeder extends Seeder
             );
         }
 
-        // Normalize v1 seeded rows if they already existed before auto_provision was added to firstOrCreate attributes
         foreach ($templates as $template) {
+            $autoProvision = ! ($template['asset_type'] === AssetType::DELIVERABLE
+                && in_array($template['slug'], ['product-renders', 'radio'], true));
+
             SystemCategory::where('slug', $template['slug'])
                 ->where('asset_type', $template['asset_type'])
                 ->where('version', 1)
-                ->update(['auto_provision' => true]);
+                ->update([
+                    'name' => $template['name'],
+                    'is_hidden' => $template['is_hidden'],
+                    'sort_order' => $template['sort_order'],
+                    'auto_provision' => $autoProvision,
+                ]);
         }
-
-        // Rename "Digital Ads" to "Digital" (slug stays digital-ads for config compatibility)
-        SystemCategory::where('asset_type', AssetType::DELIVERABLE)
-            ->where('slug', 'digital-ads')
-            ->update(['name' => 'Digital']);
     }
 }

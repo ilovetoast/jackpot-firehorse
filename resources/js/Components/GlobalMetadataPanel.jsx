@@ -100,11 +100,15 @@ export default function GlobalMetadataPanel({
     if (inline) {
         return (
             <div className={className}>
-                <div className="flex items-center gap-2 min-w-0">
-                    <label htmlFor="category-select" className="flex-shrink-0 w-24 text-sm font-medium text-gray-700 whitespace-nowrap">
+                {/* Match Upload/MetadataFieldInput label rail (w-56) so controls align with Graphic Type, Tags, etc. */}
+                <div className="flex min-w-0 items-start gap-2">
+                    <label
+                        htmlFor="category-select"
+                        className="w-56 flex-shrink-0 pt-0.5 text-sm font-medium text-gray-700"
+                    >
                         Category: <span className="text-red-500">*</span>
                     </label>
-                    <div className={inputClassName || 'flex-1 min-w-0'}>
+                    <div className={inputClassName || 'min-w-0 flex-1'}>
                         <select
                             id="category-select"
                             value={context.categoryId || ''}

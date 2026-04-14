@@ -618,10 +618,10 @@ class UploadMetadataSchemaResolverTest extends TestCase
         $this->assertContains('technical', $groupKeys);
         $this->assertContains('general', $groupKeys, 'Null group_key should map to "general"');
 
-        // Verify groups are sorted (stable order)
-        $this->assertEquals('creative', $uploadSchema['groups'][0]['key'], 'Groups should be sorted');
-        $this->assertEquals('general', $uploadSchema['groups'][1]['key']);
-        $this->assertEquals('technical', $uploadSchema['groups'][2]['key']);
+        // Verify groups use upload display order (creative → technical → general; custom would be last)
+        $this->assertEquals('creative', $uploadSchema['groups'][0]['key'], 'Creative group first');
+        $this->assertEquals('technical', $uploadSchema['groups'][1]['key']);
+        $this->assertEquals('general', $uploadSchema['groups'][2]['key']);
 
         // Verify group labels
         $creativeGroup = collect($uploadSchema['groups'])->firstWhere('key', 'creative');

@@ -32,6 +32,11 @@ return [
             'audio_type',
             'model_3d_type',
             'product_render_type',
+            'social_format',
+            'social_platform',
+            'email_type',
+            'web_type',
+            'channel_platform',
         ],
         'shared_defaults' => [
             'is_primary' => true,

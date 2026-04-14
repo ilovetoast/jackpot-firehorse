@@ -30,6 +30,95 @@ import ProcessingActionCard from './ProcessingActionCard'
 
 const EASING_TOOLBAR = 'cubic-bezier(0.16, 1, 0.3, 1)'
 
+/** Creative super-section: metadata, names, and Video AI */
+const CREATIVE_BULK_GROUP_LABELS = new Set(['Metadata', 'Names'])
+
+function partitionBulkModalGroups(groups) {
+    const general = []
+    const creative = []
+    for (const g of groups) {
+        if (CREATIVE_BULK_GROUP_LABELS.has(g.label)) {
+            creative.push(g)
+        } else {
+            general.push(g)
+        }
+    }
+    return { general, creative }
+}
+
+/** Compact rail header — matches metadata / bulk density */
+function BulkModalSuperSection({ title, children }) {
+    return (
+        <section className="space-y-3">
+            <div className="flex items-center gap-2 border-b border-gray-200 pb-1.5">
+                <h2 className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">{title}</h2>
+            </div>
+            <div className="space-y-5">{children}</div>
+        </section>
+    )
+}
+
+function BulkActionGroupBlock({ group, groupIndex, onPick }) {
+    return (
+        <div className="space-y-2">
+            {groupIndex > 0 && group.label === 'Trash' && <div className="border-t border-gray-100 pt-4 -mt-1" />}
+            <div className="flex flex-wrap items-end justify-between gap-x-3 gap-y-0.5">
+                <h3 className="text-xs font-semibold text-gray-800">{group.label}</h3>
+                {group.sectionDescription ? (
+                    <p className="max-w-full text-[11px] leading-snug text-gray-500 sm:max-w-[70%] sm:text-right">
+                        {group.sectionDescription}
+                    </p>
+                ) : null}
+            </div>
+            <div
+                className={
+                    group.validActions.length === 1
+                        ? 'mt-1.5 flex justify-start'
+                        : 'mt-1.5 grid grid-cols-[repeat(auto-fill,minmax(13.5rem,1fr))] gap-2.5'
+                }
+            >
+                {group.validActions.map((action) => {
+                    const { id, label, helper, icon: Icon, warningTint, dangerTint } = action
+                    return (
+                        <button
+                            key={id}
+                            type="button"
+                            onClick={() => onPick(id)}
+                            className={`flex w-full items-start gap-2.5 rounded-lg border border-gray-100 bg-white p-3 text-left shadow-sm transition-all duration-150 ease-out hover:-translate-y-px hover:shadow-md active:scale-[0.99] active:duration-75 ${
+                                group.validActions.length === 1 ? 'max-w-sm' : ''
+                            } ${
+                                warningTint
+                                    ? 'hover:bg-amber-50/80'
+                                    : dangerTint
+                                      ? 'hover:bg-red-50/80'
+                                      : 'hover:bg-gray-50/80'
+                            }`}
+                        >
+                            <span
+                                className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md ${
+                                    warningTint ? 'bg-amber-100' : dangerTint ? 'bg-red-100' : 'bg-gray-100'
+                                }`}
+                            >
+                                <Icon
+                                    className={`h-4 w-4 ${
+                                        warningTint ? 'text-amber-600' : dangerTint ? 'text-red-600' : 'text-gray-600'
+                                    }`}
+                                />
+                            </span>
+                            <div className="min-w-0 pt-0.5">
+                                <span className="block text-xs font-semibold text-gray-900">{label}</span>
+                                {helper ? (
+                                    <span className="mt-0.5 block text-[11px] leading-snug text-gray-500">{helper}</span>
+                                ) : null}
+                            </div>
+                        </button>
+                    )
+                })}
+            </div>
+        </div>
+    )
+}
+
 const RENAME_ASSETS_ACTION = 'RENAME_ASSETS'
 
 const SITE_RERUN_THUMBNAILS = 'SITE_RERUN_THUMBNAILS'
@@ -401,6 +490,11 @@ export default function BulkActionsModal({
         return g
     }, [validIds, categories, bulkCategoriesByAssetType, n, canBulkRename, canBulkRemoveTags])
 
+    const { general: generalBulkGroups, creative: creativeBulkGroups } = useMemo(
+        () => partitionBulkModalGroups(groupsWithValidActions),
+        [groupsWithValidActions],
+    )
+
     const renamePreview = useMemo(() => {
         if (!bulkRenameBase.trim() || n < 2) return []
         const base = bulkRenameBase.trim()
@@ -622,192 +716,164 @@ export default function BulkActionsModal({
                                 transform: stepEntered ? 'translateX(0)' : 'translateX(8px)',
                             }}
                         >
-                            <div className="space-y-6">
-                                {groupsWithValidActions.map((group, gIdx) => (
-                                    <div key={group.label} className="space-y-4">
-                                        {gIdx > 0 && group.label === 'Trash' && (
-                                            <div className="border-t border-gray-100 pt-6 -mt-2" />
-                                        )}
-                                        <div className="space-y-1">
-                                            <h3 className="text-sm font-semibold text-gray-700">
-                                                {group.label}
-                                            </h3>
-                                            {group.sectionDescription && (
-                                                <p className="text-xs text-gray-500 leading-tight">
-                                                    {group.sectionDescription}
+                            <div className="space-y-8">
+                                {(generalBulkGroups.length > 0 || canSiteAdminPipeline) && (
+                                    <BulkModalSuperSection title="General">
+                                        {generalBulkGroups.map((group, gIdx) => (
+                                            <BulkActionGroupBlock
+                                                key={group.label}
+                                                group={group}
+                                                groupIndex={gIdx}
+                                                onPick={handleSelectAction}
+                                            />
+                                        ))}
+                                        {canSiteAdminPipeline && (
+                                            <div className="rounded-xl border border-gray-200 bg-gray-50/60 p-3.5 shadow-sm">
+                                                <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 border-b border-gray-200/80 pb-1.5">
+                                                    <span className="inline-flex items-center rounded bg-indigo-600 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">
+                                                        Admin
+                                                    </span>
+                                                    <h3 className="text-xs font-semibold text-gray-800">
+                                                        Processing &amp; Automation
+                                                    </h3>
+                                                </div>
+                                                <p className="mt-2 text-[11px] leading-snug text-gray-600">
+                                                    Site admin or engineering only. Matches per-asset drawer tools. Max{' '}
+                                                    {MAX_BULK_PIPELINE_ASSETS} assets; the server dispatches in chunks of 10 with a short
+                                                    delay between chunks.{' '}
+                                                    <span className="font-medium text-amber-800">
+                                                        Background jobs — may take several minutes.
+                                                    </span>
                                                 </p>
-                                            )}
-                                        </div>
-                                        <div
-                                            className={
-                                                group.validActions.length === 1
-                                                    ? 'mt-3 flex justify-start'
-                                                    : 'mt-3 grid grid-cols-[repeat(auto-fill,minmax(14rem,1fr))] gap-3'
-                                            }
-                                        >
-                                            {group.validActions.map((action) => {
-                                                const { id, label, helper, icon: Icon, warningTint, dangerTint } = action
-                                                return (
-                                                    <button
-                                                        key={id}
-                                                        type="button"
-                                                        onClick={() => handleSelectAction(id)}
-                                                        className={`flex w-full items-center gap-3 p-3.5 text-left rounded-xl bg-white shadow-sm border border-gray-100 transition-all duration-150 ease-out hover:shadow-md hover:-translate-y-px active:scale-[0.98] active:duration-75 ${
-                                                            group.validActions.length === 1 ? 'max-w-sm' : ''
-                                                        } ${
-                                                            warningTint
-                                                                ? 'hover:bg-amber-50/80'
-                                                                : dangerTint
-                                                                ? 'hover:bg-red-50/80'
-                                                                : 'hover:bg-gray-50/80'
-                                                        }`}
-                                                    >
-                                                        <span
-                                                            className={`flex items-center justify-center w-8 h-8 rounded-lg shrink-0 ${
-                                                                warningTint ? 'bg-amber-100' : dangerTint ? 'bg-red-100' : 'bg-gray-100'
-                                                            }`}
-                                                        >
-                                                            <Icon
-                                                                className={`w-4 h-4 ${
-                                                                    warningTint ? 'text-amber-600' : dangerTint ? 'text-red-600' : 'text-gray-600'
-                                                                }`}
-                                                            />
+                                                {pipelineSelectionOverLimit && (
+                                                    <div className="mt-2 flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-900">
+                                                        <ExclamationTriangleIcon className="h-3.5 w-3.5 shrink-0" />
+                                                        <span>
+                                                            Select at most {MAX_BULK_PIPELINE_ASSETS} assets to use processing actions.
                                                         </span>
-                                                        <div className="min-w-0">
-                                                            <span className="block text-sm font-medium text-gray-900">
-                                                                {label}
-                                                            </span>
-                                                            {helper && (
-                                                                <span className="block text-xs text-gray-500 leading-snug mt-0.5">
-                                                                    {helper}
-                                                                </span>
-                                                            )}
-                                                        </div>
-                                                    </button>
-                                                )
-                                            })}
-                                        </div>
+                                                    </div>
+                                                )}
+                                                <div className="mt-2.5 grid grid-cols-1 gap-2">
+                                                    <ProcessingActionCard
+                                                        compact
+                                                        icon="sparkles"
+                                                        title="Improve AI tags"
+                                                        description="Refresh AI suggestions and tags"
+                                                        onClick={() => handleSelectAction(SITE_RERUN_AI_METADATA_TAGGING)}
+                                                        disabled={pipelineSelectionOverLimit}
+                                                    />
+                                                    <ProcessingActionCard
+                                                        compact
+                                                        icon="photo"
+                                                        title="Refresh previews"
+                                                        description="Rebuild thumbnails and preview images"
+                                                        onClick={() => handleSelectAction(SITE_RERUN_THUMBNAILS)}
+                                                        disabled={pipelineSelectionOverLimit}
+                                                    />
+                                                    <ProcessingActionCard
+                                                        compact
+                                                        icon="video"
+                                                        title="Generate video previews"
+                                                        description="Rebuild hover/quick preview MP4s with correct phone/MOV rotation"
+                                                        onClick={() => handleSelectAction(SITE_GENERATE_VIDEO_PREVIEWS)}
+                                                        disabled={pipelineSelectionOverLimit}
+                                                    />
+                                                    <ProcessingActionCard
+                                                        compact
+                                                        icon="trash"
+                                                        title="Delete video quick previews"
+                                                        description="Remove hover MP4 from storage and clear paths (no regeneration)"
+                                                        variant="danger"
+                                                        onClick={() => handleSelectAction(SITE_DELETE_VIDEO_PREVIEWS)}
+                                                        disabled={pipelineSelectionOverLimit}
+                                                    />
+                                                    <ProcessingActionCard
+                                                        compact
+                                                        icon="refresh"
+                                                        title="Re-run metadata extraction"
+                                                        description="Technical file metadata only"
+                                                        onClick={() => handleSelectAction(SITE_REPROCESS_SYSTEM_METADATA)}
+                                                        disabled={pipelineSelectionOverLimit}
+                                                    />
+                                                    <ProcessingActionCard
+                                                        compact
+                                                        icon="refreshDanger"
+                                                        title="Reprocess entire asset"
+                                                        description="Full pipeline — resource intensive"
+                                                        variant="danger"
+                                                        onClick={() => handleSelectAction(SITE_REPROCESS_FULL_PIPELINE)}
+                                                        disabled={pipelineSelectionOverLimit}
+                                                    />
+                                                </div>
+                                            </div>
+                                        )}
+                                    </BulkModalSuperSection>
+                                )}
+
+                                {(creativeBulkGroups.length > 0 || canQueueVideoInsights) && (
+                                    <BulkModalSuperSection title="Creative">
+                                        {creativeBulkGroups.map((group, gIdx) => (
+                                            <BulkActionGroupBlock
+                                                key={group.label}
+                                                group={group}
+                                                groupIndex={gIdx}
+                                                onPick={handleSelectAction}
+                                            />
+                                        ))}
+                                        {canQueueVideoInsights && (
+                                            <div className="rounded-xl border border-violet-200/90 bg-violet-50/35 p-3.5 shadow-sm">
+                                                <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 border-b border-violet-100/90 pb-1.5">
+                                                    <span className="inline-flex items-center rounded bg-violet-600 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">
+                                                        Video AI
+                                                    </span>
+                                                    <h3 className="text-xs font-semibold text-gray-800">
+                                                        Searchable video insights
+                                                    </h3>
+                                                </div>
+                                                <p className="mt-2 text-[11px] leading-snug text-gray-600">
+                                                    Queue analysis for video files (summary, tags, transcript cues). Non-videos are
+                                                    skipped. Respects tenant video AI job and minute limits. Jobs run in the background.
+                                                </p>
+                                                {pipelineSelectionOverLimit && (
+                                                    <div className="mt-2 flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-900">
+                                                        <ExclamationTriangleIcon className="h-3.5 w-3.5 shrink-0" />
+                                                        <span>
+                                                            Select at most {MAX_BULK_PIPELINE_ASSETS} assets per processing bulk action.
+                                                        </span>
+                                                    </div>
+                                                )}
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleSelectAction(GENERATE_VIDEO_INSIGHTS)}
+                                                    disabled={pipelineSelectionOverLimit}
+                                                    className="mt-2.5 flex w-full items-start gap-2.5 rounded-lg border border-violet-200 bg-white p-3 text-left shadow-sm transition-all hover:-translate-y-px hover:shadow-md disabled:cursor-not-allowed disabled:opacity-50"
+                                                >
+                                                    <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-violet-100">
+                                                        <SparklesIcon className="h-4 w-4 text-violet-700" />
+                                                    </span>
+                                                    <div className="min-w-0 pt-0.5">
+                                                        <span className="block text-xs font-semibold text-gray-900">
+                                                            Analyze video content
+                                                        </span>
+                                                        <span className="mt-0.5 block text-[11px] leading-snug text-gray-500">
+                                                            Make videos discoverable in search (tags, scenes, summary)
+                                                        </span>
+                                                    </div>
+                                                </button>
+                                            </div>
+                                        )}
+                                    </BulkModalSuperSection>
+                                )}
+
+                                {showPermissionWarning && (
+                                    <div className="flex items-center gap-2 rounded-lg border border-amber-100 bg-amber-50 p-2.5">
+                                        <ExclamationTriangleIcon className="h-4 w-4 shrink-0 text-amber-600" />
+                                        <span className="text-xs text-amber-800">
+                                            Some selected assets cannot be modified and will be skipped.
+                                        </span>
                                     </div>
-                                ))}
+                                )}
                             </div>
-                            {showPermissionWarning && (
-                                <div className="mt-6 flex items-center gap-2 p-3 rounded-xl bg-amber-50 border border-amber-100">
-                                    <ExclamationTriangleIcon className="w-5 h-5 text-amber-600 shrink-0" />
-                                    <span className="text-sm text-amber-800">
-                                        Some selected assets cannot be modified and will be skipped.
-                                    </span>
-                                </div>
-                            )}
-
-                            {canQueueVideoInsights && (
-                                <div className="mt-6 rounded-2xl border border-violet-200 bg-violet-50/40 p-5 shadow-sm">
-                                    <div className="flex flex-wrap items-center gap-2 mb-2">
-                                        <span className="inline-flex items-center rounded-md bg-violet-600/90 px-2 py-0.5 text-[10px] font-bold tracking-wide text-white">
-                                            Video AI
-                                        </span>
-                                        <h3 className="text-sm font-semibold text-gray-700">Searchable video insights</h3>
-                                    </div>
-                                    <p className="text-xs text-gray-500 mb-4">
-                                        Queue analysis for video files (summary, tags, transcript cues). Non-videos are skipped.
-                                        Respects tenant video AI job and minute limits. Jobs run in the background.
-                                    </p>
-                                    {pipelineSelectionOverLimit && (
-                                        <div className="mb-4 flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-                                            <ExclamationTriangleIcon className="h-4 w-4 shrink-0" />
-                                            <span>
-                                                Select at most {MAX_BULK_PIPELINE_ASSETS} assets per processing bulk action.
-                                            </span>
-                                        </div>
-                                    )}
-                                    <button
-                                        type="button"
-                                        onClick={() => handleSelectAction(GENERATE_VIDEO_INSIGHTS)}
-                                        disabled={pipelineSelectionOverLimit}
-                                        className="flex w-full items-center gap-3 p-3.5 text-left rounded-xl bg-white border border-violet-200 shadow-sm hover:shadow-md hover:-translate-y-px transition-all disabled:cursor-not-allowed disabled:opacity-50"
-                                    >
-                                        <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-violet-100 shrink-0">
-                                            <SparklesIcon className="w-5 h-5 text-violet-700" />
-                                        </span>
-                                        <div className="min-w-0">
-                                            <span className="block text-sm font-medium text-gray-900">Analyze video content</span>
-                                            <span className="block text-xs text-gray-600 mt-0.5">
-                                                Make videos discoverable in search (tags, scenes, summary)
-                                            </span>
-                                        </div>
-                                    </button>
-                                </div>
-                            )}
-
-                            {canSiteAdminPipeline && (
-                                <div className="mt-6 rounded-2xl border border-gray-200 bg-gray-50/50 p-5 shadow-sm">
-                                    <div className="flex flex-wrap items-center gap-2 mb-2">
-                                        <span className="inline-flex items-center rounded-md bg-indigo-600/90 px-2 py-0.5 text-[10px] font-bold tracking-wide text-white">
-                                            Admin
-                                        </span>
-                                        <h3 className="text-sm font-semibold text-gray-700">Processing &amp; Automation</h3>
-                                    </div>
-                                    <p className="text-xs text-gray-500 mb-2">
-                                        Site admin or engineering only. Matches per-asset drawer tools. Max {MAX_BULK_PIPELINE_ASSETS} assets; the server dispatches in chunks of 10 with a short delay between chunks.
-                                    </p>
-                                    <div className="text-xs text-yellow-700 mb-4">
-                                        These actions run in the background and may take several minutes.
-                                    </div>
-                                    {pipelineSelectionOverLimit && (
-                                        <div className="mb-4 flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-                                            <ExclamationTriangleIcon className="h-4 w-4 shrink-0" />
-                                            <span>
-                                                Select at most {MAX_BULK_PIPELINE_ASSETS} assets to use processing actions.
-                                            </span>
-                                        </div>
-                                    )}
-                                    <div className="grid grid-cols-1 gap-3">
-                                        <ProcessingActionCard
-                                            icon="sparkles"
-                                            title="Improve AI tags"
-                                            description="Refresh AI suggestions and tags"
-                                            onClick={() => handleSelectAction(SITE_RERUN_AI_METADATA_TAGGING)}
-                                            disabled={pipelineSelectionOverLimit}
-                                        />
-                                        <ProcessingActionCard
-                                            icon="photo"
-                                            title="Refresh previews"
-                                            description="Rebuild thumbnails and preview images"
-                                            onClick={() => handleSelectAction(SITE_RERUN_THUMBNAILS)}
-                                            disabled={pipelineSelectionOverLimit}
-                                        />
-                                        <ProcessingActionCard
-                                            icon="video"
-                                            title="Generate video previews"
-                                            description="Rebuild hover/quick preview MP4s with correct phone/MOV rotation"
-                                            onClick={() => handleSelectAction(SITE_GENERATE_VIDEO_PREVIEWS)}
-                                            disabled={pipelineSelectionOverLimit}
-                                        />
-                                        <ProcessingActionCard
-                                            icon="trash"
-                                            title="Delete video quick previews"
-                                            description="Remove hover MP4 from storage and clear paths (no regeneration)"
-                                            variant="danger"
-                                            onClick={() => handleSelectAction(SITE_DELETE_VIDEO_PREVIEWS)}
-                                            disabled={pipelineSelectionOverLimit}
-                                        />
-                                        <ProcessingActionCard
-                                            icon="refresh"
-                                            title="Re-run metadata extraction"
-                                            description="Technical file metadata only"
-                                            onClick={() => handleSelectAction(SITE_REPROCESS_SYSTEM_METADATA)}
-                                            disabled={pipelineSelectionOverLimit}
-                                        />
-                                        <ProcessingActionCard
-                                            icon="refreshDanger"
-                                            title="Reprocess entire asset"
-                                            description="Full pipeline — resource intensive"
-                                            variant="danger"
-                                            onClick={() => handleSelectAction(SITE_REPROCESS_FULL_PIPELINE)}
-                                            disabled={pipelineSelectionOverLimit}
-                                        />
-                                    </div>
-                                </div>
-                            )}
                         </div>
                     )}
 

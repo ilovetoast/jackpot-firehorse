@@ -10,15 +10,15 @@
  * Tenant-scoped fields: only tags and collection enabled unless in category_config.
  *
  * System automated fields (orientation, resolution_class, dominant_colors, etc.) are
- * enabled for every category by default so execution assets (Print, Digital, etc.)
- * receive computed metadata without manual enablement.
+ * enabled for every category by default so execution assets receive computed metadata
+ * without manual enablement.
+ *
+ * Extension notes (not seeded as fields yet):
+ * - campaign: prefer linking to Campaign records when that model is wired for metadata.
+ * - audience, region: free text or controlled vocabulary fields — add as tenant custom
+ *   or system fields when product scope is finalized.
  */
 return [
-    /*
-     * System automated fields always enabled for every category.
-     * Ensures dominant colors, orientation, resolution class, etc. are computed
-     * and visible for all assets (including executions) without per-category setup.
-     */
     'system_automated_enabled_for_all' => [
         'orientation',
         'resolution_class',
@@ -26,63 +26,99 @@ return [
         'dominant_colors',
         'dominant_hue_group',
     ],
-    /*
-     * Category slugs that get only collection and tags enabled.
-     * All system category templates use this minimal default.
-     */
-    'tags_and_collection_only_slugs' => [
-        'logos',
-        'photography',
-        'graphics',
-        'video',
-        'print',
-        'digital-ads',
-        'ooh',
-        'events',
-        'videos',
-        'sales-collateral',
-        'pr',
-        'packaging',
-        'product-renders',
-        'radio',
-        'fonts',
-    ],
 
     /*
-     * Per-field, per-category overrides (optional).
-     * Enables type fields for their corresponding system categories (e.g. photo_type for photography).
-     * Checked before tags_and_collection_only so these override the minimal default.
+     * Category slugs that start from the “tags + collection + all system fields” baseline.
+     * Type and other restrict_fields are layered via category_config.
      */
+    'tags_and_collection_only_slugs' => [
+        // Assets
+        'photography',
+        'graphics',
+        'logos',
+        'video',
+        'audio',
+        'documents',
+        'templates',
+        'fonts',
+        'model-3d',
+        'illustrations',
+        'brand-elements',
+        // Deliverables / executions
+        'social',
+        'digital-ads',
+        'print',
+        'videos',
+        'packaging',
+        'ooh',
+        'sales-collateral',
+        'pr',
+        'events',
+        'web',
+        'email',
+        // Legacy templates (hidden / no auto-provision for new brands)
+        'product-renders',
+        'radio',
+    ],
+
     'category_config' => [
-        // Asset categories: type fields
+        // --- Asset type fields ---
         'photo_type' => [
             'photography' => ['enabled' => true, 'is_primary' => true],
+        ],
+        'environment_type' => [
+            'photography' => ['enabled' => true, 'is_primary' => false],
+            'graphics' => ['enabled' => true, 'is_primary' => false],
+            'illustrations' => ['enabled' => true, 'is_primary' => false],
+            'brand-elements' => ['enabled' => true, 'is_primary' => false],
+        ],
+        'subject_type' => [
+            'photography' => ['enabled' => true, 'is_primary' => false],
+            'graphics' => ['enabled' => true, 'is_primary' => false],
+            'illustrations' => ['enabled' => true, 'is_primary' => false],
+            'brand-elements' => ['enabled' => true, 'is_primary' => false],
         ],
         'logo_type' => [
             'logos' => ['enabled' => true, 'is_primary' => true],
         ],
+        'font_role' => [
+            'fonts' => ['enabled' => true, 'is_primary' => true],
+        ],
         'graphic_type' => [
             'graphics' => ['enabled' => true, 'is_primary' => true],
+            'illustrations' => ['enabled' => true, 'is_primary' => true],
+            'brand-elements' => ['enabled' => true, 'is_primary' => true],
         ],
-        // Primary inline grid filter for Video library (requires schema file kind `video`; see AssetController)
         'video_type' => [
             'video' => ['enabled' => true, 'is_primary' => true],
         ],
-        // Font role: Fonts library / Brand Guidelines typography only (not Video or other asset categories)
-        'font_role' => [
-            'fonts' => ['enabled' => true, 'is_primary' => false],
+        'template_type' => [
+            'templates' => ['enabled' => true, 'is_primary' => true],
         ],
-        // Scene classification for image categories
-        'scene_classification' => [
-            'photography' => ['enabled' => true, 'is_primary' => false],
-            'graphics' => ['enabled' => true, 'is_primary' => false],
+        'audio_type' => [
+            'audio' => ['enabled' => true, 'is_primary' => true],
         ],
-        // Deliverable categories: type fields
-        'print_type' => [
-            'print' => ['enabled' => true, 'is_primary' => true],
+        'model_3d_type' => [
+            'model-3d' => ['enabled' => true, 'is_primary' => true],
+        ],
+
+        // --- Deliverable / execution type fields ---
+        'social_format' => [
+            'social' => ['enabled' => true, 'is_primary' => true],
+        ],
+        'social_platform' => [
+            'social' => ['enabled' => true, 'is_primary' => false],
         ],
         'digital_type' => [
             'digital-ads' => ['enabled' => true, 'is_primary' => true],
+        ],
+        'channel_platform' => [
+            'digital-ads' => ['enabled' => true, 'is_primary' => false],
+            'social' => ['enabled' => true, 'is_primary' => false],
+            'web' => ['enabled' => true, 'is_primary' => false],
+        ],
+        'print_type' => [
+            'print' => ['enabled' => true, 'is_primary' => true],
         ],
         'ooh_type' => [
             'ooh' => ['enabled' => true, 'is_primary' => true],
@@ -108,39 +144,27 @@ return [
         'radio_type' => [
             'radio' => ['enabled' => true, 'is_primary' => true],
         ],
-        // Type fields for categories that may not exist in all tenants (suppress for others)
-        'template_type' => [
-            'templates' => ['enabled' => true, 'is_primary' => true],
+        'email_type' => [
+            'email' => ['enabled' => true, 'is_primary' => true],
         ],
-        'audio_type' => [
-            'audio' => ['enabled' => true, 'is_primary' => true],
-        ],
-        'model_3d_type' => [
-            'model-3d' => ['enabled' => true, 'is_primary' => true],
-        ],
-        // Legal: only Photography by default; secondary filters (collapsed "More") via is_primary false
-        'usage_rights' => [
-            'photography' => ['enabled' => true, 'is_primary' => false],
-        ],
-        'expiration_date' => [
-            'photography' => ['enabled' => true, 'is_primary' => false],
+        'web_type' => [
+            'web' => ['enabled' => true, 'is_primary' => true],
         ],
     ],
 
-    /*
-     * Fields restricted to specific slugs. Type fields listed here are HIDDEN for categories
-     * not in their category_config. Ensures e.g. Photography shows only Photo Type, not
-     * Logo Type, Print Type, etc. Each type field is enabled only for its assigned category.
-     */
     'restrict_fields' => [
         'photo_type',
         'logo_type',
         'font_role',
         'graphic_type',
         'video_type',
-        'scene_classification',
-        'print_type',
+        'environment_type',
+        'subject_type',
+        'social_format',
+        'social_platform',
         'digital_type',
+        'channel_platform',
+        'print_type',
         'ooh_type',
         'event_type',
         'execution_video_type',
@@ -152,14 +176,10 @@ return [
         'template_type',
         'audio_type',
         'model_3d_type',
-        'usage_rights',
-        'expiration_date',
+        'email_type',
+        'web_type',
     ],
 
-    /*
-     * Starred: enabled for the category but not exposed in grid / More filters by default;
-     * remains visible in drawer / quick view (is_edit_hidden false).
-     */
     'starred_default_visibility' => [
         'is_hidden' => false,
         'is_upload_hidden' => false,
@@ -168,15 +188,11 @@ return [
         'is_edit_hidden' => false,
     ],
 
-    /*
-     * Dominant color fields: enabled by default for all categories.
-     * dominant_hue_group: filter-only field (perceptual hue clusters).
-     */
     'dominant_colors_visibility' => [
         'dominant_colors' => [
             'is_hidden' => false,
             'is_upload_hidden' => false,
-            'is_filter_hidden' => true, // Never in More filters (always_hidden_fields)
+            'is_filter_hidden' => true,
             'is_primary' => null,
         ],
         'dominant_hue_group' => [
@@ -199,5 +215,7 @@ return [
         'starred',
         'dominant_hue_group',
         'dominant_colors',
+        'status',
+        'season',
     ],
 ];

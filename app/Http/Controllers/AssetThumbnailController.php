@@ -702,9 +702,10 @@ class AssetThumbnailController extends Controller
     }
 
     /**
-     * Queue template-based enhanced preview generation (async; uses preferred thumbnail as input, else original).
+     * Queue Studio View generation: user crop on large source thumbnail → enhanced-mode derivatives (async).
      *
      * POST /app/assets/{asset}/enhanced-preview/generate
+     * Body JSON: { "crop": { "x", "y", "width", "height" } (0–1), optional "poi": { "x", "y" } (0–1) }
      */
     public function generateEnhancedPreview(Request $request, Asset $asset): \Illuminate\Http\JsonResponse
     {
@@ -722,23 +723,27 @@ class AssetThumbnailController extends Controller
             return response()->json(['error' => 'Asset has no current version'], 422);
         }
 
+        $validated = $request->validate([
+            'crop' => 'required|array',
+            'crop.x' => 'required|numeric|min:0|max:1',
+            'crop.y' => 'required|numeric|min:0|max:1',
+            'crop.width' => 'required|numeric|min:0|max:1',
+            'crop.height' => 'required|numeric|min:0|max:1',
+            'poi' => 'sometimes|nullable|array',
+            'poi.x' => 'required_with:poi|numeric|min:0|max:1',
+            'poi.y' => 'required_with:poi|numeric|min:0|max:1',
+            'force' => 'sometimes|boolean',
+        ]);
+
         $meta = is_array($version->metadata) ? $version->metadata : [];
-        $preferredMode = ThumbnailMode::Preferred->value;
-        $originalMode = ThumbnailMode::Original->value;
-
-        $hasPreferred = ThumbnailMetadata::stylePath($meta, 'medium', $preferredMode) !== null
-            || ThumbnailMetadata::stylePath($meta, 'thumb', $preferredMode) !== null;
-        $hasOriginal = ThumbnailMetadata::stylePath($meta, 'medium', $originalMode) !== null
-            || ThumbnailMetadata::stylePath($meta, 'thumb', $originalMode) !== null;
-
-        if (! $hasPreferred && ! $hasOriginal) {
+        [$canvasPath] = \App\Support\StudioViewSourceResolver::resolveLargeRasterPath($meta);
+        if ($canvasPath === null || $canvasPath === '') {
             return response()->json([
-                'error' => 'No preferred or original thumbnail available to build an enhanced preview.',
+                'error' => 'No source thumbnail large enough for Studio View yet. Wait for processing to finish.',
             ], 422);
         }
 
-        $force = $request->boolean('force');
-        $debugBbox = $request->boolean('debug_bbox');
+        $force = (bool) ($validated['force'] ?? $request->boolean('force'));
         $modesStatus = is_array($meta['thumbnail_modes_status'] ?? null) ? $meta['thumbnail_modes_status'] : [];
         $modesMetaFull = is_array($meta['thumbnail_modes_meta'] ?? null) ? $meta['thumbnail_modes_meta'] : [];
         $enhMetaGate = is_array($modesMetaFull['enhanced'] ?? null) ? $modesMetaFull['enhanced'] : [];
@@ -746,32 +751,91 @@ class AssetThumbnailController extends Controller
             && ($enhMetaGate['skip_reason'] ?? '') === ThumbnailEnhancementAiTaskRecorder::SKIP_REASON_TOO_SMALL) {
             if (! $force) {
                 return response()->json([
-                    'error' => 'This asset is too small for enhanced previews.',
+                    'error' => 'This asset was previously skipped for Studio View (canvas too small).',
                 ], 422);
             }
             $user = $request->user();
-            $tenant = app('tenant');
             $tenantRole = $user && $tenant ? strtolower((string) $user->getRoleForTenant($tenant)) : '';
             if (! in_array($tenantRole, ['owner', 'admin', 'agency_admin'], true)) {
                 return response()->json([
-                    'error' => 'Only tenant owners, admins, or agency admins can retry when the source is below the minimum size.',
+                    'error' => 'Only tenant owners, admins, or agency admins can force retry when the canvas is very small.',
                 ], 403);
             }
         }
         if (($modesStatus['enhanced'] ?? '') === 'processing' && ! $force) {
-            return response()->json(['error' => 'Enhanced preview generation already in progress'], 409);
+            return response()->json(['error' => 'Studio View generation already in progress'], 409);
         }
 
-        GenerateEnhancedPreviewJob::dispatch((string) $asset->id, (string) $version->id, $force, $debugBbox)
+        $crop = [
+            'x' => (float) $validated['crop']['x'],
+            'y' => (float) $validated['crop']['y'],
+            'width' => (float) $validated['crop']['width'],
+            'height' => (float) $validated['crop']['height'],
+        ];
+        $poi = isset($validated['poi']) && is_array($validated['poi'])
+            ? ['x' => (float) $validated['poi']['x'], 'y' => (float) $validated['poi']['y']]
+            : null;
+
+        GenerateEnhancedPreviewJob::dispatch((string) $asset->id, (string) $version->id, $crop, $poi, $force)
             ->onQueue(PipelineQueueResolver::imagesQueueForAsset($asset));
 
         return response()->json([
             'queued' => true,
-            'message' => $debugBbox
-                ? 'Enhanced preview queued — red print-bbox will be drawn on the source image in the output.'
-                : 'Enhanced preview job queued',
-            'debug_bbox' => $debugBbox,
+            'message' => 'Studio View job queued',
         ], 202);
+    }
+
+    /**
+     * Save CSS/HTML presentation preset for execution previews (no AI, no rendered file).
+     *
+     * POST /app/assets/{asset}/execution-presentation-preset
+     * Body: { "preset": "neutral_studio" | "desk_surface" | "wall_pin" }
+     */
+    public function saveExecutionPresentationPreset(Request $request, Asset $asset): \Illuminate\Http\JsonResponse
+    {
+        $this->authorize('retryThumbnails', $asset);
+
+        $tenant = app('tenant');
+        $brand = app('brand');
+        if (! $tenant || ! $brand || $asset->tenant_id !== $tenant->id || $asset->brand_id !== $brand->id) {
+            abort(404);
+        }
+
+        $validated = $request->validate([
+            'preset' => 'required|string|in:neutral_studio,desk_surface,wall_pin',
+        ]);
+
+        $asset->loadMissing(['currentVersion']);
+        $version = $asset->currentVersion;
+        if (! $version) {
+            return response()->json(['error' => 'Asset has no current version'], 422);
+        }
+
+        $patch = [
+            'preset' => $validated['preset'],
+            'updated_at' => now()->toIso8601String(),
+        ];
+
+        $merge = function (array $base) use ($patch): array {
+            $mm = $base['thumbnail_modes_meta'] ?? [];
+            if (! is_array($mm)) {
+                $mm = [];
+            }
+            $mm['presentation_css'] = $patch;
+            $base['thumbnail_modes_meta'] = $mm;
+
+            return $base;
+        };
+
+        $version->refresh();
+        $version->update(['metadata' => $merge($version->metadata ?? [])]);
+        $asset->refresh();
+        $asset->update(['metadata' => $merge($asset->metadata ?? [])]);
+
+        return response()->json([
+            'success' => true,
+            'presentation_css' => $patch,
+        ], 200);
     }
 
     /**
@@ -838,7 +902,7 @@ class AssetThumbnailController extends Controller
 
         return response()->json([
             'queued' => true,
-            'message' => 'Presentation preview job queued',
+            'message' => 'AI view job queued',
         ], 202);
     }
 

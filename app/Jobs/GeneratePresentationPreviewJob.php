@@ -73,13 +73,13 @@ class GeneratePresentationPreviewJob implements ShouldQueue
         $maxAttempts = (int) config('presentation_preview.max_attempts', 3);
         $cooldown = (int) config('presentation_preview.cooldown_seconds', 120);
 
-        [$sourcePath, $sourceMode] = EnhancedPreviewFingerprint::resolveEnhancedSource($meta);
+        [$sourcePath, $sourceMode] = EnhancedPreviewFingerprint::resolvePresentationAiSource($meta);
         if ($sourcePath === null || $sourcePath === '') {
             $this->persistTerminal(
                 $asset,
                 $version,
                 'skipped',
-                'No preferred or original thumbnail to use as presentation source'
+                'No Studio or source thumbnail available for AI view generation'
             );
 
             return;

@@ -123,19 +123,20 @@ export default function AssetGridViewOptionsDropdown({
                 <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-gray-500">
                     Grid thumbnails
                 </p>
-                <p className="mb-2 text-xs text-gray-600">
-                    Applies to the executions grid only. <span className="font-medium text-gray-800">Standard</span> uses
-                    each asset&apos;s preferred tile from the drawer when set; otherwise the source thumbnail.
+                <p className="mb-2 text-xs text-gray-600 leading-snug">
+                    Choose which thumbnail style to prefer in the executions grid. When an asset doesn&apos;t have that
+                    version yet, it quietly falls back to the best available preview (Studio or source).
                 </p>
                 <div
-                    className="grid grid-cols-3 gap-0.5 rounded-lg border border-gray-200 bg-white p-0.5"
+                    className="grid grid-cols-2 gap-0.5 rounded-lg border border-gray-200 bg-white p-0.5 sm:grid-cols-4"
                     role="group"
                     aria-label="Grid thumbnail mode"
                 >
                     {[
                         { mode: 'standard', label: 'Standard' },
-                        { mode: 'enhanced', label: 'Enhanced' },
+                        { mode: 'enhanced', label: 'Studio' },
                         { mode: 'presentation', label: 'Pres.' },
+                        { mode: 'ai', label: 'AI' },
                     ].map(({ mode, label }) => (
                         <button
                             key={mode}

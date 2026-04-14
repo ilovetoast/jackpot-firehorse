@@ -1,15 +1,19 @@
-/** @type {Record<'original' | 'enhanced' | 'presentation', string[]>} */
+/** @type {Record<'original' | 'enhanced' | 'presentation' | 'ai', string[]>} */
 export const EXECUTION_VERSION_DETAIL_BULLETS = {
     original: [
-        "Shows the asset's source thumbnail from the main pipeline (no studio framing or AI).",
-        'Best for checking crop marks, bleed, and how the file actually looks on disk.',
+        "The pipeline's source thumbnail — what the file actually looks like after rasterization.",
+        'May include crop marks, bleed, print marks, or color bars. Best for QA and production checks.',
     ],
     enhanced: [
-        'Starts from a clean, subject-aware crop when the pipeline has produced one.',
-        'Adds studio framing—template, background, and shadow—when that output exists.',
+        'Studio View: you crop the large source thumbnail manually to remove unwanted framing.',
+        'Saved as a real derivative image and used as the preferred input for Presentation styling and AI.',
     ],
     presentation: [
-        'AI-generated presentation treatment for decks and on-screen reviews.',
-        'Separate from the source thumbnail and from studio-framed previews.',
+        'Polished on-screen look using CSS presets only — no AI and no extra rendered file in v1.',
+        'Uses Studio when it exists, otherwise falls back to Source. Pick a preset below the tiles in the drawer.',
+    ],
+    ai: [
+        'User-initiated AI scene or marketing-style render (separate from Presentation).',
+        'Uses Studio first when available, otherwise Source. Produces a stored raster in the AI slot.',
     ],
 }

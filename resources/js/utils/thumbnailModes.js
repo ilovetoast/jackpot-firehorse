@@ -271,3 +271,20 @@ export function formatThumbnailPipelineAttemptLabel(status, iso) {
     }
     return `Last attempt ${t}`
 }
+
+/**
+ * Compact two-line meta for drawer tiles: short label + date/time on second line.
+ *
+ * @param {string} status
+ * @param {unknown} iso
+ * @returns {{ head: string, time: string }|null}
+ */
+export function formatThumbnailPipelineAttemptParts(status, iso) {
+    const time = formatIsoDateTimeLocal(iso)
+    if (!time) {
+        return null
+    }
+    const s = String(status || '').toLowerCase()
+    const head = s === 'processing' ? 'Started' : s === 'complete' ? 'Generated' : 'Attempt'
+    return { head, time }
+}

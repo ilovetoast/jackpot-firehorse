@@ -16,7 +16,7 @@ use Tests\TestCase;
  * Metadata seeder content model tests.
  *
  * Verifies that:
- * - New category from system template only enables collection + tags
+ * - New photography category from system template enables primary type (photo_type) plus core fields
  * - System category template has version = 1
  * - Brand creation clones from system templates
  */
@@ -69,7 +69,7 @@ class MetadataSeederContentModelTest extends TestCase
         }
     }
 
-    public function test_new_category_from_template_only_enables_collection_and_tags(): void
+    public function test_new_photography_category_enables_primary_type_and_core_fields(): void
     {
         $this->artisan('db:seed', [
             '--class' => \Database\Seeders\SystemCategoryTemplateSeeder::class,
@@ -118,7 +118,7 @@ class MetadataSeederContentModelTest extends TestCase
         $this->assertFalse((bool) $collectionVisible->is_hidden, 'collection should be enabled');
 
         $this->assertNotNull($photoTypeVisible, 'photo_type should have visibility row');
-        $this->assertTrue((bool) $photoTypeVisible->is_hidden, 'photo_type should be disabled (only collection+tags enabled)');
+        $this->assertFalse((bool) $photoTypeVisible->is_hidden, 'photo_type should be enabled for photography (primary type)');
     }
 
     public function test_new_brand_category_has_version_one(): void

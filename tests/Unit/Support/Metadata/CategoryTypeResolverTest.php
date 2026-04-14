@@ -33,6 +33,13 @@ class CategoryTypeResolverTest extends TestCase
         $this->assertSame('Font role', $r['label']);
     }
 
+    public function test_resolves_social_to_social_format(): void
+    {
+        $r = CategoryTypeResolver::resolve('social');
+        $this->assertSame('social_format', $r['field_key']);
+        $this->assertSame('Format', $r['label']);
+    }
+
     public function test_unknown_slug_returns_null(): void
     {
         $this->assertNull(CategoryTypeResolver::resolve('custom-category'));

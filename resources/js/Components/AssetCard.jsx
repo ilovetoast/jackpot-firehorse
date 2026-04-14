@@ -18,9 +18,13 @@ import { useSelectionOptional } from '../contexts/SelectionContext'
 import { TrashIcon } from '@heroicons/react/24/outline'
 import { StarIcon } from '@heroicons/react/24/solid'
 import ThumbnailPreview from './ThumbnailPreview'
+import ExecutionPresentationFrame from './execution/ExecutionPresentationFrame'
 import { isImageLikeForAssetCard } from '../utils/damFileTypes'
 import { getThumbnailVersion, getThumbnailState, supportsThumbnail } from '../utils/thumbnailUtils'
-import { getExecutionGridDisplayUrl, getExecutionGridHoverCrossfadeUrl } from '../utils/executionThumbnailDisplay'
+import {
+    getExecutionGridHoverCrossfadeUrl,
+    resolveExecutionGridThumbnail,
+} from '../utils/executionThumbnailDisplay'
 import {
     assetCardEnhancedExecutionChromeClass,
     isExecutionEnhancedGridMode,
@@ -296,14 +300,14 @@ export default function AssetCard({
         return () => window.removeEventListener('jackpot_preferred_thumbnail_tier_changed', onChange)
     }, [executionThumbnailViewMode])
 
-    const executionDisplayUrl = useMemo(() => {
+    const executionThumbResolved = useMemo(() => {
         if (executionThumbnailViewMode == null || !supportsExecutionGridThumbnailMode || showFontSwatch) {
             return null
         }
         if (thumbnailState.state !== 'AVAILABLE') {
             return null
         }
-        return getExecutionGridDisplayUrl(asset, executionThumbnailViewMode, 'medium')
+        return resolveExecutionGridThumbnail(asset, executionThumbnailViewMode, 'medium')
     }, [
         executionThumbnailViewMode,
         supportsExecutionGridThumbnailMode,
@@ -312,6 +316,10 @@ export default function AssetCard({
         asset,
         preferredTierBump,
     ])
+
+    const executionDisplayUrl = executionThumbResolved?.imageUrl ?? null
+    const executionUsePresentationCss = Boolean(executionThumbResolved?.usePresentationCss)
+    const executionPresentationPreset = executionThumbResolved?.presentationPreset ?? null
 
     const executionHoverUrl = useMemo(() => {
         if (!executionDisplayUrl || executionThumbnailViewMode == null) {
@@ -605,8 +613,10 @@ export default function AssetCard({
                         className="pointer-events-none absolute left-2 top-2 z-10 select-none text-sm opacity-80 drop-shadow-sm"
                         title={
                             executionThumbnailViewMode === 'presentation'
-                                ? 'Presentation grid thumbnails'
-                                : 'Enhanced grid thumbnails'
+                                ? 'Presentation (CSS presets)'
+                                : executionThumbnailViewMode === 'ai'
+                                  ? 'AI view thumbnails'
+                                  : 'Studio grid thumbnails'
                         }
                         aria-hidden
                     >
@@ -659,32 +669,46 @@ export default function AssetCard({
                         )}
 
                         {showExecutionDualThumb || showExecutionSingleThumb ? (
-                            <div
-                                className={`relative flex h-full w-full items-center justify-center ${
-                                    isMasonry ? 'max-h-full min-h-0' : ''
-                                }`}
-                                onMouseEnter={() => !isMobile && showExecutionDualThumb && setExecutionThumbHover(true)}
-                                onMouseLeave={() => setExecutionThumbHover(false)}
-                            >
-                                <img
-                                    src={executionDisplayUrl}
-                                    alt=""
-                                    className={`max-h-full max-w-full object-contain transition-opacity duration-200 ${
-                                        showExecutionDualThumb && executionThumbHover ? 'opacity-0' : 'opacity-100'
+                            executionUsePresentationCss && executionPresentationPreset ? (
+                                <div
+                                    className={`relative flex h-full w-full items-center justify-center overflow-hidden rounded-2xl ${
+                                        isMasonry ? 'max-h-full min-h-0' : ''
                                     }`}
-                                    draggable={false}
-                                />
-                                {showExecutionDualThumb ? (
+                                >
+                                    <ExecutionPresentationFrame
+                                        imageUrl={executionDisplayUrl}
+                                        preset={executionPresentationPreset}
+                                        className="rounded-2xl"
+                                    />
+                                </div>
+                            ) : (
+                                <div
+                                    className={`relative flex h-full w-full items-center justify-center ${
+                                        isMasonry ? 'max-h-full min-h-0' : ''
+                                    }`}
+                                    onMouseEnter={() => !isMobile && showExecutionDualThumb && setExecutionThumbHover(true)}
+                                    onMouseLeave={() => setExecutionThumbHover(false)}
+                                >
                                     <img
-                                        src={executionHoverUrl}
+                                        src={executionDisplayUrl}
                                         alt=""
-                                        className={`absolute inset-0 m-auto max-h-full max-w-full object-contain transition-opacity duration-200 ${
-                                            executionThumbHover ? 'opacity-100' : 'opacity-0'
+                                        className={`max-h-full max-w-full object-contain transition-opacity duration-200 ${
+                                            showExecutionDualThumb && executionThumbHover ? 'opacity-0' : 'opacity-100'
                                         }`}
                                         draggable={false}
                                     />
-                                ) : null}
-                            </div>
+                                    {showExecutionDualThumb ? (
+                                        <img
+                                            src={executionHoverUrl}
+                                            alt=""
+                                            className={`absolute inset-0 m-auto max-h-full max-w-full object-contain transition-opacity duration-200 ${
+                                                executionThumbHover ? 'opacity-100' : 'opacity-0'
+                                            }`}
+                                            draggable={false}
+                                        />
+                                    ) : null}
+                                </div>
+                            )
                         ) : (
                             <>
                                 {/* Phase V-1: Use ThumbnailPreview for videos (same as drawer) */}

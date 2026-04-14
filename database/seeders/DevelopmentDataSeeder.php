@@ -1085,17 +1085,17 @@ class DevelopmentDataSeeder extends Seeder
             'photo_type' => fake()->randomElement(['studio', 'lifestyle']),
             'logo_type' => fake()->randomElement(['primary', 'secondary', 'promotional']),
             'graphic_type' => fake()->randomElement(['icon', 'effect', 'texture']),
-            'video_type' => fake()->randomElement(['b_roll', 'interviews']),
+            'video_type' => fake()->randomElement(['b_roll', 'interview']),
             'template_type' => fake()->randomElement(['email', 'social']),
             'audio_type' => null, // No options in seeder
             'model_3d_type' => null,
             'product_render_type' => null,
             // Execution/deliverable type fields
             'print_type' => fake()->randomElement(['ads', 'brochures', 'posters', 'inserts']),
-            'digital_type' => 'display_ads',
+            'digital_type' => 'display_ad',
             'ooh_type' => fake()->randomElement(['billboards', 'signage']),
             'event_type' => fake()->randomElement(['booths', 'transit', 'experiential']),
-            'execution_video_type' => fake()->randomElement(['broadcast', 'pre_roll', 'brand_video', 'explainer_video', 'product_demos']),
+            'execution_video_type' => fake()->randomElement(['broadcast', 'pre_roll', 'brand_video', 'explainer', 'product_demo']),
             'sales_collateral_type' => fake()->randomElement(['catalogs', 'sales_sheets', 'trade_show_materials']),
             'pr_type' => fake()->randomElement(['press_releases', 'media_kits', 'backgrounders']),
             'packaging_type' => fake()->randomElement(['flat_art', 'renders_3d']),
@@ -1105,7 +1105,8 @@ class DevelopmentDataSeeder extends Seeder
             'orientation' => fake()->randomElement(['landscape', 'portrait', 'square']),
             'color_space' => fake()->randomElement(['srgb', 'adobe_rgb', 'cmyk']),
             'resolution_class' => fake()->randomElement(['low', 'medium', 'high', 'ultra']),
-            'scene_classification' => fake()->randomElement(['indoor', 'outdoor', 'studio', 'natural']),
+            'environment_type' => fake()->randomElement(['indoor', 'outdoor', 'studio', 'urban']),
+            'subject_type' => fake()->randomElement(['product', 'person', 'food', 'architecture']),
             default => fake()->word(),
         };
     }

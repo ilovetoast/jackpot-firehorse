@@ -165,7 +165,7 @@ final class GoogleFontLibraryEntriesService
     private function mapFontManagerRoleToFontRole(string $role): string
     {
         return match ($role) {
-            'secondary', 'body' => 'body_copy',
+            'secondary', 'body' => 'body',
             default => 'headline',
         };
     }

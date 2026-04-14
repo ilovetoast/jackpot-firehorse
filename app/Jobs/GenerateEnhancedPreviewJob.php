@@ -5,11 +5,12 @@ namespace App\Jobs;
 use App\Models\AIAgentRun;
 use App\Models\Asset;
 use App\Models\AssetVersion;
-use App\Services\PrintLayoutCropService;
+use App\Services\StudioViewCropService;
 use App\Services\TemplateRenderer;
 use App\Services\ThumbnailEnhancementAiTaskRecorder;
 use App\Services\ThumbnailGenerationService;
 use App\Support\EnhancedPreviewFingerprint;
+use App\Support\StudioViewSourceResolver;
 use App\Support\ThumbnailMode;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -20,7 +21,8 @@ use Illuminate\Support\Facades\Log;
 use Throwable;
 
 /**
- * Async enhanced (template-composited) previews. Never auto-dispatched — drawer or API only.
+ * Studio View: user-defined crop on the large source thumbnail, then template compositing into the enhanced mode bucket.
+ * Never auto-dispatched — queued only from the Studio save API.
  *
  * @see \App\Services\TemplateRenderer
  * @see \App\Services\ThumbnailGenerationService::generateEnhancedPreviewsFromLocalRaster()
@@ -33,11 +35,16 @@ class GenerateEnhancedPreviewJob implements ShouldQueue
 
     public int $timeout;
 
+    /**
+     * @param  array<string, float|int>  $studioCropNormalized  x, y, width, height in 0–1 relative to canvas image
+     * @param  array<string, float|int>|null  $poiNormalized  optional x, y in 0–1 relative to full canvas image
+     */
     public function __construct(
         public readonly string $assetId,
         public readonly string $versionId,
+        public readonly array $studioCropNormalized,
+        public readonly ?array $poiNormalized = null,
         public readonly bool $force = false,
-        public readonly bool $debugBboxOverlay = false,
     ) {
         $this->timeout = max(120, (int) config('assets.thumbnail.job_timeout_seconds', 900));
     }
@@ -45,6 +52,7 @@ class GenerateEnhancedPreviewJob implements ShouldQueue
     public function handle(
         ThumbnailGenerationService $thumbnailService,
         TemplateRenderer $templateRenderer,
+        StudioViewCropService $cropService,
         ThumbnailEnhancementAiTaskRecorder $aiRecorder,
     ): void {
         $asset = Asset::query()
@@ -75,17 +83,26 @@ class GenerateEnhancedPreviewJob implements ShouldQueue
         $maxAttempts = max(1, (int) config('enhanced_preview.max_attempts', 2));
         $cooldown = max(0, (int) config('enhanced_preview.cooldown_seconds', 60));
 
-        [$sourcePath, $sourceMode] = EnhancedPreviewFingerprint::resolveEnhancedSource($meta);
-        if ($sourcePath === null || $sourcePath === '') {
+        [$canvasPath, $canvasMode, $canvasStyle] = StudioViewSourceResolver::resolveLargeRasterPath($meta);
+        if ($canvasPath === null || $canvasPath === '') {
             $this->persistTerminal(
                 $asset,
                 $version,
                 'skipped',
-                'No preferred or original thumbnail to use as enhanced source'
+                'No large or medium source thumbnail available for Studio View'
             );
 
             return;
         }
+
+        $cropNorm = $cropService->normalizeCropRect($this->studioCropNormalized);
+        if ($cropNorm === null) {
+            $this->persistTerminal($asset, $version, 'failed', 'Invalid Studio crop rectangle');
+
+            return;
+        }
+
+        $poiNorm = $cropService->normalizePoi($this->poiNormalized);
 
         $enhancedStatus = (string) ($modesStatus['enhanced'] ?? '');
 
@@ -109,7 +126,7 @@ class GenerateEnhancedPreviewJob implements ShouldQueue
             );
 
         if (! $this->force && $stillFresh) {
-            Log::info('[GenerateEnhancedPreviewJob] Skipping: enhanced output still matches source + template', [
+            Log::info('[GenerateEnhancedPreviewJob] Skipping: Studio output still matches crop + source + template', [
                 'asset_id' => $asset->id,
             ]);
 
@@ -146,7 +163,7 @@ class GenerateEnhancedPreviewJob implements ShouldQueue
 
         $templateId = $templateRenderer->selectTemplateForAsset($asset);
         $templateVersion = EnhancedPreviewFingerprint::templateVersionFor($templateId);
-        $aiRun = $aiRecorder->start($asset, $version, $sourceMode, $templateId, [
+        $aiRun = $aiRecorder->start($asset, $version, $canvasMode, $templateId, [
             'template_version' => $templateVersion,
             'attempt' => $attemptsNext,
         ]);
@@ -156,64 +173,85 @@ class GenerateEnhancedPreviewJob implements ShouldQueue
 
         $localRaster = null;
         try {
-            $localRaster = $thumbnailService->downloadObjectToTemp($bucket, $sourcePath, $asset->id);
+            $localRaster = $thumbnailService->downloadObjectToTemp($bucket, $canvasPath, $asset->id);
         } catch (Throwable $e) {
-            Log::warning('[GenerateEnhancedPreviewJob] Source download failed', [
+            Log::warning('[GenerateEnhancedPreviewJob] Canvas download failed', [
                 'asset_id' => $asset->id,
-                'path' => $sourcePath,
+                'path' => $canvasPath,
                 'error' => $e->getMessage(),
             ]);
-            $this->persistTerminal($asset, $version, 'failed', 'Failed to download source thumbnail: '.$e->getMessage(), $aiRun);
+            $this->persistTerminal($asset, $version, 'failed', 'Failed to download source for Studio View: '.$e->getMessage(), $aiRun);
 
             return;
         }
 
         if ($localRaster === null || ! is_file($localRaster) || filesize($localRaster) === 0) {
-            $this->persistTerminal($asset, $version, 'failed', 'Downloaded source thumbnail is empty', $aiRun);
+            $this->persistTerminal($asset, $version, 'failed', 'Downloaded Studio canvas is empty', $aiRun);
 
             return;
         }
 
         $sourceDims = @getimagesize($localRaster);
-        if ($sourceDims === false || ($sourceDims[0] ?? 0) < 400 || ($sourceDims[1] ?? 0) < 400) {
+        if ($sourceDims === false || ($sourceDims[0] ?? 0) < 32 || ($sourceDims[1] ?? 0) < 32) {
             $this->persistTerminal(
                 $asset,
                 $version,
                 'skipped',
-                'Source too small for enhanced preview (minimum 400×400 pixels).',
+                'Studio canvas is too small to crop.',
                 $aiRun,
                 ThumbnailEnhancementAiTaskRecorder::SKIP_REASON_TOO_SMALL
             );
+            if (is_file($localRaster)) {
+                @unlink($localRaster);
+            }
 
             return;
         }
 
-        $inputHash = EnhancedPreviewFingerprint::computeInputHash($thumbnailService, $bucket, $sourcePath);
-        $aiRecorder->mergeMetadata($aiRun, ['input_hash' => $inputHash]);
-
-        $rasterForGen = $localRaster;
-        $overlayTemp = null;
-        if ($this->debugBboxOverlay) {
-            $overlayTemp = app(PrintLayoutCropService::class)->renderFullImageWithBboxOverlayPng($localRaster);
-            if ($overlayTemp !== null && is_file($overlayTemp)) {
-                $rasterForGen = $overlayTemp;
-                Log::info('[GenerateEnhancedPreviewJob] Using source raster with red print-bbox overlay for enhanced preview', [
-                    'asset_id' => $asset->id,
-                ]);
-            } else {
-                Log::warning('[GenerateEnhancedPreviewJob] debug_bbox requested but bbox overlay could not be rendered; using plain source', [
-                    'asset_id' => $asset->id,
-                ]);
+        $croppedPath = $cropService->cropNormalizedToTemp($localRaster, $cropNorm);
+        if ($croppedPath === null || ! is_file($croppedPath)) {
+            $this->persistTerminal($asset, $version, 'failed', 'Could not apply Studio crop', $aiRun);
+            if (is_file($localRaster)) {
+                @unlink($localRaster);
             }
+
+            return;
         }
+
+        $cropDims = @getimagesize($croppedPath);
+        if ($cropDims === false || ($cropDims[0] ?? 0) < 32 || ($cropDims[1] ?? 0) < 32) {
+            $this->persistTerminal(
+                $asset,
+                $version,
+                'failed',
+                'Cropped region is too small after Studio crop.',
+                $aiRun
+            );
+            @unlink($croppedPath);
+            if (is_file($localRaster)) {
+                @unlink($localRaster);
+            }
+
+            return;
+        }
+
+        $inputHash = EnhancedPreviewFingerprint::computeStudioInputHash(
+            $thumbnailService,
+            $bucket,
+            $canvasPath,
+            $cropNorm,
+            $poiNorm,
+            $templateId
+        );
+        $aiRecorder->mergeMetadata($aiRun, ['input_hash' => $inputHash, 'studio_canvas' => $canvasStyle]);
 
         try {
             $result = $thumbnailService->generateEnhancedPreviewsFromLocalRaster(
                 $asset,
                 $version,
-                $rasterForGen,
+                $croppedPath,
                 $templateId,
-                $sourceMode
+                $canvasMode
             );
         } catch (Throwable $e) {
             Log::warning('[GenerateEnhancedPreviewJob] Generation failed', [
@@ -221,11 +259,15 @@ class GenerateEnhancedPreviewJob implements ShouldQueue
                 'error' => $e->getMessage(),
             ]);
             $this->persistTerminal($asset, $version, 'failed', $e->getMessage(), $aiRun);
+            @unlink($croppedPath);
+            if (is_file($localRaster)) {
+                @unlink($localRaster);
+            }
 
             return;
         } finally {
-            if ($overlayTemp !== null && is_string($overlayTemp) && is_file($overlayTemp) && $overlayTemp !== $localRaster) {
-                @unlink($overlayTemp);
+            if (is_string($croppedPath) && is_file($croppedPath)) {
+                @unlink($croppedPath);
             }
             if (is_string($localRaster) && is_file($localRaster)) {
                 @unlink($localRaster);
@@ -242,16 +284,20 @@ class GenerateEnhancedPreviewJob implements ShouldQueue
             $result,
             $templateId,
             $templateVersion,
-            $sourceMode,
+            $canvasMode,
+            $canvasStyle,
+            $cropNorm,
+            $poiNorm,
             $inputHash,
             $attemptsNext,
             $aiRun->id,
-            $this->debugBboxOverlay
         );
     }
 
     /**
      * @param  array<string, mixed>  $result
+     * @param  array{x:float,y:float,width:float,height:float}  $cropNorm
+     * @param  array{x:float,y:float}|null  $poiNorm
      */
     protected function mergeSuccess(
         Asset $asset,
@@ -259,17 +305,32 @@ class GenerateEnhancedPreviewJob implements ShouldQueue
         array $result,
         string $templateId,
         string $templateVersion,
-        string $sourceMode,
+        string $canvasMode,
+        string $canvasStyle,
+        array $cropNorm,
+        ?array $poiNorm,
         string $inputHash,
         int $attemptsDone,
         int $aiTaskId,
-        bool $debugBboxOverlay = false,
     ): void {
         $mode = ThumbnailMode::Enhanced->value;
         $finalThumbnails = $result['thumbnails'][$mode] ?? [];
         $thumbnailDimensions = $result['thumbnail_dimensions'][$mode] ?? [];
 
-        $merge = function (array $base) use ($mode, $finalThumbnails, $thumbnailDimensions, $templateId, $templateVersion, $sourceMode, $inputHash, $attemptsDone, $aiTaskId, $debugBboxOverlay): array {
+        $merge = function (array $base) use (
+            $mode,
+            $finalThumbnails,
+            $thumbnailDimensions,
+            $templateId,
+            $templateVersion,
+            $canvasMode,
+            $canvasStyle,
+            $cropNorm,
+            $poiNorm,
+            $inputHash,
+            $attemptsDone,
+            $aiTaskId,
+        ): array {
             $thumbs = $base['thumbnails'] ?? [];
             if (! is_array($thumbs)) {
                 $thumbs = [];
@@ -297,16 +358,24 @@ class GenerateEnhancedPreviewJob implements ShouldQueue
             }
             $prev = is_array($mm['enhanced'] ?? null) ? $mm['enhanced'] : [];
             unset($prev['failure_message'], $prev['failed_at'], $prev['skip_reason']);
-            $mm['enhanced'] = array_merge($prev, [
+            $row = [
                 'template' => $templateId,
                 'template_version' => $templateVersion,
-                'source_mode' => $sourceMode,
+                'source_mode' => $canvasMode,
+                'studio_canvas_style' => $canvasStyle,
+                'manual_studio' => true,
+                'studio_crop' => $cropNorm,
                 'input_hash' => $inputHash,
                 'ai_task_id' => $aiTaskId,
                 'attempts' => $attemptsDone,
                 'last_attempt_at' => now()->toIso8601String(),
-                'debug_bbox_overlay' => $debugBboxOverlay,
-            ]);
+            ];
+            if ($poiNorm !== null) {
+                $row['poi'] = $poiNorm;
+            } else {
+                unset($prev['poi']);
+            }
+            $mm['enhanced'] = array_merge($prev, $row);
             $base['thumbnail_modes_meta'] = $mm;
 
             return $base;
@@ -317,10 +386,10 @@ class GenerateEnhancedPreviewJob implements ShouldQueue
         $asset->refresh();
         $asset->update(['metadata' => $merge($asset->metadata ?? [])]);
 
-        Log::info('[GenerateEnhancedPreviewJob] Enhanced previews complete', [
+        Log::info('[GenerateEnhancedPreviewJob] Studio View (enhanced mode) complete', [
             'asset_id' => $asset->id,
             'template' => $templateId,
-            'source_mode' => $sourceMode,
+            'canvas_mode' => $canvasMode,
         ]);
     }
 

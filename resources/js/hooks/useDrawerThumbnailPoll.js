@@ -30,9 +30,42 @@ import { mergeThumbnailModeUrlsDrawerSync, mergeThumbnailModeUrlsPreserveCache }
 const POLL_SCHEDULE = [2000, 3000, 5000, 10000, 15000] // milliseconds
 const MAX_POLL_ATTEMPTS = POLL_SCHEDULE.length
 
+/** Studio / AI (presentation) jobs: main thumbnail can already be complete while these run */
+const MODE_PIPELINE_POLL_MS = 3000
+const MODE_PIPELINE_MAX_POLLS = 80
+
+/**
+ * @param {Object|null|undefined} a
+ * @returns {boolean}
+ */
+function isPerModePipelineProcessing(a) {
+    if (!a) {
+        return false
+    }
+    const top = a.thumbnail_modes_status && typeof a.thumbnail_modes_status === 'object' ? a.thumbnail_modes_status : {}
+    const nested =
+        a.metadata?.thumbnail_modes_status && typeof a.metadata.thumbnail_modes_status === 'object'
+            ? a.metadata.thumbnail_modes_status
+            : {}
+    const pick = (k) => String(top[k] ?? nested[k] ?? '').toLowerCase()
+    return pick('enhanced') === 'processing' || pick('presentation') === 'processing'
+}
+
+/**
+ * Re-start polling when a mode enters processing (optimistic UI after queueing Studio / AI).
+ * @param {Object|null|undefined} asset
+ */
+function modePipelineWatchKey(asset) {
+    if (!asset?.id) {
+        return ''
+    }
+    return `${asset.id}:${isPerModePipelineProcessing(asset) ? 'modes-busy' : 'modes-idle'}`
+}
+
 export function useDrawerThumbnailPoll({ asset, onAssetUpdate, pollEnabled = true }) {
     const timeoutIdRef = useRef(null)
     const pollAttemptRef = useRef(0)
+    const modePipelinePollsRef = useRef(0)
     const assetIdRef = useRef(asset?.id)
     const assetRef = useRef(asset)
     const onAssetUpdateRef = useRef(onAssetUpdate)
@@ -119,6 +152,7 @@ export function useDrawerThumbnailPoll({ asset, onAssetUpdate, pollEnabled = tru
                 timeoutIdRef.current = null
             }
             pollAttemptRef.current = 0
+            modePipelinePollsRef.current = 0
             assetIdRef.current = asset.id
         }
     }, [asset?.id])
@@ -224,6 +258,8 @@ export function useDrawerThumbnailPoll({ asset, onAssetUpdate, pollEnabled = tru
                     modeMetaChanged ||
                     modesStatusChanged
                 ) {
+                    const nextModesStatus =
+                        updatedAssetData.thumbnail_modes_status ?? currentAsset.thumbnail_modes_status
                     // Merge updated data into current asset
                     // Note: updatedAssetData has asset_id, but we keep id from currentAsset
                     const updatedAsset = {
@@ -235,8 +271,15 @@ export function useDrawerThumbnailPoll({ asset, onAssetUpdate, pollEnabled = tru
                         thumbnail_error: updatedAssetData.thumbnail_error ?? currentAsset.thumbnail_error,
                         thumbnail_mode_urls: mergedModeUrls ?? updatedAssetData.thumbnail_mode_urls ?? currentAsset.thumbnail_mode_urls,
                         thumbnail_modes_meta: nextModesMeta ?? currentAsset.thumbnail_modes_meta,
-                        thumbnail_modes_status:
-                            updatedAssetData.thumbnail_modes_status ?? currentAsset.thumbnail_modes_status,
+                        thumbnail_modes_status: nextModesStatus,
+                        metadata: {
+                            ...(currentAsset.metadata && typeof currentAsset.metadata === 'object'
+                                ? currentAsset.metadata
+                                : {}),
+                            ...(nextModesStatus && typeof nextModesStatus === 'object'
+                                ? { thumbnail_modes_status: nextModesStatus }
+                                : {}),
+                        },
                     }
 
                     // Update ref for next poll
@@ -260,14 +303,29 @@ export function useDrawerThumbnailPoll({ asset, onAssetUpdate, pollEnabled = tru
         const a = assetRef.current
         const stAfter = a.thumbnail_status?.value || a.thumbnail_status
         const hasFinalAfter = !!a.final_thumbnail_url
-        if (
-            (stAfter === 'completed' && hasFinalAfter) ||
-            stAfter === 'failed' ||
-            stAfter === 'skipped' ||
-            !!a.thumbnail_error
-        ) {
+        const modeBusy = isPerModePipelineProcessing(a)
+
+        if (stAfter === 'failed' || stAfter === 'skipped' || !!a.thumbnail_error) {
             return
         }
+
+        // Main raster pipeline can be done while Studio / AI jobs still run — keep polling until modes settle.
+        if (stAfter === 'completed' && hasFinalAfter && !modeBusy) {
+            return
+        }
+
+        if (modeBusy) {
+            modePipelinePollsRef.current += 1
+            if (modePipelinePollsRef.current > MODE_PIPELINE_MAX_POLLS) {
+                return
+            }
+            timeoutIdRef.current = setTimeout(() => {
+                performPoll()
+            }, MODE_PIPELINE_POLL_MS)
+            return
+        }
+
+        modePipelinePollsRef.current = 0
 
         // Schedule next poll if we haven't exceeded max attempts
         if (pollAttemptRef.current < MAX_POLL_ATTEMPTS) {
@@ -288,6 +346,7 @@ export function useDrawerThumbnailPoll({ asset, onAssetUpdate, pollEnabled = tru
                 timeoutIdRef.current = null
             }
             pollAttemptRef.current = 0
+            modePipelinePollsRef.current = 0
             return
         }
         const currentAsset = assetRef.current
@@ -297,6 +356,7 @@ export function useDrawerThumbnailPoll({ asset, onAssetUpdate, pollEnabled = tru
 
         // Reset polling state for new asset
         pollAttemptRef.current = 0
+        modePipelinePollsRef.current = 0
 
         // Check if we should even start polling
         const thumbnailStatus = currentAsset.thumbnail_status?.value || currentAsset.thumbnail_status
@@ -306,10 +366,24 @@ export function useDrawerThumbnailPoll({ asset, onAssetUpdate, pollEnabled = tru
         const isSkipped = thumbnailStatus === 'skipped'
         const hasError = !!currentAsset.thumbnail_error
         const isPending = thumbnailStatus === 'pending' || thumbnailStatus === 'processing'
+        const modeBusyStart = isPerModePipelineProcessing(currentAsset)
 
         // Don't poll if terminal error state
         if (isFailed || isSkipped || hasError) {
             return
+        }
+
+        // Studio / AI queued while main thumbnails already exist — must poll batch status
+        if (modeBusyStart) {
+            performPoll()
+            return () => {
+                if (timeoutIdRef.current) {
+                    clearTimeout(timeoutIdRef.current)
+                    timeoutIdRef.current = null
+                }
+                pollAttemptRef.current = 0
+                modePipelinePollsRef.current = 0
+            }
         }
 
         // Don't start polling if status is pending but no preview or final URL exists
@@ -338,8 +412,9 @@ export function useDrawerThumbnailPoll({ asset, onAssetUpdate, pollEnabled = tru
                 timeoutIdRef.current = null
             }
             pollAttemptRef.current = 0
+            modePipelinePollsRef.current = 0
         }
-    }, [asset?.id, pollEnabled])
+    }, [asset?.id, pollEnabled, modePipelineWatchKey(asset)])
 
     return {
         drawerAsset: drawerAsset || asset, // Fallback to prop if state not initialized

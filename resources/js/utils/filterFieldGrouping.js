@@ -42,6 +42,8 @@ function isAiOrSceneField(field) {
     if (field.is_ai_trainable === true || field.ai_eligible === true) return true
     if (/^ai_/i.test(k) || /^scene_/i.test(k)) return true
     if (
+        k.includes('environment_type') ||
+        k.includes('subject_type') ||
         k.includes('scene_classification') ||
         k.includes('caption') ||
         k.includes('detected_objects') ||

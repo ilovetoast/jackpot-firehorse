@@ -14,9 +14,21 @@ function getCsrfToken() {
     return document.querySelector('meta[name="csrf-token"]')?.content || ''
 }
 
-function fieldTitle(field) {
-    if (field.key && String(field.key).endsWith('_type')) return 'Type'
-    return field.label || field.system_label || field.key || 'Unnamed Field'
+/**
+ * Table title for Manage → Fields. Only the category's canonical primary type field
+ * (type_field.field_key, e.g. photo_type) should read as "Type". Other keys ending in
+ * _type (environment_type, subject_type, execution_video_type, …) must use their
+ * system labels so they do not all collapse to duplicate "Type" rows.
+ */
+function fieldTitle(field, primaryTypeFieldKey = null) {
+    const k = field.key ? String(field.key) : ''
+    if (k.endsWith('_type')) {
+        if (primaryTypeFieldKey && k === primaryTypeFieldKey) {
+            return 'Type'
+        }
+        return field.label || field.system_label || k.replace(/_type$/, '').replace(/_/g, ' ') || 'Field'
+    }
+    return field.label || field.system_label || k || 'Unnamed Field'
 }
 
 function isAutomatedField(field) {
@@ -240,21 +252,24 @@ export default function ManageFieldsWorkspace({
               available.find((f) => f.key === resolvedTypeKey) ||
               null
             : null
-        const primarySceneField =
-            enabled.find((f) => f.key === 'scene_classification') ||
-            available.find((f) => f.key === 'scene_classification') ||
-            null
+        const descriptorKeys = ['environment_type', 'subject_type']
+        const primaryDescriptorFields = descriptorKeys
+            .map(
+                (key) =>
+                    enabled.find((f) => f.key === key) || available.find((f) => f.key === key) || null
+            )
+            .filter(Boolean)
 
         const otherEnabled = enabled.filter(
             (f) =>
                 !hideTypeFamilyMember(f) &&
-                f.key !== 'scene_classification' &&
+                !descriptorKeys.includes(f.key) &&
                 !(resolvedTypeKey && f.key === resolvedTypeKey)
         )
         const otherAvailable = available.filter(
             (f) =>
                 !hideTypeFamilyMember(f) &&
-                f.key !== 'scene_classification' &&
+                !descriptorKeys.includes(f.key) &&
                 !(resolvedTypeKey && f.key === resolvedTypeKey)
         )
 
@@ -274,12 +289,12 @@ export default function ManageFieldsWorkspace({
                 enabled: enabled.some((f) => f.id === primaryTypeField.id),
             })
         }
-        if (primarySceneField) {
-            pushRow(primarySceneField, {
+        primaryDescriptorFields.forEach((field) => {
+            pushRow(field, {
                 automated: false,
-                enabled: enabled.some((f) => f.id === primarySceneField.id),
+                enabled: enabled.some((f) => f.id === field.id),
             })
-        }
+        })
         otherEnabled.forEach((f) => pushRow(f, { automated: false, enabled: true }))
         otherAvailable.forEach((f) => pushRow(f, { automated: false, enabled: false }))
         enabledAutomated.forEach((f) => pushRow(f, { automated: true, enabled: true }))
@@ -814,12 +829,15 @@ export default function ManageFieldsWorkspace({
                                     ? resolveEffective(field, selectedCategoryId, detailData)
                                     : null
                             const isExpanded = expandedDetailKey === rowKey
+                            const primaryTypeKey = selectedCategory?.type_field?.field_key ?? null
                             return (
                                 <Fragment key={rowKey}>
                                     <tr className={isEnabled ? '' : 'bg-gray-50/60'}>
                                         <td className="px-4 py-3">
                                             <div className="flex flex-wrap items-center gap-2">
-                                                <span className="text-sm font-medium text-gray-900">{fieldTitle(field)}</span>
+                                                <span className="text-sm font-medium text-gray-900">
+                                                    {fieldTitle(field, primaryTypeKey)}
+                                                </span>
                                                 {isAutomated && (
                                                     <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-gray-600">
                                                         Auto

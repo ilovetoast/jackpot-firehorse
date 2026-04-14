@@ -239,7 +239,7 @@ class UploadMetadataSchemaResolver
      * Group fields by group_key.
      *
      * Fields with null group_key go into "General" group.
-     * Groups are returned in a stable order (sorted by group_key).
+     * Groups use {@see sortGroupedFieldsByUploadDisplayOrder} (standard buckets first, {@code custom} last).
      * Fields within groups maintain their original order.
      *
      * @param array $fields Filtered upload fields
@@ -257,10 +257,59 @@ class UploadMetadataSchemaResolver
             $grouped[$groupKey][] = $field;
         }
 
-        // Sort groups by key for stable order
-        ksort($grouped);
+        return $this->sortGroupedFieldsByUploadDisplayOrder($grouped);
+    }
 
-        return $grouped;
+    /**
+     * Upload form group order: standard buckets first, other tenant-defined keys in the middle,
+     * {@see $group_key} {@code custom} last so “Custom” fields sit below General / Rights.
+     */
+    protected function sortGroupedFieldsByUploadDisplayOrder(array $grouped): array
+    {
+        $priority = [
+            'creative',
+            'technical',
+            'commercial',
+            'ai',
+            'ai_system',
+            'general',
+            'legal',
+            'legal_rights',
+            'rights',
+            'internal',
+        ];
+
+        $keys = array_keys($grouped);
+        $orderedKeys = [];
+
+        foreach ($priority as $p) {
+            foreach ($keys as $k) {
+                if (strcasecmp((string) $k, $p) === 0 && ! in_array($k, $orderedKeys, true)) {
+                    $orderedKeys[] = $k;
+                }
+            }
+        }
+
+        $remaining = array_values(array_diff($keys, $orderedKeys));
+        $customKeys = [];
+        $otherTail = [];
+        foreach ($remaining as $k) {
+            if (strcasecmp((string) $k, 'custom') === 0) {
+                $customKeys[] = $k;
+            } else {
+                $otherTail[] = $k;
+            }
+        }
+        sort($otherTail, SORT_NATURAL | SORT_FLAG_CASE);
+
+        $finalKeys = array_merge($orderedKeys, $otherTail, $customKeys);
+
+        $out = [];
+        foreach ($finalKeys as $k) {
+            $out[$k] = $grouped[$k];
+        }
+
+        return $out;
     }
 
     /**

@@ -10,6 +10,19 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Transparent Studio plate (no template gradient / no GD drop shadow block)
+    |--------------------------------------------------------------------------
+    |
+    | When true, enhanced (Studio) thumbnails are composited on a fully transparent
+    | canvas so CSS presentation presets (desk / wall / neutral) read through padding
+    | and transparent areas. Drop shadow is left to the client (ExecutionPresentationFrame).
+    | Set to false to restore the legacy gradient card behind the crop.
+    |
+    */
+    'transparent_plate' => filter_var(env('ENHANCED_PREVIEW_TRANSPARENT_PLATE', true), FILTER_VALIDATE_BOOL),
+
+    /*
+    |--------------------------------------------------------------------------
     | Styles to generate for enhanced mode
     |--------------------------------------------------------------------------
     |
@@ -26,7 +39,7 @@ return [
     'templates' => [
         'catalog_v1' => [
             // Bump when compositing or pre-crop behavior changes (staleness / regenerate)
-            'version' => env('ENHANCED_TEMPLATE_CATALOG_V1_VERSION', '1.1.0'),
+            'version' => env('ENHANCED_TEMPLATE_CATALOG_V1_VERSION', '1.2.2'),
             'bg_top' => [245, 247, 250],
             'bg_bottom' => [220, 225, 232],
             'shadow_alpha' => 55,
@@ -35,7 +48,7 @@ return [
             'padding_ratio' => (float) env('ENHANCED_TEMPLATE_CATALOG_PADDING', 0.055),
         ],
         'surface_v1' => [
-            'version' => env('ENHANCED_TEMPLATE_SURFACE_V1_VERSION', '1.1.0'),
+            'version' => env('ENHANCED_TEMPLATE_SURFACE_V1_VERSION', '1.2.2'),
             'bg_top' => [252, 252, 250],
             'bg_bottom' => [235, 232, 226],
             'shadow_alpha' => 50,
@@ -43,7 +56,7 @@ return [
             'padding_ratio' => (float) env('ENHANCED_TEMPLATE_SURFACE_PADDING', 0.055),
         ],
         'neutral_v1' => [
-            'version' => env('ENHANCED_TEMPLATE_NEUTRAL_V1_VERSION', '1.1.0'),
+            'version' => env('ENHANCED_TEMPLATE_NEUTRAL_V1_VERSION', '1.2.2'),
             'bg_top' => [248, 248, 248],
             'bg_bottom' => [232, 232, 232],
             'shadow_alpha' => 60,

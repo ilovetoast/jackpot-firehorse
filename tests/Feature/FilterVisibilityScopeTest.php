@@ -111,7 +111,7 @@ class FilterVisibilityScopeTest extends TestCase
     /**
      * Test 1: Filter omitted when no values exist.
      *
-     * Create assets with no radio_type, no ooh_type (and no photo_type / scene_classification).
+     * Create assets with no radio_type, no ooh_type (and no photo_type / environment_type).
      * Assert filter payload does NOT include those keys.
      */
     public function test_filter_omitted_when_no_values_exist(): void
@@ -132,7 +132,7 @@ class FilterVisibilityScopeTest extends TestCase
             'uploaded_size' => 1024,
         ]);
 
-        // Two assets with no photo_type, no scene_classification, no radio_type, no ooh_type
+        // Two assets with no photo_type, no environment_type, no radio_type, no ooh_type
         foreach (['a', 'b'] as $i) {
             Asset::create([
                 'tenant_id' => $this->tenant->id,
@@ -156,7 +156,7 @@ class FilterVisibilityScopeTest extends TestCase
 
         // Fields with zero values in scope must not appear in the payload
         $this->assertNotContains('photo_type', $payloadKeys, 'photo_type should be omitted when no asset has a value');
-        $this->assertNotContains('scene_classification', $payloadKeys, 'scene_classification should be omitted when no asset has a value');
+        $this->assertNotContains('environment_type', $payloadKeys, 'environment_type should be omitted when no asset has a value');
     }
 
     /**

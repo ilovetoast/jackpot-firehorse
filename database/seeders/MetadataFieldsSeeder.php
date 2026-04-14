@@ -47,6 +47,25 @@ class MetadataFieldsSeeder extends Seeder
 
         // Guarantee default system fields exist and are enabled (staging consistency)
         $this->ensureDefaultSystemFields();
+
+        $this->deprecateLegacySceneClassification();
+    }
+
+    /**
+     * scene_classification mixed environment, subject, and composition; replaced by environment_type + subject_type.
+     * Existing rows remain in DB for audit; field is hidden from schema via deprecated_at.
+     */
+    protected function deprecateLegacySceneClassification(): void
+    {
+        $replacementId = DB::table('metadata_fields')->where('key', 'environment_type')->value('id');
+
+        DB::table('metadata_fields')
+            ->where('key', 'scene_classification')
+            ->update([
+                'deprecated_at' => now(),
+                'replacement_field_id' => $replacementId,
+                'updated_at' => now(),
+            ]);
     }
 
     /**
@@ -123,26 +142,7 @@ class MetadataFieldsSeeder extends Seeder
             ->whereIn('key', ['ai_color_palette', 'ai_detected_objects'])
             ->delete();
 
-        // Convert Scene Classification from automatic to regular metadata field
-        $sceneField = DB::table('metadata_fields')
-            ->where('key', 'scene_classification')
-            ->first();
-
-        if ($sceneField) {
-            DB::table('metadata_fields')
-                ->where('id', $sceneField->id)
-                ->update([
-                    'population_mode' => 'manual', // Change from automatic to manual
-                    'show_on_upload' => true, // Enable on upload
-                    'show_on_edit' => true, // Enable on edit
-                    'show_in_filters' => true, // Keep filterable
-                    'readonly' => false, // Make it editable
-                    'is_user_editable' => true, // User can edit
-                    'ai_eligible' => true, // Enable AI suggestions
-                    'group_key' => 'creative', // Move to creative group
-                    'updated_at' => now(),
-                ]);
-        }
+        // scene_classification: deprecated in favor of environment_type + subject_type (see deprecateLegacySceneClassification).
     }
 
     /**
@@ -172,7 +172,7 @@ class MetadataFieldsSeeder extends Seeder
      */
     protected function seedBasicFields(): void
     {
-        // Photo Type (Photography) — options: studio, lifestyle only
+        // Photo Type (Photography) — production / shoot style options (see syncOptions list)
         $photoTypeId = $this->getOrCreateField([
             'key' => 'photo_type',
             'system_label' => 'Photo Type',
@@ -191,6 +191,12 @@ class MetadataFieldsSeeder extends Seeder
         $this->syncOptions($photoTypeId, [
             ['value' => 'studio', 'system_label' => 'Studio'],
             ['value' => 'lifestyle', 'system_label' => 'Lifestyle'],
+            ['value' => 'product', 'system_label' => 'Product'],
+            ['value' => 'portrait', 'system_label' => 'Portrait'],
+            ['value' => 'event', 'system_label' => 'Event'],
+            ['value' => 'editorial', 'system_label' => 'Editorial'],
+            ['value' => 'macro_detail', 'system_label' => 'Macro / Detail'],
+            ['value' => 'flat_lay', 'system_label' => 'Flat Lay'],
         ]);
 
         // Logo Type (Logos) — options: primary, secondary, promotional only; no AI by default
@@ -212,7 +218,11 @@ class MetadataFieldsSeeder extends Seeder
         $this->syncOptions($logoTypeId, [
             ['value' => 'primary', 'system_label' => 'Primary'],
             ['value' => 'secondary', 'system_label' => 'Secondary'],
+            ['value' => 'icon', 'system_label' => 'Icon'],
+            ['value' => 'wordmark', 'system_label' => 'Wordmark'],
+            ['value' => 'lockup', 'system_label' => 'Lockup'],
             ['value' => 'promotional', 'system_label' => 'Promotional'],
+            ['value' => 'alternate', 'system_label' => 'Alternate'],
         ]);
 
         // Font role — headline vs body copy (Fonts library / Brand Guidelines typography only).
@@ -235,7 +245,10 @@ class MetadataFieldsSeeder extends Seeder
         ]);
         $this->syncOptions($fontRoleId, [
             ['value' => 'headline', 'system_label' => 'Headline'],
-            ['value' => 'body_copy', 'system_label' => 'Body copy'],
+            ['value' => 'subhead', 'system_label' => 'Subhead'],
+            ['value' => 'body', 'system_label' => 'Body'],
+            ['value' => 'accent', 'system_label' => 'Accent'],
+            ['value' => 'ui', 'system_label' => 'UI'],
         ]);
 
         // Graphics — graphic_type
@@ -253,10 +266,15 @@ class MetadataFieldsSeeder extends Seeder
             'is_internal_only' => false,
             'display_widget' => 'select',
         ]);
-        $this->createOptions($graphicTypeId, [
+        $this->syncOptions($graphicTypeId, [
             ['value' => 'icon', 'system_label' => 'Icon'],
-            ['value' => 'effect', 'system_label' => 'Effect'],
+            ['value' => 'illustration', 'system_label' => 'Illustration'],
             ['value' => 'texture', 'system_label' => 'Texture'],
+            ['value' => 'pattern', 'system_label' => 'Pattern'],
+            ['value' => 'overlay', 'system_label' => 'Overlay'],
+            ['value' => 'badge', 'system_label' => 'Badge'],
+            ['value' => 'effect', 'system_label' => 'Effect'],
+            ['value' => 'background', 'system_label' => 'Background'],
         ]);
 
         // Video Assets — video_type (primary filter on Video category via config/metadata_category_defaults.php;
@@ -275,9 +293,15 @@ class MetadataFieldsSeeder extends Seeder
             'is_internal_only' => false,
             'display_widget' => 'select',
         ]);
-        $this->createOptions($videoTypeId, [
+        $this->syncOptions($videoTypeId, [
             ['value' => 'b_roll', 'system_label' => 'B-Roll'],
-            ['value' => 'interviews', 'system_label' => 'Interviews'],
+            ['value' => 'interview', 'system_label' => 'Interview'],
+            ['value' => 'testimonial', 'system_label' => 'Testimonial'],
+            ['value' => 'product_demo', 'system_label' => 'Product Demo'],
+            ['value' => 'event_footage', 'system_label' => 'Event Footage'],
+            ['value' => 'social_clip', 'system_label' => 'Social Clip'],
+            ['value' => 'motion_graphic', 'system_label' => 'Motion Graphic'],
+            ['value' => 'behind_the_scenes', 'system_label' => 'Behind the Scenes'],
         ]);
 
         // Templates — template_type
@@ -295,13 +319,16 @@ class MetadataFieldsSeeder extends Seeder
             'is_internal_only' => false,
             'display_widget' => 'select',
         ]);
-        $this->createOptions($templateTypeId, [
-            ['value' => 'email', 'system_label' => 'Email'],
+        $this->syncOptions($templateTypeId, [
             ['value' => 'social', 'system_label' => 'Social'],
+            ['value' => 'email', 'system_label' => 'Email'],
+            ['value' => 'presentation', 'system_label' => 'Presentation'],
+            ['value' => 'print', 'system_label' => 'Print'],
+            ['value' => 'web', 'system_label' => 'Web'],
+            ['value' => 'ad', 'system_label' => 'Ad'],
         ]);
 
-        // Audio — audio_type (field only, no options)
-        $this->getOrCreateField([
+        $audioTypeId = $this->getOrCreateField([
             'key' => 'audio_type',
             'system_label' => 'Audio Type',
             'type' => 'select',
@@ -315,9 +342,16 @@ class MetadataFieldsSeeder extends Seeder
             'is_internal_only' => false,
             'display_widget' => 'select',
         ]);
+        $this->syncOptions($audioTypeId, [
+            ['value' => 'voiceover', 'system_label' => 'Voiceover'],
+            ['value' => 'music', 'system_label' => 'Music'],
+            ['value' => 'sfx', 'system_label' => 'SFX'],
+            ['value' => 'podcast', 'system_label' => 'Podcast'],
+            ['value' => 'interview', 'system_label' => 'Interview'],
+            ['value' => 'ambient', 'system_label' => 'Ambient'],
+        ]);
 
-        // 3D Models — model_3d_type (field only, no options)
-        $this->getOrCreateField([
+        $model3dTypeId = $this->getOrCreateField([
             'key' => 'model_3d_type',
             'system_label' => '3D Model Type',
             'type' => 'select',
@@ -330,6 +364,14 @@ class MetadataFieldsSeeder extends Seeder
             'is_upload_visible' => true,
             'is_internal_only' => false,
             'display_widget' => 'select',
+        ]);
+        $this->syncOptions($model3dTypeId, [
+            ['value' => 'product_model', 'system_label' => 'Product Model'],
+            ['value' => 'environment', 'system_label' => 'Environment'],
+            ['value' => 'packaging', 'system_label' => 'Packaging'],
+            ['value' => 'fixture', 'system_label' => 'Fixture'],
+            ['value' => 'concept', 'system_label' => 'Concept'],
+            ['value' => 'render_source', 'system_label' => 'Render Source'],
         ]);
 
         // Orientation
@@ -541,10 +583,9 @@ class MetadataFieldsSeeder extends Seeder
                 'updated_at' => now(),
             ]);
 
-        // Scene Classification (regular metadata field with AI suggestions)
-        $sceneClassificationId = $this->getOrCreateField([
-            'key' => 'scene_classification',
-            'system_label' => 'Scene Classification',
+        $environmentTypeId = $this->getOrCreateField([
+            'key' => 'environment_type',
+            'system_label' => 'Environment',
             'type' => 'select',
             'applies_to' => 'image',
             'scope' => 'system',
@@ -554,20 +595,86 @@ class MetadataFieldsSeeder extends Seeder
             'is_ai_trainable' => true,
             'is_upload_visible' => true,
             'is_internal_only' => false,
-            'ai_eligible' => true, // Enable AI suggestions
+            'ai_eligible' => true,
+            'display_widget' => 'select',
         ]);
-
-        $this->createOptions($sceneClassificationId, [
+        $this->syncOptions($environmentTypeId, [
+            ['value' => 'studio', 'system_label' => 'Studio'],
             ['value' => 'indoor', 'system_label' => 'Indoor'],
             ['value' => 'outdoor', 'system_label' => 'Outdoor'],
-            ['value' => 'portrait', 'system_label' => 'Portrait'],
-            ['value' => 'landscape', 'system_label' => 'Landscape'],
+            ['value' => 'urban', 'system_label' => 'Urban'],
+            ['value' => 'nature', 'system_label' => 'Nature'],
+        ]);
+
+        $subjectTypeId = $this->getOrCreateField([
+            'key' => 'subject_type',
+            'system_label' => 'Subject',
+            'type' => 'select',
+            'applies_to' => 'image',
+            'scope' => 'system',
+            'group_key' => 'creative',
+            'is_filterable' => true,
+            'is_user_editable' => true,
+            'is_ai_trainable' => true,
+            'is_upload_visible' => true,
+            'is_internal_only' => false,
+            'ai_eligible' => true,
+            'display_widget' => 'select',
+        ]);
+        $this->syncOptions($subjectTypeId, [
             ['value' => 'product', 'system_label' => 'Product'],
+            ['value' => 'person', 'system_label' => 'Person'],
             ['value' => 'food', 'system_label' => 'Food'],
             ['value' => 'architecture', 'system_label' => 'Architecture'],
-            ['value' => 'nature', 'system_label' => 'Nature'],
-            ['value' => 'urban', 'system_label' => 'Urban'],
+            ['value' => 'landscape', 'system_label' => 'Landscape'],
             ['value' => 'abstract', 'system_label' => 'Abstract'],
+            ['value' => 'object', 'system_label' => 'Object'],
+            ['value' => 'texture', 'system_label' => 'Texture'],
+        ]);
+
+        $statusId = $this->getOrCreateField([
+            'key' => 'status',
+            'system_label' => 'Status',
+            'type' => 'select',
+            'applies_to' => 'all',
+            'scope' => 'system',
+            'group_key' => 'general',
+            'is_filterable' => true,
+            'is_user_editable' => true,
+            'is_ai_trainable' => false,
+            'is_upload_visible' => true,
+            'is_internal_only' => false,
+            'ai_eligible' => false,
+            'display_widget' => 'select',
+        ]);
+        $this->syncOptions($statusId, [
+            ['value' => 'draft', 'system_label' => 'Draft'],
+            ['value' => 'approved', 'system_label' => 'Approved'],
+            ['value' => 'published', 'system_label' => 'Published'],
+            ['value' => 'archived', 'system_label' => 'Archived'],
+        ]);
+
+        $seasonId = $this->getOrCreateField([
+            'key' => 'season',
+            'system_label' => 'Season',
+            'type' => 'select',
+            'applies_to' => 'all',
+            'scope' => 'system',
+            'group_key' => 'general',
+            'is_filterable' => true,
+            'is_user_editable' => true,
+            'is_ai_trainable' => false,
+            'is_upload_visible' => true,
+            'is_internal_only' => false,
+            'ai_eligible' => false,
+            'display_widget' => 'select',
+        ]);
+        $this->syncOptions($seasonId, [
+            ['value' => 'spring', 'system_label' => 'Spring'],
+            ['value' => 'summer', 'system_label' => 'Summer'],
+            ['value' => 'fall', 'system_label' => 'Fall'],
+            ['value' => 'winter', 'system_label' => 'Winter'],
+            ['value' => 'evergreen', 'system_label' => 'Evergreen'],
         ]);
 
         // Dominant Colors (system automated) — drawer only, never in More filters
@@ -625,11 +732,15 @@ class MetadataFieldsSeeder extends Seeder
             'ai_eligible' => true,
             'display_widget' => 'select',
         ]);
-        $this->createOptions($printTypeId, [
-            ['value' => 'ads', 'system_label' => 'Ads'],
-            ['value' => 'brochures', 'system_label' => 'Brochures'],
-            ['value' => 'posters', 'system_label' => 'Posters'],
-            ['value' => 'inserts', 'system_label' => 'Inserts'],
+        $this->syncOptions($printTypeId, [
+            ['value' => 'ad', 'system_label' => 'Ad'],
+            ['value' => 'brochure', 'system_label' => 'Brochure'],
+            ['value' => 'flyer', 'system_label' => 'Flyer'],
+            ['value' => 'poster', 'system_label' => 'Poster'],
+            ['value' => 'insert', 'system_label' => 'Insert'],
+            ['value' => 'catalog', 'system_label' => 'Catalog'],
+            ['value' => 'sales_sheet', 'system_label' => 'Sales Sheet'],
+            ['value' => 'direct_mail', 'system_label' => 'Direct Mail'],
         ]);
 
         // 2. Digital (rename from Digital Ads)
@@ -648,8 +759,14 @@ class MetadataFieldsSeeder extends Seeder
             'ai_eligible' => true,
             'display_widget' => 'select',
         ]);
-        $this->createOptions($digitalTypeId, [
-            ['value' => 'display_ads', 'system_label' => 'Display Ads'],
+        $this->syncOptions($digitalTypeId, [
+            ['value' => 'display_ad', 'system_label' => 'Display Ad'],
+            ['value' => 'web_banner', 'system_label' => 'Web Banner'],
+            ['value' => 'landing_page', 'system_label' => 'Landing Page'],
+            ['value' => 'email_graphic', 'system_label' => 'Email Graphic'],
+            ['value' => 'hero', 'system_label' => 'Hero'],
+            ['value' => 'ecommerce_module', 'system_label' => 'E-commerce Module'],
+            ['value' => 'app_creative', 'system_label' => 'App Creative'],
         ]);
 
         // 3. OOH
@@ -668,9 +785,13 @@ class MetadataFieldsSeeder extends Seeder
             'ai_eligible' => true,
             'display_widget' => 'select',
         ]);
-        $this->createOptions($oohTypeId, [
-            ['value' => 'billboards', 'system_label' => 'Billboards'],
+        $this->syncOptions($oohTypeId, [
+            ['value' => 'billboard', 'system_label' => 'Billboard'],
             ['value' => 'signage', 'system_label' => 'Signage'],
+            ['value' => 'transit', 'system_label' => 'Transit'],
+            ['value' => 'retail_display', 'system_label' => 'Retail Display'],
+            ['value' => 'wall_graphic', 'system_label' => 'Wall Graphic'],
+            ['value' => 'window_graphic', 'system_label' => 'Window Graphic'],
         ]);
 
         // 4. Events
@@ -689,10 +810,14 @@ class MetadataFieldsSeeder extends Seeder
             'ai_eligible' => true,
             'display_widget' => 'select',
         ]);
-        $this->createOptions($eventTypeId, [
-            ['value' => 'booths', 'system_label' => 'Booths'],
-            ['value' => 'transit', 'system_label' => 'Transit'],
-            ['value' => 'experiential', 'system_label' => 'Experiential'],
+        $this->syncOptions($eventTypeId, [
+            ['value' => 'booth', 'system_label' => 'Booth'],
+            ['value' => 'backdrop', 'system_label' => 'Backdrop'],
+            ['value' => 'banner', 'system_label' => 'Banner'],
+            ['value' => 'credential', 'system_label' => 'Credential'],
+            ['value' => 'handout', 'system_label' => 'Handout'],
+            ['value' => 'experiential_installation', 'system_label' => 'Experiential Installation'],
+            ['value' => 'wayfinding', 'system_label' => 'Wayfinding'],
         ]);
 
         // 5. Video (Executions)
@@ -711,12 +836,14 @@ class MetadataFieldsSeeder extends Seeder
             'ai_eligible' => true,
             'display_widget' => 'select',
         ]);
-        $this->createOptions($executionVideoTypeId, [
+        $this->syncOptions($executionVideoTypeId, [
             ['value' => 'broadcast', 'system_label' => 'Broadcast'],
             ['value' => 'pre_roll', 'system_label' => 'Pre-Roll'],
             ['value' => 'brand_video', 'system_label' => 'Brand Video'],
-            ['value' => 'explainer_video', 'system_label' => 'Explainer Video'],
-            ['value' => 'product_demos', 'system_label' => 'Product Demos'],
+            ['value' => 'explainer', 'system_label' => 'Explainer'],
+            ['value' => 'product_demo', 'system_label' => 'Product Demo'],
+            ['value' => 'social_video', 'system_label' => 'Social Video'],
+            ['value' => 'cutdown', 'system_label' => 'Cutdown'],
         ]);
 
         // 6. Sales Collateral
@@ -735,10 +862,13 @@ class MetadataFieldsSeeder extends Seeder
             'ai_eligible' => true,
             'display_widget' => 'select',
         ]);
-        $this->createOptions($salesCollateralTypeId, [
-            ['value' => 'catalogs', 'system_label' => 'Catalogs'],
-            ['value' => 'sales_sheets', 'system_label' => 'Sales Sheets'],
-            ['value' => 'trade_show_materials', 'system_label' => 'Trade Show Materials'],
+        $this->syncOptions($salesCollateralTypeId, [
+            ['value' => 'sales_sheet', 'system_label' => 'Sales Sheet'],
+            ['value' => 'catalog', 'system_label' => 'Catalog'],
+            ['value' => 'pitch_deck', 'system_label' => 'Pitch Deck'],
+            ['value' => 'trade_show_material', 'system_label' => 'Trade Show Material'],
+            ['value' => 'case_study', 'system_label' => 'Case Study'],
+            ['value' => 'one_pager', 'system_label' => 'One Pager'],
         ]);
 
         // 7. PR
@@ -757,10 +887,12 @@ class MetadataFieldsSeeder extends Seeder
             'ai_eligible' => true,
             'display_widget' => 'select',
         ]);
-        $this->createOptions($prTypeId, [
-            ['value' => 'press_releases', 'system_label' => 'Press Releases'],
-            ['value' => 'media_kits', 'system_label' => 'Media Kits'],
-            ['value' => 'backgrounders', 'system_label' => 'Backgrounders'],
+        $this->syncOptions($prTypeId, [
+            ['value' => 'press_release', 'system_label' => 'Press Release'],
+            ['value' => 'media_kit', 'system_label' => 'Media Kit'],
+            ['value' => 'backgrounder', 'system_label' => 'Backgrounder'],
+            ['value' => 'fact_sheet', 'system_label' => 'Fact Sheet'],
+            ['value' => 'announcement', 'system_label' => 'Announcement'],
         ]);
 
         // 8. Packaging
@@ -779,13 +911,17 @@ class MetadataFieldsSeeder extends Seeder
             'ai_eligible' => true,
             'display_widget' => 'select',
         ]);
-        $this->createOptions($packagingTypeId, [
+        $this->syncOptions($packagingTypeId, [
+            ['value' => 'label', 'system_label' => 'Label'],
+            ['value' => 'box', 'system_label' => 'Box'],
+            ['value' => 'pouch', 'system_label' => 'Pouch'],
+            ['value' => 'carton', 'system_label' => 'Carton'],
+            ['value' => 'shipper', 'system_label' => 'Shipper'],
             ['value' => 'flat_art', 'system_label' => 'Flat Art'],
-            ['value' => 'renders_3d', 'system_label' => '3D Renders'],
+            ['value' => 'render', 'system_label' => 'Render'],
         ]);
 
-        // 9. Product Renders (field only; options left empty)
-        $this->getOrCreateField([
+        $productRenderTypeId = $this->getOrCreateField([
             'key' => 'product_render_type',
             'system_label' => 'Product Render Type',
             'type' => 'select',
@@ -799,6 +935,12 @@ class MetadataFieldsSeeder extends Seeder
             'is_internal_only' => false,
             'ai_eligible' => true,
             'display_widget' => 'select',
+        ]);
+        $this->syncOptions($productRenderTypeId, [
+            ['value' => 'product_hero', 'system_label' => 'Product Hero'],
+            ['value' => 'lifestyle_render', 'system_label' => 'Lifestyle Render'],
+            ['value' => 'technical_flat', 'system_label' => 'Technical Flat'],
+            ['value' => 'cad_export', 'system_label' => 'CAD Export'],
         ]);
 
         // 10. Radio
@@ -817,9 +959,131 @@ class MetadataFieldsSeeder extends Seeder
             'ai_eligible' => true,
             'display_widget' => 'select',
         ]);
-        $this->createOptions($radioTypeId, [
+        $this->syncOptions($radioTypeId, [
             ['value' => 'broadcast_spots', 'system_label' => 'Broadcast Spots'],
             ['value' => 'live_reads', 'system_label' => 'Live Reads'],
+        ]);
+
+        $socialFormatId = $this->getOrCreateField([
+            'key' => 'social_format',
+            'system_label' => 'Social Format',
+            'type' => 'select',
+            'applies_to' => 'all',
+            'scope' => 'system',
+            'group_key' => 'creative',
+            'is_filterable' => true,
+            'is_user_editable' => true,
+            'is_ai_trainable' => false,
+            'is_upload_visible' => true,
+            'is_internal_only' => false,
+            'ai_eligible' => true,
+            'display_widget' => 'select',
+        ]);
+        $this->syncOptions($socialFormatId, [
+            ['value' => 'feed_post', 'system_label' => 'Feed Post'],
+            ['value' => 'story', 'system_label' => 'Story'],
+            ['value' => 'reel', 'system_label' => 'Reel'],
+            ['value' => 'carousel', 'system_label' => 'Carousel'],
+            ['value' => 'cover', 'system_label' => 'Cover'],
+            ['value' => 'ad', 'system_label' => 'Ad'],
+            ['value' => 'thumbnail', 'system_label' => 'Thumbnail'],
+        ]);
+
+        $socialPlatformId = $this->getOrCreateField([
+            'key' => 'social_platform',
+            'system_label' => 'Social Platform',
+            'type' => 'select',
+            'applies_to' => 'all',
+            'scope' => 'system',
+            'group_key' => 'creative',
+            'is_filterable' => true,
+            'is_user_editable' => true,
+            'is_ai_trainable' => false,
+            'is_upload_visible' => true,
+            'is_internal_only' => false,
+            'ai_eligible' => true,
+            'display_widget' => 'select',
+        ]);
+        $this->syncOptions($socialPlatformId, [
+            ['value' => 'instagram', 'system_label' => 'Instagram'],
+            ['value' => 'facebook', 'system_label' => 'Facebook'],
+            ['value' => 'linkedin', 'system_label' => 'LinkedIn'],
+            ['value' => 'tiktok', 'system_label' => 'TikTok'],
+            ['value' => 'pinterest', 'system_label' => 'Pinterest'],
+            ['value' => 'x', 'system_label' => 'X'],
+            ['value' => 'youtube', 'system_label' => 'YouTube'],
+            ['value' => 'multiple', 'system_label' => 'Multiple'],
+        ]);
+
+        $emailTypeId = $this->getOrCreateField([
+            'key' => 'email_type',
+            'system_label' => 'Email Type',
+            'type' => 'select',
+            'applies_to' => 'all',
+            'scope' => 'system',
+            'group_key' => 'creative',
+            'is_filterable' => true,
+            'is_user_editable' => true,
+            'is_ai_trainable' => false,
+            'is_upload_visible' => true,
+            'is_internal_only' => false,
+            'ai_eligible' => true,
+            'display_widget' => 'select',
+        ]);
+        $this->syncOptions($emailTypeId, [
+            ['value' => 'newsletter', 'system_label' => 'Newsletter'],
+            ['value' => 'campaign', 'system_label' => 'Campaign'],
+            ['value' => 'transactional', 'system_label' => 'Transactional'],
+            ['value' => 'launch', 'system_label' => 'Launch'],
+            ['value' => 'promotional', 'system_label' => 'Promotional'],
+        ]);
+
+        $webTypeId = $this->getOrCreateField([
+            'key' => 'web_type',
+            'system_label' => 'Web Type',
+            'type' => 'select',
+            'applies_to' => 'all',
+            'scope' => 'system',
+            'group_key' => 'creative',
+            'is_filterable' => true,
+            'is_user_editable' => true,
+            'is_ai_trainable' => false,
+            'is_upload_visible' => true,
+            'is_internal_only' => false,
+            'ai_eligible' => true,
+            'display_widget' => 'select',
+        ]);
+        $this->syncOptions($webTypeId, [
+            ['value' => 'landing_page', 'system_label' => 'Landing Page'],
+            ['value' => 'homepage', 'system_label' => 'Homepage'],
+            ['value' => 'product_page', 'system_label' => 'Product Page'],
+            ['value' => 'blog_feature', 'system_label' => 'Blog Feature'],
+            ['value' => 'microsite', 'system_label' => 'Microsite'],
+            ['value' => 'banner_module', 'system_label' => 'Banner Module'],
+        ]);
+
+        $channelPlatformId = $this->getOrCreateField([
+            'key' => 'channel_platform',
+            'system_label' => 'Channel / Platform',
+            'type' => 'select',
+            'applies_to' => 'all',
+            'scope' => 'system',
+            'group_key' => 'creative',
+            'is_filterable' => true,
+            'is_user_editable' => true,
+            'is_ai_trainable' => false,
+            'is_upload_visible' => true,
+            'is_internal_only' => false,
+            'ai_eligible' => false,
+            'display_widget' => 'select',
+        ]);
+        $this->syncOptions($channelPlatformId, [
+            ['value' => 'google', 'system_label' => 'Google'],
+            ['value' => 'meta', 'system_label' => 'Meta'],
+            ['value' => 'amazon', 'system_label' => 'Amazon'],
+            ['value' => 'programmatic', 'system_label' => 'Programmatic'],
+            ['value' => 'internal', 'system_label' => 'Internal'],
+            ['value' => 'website', 'system_label' => 'Website'],
         ]);
     }
 

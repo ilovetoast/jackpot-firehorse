@@ -3,12 +3,14 @@
 namespace App\Services;
 
 use App\Models\Asset;
-use App\Support\EnhancedPreviewContentCrop;
 use Illuminate\Support\Facades\Log;
 
 /**
  * Template-based compositing for enhanced preview thumbnails (GD).
- * Perspective transforms are reserved for a future v2 pass.
+ *
+ * When {@see config('enhanced_preview.transparent_plate')} is true, the canvas stays
+ * transparent (no gradient plate, no offset shadow rectangle) so Studio crops can sit
+ * on CSS presentation surfaces; alpha is preserved into WebP/PNG output.
  */
 final class TemplateRenderer
 {
@@ -62,16 +64,24 @@ final class TemplateRenderer
             return null;
         }
 
-        imagealphablending($canvas, true);
-        imagesavealpha($canvas, true);
+        $transparentPlate = (bool) config('enhanced_preview.transparent_plate', true);
 
-        $this->fillGradientBackground(
-            $canvas,
-            $w,
-            $h,
-            array_map('intval', $tpl['bg_top'] ?? [248, 248, 248]),
-            array_map('intval', $tpl['bg_bottom'] ?? [232, 232, 232])
-        );
+        imagealphablending($canvas, false);
+        imagesavealpha($canvas, true);
+        if ($transparentPlate) {
+            $clear = imagecolorallocatealpha($canvas, 0, 0, 0, 127);
+            imagefill($canvas, 0, 0, $clear);
+        } else {
+            imagealphablending($canvas, true);
+            $this->fillGradientBackground(
+                $canvas,
+                $w,
+                $h,
+                array_map('intval', $tpl['bg_top'] ?? [248, 248, 248]),
+                array_map('intval', $tpl['bg_bottom'] ?? [232, 232, 232])
+            );
+        }
+        imagealphablending($canvas, true);
 
         $blob = @file_get_contents($sourcePath);
         if ($blob === false || $blob === '') {
@@ -100,22 +110,13 @@ final class TemplateRenderer
             return null;
         }
 
-        $cropRect = EnhancedPreviewContentCrop::computeCropRect($src);
-        if ($cropRect !== null
-            && ($cropRect['width'] ?? 0) >= 8
-            && ($cropRect['height'] ?? 0) >= 8) {
-            $cropped = imagecrop($src, $cropRect);
-            if ($cropped !== false) {
-                imagedestroy($src);
-                $src = $cropped;
-                $sw = imagesx($src);
-                $sh = imagesy($src);
-            }
-        }
-
         $padRatio = (float) ($tpl['padding_ratio'] ?? 0.08);
-        $pad = (int) round(min($w, $h) * max(0.02, min(0.25, $padRatio)));
-        $off = (int) ($tpl['shadow_offset'] ?? 4);
+        // Transparent plate: no inset margin in the raster — avoids a faint “frame” in Presentation
+        // (letterboxed transparency + CSS ring/box-shadow read as a box around the art).
+        $pad = $transparentPlate
+            ? 0
+            : (int) round(min($w, $h) * max(0.02, min(0.25, $padRatio)));
+        $off = $transparentPlate ? 0 : (int) ($tpl['shadow_offset'] ?? 4);
         $cw = max(1, $w - 2 * $pad - $off);
         $ch = max(1, $h - 2 * $pad - $off);
 
@@ -123,7 +124,13 @@ final class TemplateRenderer
         $tw = max(1, (int) round($sw * $scale));
         $th = max(1, (int) round($sh * $scale));
 
-        $resized = imagescale($src, $tw, $th);
+        if (! imageistruecolor($src) && function_exists('imagepalettetotruecolor')) {
+            @imagepalettetotruecolor($src);
+        }
+
+        $resized = $transparentPlate
+            ? $this->resizeTruecolorPreservingAlpha($src, $tw, $th)
+            : imagescale($src, $tw, $th);
         imagedestroy($src);
         if ($resized === false) {
             imagedestroy($canvas);
@@ -134,22 +141,26 @@ final class TemplateRenderer
         $dx = $pad + (int) (($cw - $tw) / 2);
         $dy = $pad + (int) (($ch - $th) / 2);
 
-        $shadowAlpha = (int) ($tpl['shadow_alpha'] ?? 55);
-        $shadowAlpha = max(0, min(127, $shadowAlpha));
-        $shadowCol = imagecolorallocatealpha($canvas, 0, 0, 0, $shadowAlpha);
-        imagefilledrectangle(
-            $canvas,
-            $dx + $off,
-            $dy + $off,
-            $dx + $tw + $off,
-            $dy + $th + $off,
-            $shadowCol
-        );
+        if (! $transparentPlate) {
+            $shadowAlpha = (int) ($tpl['shadow_alpha'] ?? 55);
+            $shadowAlpha = max(0, min(127, $shadowAlpha));
+            $shadowCol = imagecolorallocatealpha($canvas, 0, 0, 0, $shadowAlpha);
+            imagefilledrectangle(
+                $canvas,
+                $dx + $off,
+                $dy + $off,
+                $dx + $tw + $off,
+                $dy + $th + $off,
+                $shadowCol
+            );
+        }
 
+        imagesavealpha($resized, true);
+        imagealphablending($resized, true);
+        imagealphablending($canvas, true);
         imagecopy($canvas, $resized, $dx, $dy, 0, 0, $tw, $th);
         imagedestroy($resized);
 
-        $format = config('assets.thumbnail.output_format', 'webp') === 'webp' ? 'webp' : 'jpeg';
         $quality = (int) ($styleConfig['quality'] ?? 88);
         $quality = max(40, min(100, $quality));
 
@@ -159,17 +170,37 @@ final class TemplateRenderer
 
             return null;
         }
-        $ext = $format === 'webp' ? '.webp' : '.jpg';
-        $outPath = $tmp.$ext;
-        @unlink($tmp);
 
         $ok = false;
-        if ($format === 'webp' && function_exists('imagewebp')) {
-            $ok = @imagewebp($canvas, $outPath, $quality);
-        }
-        if (! $ok) {
-            $outPath = $tmp.'.jpg';
-            $ok = @imagejpeg($canvas, $outPath, $quality);
+        $outPath = '';
+
+        if ($transparentPlate) {
+            imagesavealpha($canvas, true);
+            imagealphablending($canvas, false);
+            $outPath = $tmp.'.webp';
+            @unlink($tmp);
+            if (function_exists('imagewebp')) {
+                $ok = @imagewebp($canvas, $outPath, $quality);
+            }
+            if (! $ok) {
+                if (is_file($outPath)) {
+                    @unlink($outPath);
+                }
+                $outPath = $tmp.'.png';
+                $ok = @imagepng($canvas, $outPath, 6);
+            }
+        } else {
+            $format = config('assets.thumbnail.output_format', 'webp') === 'webp' ? 'webp' : 'jpeg';
+            $ext = $format === 'webp' ? '.webp' : '.jpg';
+            $outPath = $tmp.$ext;
+            @unlink($tmp);
+            if ($format === 'webp' && function_exists('imagewebp')) {
+                $ok = @imagewebp($canvas, $outPath, $quality);
+            }
+            if (! $ok) {
+                $outPath = $tmp.'.jpg';
+                $ok = @imagejpeg($canvas, $outPath, $quality);
+            }
         }
 
         imagedestroy($canvas);
@@ -195,5 +226,37 @@ final class TemplateRenderer
             $col = imagecolorallocate($canvas, max(0, min(255, $r)), max(0, min(255, $g)), max(0, min(255, $b)));
             imageline($canvas, 0, $y, $w, $y, $col);
         }
+    }
+
+    /**
+     * Resize with explicit transparent margins — {@see imagescale()} can flatten alpha on some GD builds.
+     *
+     * @param  \GdImage|resource  $src
+     * @return \GdImage|resource|false
+     */
+    protected function resizeTruecolorPreservingAlpha($src, int $tw, int $th)
+    {
+        $sw = imagesx($src);
+        $sh = imagesy($src);
+        if ($sw < 1 || $sh < 1 || $tw < 1 || $th < 1) {
+            return false;
+        }
+
+        $dst = imagecreatetruecolor($tw, $th);
+        if ($dst === false) {
+            return false;
+        }
+
+        imagealphablending($dst, false);
+        imagesavealpha($dst, true);
+        $transparent = imagecolorallocatealpha($dst, 0, 0, 0, 127);
+        imagefill($dst, 0, 0, $transparent);
+        imagealphablending($dst, true);
+        imagesavealpha($src, true);
+        imagealphablending($src, true);
+
+        $ok = @imagecopyresampled($dst, $src, 0, 0, 0, 0, $tw, $th, $sw, $sh);
+
+        return $ok ? $dst : false;
     }
 }

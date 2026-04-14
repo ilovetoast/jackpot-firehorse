@@ -90,39 +90,7 @@ class FilterOnlyMetadataFieldsSeeder extends Seeder
             ['value' => 'gray', 'label' => 'Gray'],
         ]);
 
-        // Scene Classification (select)
-        $sceneClassificationId = $this->createField([
-            'key' => 'scene_classification',
-            'system_label' => 'Scene Classification',
-            'type' => 'select',
-            'applies_to' => 'image',
-            'scope' => 'system',
-            'is_filterable' => true,
-            'is_user_editable' => false,
-            'is_ai_trainable' => true,
-            'is_upload_visible' => false,
-            'is_internal_only' => false,
-            'group_key' => 'ai_analysis',
-            'population_mode' => 'automatic',
-            'show_on_upload' => false,
-            'show_on_edit' => false,
-            'show_in_filters' => true,
-            'readonly' => true,
-        ]);
-
-        // Add options for Scene Classification
-        $this->createOptions($sceneClassificationId, [
-            ['value' => 'indoor', 'label' => 'Indoor'],
-            ['value' => 'outdoor', 'label' => 'Outdoor'],
-            ['value' => 'portrait', 'label' => 'Portrait'],
-            ['value' => 'landscape', 'label' => 'Landscape'],
-            ['value' => 'product', 'label' => 'Product'],
-            ['value' => 'food', 'label' => 'Food'],
-            ['value' => 'architecture', 'label' => 'Architecture'],
-            ['value' => 'nature', 'label' => 'Nature'],
-            ['value' => 'urban', 'label' => 'Urban'],
-            ['value' => 'abstract', 'label' => 'Abstract'],
-        ]);
+        // scene_classification removed: use environment_type + subject_type from MetadataFieldsSeeder (deprecated_at set there).
     }
 
     /**

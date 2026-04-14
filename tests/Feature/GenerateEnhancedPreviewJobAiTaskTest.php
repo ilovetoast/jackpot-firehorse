@@ -83,6 +83,7 @@ class GenerateEnhancedPreviewJobAiTaskTest extends TestCase
         ]);
 
         $thumbPath = 'tenants/t/assets/'.$asset->id.'/v1/thumbnails/preferred/medium/m.webp';
+        $thumbPathLarge = 'tenants/t/assets/'.$asset->id.'/v1/thumbnails/preferred/large/l.webp';
         $version = AssetVersion::create([
             'id' => Str::uuid(),
             'asset_id' => $asset->id,
@@ -100,6 +101,11 @@ class GenerateEnhancedPreviewJobAiTaskTest extends TestCase
                     'preferred' => [
                         'medium' => [
                             'path' => $thumbPath,
+                            'width' => 500,
+                            'height' => 500,
+                        ],
+                        'large' => [
+                            'path' => $thumbPathLarge,
                             'width' => 500,
                             'height' => 500,
                         ],
@@ -151,7 +157,12 @@ class GenerateEnhancedPreviewJobAiTaskTest extends TestCase
 
         $before = AIAgentRun::count();
 
-        $job = new GenerateEnhancedPreviewJob((string) $asset->id, (string) $version->id, true);
+        $job = new GenerateEnhancedPreviewJob((string) $asset->id, (string) $version->id, [
+            'x' => 0.0,
+            'y' => 0.0,
+            'width' => 1.0,
+            'height' => 1.0,
+        ], null, true);
         $job->handle(
             $mock,
             app(\App\Services\TemplateRenderer::class),
@@ -184,7 +195,12 @@ class GenerateEnhancedPreviewJobAiTaskTest extends TestCase
         $mock->shouldReceive('downloadObjectToTemp')->once()->andThrow(new \RuntimeException('network'));
         $this->instance(ThumbnailGenerationService::class, $mock);
 
-        $job = new GenerateEnhancedPreviewJob((string) $asset->id, (string) $version->id, true);
+        $job = new GenerateEnhancedPreviewJob((string) $asset->id, (string) $version->id, [
+            'x' => 0.0,
+            'y' => 0.0,
+            'width' => 1.0,
+            'height' => 1.0,
+        ], null, true);
         $job->handle(
             $mock,
             app(\App\Services\TemplateRenderer::class),

@@ -3,7 +3,7 @@
 namespace App\Support\Metadata;
 
 /**
- * Maps category slug → canonical *_type metadata field key (UI abstraction only).
+ * Maps category slug → canonical primary metadata field key (UI abstraction only).
  * Aligns with config/metadata_category_defaults.php category_config + metadata_field_families.type.fields.
  */
 class CategoryTypeResolver
@@ -16,6 +16,8 @@ class CategoryTypeResolver
         'logos' => 'logo_type',
         'fonts' => 'font_role',
         'graphics' => 'graphic_type',
+        'illustrations' => 'graphic_type',
+        'brand-elements' => 'graphic_type',
         'video' => 'video_type',
         'print' => 'print_type',
         'digital-ads' => 'digital_type',
@@ -30,6 +32,9 @@ class CategoryTypeResolver
         'templates' => 'template_type',
         'audio' => 'audio_type',
         'model-3d' => 'model_3d_type',
+        'social' => 'social_format',
+        'email' => 'email_type',
+        'web' => 'web_type',
     ];
 
     /**
@@ -64,13 +69,17 @@ class CategoryTypeResolver
             return null;
         }
 
-        $label = match ($slug) {
-            'fonts' => 'Font role',
+        $fieldKey = self::SLUG_TO_TYPE_FIELD[$slug];
+        $label = match (true) {
+            $slug === 'fonts' => 'Font role',
+            $fieldKey === 'social_format' => 'Format',
+            $fieldKey === 'email_type' => 'Email type',
+            $fieldKey === 'web_type' => 'Web type',
             default => 'Type',
         };
 
         return [
-            'field_key' => self::SLUG_TO_TYPE_FIELD[$slug],
+            'field_key' => $fieldKey,
             'label' => $label,
         ];
     }

@@ -43,10 +43,10 @@ return [
         'ai_detected_objects' => env('AI_METADATA_THRESHOLD_DETECTED_OBJECTS', 0.70),
 
         /**
-         * Scene Classification
-         * Threshold: 0.75 (75% confidence required)
+         * Environment / subject (split taxonomy; replaces scene_classification for new tagging)
          */
-        'scene_classification' => env('AI_METADATA_THRESHOLD_SCENE_CLASSIFICATION', 0.75),
+        'environment_type' => env('AI_METADATA_THRESHOLD_ENVIRONMENT_TYPE', 0.75),
+        'subject_type' => env('AI_METADATA_THRESHOLD_SUBJECT_TYPE', 0.75),
     ],
 
     /**
@@ -58,7 +58,8 @@ return [
     'ai_metadata_fields' => [
         'ai_color_palette',
         'ai_detected_objects',
-        'scene_classification',
+        'environment_type',
+        'subject_type',
     ],
 
     /**

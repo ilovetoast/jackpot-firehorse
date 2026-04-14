@@ -37,9 +37,10 @@ class AiMetadataConfidenceServiceTest extends TestCase
         $this->assertFalse($this->service->shouldSuppress('ai_detected_objects', 0.75));
         $this->assertTrue($this->service->shouldShow('ai_detected_objects', 0.75));
 
-        // scene_classification threshold is 0.75
-        $this->assertFalse($this->service->shouldSuppress('scene_classification', 0.80));
-        $this->assertTrue($this->service->shouldShow('scene_classification', 0.80));
+        // environment_type / subject_type threshold is 0.75
+        $this->assertFalse($this->service->shouldSuppress('environment_type', 0.80));
+        $this->assertFalse($this->service->shouldSuppress('subject_type', 0.80));
+        $this->assertTrue($this->service->shouldShow('environment_type', 0.80));
     }
 
     /**
@@ -55,9 +56,8 @@ class AiMetadataConfidenceServiceTest extends TestCase
         $this->assertTrue($this->service->shouldSuppress('ai_detected_objects', 0.65));
         $this->assertFalse($this->service->shouldShow('ai_detected_objects', 0.65));
 
-        // scene_classification threshold is 0.75
-        $this->assertTrue($this->service->shouldSuppress('scene_classification', 0.70));
-        $this->assertFalse($this->service->shouldShow('scene_classification', 0.70));
+        $this->assertTrue($this->service->shouldSuppress('environment_type', 0.70));
+        $this->assertFalse($this->service->shouldShow('subject_type', 0.70));
     }
 
     /**
@@ -68,7 +68,8 @@ class AiMetadataConfidenceServiceTest extends TestCase
         // At threshold should be visible (>= threshold)
         $this->assertFalse($this->service->shouldSuppress('ai_color_palette', 0.80));
         $this->assertFalse($this->service->shouldSuppress('ai_detected_objects', 0.70));
-        $this->assertFalse($this->service->shouldSuppress('scene_classification', 0.75));
+        $this->assertFalse($this->service->shouldSuppress('environment_type', 0.75));
+        $this->assertFalse($this->service->shouldSuppress('subject_type', 0.75));
     }
 
     /**
@@ -95,7 +96,8 @@ class AiMetadataConfidenceServiceTest extends TestCase
         // Null confidence should be suppressed for AI fields
         $this->assertTrue($this->service->shouldSuppress('ai_color_palette', null));
         $this->assertTrue($this->service->shouldSuppress('ai_detected_objects', null));
-        $this->assertTrue($this->service->shouldSuppress('scene_classification', null));
+        $this->assertTrue($this->service->shouldSuppress('environment_type', null));
+        $this->assertTrue($this->service->shouldSuppress('subject_type', null));
 
         // Should not show
         $this->assertFalse($this->service->shouldShow('ai_color_palette', null));
@@ -120,7 +122,8 @@ class AiMetadataConfidenceServiceTest extends TestCase
     {
         $this->assertTrue($this->service->isAiMetadataField('ai_color_palette'));
         $this->assertTrue($this->service->isAiMetadataField('ai_detected_objects'));
-        $this->assertTrue($this->service->isAiMetadataField('scene_classification'));
+        $this->assertTrue($this->service->isAiMetadataField('environment_type'));
+        $this->assertTrue($this->service->isAiMetadataField('subject_type'));
 
         $this->assertFalse($this->service->isAiMetadataField('orientation'));
         $this->assertFalse($this->service->isAiMetadataField('resolution'));
@@ -134,7 +137,8 @@ class AiMetadataConfidenceServiceTest extends TestCase
     {
         $this->assertEquals(0.80, $this->service->getThreshold('ai_color_palette'));
         $this->assertEquals(0.70, $this->service->getThreshold('ai_detected_objects'));
-        $this->assertEquals(0.75, $this->service->getThreshold('scene_classification'));
+        $this->assertEquals(0.75, $this->service->getThreshold('environment_type'));
+        $this->assertEquals(0.75, $this->service->getThreshold('subject_type'));
 
         // Non-AI fields return default threshold of 1.0
         $this->assertEquals(1.0, $this->service->getThreshold('orientation'));

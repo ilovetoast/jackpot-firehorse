@@ -731,6 +731,7 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
             // Thumbnail retry endpoint
             Route::post('/assets/{asset}/thumbnails/retry', [\App\Http\Controllers\AssetThumbnailController::class, 'retry'])->name('assets.thumbnails.retry');
             Route::post('/assets/{asset}/enhanced-preview/generate', [\App\Http\Controllers\AssetThumbnailController::class, 'generateEnhancedPreview'])->name('assets.enhanced-preview.generate');
+            Route::post('/assets/{asset}/execution-presentation-preset', [\App\Http\Controllers\AssetThumbnailController::class, 'saveExecutionPresentationPreset'])->name('assets.execution-presentation-preset.save');
             Route::post('/assets/{asset}/presentation-preview/generate', [\App\Http\Controllers\AssetThumbnailController::class, 'generatePresentationPreview'])->name('assets.presentation-preview.generate');
             // Thumbnail generation endpoint (for existing assets without thumbnails)
             Route::post('/assets/{asset}/thumbnails/generate', [\App\Http\Controllers\AssetThumbnailController::class, 'generate'])->name('assets.thumbnails.generate');
