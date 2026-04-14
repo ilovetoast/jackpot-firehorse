@@ -18,7 +18,7 @@
  * @param {string|null|undefined} props.imageUrl
  * @param {'neutral_studio'|'desk_surface'|'wall_pin'} [props.preset]
  * @param {string} [props.className]
- * @param {'default'|'tile'} [props.variant] `tile` = small fixed-height slots (drawer tiles); tighter padding and `max-h-full` on the image.
+ * @param {'default'|'tile'} [props.variant] `tile` = small fixed-height slots (drawer tiles); minimal padding and `max-h-full` on the image. `default` uses comfortable inset so the print does not touch the frame edges.
  */
 export default function ExecutionPresentationFrame({
     imageUrl,
@@ -75,7 +75,9 @@ export default function ExecutionPresentationFrame({
     return (
         <div
             className={`relative flex h-full min-h-0 w-full items-center justify-center overflow-hidden ${
-                tile ? 'p-0.5' : 'px-1.5 py-1.5 sm:px-2 sm:py-2'
+                tile
+                    ? 'p-0.5'
+                    : 'px-4 py-4 sm:px-6 sm:py-5 md:px-7 md:py-6'
             } ${className}`}
             style={{ backgroundColor: surfaceBase }}
         >

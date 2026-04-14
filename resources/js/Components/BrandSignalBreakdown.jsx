@@ -19,7 +19,7 @@ const SIGNAL_KEYS = ['has_logo', 'has_brand_colors', 'has_typography', 'has_refe
 /** Short labels for inline row */
 const SIGNAL_SHORT = {
     has_logo: 'Logo',
-    has_brand_colors: 'Colors',
+    has_brand_colors: 'Palette',
     has_typography: 'Type',
     has_reference_similarity: 'Style',
 }
@@ -33,23 +33,23 @@ const MISSING_PHRASE = {
 }
 
 const SIGNAL_DEFS = [
-    { key: 'has_logo', label: 'Logo', Icon: PhotoIcon },
-    { key: 'has_brand_colors', label: 'Colors', Icon: SwatchIcon },
+    { key: 'has_logo', label: 'Logo signal', Icon: PhotoIcon },
+    { key: 'has_brand_colors', label: 'Palette fit', Icon: SwatchIcon },
     { key: 'has_typography', label: 'Typography', Icon: LanguageIcon },
-    { key: 'has_reference_similarity', label: 'Visual style', Icon: Squares2X2Icon },
+    { key: 'has_reference_similarity', label: 'Style compare', Icon: Squares2X2Icon },
 ]
 
 const SIGNAL_POSITIVE_LABEL = {
-    has_logo: 'Matched',
-    has_brand_colors: 'Matches palette',
-    has_typography: 'Configured',
-    has_reference_similarity: 'Reference available',
+    has_logo: 'Positive',
+    has_brand_colors: 'On palette',
+    has_typography: 'Ready to score',
+    has_reference_similarity: 'References ready',
 }
 
 const SIGNAL_NEGATIVE_LABEL = {
-    has_logo: 'Missing',
-    has_brand_colors: 'No match',
-    has_typography: 'Missing',
+    has_logo: 'No signal',
+    has_brand_colors: 'Off palette',
+    has_typography: 'Not configured',
     has_reference_similarity: 'Not ready',
 }
 
@@ -159,20 +159,34 @@ function signalStatus(value) {
 }
 
 /**
- * Explains what the positive signal is based on (not necessarily on-pixel vision).
+ * Plain-language: what each boolean checked (inputs to scoring, not four separate “found in the image” claims).
  * @param {string} signalKey
- * @param {object} [asset]
+ * @param {object} [breakdown] — `breakdown_json` from Brand Intelligence; may include `logo_detection`
  */
-function getSignalSourceLabel(signalKey, asset) {
+function getSignalExplanation(signalKey, breakdown) {
     switch (signalKey) {
-        case 'has_logo':
-            return 'From name / metadata'
-        case 'has_typography':
-            return 'From brand settings'
+        case 'has_logo': {
+            const ld = breakdown?.logo_detection
+            if (ld && typeof ld === 'object') {
+                if (ld.ocr_matched === true) {
+                    return 'Brand name (or slug) appeared in the title, file name, or text we extracted from this asset — not “we drew a box around a logomark”.'
+                }
+                if (
+                    ld.embedding_similarity != null &&
+                    !Number.isNaN(Number(ld.embedding_similarity)) &&
+                    ld.has_logo === true
+                ) {
+                    return 'Visual similarity to a logo reference image stored for this brand (embedding match), not metadata alone.'
+                }
+            }
+            return 'Looks for your brand name in readable text and/or visual similarity to saved logo references — not whether a logo “exists” only in guidelines.'
+        }
         case 'has_brand_colors':
-            return 'From palette comparison'
+            return 'Compares dominant colors in this artwork to the palette from your brand DNA / guidelines when analysis runs — “yes” means alignment passed, not only that a palette exists.'
+        case 'has_typography':
+            return 'Whether typography is set up in brand guidelines and/or this asset has type-related metadata the scorer can use — it does not mean we necessarily read fonts out of the image.'
         case 'has_reference_similarity':
-            return 'From reference assets'
+            return 'This asset has an embedding and there are style-reference images (guideline, promoted, or system) we can compare to — readiness for style similarity, not a single “on-brand %” here.'
         default:
             return ''
     }
@@ -432,8 +446,11 @@ export default function BrandSignalBreakdown({ brandIntelligence = null, data = 
             >
                 <div className="overflow-hidden min-h-0">
                     <div className="border-t border-slate-100 px-2.5 pb-2.5 pt-1.5 transition-opacity duration-300 ease-out">
-                        <div className="text-xs text-gray-500 mb-2">
-                            Analysis based on metadata and brand configuration.
+                        <div className="mb-2 rounded-md border border-slate-100 bg-slate-50/80 px-2 py-1.5 text-[10px] leading-snug text-slate-600">
+                            <span className="font-medium text-slate-700">How to read these four tiles:</span> each one is a{' '}
+                            <span className="font-medium text-slate-700">check the scorer could run</span> using your
+                            guidelines, references, and this file — not four separate guarantees that something was
+                            literally detected inside the execution image.
                         </div>
                         {isVideoAsset(asset) && (
                             <div className="text-xs text-yellow-600 mb-2">
@@ -445,9 +462,13 @@ export default function BrandSignalBreakdown({ brandIntelligence = null, data = 
                                 const st = signalStatus(signals[key])
                                 const ok = SIGNAL_POSITIVE_LABEL[key]
                                 const bad = SIGNAL_NEGATIVE_LABEL[key]
-                                const sourceLine = getSignalSourceLabel(key, asset)
+                                const explain = getSignalExplanation(key, breakdown)
                                 return (
-                                    <div key={key} className="flex items-start gap-1.5 rounded border border-slate-100/80 bg-slate-50/50 px-1.5 py-1">
+                                    <div
+                                        key={key}
+                                        className="flex items-start gap-1.5 rounded border border-slate-100/80 bg-slate-50/50 px-1.5 py-1.5"
+                                        title={explain}
+                                    >
                                         <Icon className="mt-0.5 h-4 w-4 shrink-0 text-slate-500" aria-hidden />
                                         <div className="min-w-0">
                                             <div className="text-[10px] font-medium leading-tight text-slate-700">{label}</div>
@@ -461,8 +482,8 @@ export default function BrandSignalBreakdown({ brandIntelligence = null, data = 
                                                     </span>
                                                 )}
                                             </div>
-                                            {sourceLine ? (
-                                                <div className="text-xs text-gray-500 mt-0.5 leading-snug">{sourceLine}</div>
+                                            {explain ? (
+                                                <p className="mt-1 line-clamp-5 text-[9px] leading-snug text-slate-500">{explain}</p>
                                             ) : null}
                                         </div>
                                     </div>
