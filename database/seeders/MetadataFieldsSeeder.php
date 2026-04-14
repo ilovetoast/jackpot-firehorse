@@ -2,6 +2,8 @@
 
 namespace Database\Seeders;
 
+use App\Models\Tenant;
+use App\Support\MetadataCache;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\DB;
 
@@ -49,6 +51,33 @@ class MetadataFieldsSeeder extends Seeder
         $this->ensureDefaultSystemFields();
 
         $this->deprecateLegacySceneClassification();
+        $this->deprecateRedundantMetadataStatusField();
+
+        // Raw DB writes do not fire MetadataFieldObserver; bump schema version so upload/drawer
+        // refetch (MetadataSchemaResolver uses versioned cache keys).
+        $this->bumpMetadataSchemaCacheForAllTenants();
+    }
+
+    protected function bumpMetadataSchemaCacheForAllTenants(): void
+    {
+        foreach (Tenant::query()->cursor() as $tenant) {
+            MetadataCache::flushTenant((int) $tenant->id);
+        }
+    }
+
+    /**
+     * Lifecycle status is tracked on assets/workflows elsewhere; remove duplicate metadata field from catalog.
+     */
+    protected function deprecateRedundantMetadataStatusField(): void
+    {
+        DB::table('metadata_fields')
+            ->where('key', 'status')
+            ->where('scope', 'system')
+            ->update([
+                'deprecated_at' => now(),
+                'replacement_field_id' => null,
+                'updated_at' => now(),
+            ]);
     }
 
     /**
@@ -630,28 +659,6 @@ class MetadataFieldsSeeder extends Seeder
             ['value' => 'abstract', 'system_label' => 'Abstract'],
             ['value' => 'object', 'system_label' => 'Object'],
             ['value' => 'texture', 'system_label' => 'Texture'],
-        ]);
-
-        $statusId = $this->getOrCreateField([
-            'key' => 'status',
-            'system_label' => 'Status',
-            'type' => 'select',
-            'applies_to' => 'all',
-            'scope' => 'system',
-            'group_key' => 'general',
-            'is_filterable' => true,
-            'is_user_editable' => true,
-            'is_ai_trainable' => false,
-            'is_upload_visible' => true,
-            'is_internal_only' => false,
-            'ai_eligible' => false,
-            'display_widget' => 'select',
-        ]);
-        $this->syncOptions($statusId, [
-            ['value' => 'draft', 'system_label' => 'Draft'],
-            ['value' => 'approved', 'system_label' => 'Approved'],
-            ['value' => 'published', 'system_label' => 'Published'],
-            ['value' => 'archived', 'system_label' => 'Archived'],
         ]);
 
         $seasonId = $this->getOrCreateField([

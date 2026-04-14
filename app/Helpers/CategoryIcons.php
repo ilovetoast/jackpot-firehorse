@@ -168,8 +168,40 @@ class CategoryIcons
      */
     public static function getDefaultIcon(string $categoryName, string $slug = ''): string
     {
+        $slugLower = strtolower($slug);
+        $bySlug = [
+            'photography' => 'photo',
+            'graphics' => 'paint-brush',
+            'logos' => 'star',
+            'video' => 'video',
+            'audio' => 'music',
+            'documents' => 'document',
+            'templates' => 'cube',
+            'fonts' => 'bookmark',
+            'model-3d' => 'cube',
+            'illustrations' => 'sparkles',
+            'brand-elements' => 'puzzle',
+            'social' => 'user-group',
+            'digital-ads' => 'chart-bar',
+            'print' => 'document',
+            'videos' => 'film',
+            'packaging' => 'gift',
+            'ooh' => 'map-pin',
+            'sales-collateral' => 'clipboard',
+            'pr' => 'megaphone',
+            'events' => 'calendar',
+            'web' => 'cloud',
+            'email' => 'envelope',
+            'product-renders' => 'camera',
+            'radio' => 'microphone',
+            'reference_material' => 'folder',
+        ];
+        if ($slugLower !== '' && isset($bySlug[$slugLower])) {
+            return $bySlug[$slugLower];
+        }
+
         $name = strtolower($categoryName . ' ' . $slug);
-        
+
         // Map common category names to icons
         if (str_contains($name, 'logo')) return 'sparkles';
         if (str_contains($name, 'photo') || str_contains($name, 'image')) return 'photo';

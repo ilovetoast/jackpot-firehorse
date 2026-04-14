@@ -17,6 +17,7 @@
  * - campaign: prefer linking to Campaign records when that model is wired for metadata.
  * - audience, region: free text or controlled vocabulary fields — add as tenant custom
  *   or system fields when product scope is finalized.
+ * - status: use asset / workflow status elsewhere; not duplicated as metadata_fields.status.
  */
 return [
     'system_automated_enabled_for_all' => [
@@ -215,7 +216,6 @@ return [
         'starred',
         'dominant_hue_group',
         'dominant_colors',
-        'status',
         'season',
     ],
 ];
