@@ -1,17 +1,22 @@
 /**
  * Brand Intelligence — compact signal summary with progressive disclosure.
+ * Supports v1 (4-boolean gates) and v2 (6-dimension evidence model) layouts.
  */
 
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from '@inertiajs/react'
 import {
+    CheckCircleIcon,
     ChevronDownIcon,
     ChevronUpIcon,
+    ExclamationTriangleIcon,
     LanguageIcon,
+    MinusCircleIcon,
     MinusSmallIcon,
     PhotoIcon,
     Squares2X2Icon,
     SwatchIcon,
+    XCircleIcon,
 } from '@heroicons/react/24/outline'
 
 const SIGNAL_KEYS = ['has_logo', 'has_brand_colors', 'has_typography', 'has_reference_similarity']
@@ -249,6 +254,173 @@ function ScoreDots({ count, tone }) {
     )
 }
 
+/* ======================================================================
+ *  V2 — 6-Dimension Evidence Model helpers
+ * ====================================================================== */
+
+const V2_DIMENSION_ORDER = ['identity', 'color', 'typography', 'visual_style', 'copy_voice', 'context_fit']
+
+const V2_DIMENSION_LABELS = {
+    identity: 'Identity',
+    color: 'Color',
+    typography: 'Type',
+    visual_style: 'Style',
+    copy_voice: 'Copy',
+    context_fit: 'Context',
+}
+
+const V2_DIMENSION_ICONS = {
+    identity: PhotoIcon,
+    color: SwatchIcon,
+    typography: LanguageIcon,
+    visual_style: Squares2X2Icon,
+    copy_voice: LanguageIcon,
+    context_fit: Squares2X2Icon,
+}
+
+function v2StatusIcon(status) {
+    switch (status) {
+        case 'aligned':
+            return <CheckCircleIcon className="h-3.5 w-3.5 text-emerald-600" aria-label="Aligned" />
+        case 'partial':
+            return <ExclamationTriangleIcon className="h-3.5 w-3.5 text-amber-500" aria-label="Partial" />
+        case 'weak':
+            return <MinusCircleIcon className="h-3.5 w-3.5 text-slate-400" aria-label="Weak evidence" />
+        case 'not_evaluable':
+        case 'missing_reference':
+            return <MinusSmallIcon className="h-3.5 w-3.5 text-slate-400" aria-label="Not evaluated" />
+        case 'fail':
+            return <XCircleIcon className="h-3.5 w-3.5 text-red-500" aria-label="Not aligned" />
+        default:
+            return <MinusSmallIcon className="h-3.5 w-3.5 text-slate-400" />
+    }
+}
+
+const V2_STATUS_LABELS = {
+    aligned: 'Aligned',
+    partial: 'Partial',
+    weak: 'Weak evidence',
+    not_evaluable: 'Not evaluated',
+    missing_reference: 'No reference',
+    fail: 'Not aligned',
+}
+
+function v2StatusLabel(status) {
+    return V2_STATUS_LABELS[status] || status
+}
+
+/**
+ * Evidence hint for a dimension — uses status_reason when short enough,
+ * otherwise falls back to a safe phrase based on primary_evidence_source.
+ *
+ * Wording guardrails (from plan):
+ * - Never imply visual detection when evidence was text-based
+ * - Never say "weak" or "not aligned" when the real issue is missing evidence
+ * - Never say "aligned" for readiness-only signals
+ * - Prefer hedged language ("appears", "suggests") when confidence is low
+ */
+function v2EvidenceHint(dim) {
+    if (!dim) return null
+
+    if (dim.status_reason && typeof dim.status_reason === 'string' && dim.status_reason.length <= 80) {
+        return dim.status_reason
+    }
+
+    const lowConf = typeof dim.confidence === 'number' && dim.confidence < 0.4
+    const src = dim.primary_evidence_source
+    switch (src) {
+        case 'visual_similarity':
+            return lowConf ? 'Appears visually similar to logo reference' : 'Visually similar to logo reference'
+        case 'extracted_text':
+            return 'Brand text found via OCR'
+        case 'palette_extraction':
+            return dim.status === 'aligned'
+                ? (lowConf ? 'Colors appear to be on palette' : 'Colors on brand palette')
+                : 'Colors diverge from palette'
+        case 'metadata_hint':
+            return 'Filename suggests brand link'
+        case 'configuration_only':
+            return 'Config present, not evaluated'
+        case 'ai_analysis':
+            return lowConf ? 'Limited AI analysis' : 'Based on AI analysis'
+        case 'not_evaluable':
+            return 'Not enough evidence'
+        default:
+            return null
+    }
+}
+
+function v2RatingTone(rating) {
+    if (rating >= 4) return 'green'
+    if (rating >= 3) return 'amber'
+    if (rating >= 2) return 'amber'
+    return 'slate'
+}
+
+function V2DimensionChips({ dimensions }) {
+    return (
+        <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-slate-600">
+            {V2_DIMENSION_ORDER.map((key, idx) => {
+                const dim = dimensions?.[key]
+                const label = V2_DIMENSION_LABELS[key]
+                return (
+                    <span key={key} className="inline-flex items-center gap-0.5 whitespace-nowrap">
+                        {idx > 0 ? <span className="text-slate-300">|</span> : null}
+                        <span className="text-slate-500">{label}</span>
+                        {v2StatusIcon(dim?.status)}
+                    </span>
+                )
+            })}
+        </div>
+    )
+}
+
+function V2DimensionGrid({ dimensions }) {
+    return (
+        <div className="grid grid-cols-2 gap-x-2 gap-y-1.5">
+            {V2_DIMENSION_ORDER.map((key) => {
+                const dim = dimensions?.[key]
+                if (!dim) return null
+                const Icon = V2_DIMENSION_ICONS[key] || Squares2X2Icon
+                const label = V2_DIMENSION_LABELS[key]
+                const hint = v2EvidenceHint(dim)
+                const statusText = v2StatusLabel(dim.status)
+                const statusColor =
+                    dim.status === 'aligned'
+                        ? 'text-emerald-700'
+                        : dim.status === 'fail'
+                          ? 'text-red-700'
+                          : dim.status === 'partial'
+                            ? 'text-amber-700'
+                            : 'text-slate-500'
+                return (
+                    <div
+                        key={key}
+                        className="flex items-start gap-1.5 rounded border border-slate-100/80 bg-slate-50/50 px-1.5 py-1.5"
+                        title={dim.status_reason || undefined}
+                    >
+                        <Icon className="mt-0.5 h-4 w-4 shrink-0 text-slate-500" aria-hidden />
+                        <div className="min-w-0">
+                            <div className="text-[10px] font-medium leading-tight text-slate-700">{label}</div>
+                            <div className={`mt-0.5 text-[10px] leading-tight ${statusColor}`}>
+                                {statusText}
+                            </div>
+                            {hint && (
+                                <p className="mt-0.5 line-clamp-2 text-[9px] leading-snug text-slate-500">{hint}</p>
+                            )}
+                            {dim.evaluable && dim.confidence > 0 && (
+                                <p className="mt-0.5 text-[9px] text-slate-400">
+                                    conf {Math.round(dim.confidence * 100)}%
+                                </p>
+                            )}
+                        </div>
+                    </div>
+                )
+            })}
+        </div>
+    )
+}
+
 /**
  * @param {object} props
  * @param {object} [props.brandIntelligence]
@@ -265,6 +437,9 @@ export default function BrandSignalBreakdown({ brandIntelligence = null, data = 
         const flat = data && typeof data === 'object' ? data : null
         const bi = flat ?? brandIntelligence
         const breakdown = bi?.breakdown_json ?? {}
+
+        const hasV2 = breakdown?.dimensions != null && typeof breakdown.dimensions === 'object'
+
         const signals =
             flat?.signals ??
             bi?.signal_breakdown ??
@@ -293,6 +468,10 @@ export default function BrandSignalBreakdown({ brandIntelligence = null, data = 
             breakdown?.signal_count ??
             countTruthySignals(signals)
 
+        const v2Rating = hasV2 ? (breakdown.rating ?? null) : null
+        const v2Dimensions = hasV2 ? breakdown.dimensions : null
+        const v2Recommendations = hasV2 ? (breakdown.v2_recommendations ?? bi?.v2_recommendations ?? null) : null
+
         return {
             alignment_state,
             confidenceBand,
@@ -301,10 +480,14 @@ export default function BrandSignalBreakdown({ brandIntelligence = null, data = 
             signal_score,
             breakdown,
             confidence: typeof bi?.confidence === 'number' ? bi.confidence : null,
+            hasV2,
+            v2Rating,
+            v2Dimensions,
+            v2Recommendations,
         }
     }, [brandIntelligence, data])
 
-    const { alignment_state, confidenceBand, signals, reference_tier_usage, signal_score, breakdown, confidence } =
+    const { alignment_state, confidenceBand, signals, reference_tier_usage, signal_score, breakdown, confidence, hasV2, v2Rating, v2Dimensions, v2Recommendations } =
         normalized
 
     const creativePanel = useMemo(() => {
@@ -324,10 +507,13 @@ export default function BrandSignalBreakdown({ brandIntelligence = null, data = 
 
     const missingSummary = useMemo(() => buildMissingSummary(signals), [signals])
 
-    const tone = overallTone(alignment_state, typeof signal_score === 'number' ? signal_score : 0)
+    const tone = hasV2
+        ? v2RatingTone(v2Rating ?? 0)
+        : overallTone(alignment_state, typeof signal_score === 'number' ? signal_score : 0)
 
-    const filledDots =
-        typeof signal_score === 'number' && !Number.isNaN(signal_score) ? Math.min(4, Math.max(0, signal_score)) : 0
+    const filledDots = hasV2
+        ? Math.min(4, Math.max(0, v2Rating ?? 0))
+        : (typeof signal_score === 'number' && !Number.isNaN(signal_score) ? Math.min(4, Math.max(0, signal_score)) : 0)
 
     const confFrac = confidenceBand ? CONFIDENCE_FILL[confidenceBand] ?? 0 : typeof confidence === 'number' ? confidence : 0
     const filledConfSegments = Math.round(confFrac * CONFIDENCE_SEGMENTS)
@@ -368,34 +554,40 @@ export default function BrandSignalBreakdown({ brandIntelligence = null, data = 
                             <h3 className="text-xs font-semibold text-slate-900">Brand Alignment</h3>
                             <ScoreDots count={filledDots} tone={tone} />
                         </div>
-                        <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-slate-600">
-                            {SIGNAL_KEYS.map((key, idx) => {
-                                const st = signalStatus(signals[key])
-                                const short = SIGNAL_SHORT[key]
-                                const sym =
-                                    st === 'ok' ? (
-                                        <span className="text-emerald-600" aria-label={`${short} ok`}>
-                                            ✓
-                                        </span>
-                                    ) : st === 'bad' ? (
-                                        <span className="text-slate-500" aria-label={`${short} missing`}>
-                                            ✗
-                                        </span>
-                                    ) : (
-                                        <span className="text-slate-400" aria-label={`${short} unknown`}>
-                                            —
+                        {hasV2 ? (
+                            <V2DimensionChips dimensions={v2Dimensions} />
+                        ) : (
+                            <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-slate-600">
+                                {SIGNAL_KEYS.map((key, idx) => {
+                                    const st = signalStatus(signals[key])
+                                    const short = SIGNAL_SHORT[key]
+                                    const sym =
+                                        st === 'ok' ? (
+                                            <span className="text-emerald-600" aria-label={`${short} ok`}>
+                                                ✓
+                                            </span>
+                                        ) : st === 'bad' ? (
+                                            <span className="text-slate-500" aria-label={`${short} missing`}>
+                                                ✗
+                                            </span>
+                                        ) : (
+                                            <span className="text-slate-400" aria-label={`${short} unknown`}>
+                                                —
+                                            </span>
+                                        )
+                                    return (
+                                        <span key={key} className="inline-flex items-center gap-0.5 whitespace-nowrap">
+                                            {idx > 0 ? <span className="text-slate-300">|</span> : null}
+                                            <span className="text-slate-500">{short}</span>
+                                            {sym}
                                         </span>
                                     )
-                                return (
-                                    <span key={key} className="inline-flex items-center gap-0.5 whitespace-nowrap">
-                                        {idx > 0 ? <span className="text-slate-300">|</span> : null}
-                                        <span className="text-slate-500">{short}</span>
-                                        {sym}
-                                    </span>
-                                )
-                            })}
-                        </div>
-                        {missingSummary ? (
+                                })}
+                            </div>
+                        )}
+                        {hasV2 && v2Recommendations && v2Recommendations.length > 0 ? (
+                            <p className="mt-0.5 line-clamp-1 text-[10px] leading-snug text-slate-600">{v2Recommendations[0]}</p>
+                        ) : missingSummary ? (
                             <p className="mt-0.5 line-clamp-1 text-[10px] leading-snug text-slate-600">{missingSummary}</p>
                         ) : (
                             <p className="mt-0.5 line-clamp-1 text-[10px] leading-snug text-slate-500">
@@ -446,50 +638,68 @@ export default function BrandSignalBreakdown({ brandIntelligence = null, data = 
             >
                 <div className="overflow-hidden min-h-0">
                     <div className="border-t border-slate-100 px-2.5 pb-2.5 pt-1.5 transition-opacity duration-300 ease-out">
-                        <div className="mb-2 rounded-md border border-slate-100 bg-slate-50/80 px-2 py-1.5 text-[10px] leading-snug text-slate-600">
-                            <span className="font-medium text-slate-700">How to read these four tiles:</span> each one is a{' '}
-                            <span className="font-medium text-slate-700">check the scorer could run</span> using your
-                            guidelines, references, and this file — not four separate guarantees that something was
-                            literally detected inside the execution image.
-                        </div>
-                        {isVideoAsset(asset) && (
-                            <div className="text-xs text-yellow-600 mb-2">
-                                Visual analysis not applied to video assets.
-                            </div>
-                        )}
-                        <div className="grid grid-cols-2 gap-x-2 gap-y-1.5">
-                            {SIGNAL_DEFS.map(({ key, label, Icon }) => {
-                                const st = signalStatus(signals[key])
-                                const ok = SIGNAL_POSITIVE_LABEL[key]
-                                const bad = SIGNAL_NEGATIVE_LABEL[key]
-                                const explain = getSignalExplanation(key, breakdown)
-                                return (
-                                    <div
-                                        key={key}
-                                        className="flex items-start gap-1.5 rounded border border-slate-100/80 bg-slate-50/50 px-1.5 py-1.5"
-                                        title={explain}
-                                    >
-                                        <Icon className="mt-0.5 h-4 w-4 shrink-0 text-slate-500" aria-hidden />
-                                        <div className="min-w-0">
-                                            <div className="text-[10px] font-medium leading-tight text-slate-700">{label}</div>
-                                            <div className="mt-0.5 text-[10px] leading-tight">
-                                                {st === 'ok' && <span className="text-emerald-700">{ok}</span>}
-                                                {st === 'bad' && <span className="text-amber-800/90">{bad}</span>}
-                                                {st === 'unknown' && (
-                                                    <span className="inline-flex items-center gap-0.5 text-slate-500">
-                                                        <MinusSmallIcon className="h-3 w-3" aria-hidden />
-                                                        Unknown
-                                                    </span>
-                                                )}
-                                            </div>
-                                            {explain ? (
-                                                <p className="mt-1 line-clamp-5 text-[9px] leading-snug text-slate-500">{explain}</p>
-                                            ) : null}
-                                        </div>
+                        {hasV2 ? (
+                            <>
+                                <div className="mb-2 rounded-md border border-slate-100 bg-slate-50/80 px-2 py-1.5 text-[10px] leading-snug text-slate-600">
+                                    <span className="font-medium text-slate-700">6 alignment dimensions</span> — each
+                                    shows what was evaluated, the evidence found, and confidence level. Labels reflect
+                                    actual evidence, not just configuration presence.
+                                </div>
+                                {isVideoAsset(asset) && (
+                                    <div className="text-xs text-yellow-600 mb-2">
+                                        Visual analysis limited for video assets.
                                     </div>
-                                )
-                            })}
-                        </div>
+                                )}
+                                <V2DimensionGrid dimensions={v2Dimensions} />
+                            </>
+                        ) : (
+                            <>
+                                <div className="mb-2 rounded-md border border-slate-100 bg-slate-50/80 px-2 py-1.5 text-[10px] leading-snug text-slate-600">
+                                    <span className="font-medium text-slate-700">How to read these four tiles:</span> each one is a{' '}
+                                    <span className="font-medium text-slate-700">check the scorer could run</span> using your
+                                    guidelines, references, and this file — not four separate guarantees that something was
+                                    literally detected inside the execution image.
+                                </div>
+                                {isVideoAsset(asset) && (
+                                    <div className="text-xs text-yellow-600 mb-2">
+                                        Visual analysis not applied to video assets.
+                                    </div>
+                                )}
+                                <div className="grid grid-cols-2 gap-x-2 gap-y-1.5">
+                                    {SIGNAL_DEFS.map(({ key, label, Icon }) => {
+                                        const st = signalStatus(signals[key])
+                                        const ok = SIGNAL_POSITIVE_LABEL[key]
+                                        const bad = SIGNAL_NEGATIVE_LABEL[key]
+                                        const explain = getSignalExplanation(key, breakdown)
+                                        return (
+                                            <div
+                                                key={key}
+                                                className="flex items-start gap-1.5 rounded border border-slate-100/80 bg-slate-50/50 px-1.5 py-1.5"
+                                                title={explain}
+                                            >
+                                                <Icon className="mt-0.5 h-4 w-4 shrink-0 text-slate-500" aria-hidden />
+                                                <div className="min-w-0">
+                                                    <div className="text-[10px] font-medium leading-tight text-slate-700">{label}</div>
+                                                    <div className="mt-0.5 text-[10px] leading-tight">
+                                                        {st === 'ok' && <span className="text-emerald-700">{ok}</span>}
+                                                        {st === 'bad' && <span className="text-amber-800/90">{bad}</span>}
+                                                        {st === 'unknown' && (
+                                                            <span className="inline-flex items-center gap-0.5 text-slate-500">
+                                                                <MinusSmallIcon className="h-3 w-3" aria-hidden />
+                                                                Unknown
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                    {explain ? (
+                                                        <p className="mt-1 line-clamp-5 text-[9px] leading-snug text-slate-500">{explain}</p>
+                                                    ) : null}
+                                                </div>
+                                            </div>
+                                        )
+                                    })}
+                                </div>
+                            </>
+                        )}
 
                         {creativePanel && (
                             <div className="mt-2 rounded-md border border-violet-100/90 bg-violet-50/35 px-2 py-1.5">

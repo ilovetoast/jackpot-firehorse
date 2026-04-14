@@ -25,7 +25,7 @@ class BrandIntelligenceEngine
     /**
      * Bump when scoring semantics change; allows parallel history rows per asset and idempotent skips.
      */
-    public const ENGINE_VERSION = 'v7_creative_copy_parallel';
+    public const ENGINE_VERSION = 'v8_dimension_model';
 
     /** Cosine similarity vs brand logo reference embeddings above this counts as logo present. */
     public const LOGO_EMBEDDING_SIMILARITY_THRESHOLD = 0.72;
@@ -321,6 +321,8 @@ class BrandIntelligenceEngine
         }
         $withRefs['ai_used'] = $aiUsed;
 
+        $withRefs = $this->appendDimensionEvaluation($asset, $brand, $withRefs);
+
         return [
             'overall_score' => $score,
             'confidence' => $confidence,
@@ -419,6 +421,8 @@ class BrandIntelligenceEngine
 
         $aiUsedInsufficient = ! empty($withRefs['ai_insight'])
             || (($withRefs['ebi_ai_trace']['creative_ai_ran'] ?? false) === true);
+
+        $withRefs = $this->appendDimensionEvaluation($asset, $brand, $withRefs);
 
         return [
             'overall_score' => 50,
@@ -1005,6 +1009,77 @@ class BrandIntelligenceEngine
         }
 
         return max(0.0, min(1.0, $score / 100.0));
+    }
+
+    /**
+     * Run the v2 6-dimension evaluation and merge results into breakdown_json alongside existing keys.
+     *
+     * @param  array<string, mixed>  $breakdown  Existing breakdown_json being assembled
+     * @return array<string, mixed>  The breakdown with dimensions, evaluation_context, weights, and v2 scoring appended
+     */
+    protected function appendDimensionEvaluation(Asset $asset, Brand $brand, array $breakdown): array
+    {
+        $orchestrator = new \App\Services\BrandIntelligence\Dimensions\EvaluationOrchestrator(
+            $this->brandColorPaletteAlignmentEvaluator,
+            $this->assetContextClassifier,
+        );
+
+        $evalResult = $orchestrator->evaluate($asset, $brand);
+
+        $creativePayload = null;
+        if (isset($breakdown['copy_alignment']) || isset($breakdown['context_analysis'])) {
+            $creativePayload = [
+                'copy_alignment' => $breakdown['copy_alignment'] ?? null,
+                'context_analysis' => $breakdown['context_analysis'] ?? null,
+                'ebi_ai_trace' => $breakdown['ebi_ai_trace'] ?? null,
+            ];
+        }
+
+        $dimensions = $orchestrator->enrichWithCreativeIntelligence(
+            $evalResult['dimensions'],
+            $creativePayload,
+        );
+
+        $deriver = new \App\Services\BrandIntelligence\Dimensions\AlignmentScoreDeriver();
+        $derived = $deriver->derive($dimensions, $evalResult['weights']);
+
+        $breakdown['dimensions'] = array_map(
+            fn (\App\Services\BrandIntelligence\Dimensions\DimensionResult $r) => $r->toArray(),
+            $dimensions,
+        );
+        $breakdown['evaluation_context'] = $evalResult['context']->toArray();
+        $breakdown['dimension_weights'] = $evalResult['weights'];
+        $breakdown['dimension_weights_note'] = $evalResult['weights_note'];
+        $breakdown['weighted_score'] = $derived['weighted_score'];
+        $breakdown['overall_confidence'] = $derived['overall_confidence'];
+        $breakdown['evaluable_proportion'] = $derived['evaluable_proportion'];
+        $breakdown['rating'] = $derived['rating'];
+        $breakdown['rating_derivation'] = $derived['rating_derivation'];
+        $breakdown['v2_alignment_state'] = $derived['alignment_state']->value;
+
+        $breakdown['v2_recommendations'] = $this->generateDimensionRecommendations($dimensions);
+
+        return $breakdown;
+    }
+
+    /**
+     * Dimension-aware recommendations: each names the affected dimension, distinguishes
+     * missing evidence from weak alignment, and suggests a concrete improvement.
+     *
+     * @param  array<string, \App\Services\BrandIntelligence\Dimensions\DimensionResult>  $dimensions
+     * @return list<string>
+     */
+    protected function generateDimensionRecommendations(array $dimensions): array
+    {
+        $recs = [];
+
+        foreach ($dimensions as $result) {
+            foreach ($result->blockers as $blocker) {
+                $recs[] = sprintf('[%s] %s', $result->dimension->label(), $blocker);
+            }
+        }
+
+        return array_slice($recs, 0, 6);
     }
 
     /**

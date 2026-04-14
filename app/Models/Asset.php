@@ -879,7 +879,7 @@ class Asset extends Model
 
         $bj = $row->breakdown_json ?? [];
 
-        return [
+        $payload = [
             'level' => $row->level,
             'confidence' => $row->confidence,
             'breakdown_json' => $bj,
@@ -892,6 +892,21 @@ class Asset extends Model
                 $referenceAssetsById
             ),
         ];
+
+        if (isset($bj['dimensions'])) {
+            $payload['dimensions'] = $bj['dimensions'];
+            $payload['evaluation_context'] = $bj['evaluation_context'] ?? null;
+            $payload['dimension_weights'] = $bj['dimension_weights'] ?? null;
+            $payload['weighted_score'] = $bj['weighted_score'] ?? null;
+            $payload['overall_confidence'] = $bj['overall_confidence'] ?? null;
+            $payload['evaluable_proportion'] = $bj['evaluable_proportion'] ?? null;
+            $payload['rating'] = $bj['rating'] ?? null;
+            $payload['rating_derivation'] = $bj['rating_derivation'] ?? null;
+            $payload['v2_alignment_state'] = $bj['v2_alignment_state'] ?? null;
+            $payload['v2_recommendations'] = $bj['v2_recommendations'] ?? null;
+        }
+
+        return $payload;
     }
 
     /**
