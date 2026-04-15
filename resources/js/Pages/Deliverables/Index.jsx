@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
+import { motion } from 'framer-motion'
 import { usePage, router } from '@inertiajs/react'
 import { useAssetReconciliation } from '../../hooks/useAssetReconciliation'
 import { useThumbnailSmartPoll } from '../../hooks/useThumbnailSmartPoll'
@@ -822,17 +822,13 @@ function DeliverablesIndexPage({ categories, total_asset_count = 0, selected_cat
                                 </div>
                             )
                         })()}
-                        <AnimatePresence mode="wait">
-                            <motion.div
-                                key={selectedCategoryId ?? 'all'}
-                                initial={{ opacity: 0 }}
-                                animate={{ 
-                                    opacity: Math.max(0.55, 1 - Math.min(Math.abs(dragOffsetX) / 100, 0.45)),
-                                }}
-                                exit={{ opacity: 0 }}
-                                transition={{ duration: 0.2, ease: 'easeInOut' }}
-                                className="py-6 px-4 sm:px-6 lg:px-8"
-                            >
+                        {/* No AnimatePresence/category key fade — that matched Assets and avoids double-flash on category change. */}
+                        <div
+                            className="py-6 px-4 sm:px-6 lg:px-8"
+                            style={{
+                                opacity: Math.max(0.55, 1 - Math.min(Math.abs(dragOffsetX) / 100, 0.45)),
+                            }}
+                        >
                         {/* Asset Grid Toolbar - Always visible (persists across categories) */}
                         {/* Matches Assets/Index behavior - toolbar always visible, even when no assets */}
                         <div className="mb-8">
@@ -976,8 +972,7 @@ function DeliverablesIndexPage({ categories, total_asset_count = 0, selected_cat
                                 </div>
                             </div>
                         )}
-                            </motion.div>
-                        </AnimatePresence>
+                        </div>
                     </motion.div>
 
                     {/* Asset Drawer - Desktop (pushes grid) */}
