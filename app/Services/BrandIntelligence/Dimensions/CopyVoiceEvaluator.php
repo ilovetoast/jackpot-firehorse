@@ -7,6 +7,7 @@ use App\Enums\DimensionStatus;
 use App\Enums\EvidenceSource;
 use App\Models\Asset;
 use App\Models\Brand;
+use App\Services\BrandIntelligence\BrandIntelligenceTextEvidence;
 
 /**
  * Copy / Voice dimension.
@@ -19,7 +20,7 @@ final class CopyVoiceEvaluator implements DimensionEvaluatorInterface
     public function evaluate(Asset $asset, Brand $brand, EvaluationContext $context): DimensionResult
     {
         $hasOcr = $context->hasExtraction('ocr');
-        $ocrText = $this->extractTextContent($asset);
+        $ocrText = $this->extractTextContent($asset, $context);
 
         if (! $hasOcr && $ocrText === '') {
             return DimensionResult::notEvaluable(
@@ -137,28 +138,12 @@ final class CopyVoiceEvaluator implements DimensionEvaluatorInterface
         );
     }
 
-    private function extractTextContent(Asset $asset): string
+    private function extractTextContent(Asset $asset, EvaluationContext $context): string
     {
-        $parts = [];
-        $meta = is_array($asset->metadata ?? null) ? $asset->metadata : [];
-
-        foreach (['extracted_text', 'ocr_text', 'vision_ocr', 'detected_text'] as $k) {
-            if (! empty($meta[$k]) && is_string($meta[$k])) {
-                $parts[] = $meta[$k];
-            }
-        }
-
-        if (\Illuminate\Support\Facades\Schema::hasTable('pdf_text_extractions')) {
-            $ext = \App\Models\PdfTextExtraction::query()
-                ->where('asset_id', $asset->id)
-                ->orderByDesc('id')
-                ->first();
-            if ($ext && is_string($ext->extracted_text ?? null) && trim($ext->extracted_text) !== '') {
-                $parts[] = $ext->extracted_text;
-            }
-        }
-
-        return trim(implode("\n", array_filter($parts)));
+        return BrandIntelligenceTextEvidence::mergedCopyVoiceRaw(
+            $asset,
+            $context->supplementalCreativeOcrText
+        );
     }
 
     private function brandHasVoiceConfig(Brand $brand): bool

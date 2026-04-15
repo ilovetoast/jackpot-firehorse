@@ -91,10 +91,13 @@ final class EvaluationOrchestrator
      *   weights_note: string|null,
      * }
      */
-    public function evaluate(Asset $asset, Brand $brand): array
+    public function evaluate(Asset $asset, Brand $brand, ?string $supplementalCreativeOcrText = null): array
     {
         $contextType = $this->contextClassifier->classify($asset);
         $context = EvaluationContext::fromAsset($asset, $contextType);
+        if ($supplementalCreativeOcrText !== null && trim($supplementalCreativeOcrText) !== '') {
+            $context = EvaluationContext::withSupplementalCreativeOcr($context, $supplementalCreativeOcrText);
+        }
 
         $results = [];
         $results[AlignmentDimension::IDENTITY->value] = $this->identityEvaluator->evaluate($asset, $brand, $context);

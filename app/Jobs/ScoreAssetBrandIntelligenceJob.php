@@ -2,24 +2,31 @@
 
 namespace App\Jobs;
 
+use App\Enums\PdfBrandIntelligenceScanMode;
 use App\Models\Asset;
 use App\Models\BrandIntelligenceScore;
 use App\Services\AnalysisStatusLogger;
 use App\Services\BrandIntelligence\BrandIntelligenceEngine;
+use App\Services\BrandIntelligence\PdfBrandIntelligenceScanGates;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
 
 class ScoreAssetBrandIntelligenceJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
+    /**
+     * @param  string  $pdfScanMode  {@see PdfBrandIntelligenceScanMode} serialized value (queue-safe).
+     */
     public function __construct(
         public readonly string $assetId,
-        public bool $forceRun = false
+        public bool $forceRun = false,
+        public string $pdfScanMode = 'standard',
     ) {}
 
     public function handle(BrandIntelligenceEngine $engine): void
@@ -48,7 +55,16 @@ class ScoreAssetBrandIntelligenceJob implements ShouldQueue
         }
 
         if ($ebiEnabled && $guidelinesPublished && ! $this->alreadyScoredForCurrentEngine($asset)) {
-            $payload = $engine->scoreAsset($asset);
+            $requestedMode = PdfBrandIntelligenceScanMode::tryFrom($this->pdfScanMode)
+                ?? PdfBrandIntelligenceScanMode::Standard;
+
+            if ($requestedMode === PdfBrandIntelligenceScanMode::Deep) {
+                PdfBrandIntelligenceScanGates::assertMayDispatchDeepScan(Auth::user(), $asset);
+            }
+
+            $effectiveMode = PdfBrandIntelligenceScanGates::resolveEffectivePdfScanModeInJob($asset, $requestedMode);
+
+            $payload = $engine->scoreAsset($asset, false, $effectiveMode);
             if ($payload !== null) {
                 $this->persistAssetScore($asset, $payload);
 
@@ -57,7 +73,24 @@ class ScoreAssetBrandIntelligenceJob implements ShouldQueue
                     'brand_id' => $asset->brand_id,
                     'score' => $payload['overall_score'] ?? null,
                     'engine_version' => BrandIntelligenceEngine::ENGINE_VERSION,
+                    'pdf_scan_mode_requested' => $requestedMode->value,
+                    'pdf_scan_mode_effective' => $effectiveMode->value,
                 ]);
+
+                if ($requestedMode === PdfBrandIntelligenceScanMode::Deep) {
+                    $bj = is_array($payload['breakdown_json'] ?? null) ? $payload['breakdown_json'] : [];
+                    Log::info('[EBI] pdf_deep_scan_completed', [
+                        'asset_id' => $asset->id,
+                        'tenant_id' => $asset->tenant_id,
+                        'brand_id' => $asset->brand_id,
+                        'pdf_scan_mode_requested' => $requestedMode->value,
+                        'pdf_scan_mode_effective' => $effectiveMode->value,
+                        'overall_confidence' => $bj['overall_confidence'] ?? null,
+                        'evaluable_proportion' => $bj['evaluable_proportion'] ?? null,
+                        'alignment_state' => $bj['alignment_state'] ?? null,
+                        'gate_confidence' => $bj['confidence'] ?? null,
+                    ]);
+                }
             }
         }
 

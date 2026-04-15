@@ -3,6 +3,8 @@
 namespace App\Services\BrandIntelligence;
 
 use App\Enums\AssetContextType;
+use App\Enums\MediaType;
+use App\Enums\PdfBrandIntelligenceScanMode;
 use App\Models\Asset;
 use App\Models\Brand;
 use App\Services\AI\Contracts\AIProviderInterface;
@@ -19,6 +21,7 @@ final class CreativeIntelligenceAnalyzer
     public function __construct(
         protected AIProviderInterface $aiProvider,
         protected AiMetadataGenerationService $aiMetadataGenerationService,
+        protected VisualEvaluationSourceResolver $visualEvaluationSourceResolver,
     ) {}
 
     /**
@@ -32,25 +35,48 @@ final class CreativeIntelligenceAnalyzer
      *   ebi_ai_trace: array
      * }
      */
-    public function analyze(Asset $asset, Brand $brand, AssetContextType $heuristicContext, bool $dryRun): array
-    {
+    public function analyze(
+        Asset $asset,
+        Brand $brand,
+        AssetContextType $heuristicContext,
+        bool $dryRun,
+        PdfBrandIntelligenceScanMode $pdfScanMode = PdfBrandIntelligenceScanMode::Standard,
+    ): array {
+        $resolvedVisual = $this->visualEvaluationSourceResolver->resolve($asset);
+        $visualTrace = VisualEvaluationSourceResolver::traceSubset($resolvedVisual);
+
+        $mime = strtolower((string) ($asset->mime_type ?? ''));
+        $mediaType = MediaType::fromMime($mime);
+
         $trace = [
             'creative_ai_ran' => false,
             'copy_extracted' => false,
             'copy_alignment_scored' => false,
             'skipped' => true,
             'skip_reason' => null,
+            'visual_evaluation_source' => $visualTrace,
         ];
+
+        if ($mediaType === MediaType::PDF) {
+            $trace['pdf_scan_mode'] = $pdfScanMode->value;
+            $trace['max_pdf_pages_allowed'] = $pdfScanMode->maxPdfPagesForSelection();
+        }
 
         if ($dryRun) {
             $trace['skip_reason'] = 'dry_run';
 
             return $this->emptyPayload($trace);
         }
+        $canUseVisionRaster = match ($mediaType) {
+            MediaType::IMAGE => true,
+            MediaType::PDF => $this->visualEvaluationSourceResolver->assetHasRenderableRaster($asset),
+            default => (($resolvedVisual['resolved'] ?? false) === true),
+        };
 
-        $mime = strtolower((string) ($asset->mime_type ?? ''));
-        if ($mime === '' || ! str_starts_with($mime, 'image/')) {
-            $trace['skip_reason'] = 'not_image';
+        if (! $canUseVisionRaster) {
+            $trace['skip_reason'] = $mediaType === MediaType::PDF
+                ? 'pdf_visual_source_missing'
+                : 'not_image';
 
             return $this->emptyPayload($trace);
         }
@@ -61,25 +87,50 @@ final class CreativeIntelligenceAnalyzer
             return $this->emptyPayload($trace);
         }
 
-        $imageDataUrl = $this->aiMetadataGenerationService->fetchThumbnailForVisionAnalysis($asset);
-        if ($imageDataUrl === null || $imageDataUrl === '') {
-            $trace['skip_reason'] = 'no_thumbnail_for_vision';
-
-            return $this->emptyPayload($trace);
+        $catalog = [];
+        $selection = null;
+        if ($mediaType === MediaType::PDF) {
+            $catalog = PdfBrandIntelligencePageRasterCatalog::discoverRastersByPage($asset, $this->visualEvaluationSourceResolver);
+            $selection = PdfBrandIntelligencePageSelector::select(
+                $asset,
+                $catalog,
+                $pdfScanMode->maxPdfPagesForSelection(),
+            );
         }
 
         $dna = $this->extractBrandDnaForCopyAlignment($brand);
         $modelKey = 'gpt-4o-mini';
         $modelName = config("ai.models.{$modelKey}.model_name", 'gpt-4o-mini');
-
         $prompt = $this->buildVisionPrompt($heuristicContext, $dna);
+        $visionOpts = [
+            'model' => $modelName,
+            'max_tokens' => 1800,
+            'response_format' => ['type' => 'json_object'],
+        ];
+
+        if ($mediaType === MediaType::PDF && $selection !== null && count($selection['entries']) > 1) {
+            return $this->analyzePdfMultiPageCreative($asset, $heuristicContext, $prompt, $visionOpts, $trace, $selection);
+        }
+
+        $imageDataUrl = null;
+        if ($mediaType === MediaType::PDF && $selection !== null && $selection['entries'] !== []) {
+            $firstPath = (string) ($selection['entries'][0]['storage_path'] ?? '');
+            if ($firstPath !== '') {
+                $imageDataUrl = $this->aiMetadataGenerationService->fetchStoragePathForVisionAnalysis($asset, $firstPath);
+            }
+        }
+        if ($imageDataUrl === null || $imageDataUrl === '') {
+            $imageDataUrl = $this->aiMetadataGenerationService->fetchThumbnailForVisionAnalysis($asset);
+        }
+        if ($imageDataUrl === null || $imageDataUrl === '') {
+            // Resolver already picked a path; missing payload is a fetch/pipeline issue, not "no PDF raster".
+            $trace['skip_reason'] = 'no_thumbnail_for_vision';
+
+            return $this->emptyPayload($trace);
+        }
 
         try {
-            $response = $this->aiProvider->analyzeImage($imageDataUrl, $prompt, [
-                'model' => $modelName,
-                'max_tokens' => 1800,
-                'response_format' => ['type' => 'json_object'],
-            ]);
+            $response = $this->aiProvider->analyzeImage($imageDataUrl, $prompt, $visionOpts);
         } catch (\Throwable $e) {
             Log::warning('[EBI Creative] Vision analysis failed', [
                 'asset_id' => $asset->id,
@@ -97,6 +148,179 @@ final class CreativeIntelligenceAnalyzer
             return $this->emptyPayload($trace);
         }
 
+        if ($mediaType === MediaType::PDF && $selection !== null) {
+            $trace['pdf_multi_page'] = $this->buildPdfMultiPageTraceSingleRasterPlan($selection, $trace);
+        }
+
+        return $this->finalizeCreativePayload($parsed, $heuristicContext, $trace);
+    }
+
+    /**
+     * @param  array{
+     *     strategy: string,
+     *     total_pdf_pages_known: int|null,
+     *     selected_pages: list<int>,
+     *     entries: list<array{page: int, storage_path: string, origin: string, size_bytes?: int}>
+     * }  $selection
+     * @param  array<string, mixed>  $trace
+     * @param  array{model: string, max_tokens: int, response_format: array<string, mixed>}  $visionOpts
+     * @return array{
+     *   creative_analysis: array|null,
+     *   copy_alignment: array,
+     *   context_analysis: array,
+     *   visual_alignment_ai: array|null,
+     *   overall_summary: ?string,
+     *   brand_copy_conflict: bool,
+     *   ebi_ai_trace: array
+     * }
+     */
+    protected function analyzePdfMultiPageCreative(
+        Asset $asset,
+        AssetContextType $heuristicContext,
+        string $prompt,
+        array $visionOpts,
+        array $trace,
+        array $selection,
+    ): array {
+        $perPageSources = [];
+        $parsedPages = [];
+        $evaluatedPages = [];
+
+        foreach ($selection['entries'] as $entry) {
+            $page = (int) ($entry['page'] ?? 0);
+            $path = (string) ($entry['storage_path'] ?? '');
+            $origin = is_string($entry['origin'] ?? null) ? (string) $entry['origin'] : 'unknown';
+            if ($page < 1) {
+                $perPageSources[] = [
+                    'page' => $page,
+                    'origin' => $origin,
+                    'source_type' => 'pdf_rendered_image',
+                    'storage_path' => $path !== '' ? $path : null,
+                    'resolved' => false,
+                    'reason' => 'invalid_page',
+                ];
+
+                continue;
+            }
+            if ($path === '') {
+                $perPageSources[] = [
+                    'page' => $page,
+                    'origin' => $origin,
+                    'source_type' => 'pdf_rendered_image',
+                    'storage_path' => null,
+                    'resolved' => false,
+                    'reason' => 'missing_storage_path',
+                ];
+
+                continue;
+            }
+
+            $dataUrl = $this->aiMetadataGenerationService->fetchStoragePathForVisionAnalysis($asset, $path);
+            if ($dataUrl === null || $dataUrl === '') {
+                $perPageSources[] = [
+                    'page' => $page,
+                    'origin' => $origin,
+                    'source_type' => 'pdf_rendered_image',
+                    'storage_path' => $path,
+                    'resolved' => false,
+                    'reason' => 'fetch_failed_or_empty',
+                ];
+
+                continue;
+            }
+
+            try {
+                $response = $this->aiProvider->analyzeImage($dataUrl, $prompt, $visionOpts);
+            } catch (\Throwable $e) {
+                Log::warning('[EBI Creative] Vision analysis failed (PDF page)', [
+                    'asset_id' => $asset->id,
+                    'page' => $page,
+                    'error' => $e->getMessage(),
+                ]);
+                $perPageSources[] = [
+                    'page' => $page,
+                    'origin' => $origin,
+                    'source_type' => 'pdf_rendered_image',
+                    'storage_path' => $path,
+                    'resolved' => false,
+                    'reason' => 'ai_error: '.$e->getMessage(),
+                ];
+
+                continue;
+            }
+
+            $parsed = $this->parseCreativeJson($response['text'] ?? '');
+            if ($parsed === null) {
+                $perPageSources[] = [
+                    'page' => $page,
+                    'origin' => $origin,
+                    'source_type' => 'pdf_rendered_image',
+                    'storage_path' => $path,
+                    'resolved' => false,
+                    'reason' => 'parse_failed',
+                ];
+
+                continue;
+            }
+
+            $perPageSources[] = [
+                'page' => $page,
+                'origin' => $origin,
+                'source_type' => 'pdf_rendered_image',
+                'storage_path' => $path,
+                'resolved' => true,
+                'reason' => 'ok',
+            ];
+            $parsedPages[] = $parsed;
+            $evaluatedPages[] = $page;
+        }
+
+        $combination = count($parsedPages) >= 2
+            ? 'merged_multi_page_vision_best_signals'
+            : (count($parsedPages) === 1 ? 'single_evaluated_page_from_multi_page_plan' : 'none');
+
+        $trace['pdf_multi_page'] = [
+            'pdf_scan_mode' => $trace['pdf_scan_mode'] ?? PdfBrandIntelligenceScanMode::Standard->value,
+            'max_pdf_pages_allowed' => (int) ($trace['max_pdf_pages_allowed'] ?? 1),
+            'total_pdf_pages_known' => $selection['total_pdf_pages_known'],
+            'selected_pdf_pages' => $selection['selected_pages'],
+            'evaluated_pdf_pages' => $evaluatedPages,
+            'pdf_page_selection_strategy' => $selection['strategy'],
+            'per_page_visual_sources' => $perPageSources,
+            'page_combination_strategy' => $combination,
+        ];
+
+        if ($parsedPages === []) {
+            $trace['skip_reason'] = 'no_thumbnail_for_vision';
+
+            return $this->emptyPayload($trace);
+        }
+
+        if (count($parsedPages) === 1) {
+            $trace['pdf_multi_page']['page_combination_strategy'] = 'single_evaluated_page_from_multi_page_plan';
+
+            return $this->finalizeCreativePayload($parsedPages[0], $heuristicContext, $trace);
+        }
+
+        $mergedParsed = $this->mergeParsedCreativeFromPdfPages($parsedPages, $evaluatedPages, $heuristicContext);
+
+        return $this->finalizeCreativePayload($mergedParsed, $heuristicContext, $trace);
+    }
+
+    /**
+     * @param  array<string, mixed>  $trace
+     * @return array{
+     *   creative_analysis: array|null,
+     *   copy_alignment: array,
+     *   context_analysis: array,
+     *   visual_alignment_ai: array|null,
+     *   overall_summary: ?string,
+     *   brand_copy_conflict: bool,
+     *   ebi_ai_trace: array
+     * }
+     */
+    protected function finalizeCreativePayload(array $parsed, AssetContextType $heuristicContext, array $trace): array
+    {
         $trace['creative_ai_ran'] = true;
         $trace['skipped'] = false;
         $trace['skip_reason'] = null;
@@ -122,13 +346,18 @@ final class CreativeIntelligenceAnalyzer
                 && isset($copyAlignment['score']) && is_numeric($copyAlignment['score']);
         }
 
-        $ctxAnalysis = [
-            'context_type_heuristic' => $heuristicContext->value,
-            'context_type_ai' => is_string($creative['context_type'] ?? null) ? $creative['context_type'] : null,
-            'scene_type' => $creative['scene_type'] ?? null,
-            'lighting_type' => $creative['lighting_type'] ?? null,
-            'mood' => $creative['mood'] ?? null,
-        ];
+        $ctxAnalysis = is_array($parsed['context_analysis'] ?? null)
+            ? $parsed['context_analysis']
+            : [
+                'context_type_heuristic' => $heuristicContext->value,
+                'context_type_ai' => is_string($creative['context_type'] ?? null) ? $creative['context_type'] : null,
+                'scene_type' => $creative['scene_type'] ?? null,
+                'lighting_type' => $creative['lighting_type'] ?? null,
+                'mood' => $creative['mood'] ?? null,
+            ];
+        if (($ctxAnalysis['context_type_heuristic'] ?? null) === null || $ctxAnalysis['context_type_heuristic'] === '') {
+            $ctxAnalysis['context_type_heuristic'] = $heuristicContext->value;
+        }
 
         $visualAi = $parsed['visual_alignment'] ?? null;
         if (! is_array($visualAi)) {
@@ -148,6 +377,302 @@ final class CreativeIntelligenceAnalyzer
             'brand_copy_conflict' => $conflict,
             'ebi_ai_trace' => $trace,
         ];
+    }
+
+    /**
+     * @param  array{
+     *     strategy: string,
+     *     total_pdf_pages_known: int|null,
+     *     selected_pages: list<int>,
+     *     entries: list<array{page: int, storage_path: string, origin: string, size_bytes?: int}>
+     * }  $selection
+     * @return array<string, mixed>
+     */
+    /**
+     * @param  array<string, mixed>  $trace
+     */
+    protected function buildPdfMultiPageTraceSingleRasterPlan(array $selection, array $trace): array
+    {
+        $first = $selection['entries'][0] ?? null;
+        $page = is_array($first) ? (int) ($first['page'] ?? 1) : 1;
+
+        return [
+            'pdf_scan_mode' => $trace['pdf_scan_mode'] ?? PdfBrandIntelligenceScanMode::Standard->value,
+            'max_pdf_pages_allowed' => (int) ($trace['max_pdf_pages_allowed'] ?? 1),
+            'total_pdf_pages_known' => $selection['total_pdf_pages_known'],
+            'selected_pdf_pages' => $selection['selected_pages'],
+            'evaluated_pdf_pages' => [$page],
+            'pdf_page_selection_strategy' => $selection['strategy'],
+            'per_page_visual_sources' => [],
+            'page_combination_strategy' => 'single_page_catalog_or_thumbnail',
+        ];
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $parsedPages
+     * @param  list<int>  $evaluatedPages
+     * @return array<string, mixed>
+     */
+    protected function mergeParsedCreativeFromPdfPages(array $parsedPages, array $evaluatedPages, AssetContextType $heuristicContext): array
+    {
+        $creatives = [];
+        foreach ($parsedPages as $parsed) {
+            $c = $parsed['creative_analysis'] ?? $parsed;
+            $creatives[] = is_array($c) ? $c : [];
+        }
+
+        $mergedCreative = $this->mergeCreativeAnalysisFields($creatives);
+
+        $voteCounts = [];
+        foreach ($creatives as $c) {
+            $ct = $c['context_type'] ?? null;
+            if (is_string($ct) && trim($ct) !== '') {
+                $t = trim($ct);
+                $voteCounts[$t] = ($voteCounts[$t] ?? 0) + 1;
+            }
+        }
+        arsort($voteCounts);
+        $winnerContext = $voteCounts === [] ? null : array_key_first($voteCounts);
+        $n = count($parsedPages);
+        $topVotes = $voteCounts === [] ? 0 : max($voteCounts);
+        $agreement = $n > 0 ? round($topVotes / $n, 3) : null;
+
+        $copyAlignment = $this->mergeCopyAlignmentFromPages($parsedPages, $this->detectCopyExtracted($mergedCreative));
+
+        $visualAi = $this->mergeVisualAlignmentFromPages($parsedPages);
+
+        $summaries = [];
+        foreach ($parsedPages as $i => $parsed) {
+            $s = $parsed['overall_summary'] ?? null;
+            if (is_string($s) && trim($s) !== '') {
+                $p = $evaluatedPages[$i] ?? ($i + 1);
+                $summaries[] = 'Page '.$p.': '.trim($s);
+            }
+        }
+        $overallSummary = $summaries === [] ? null : implode(' ', $summaries);
+
+        $conflict = false;
+        foreach ($parsedPages as $parsed) {
+            if (filter_var($parsed['brand_copy_conflict'] ?? false, FILTER_VALIDATE_BOOLEAN)) {
+                $conflict = true;
+                break;
+            }
+        }
+
+        return [
+            'creative_analysis' => $mergedCreative,
+            'copy_alignment' => $copyAlignment,
+            'context_analysis' => [
+                'context_type_heuristic' => $heuristicContext->value,
+                'context_type_ai' => $winnerContext,
+                'scene_type' => $mergedCreative['scene_type'] ?? null,
+                'lighting_type' => $mergedCreative['lighting_type'] ?? null,
+                'mood' => $mergedCreative['mood'] ?? null,
+                'multi_page_context_type_votes' => $voteCounts,
+                'multi_page_context_agreement' => $agreement,
+            ],
+            'visual_alignment' => $visualAi,
+            'overall_summary' => $overallSummary,
+            'brand_copy_conflict' => $conflict,
+        ];
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $creatives
+     * @return array<string, mixed>
+     */
+    protected function mergeCreativeAnalysisFields(array $creatives): array
+    {
+        $merged = [
+            'context_type' => null,
+            'scene_type' => null,
+            'lighting_type' => null,
+            'mood' => null,
+            'detected_text' => null,
+            'headline_text' => null,
+            'supporting_text' => null,
+            'cta_text' => null,
+            'voice_traits_detected' => [],
+            'visual_traits_detected' => [],
+        ];
+
+        $voteCounts = [];
+        foreach ($creatives as $c) {
+            $ct = $c['context_type'] ?? null;
+            if (is_string($ct) && trim($ct) !== '') {
+                $t = trim($ct);
+                $voteCounts[$t] = ($voteCounts[$t] ?? 0) + 1;
+            }
+        }
+        arsort($voteCounts);
+        if ($voteCounts !== []) {
+            $merged['context_type'] = array_key_first($voteCounts);
+        }
+
+        $joinUnique = static function (array $parts, string $sep): ?string {
+            $u = [];
+            foreach ($parts as $p) {
+                if (! is_string($p)) {
+                    continue;
+                }
+                $t = trim($p);
+                if ($t === '') {
+                    continue;
+                }
+                $u[$t] = true;
+            }
+
+            return $u === [] ? null : implode($sep, array_keys($u));
+        };
+
+        foreach (['scene_type', 'lighting_type', 'mood'] as $k) {
+            $parts = [];
+            foreach ($creatives as $c) {
+                $v = $c[$k] ?? null;
+                if (is_string($v) && trim($v) !== '') {
+                    $parts[] = trim($v);
+                }
+            }
+            $merged[$k] = $joinUnique($parts, '; ');
+        }
+
+        foreach (['detected_text', 'headline_text', 'supporting_text', 'cta_text'] as $k) {
+            $parts = [];
+            foreach ($creatives as $c) {
+                $v = $c[$k] ?? null;
+                if (is_string($v) && trim($v) !== '') {
+                    $parts[] = trim($v);
+                }
+            }
+            $merged[$k] = $joinUnique($parts, "\n");
+        }
+
+        $voices = [];
+        $visuals = [];
+        foreach ($creatives as $c) {
+            foreach ($this->stringList($c['voice_traits_detected'] ?? []) as $t) {
+                $voices[$t] = true;
+            }
+            foreach ($this->stringList($c['visual_traits_detected'] ?? []) as $t) {
+                $visuals[$t] = true;
+            }
+        }
+        $merged['voice_traits_detected'] = array_slice(array_keys($voices), 0, 24);
+        $merged['visual_traits_detected'] = array_slice(array_keys($visuals), 0, 24);
+
+        return $merged;
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $parsedPages
+     * @return array<string, mixed>
+     */
+    protected function mergeCopyAlignmentFromPages(array $parsedPages, bool $mergedHasText): array
+    {
+        $best = null;
+        $bestWeight = -1.0;
+        foreach ($parsedPages as $parsed) {
+            $ca = $parsed['copy_alignment'] ?? null;
+            if (! is_array($ca)) {
+                continue;
+            }
+            $state = is_string($ca['alignment_state'] ?? null) ? $ca['alignment_state'] : 'not_applicable';
+            $score = $ca['score'] ?? null;
+            $conf = is_numeric($ca['confidence'] ?? null) ? (float) $ca['confidence'] : 0.0;
+            if (! in_array($state, ['aligned', 'partial', 'off_brand'], true)) {
+                continue;
+            }
+            if ($score === null || ! is_numeric($score)) {
+                continue;
+            }
+            $weight = (float) $score * max(0.01, $conf);
+            if ($weight > $bestWeight) {
+                $bestWeight = $weight;
+                $best = $ca;
+            }
+        }
+
+        $reasons = [];
+        foreach ($parsedPages as $parsed) {
+            $ca = $parsed['copy_alignment'] ?? null;
+            if (! is_array($ca) || ! isset($ca['reasons']) || ! is_array($ca['reasons'])) {
+                continue;
+            }
+            foreach ($ca['reasons'] as $r) {
+                if (is_string($r) && trim($r) !== '') {
+                    $reasons[] = trim($r);
+                }
+            }
+        }
+        $reasons = array_slice(array_values(array_unique($reasons)), 0, 8);
+
+        if ($best !== null) {
+            $merged = $best;
+            if ($reasons !== []) {
+                $existing = isset($merged['reasons']) && is_array($merged['reasons']) ? $merged['reasons'] : [];
+                $merged['reasons'] = array_slice(array_values(array_unique(array_merge(
+                    array_filter($existing, static fn ($x) => is_string($x) && trim($x) !== ''),
+                    $reasons
+                ))), 0, 8);
+            }
+
+            return $merged;
+        }
+
+        return [
+            'score' => null,
+            'alignment_state' => 'not_applicable',
+            'confidence' => 0.0,
+            'reasons' => $reasons !== [] ? $reasons : ['No scored copy alignment across evaluated PDF pages.'],
+        ];
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $parsedPages
+     * @return array<string, mixed>|null
+     */
+    protected function mergeVisualAlignmentFromPages(array $parsedPages): ?array
+    {
+        $best = null;
+        $bestKey = -1.0;
+        foreach ($parsedPages as $parsed) {
+            $va = $parsed['visual_alignment'] ?? null;
+            if (! is_array($va)) {
+                continue;
+            }
+            $fit = $va['fit_score'] ?? null;
+            $conf = $va['confidence'] ?? null;
+            if (! is_numeric($fit)) {
+                continue;
+            }
+            $c = is_numeric($conf) ? (float) $conf : 0.5;
+            $key = (float) $fit * max(0.05, $c);
+            if ($key > $bestKey) {
+                $bestKey = $key;
+                $best = $va;
+            }
+        }
+
+        if ($best === null) {
+            return null;
+        }
+
+        $summaries = [];
+        foreach ($parsedPages as $parsed) {
+            $va = $parsed['visual_alignment'] ?? null;
+            if (! is_array($va)) {
+                continue;
+            }
+            $s = $va['summary'] ?? null;
+            if (is_string($s) && trim($s) !== '') {
+                $summaries[] = trim($s);
+            }
+        }
+        if ($summaries !== []) {
+            $best['summary'] = implode(' ', array_slice(array_values(array_unique($summaries)), 0, 3));
+        }
+
+        return $best;
     }
 
     /**

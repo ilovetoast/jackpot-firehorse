@@ -42,10 +42,10 @@ class ImageEmbeddingService implements \App\Contracts\ImageEmbeddingServiceInter
     /**
      * {@inheritdoc}
      */
-    public function embedAsset(Asset $asset): array
+    public function embedAsset(Asset $asset, ?string $imageUrlOverride = null): array
     {
         if ($this->apiUrl) {
-            return $this->embedViaApi($asset);
+            return $this->embedViaApi($asset, $imageUrlOverride);
         }
 
         return $this->embedPlaceholder($asset);
@@ -54,10 +54,12 @@ class ImageEmbeddingService implements \App\Contracts\ImageEmbeddingServiceInter
     /**
      * Call external embedding API with image URL.
      */
-    protected function embedViaApi(Asset $asset): array
+    protected function embedViaApi(Asset $asset, ?string $imageUrlOverride = null): array
     {
-        $url = $asset->deliveryUrl(\App\Support\AssetVariant::THUMB_MEDIUM, \App\Support\DeliveryContext::AUTHENTICATED)
-            ?: $asset->deliveryUrl(\App\Support\AssetVariant::THUMB_PREVIEW, \App\Support\DeliveryContext::AUTHENTICATED);
+        $url = $imageUrlOverride !== null && trim($imageUrlOverride) !== ''
+            ? trim($imageUrlOverride)
+            : ($asset->deliveryUrl(\App\Support\AssetVariant::THUMB_MEDIUM, \App\Support\DeliveryContext::AUTHENTICATED)
+            ?: $asset->deliveryUrl(\App\Support\AssetVariant::THUMB_PREVIEW, \App\Support\DeliveryContext::AUTHENTICATED));
         if (! $url) {
             Log::warning('[ImageEmbeddingService] No image URL available for asset', [
                 'asset_id' => $asset->id,

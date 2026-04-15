@@ -7,6 +7,7 @@ use App\Enums\MediaType;
 use App\Models\Asset;
 use App\Models\CollectionCampaignIdentity;
 use App\Services\BrandIntelligence\Campaign\CampaignIdentityPayloadNormalizer;
+use App\Services\BrandIntelligence\VisualEvaluationSourceResolver;
 
 final class EvaluationContext
 {
@@ -19,6 +20,15 @@ final class EvaluationContext
     public bool $hasCampaignOverride;
     public ?array $campaignDna;
 
+    /** Creative-vision text from the same scoring pass (e.g. PDF page raster OCR). */
+    public ?string $supplementalCreativeOcrText = null;
+
+    /**
+     * True when {@see VisualEvaluationSourceResolver} selected a usable raster (image thumbnail, PDF page render, etc.).
+     * Videos and other non-visual roots stay false.
+     */
+    public bool $visualEvaluationRasterResolved = false;
+
     /**
      * @param  list<string>  $availableExtractions   e.g. ['screenshot', 'ocr', 'palette', 'embeddings']
      * @param  list<string>  $unavailableExtractions e.g. ['transcript']
@@ -30,6 +40,8 @@ final class EvaluationContext
         array $unavailableExtractions,
         bool $hasCampaignOverride,
         ?array $campaignDna,
+        ?string $supplementalCreativeOcrText = null,
+        bool $visualEvaluationRasterResolved = false,
     ) {
         $this->mediaType = $mediaType;
         $this->contextType = $contextType;
@@ -37,10 +49,16 @@ final class EvaluationContext
         $this->unavailableExtractions = $unavailableExtractions;
         $this->hasCampaignOverride = $hasCampaignOverride;
         $this->campaignDna = $campaignDna;
+        $this->supplementalCreativeOcrText = $supplementalCreativeOcrText;
+        $this->visualEvaluationRasterResolved = $visualEvaluationRasterResolved;
     }
 
     public function hasExtraction(string $key): bool
     {
+        if ($key === 'ocr' && is_string($this->supplementalCreativeOcrText) && trim($this->supplementalCreativeOcrText) !== '') {
+            return true;
+        }
+
         return in_array($key, $this->availableExtractions, true);
     }
 
@@ -52,6 +70,10 @@ final class EvaluationContext
             'available_extractions' => $this->availableExtractions,
             'unavailable_extractions' => $this->unavailableExtractions,
             'campaign_override' => $this->hasCampaignOverride,
+            'supplemental_creative_ocr' => $this->supplementalCreativeOcrText !== null
+                && trim($this->supplementalCreativeOcrText) !== '',
+            'pdf_page_raster_hint' => $this->mediaType === MediaType::PDF && $this->visualEvaluationRasterResolved,
+            'visual_evaluation_raster_resolved' => $this->visualEvaluationRasterResolved,
         ];
     }
 
@@ -61,10 +83,20 @@ final class EvaluationContext
         $mediaType = MediaType::fromMime($mime);
         $meta = is_array($asset->metadata ?? null) ? $asset->metadata : [];
 
+        $visualEvaluationRasterResolved = app(VisualEvaluationSourceResolver::class)->assetHasRenderableRaster($asset);
+
         $available = [];
         $unavailable = [];
 
-        if ($mediaType === MediaType::IMAGE || $mediaType === MediaType::PDF) {
+        if ($mediaType === MediaType::VIDEO || $mediaType === MediaType::AUDIO) {
+            $unavailable[] = 'screenshot';
+        } elseif ($mediaType === MediaType::PDF) {
+            if ($visualEvaluationRasterResolved) {
+                $available[] = 'screenshot';
+            } else {
+                $unavailable[] = 'screenshot';
+            }
+        } elseif ($mediaType === MediaType::IMAGE || $visualEvaluationRasterResolved) {
             $available[] = 'screenshot';
         } else {
             $unavailable[] = 'screenshot';
@@ -111,6 +143,8 @@ final class EvaluationContext
             unavailableExtractions: $unavailable,
             hasCampaignOverride: false,
             campaignDna: null,
+            supplementalCreativeOcrText: null,
+            visualEvaluationRasterResolved: $visualEvaluationRasterResolved,
         );
     }
 
@@ -132,6 +166,39 @@ final class EvaluationContext
             unavailableExtractions: $base->unavailableExtractions,
             hasCampaignOverride: true,
             campaignDna: $normalized,
+            supplementalCreativeOcrText: $base->supplementalCreativeOcrText,
+            visualEvaluationRasterResolved: $base->visualEvaluationRasterResolved,
+        );
+    }
+
+    /**
+     * Merge creative-vision OCR into extraction flags for the same request (PDF raster path).
+     */
+    public static function withSupplementalCreativeOcr(self $base, ?string $text): self
+    {
+        $trimmed = $text !== null ? trim($text) : '';
+        if ($trimmed === '') {
+            return $base;
+        }
+
+        $available = $base->availableExtractions;
+        if (! in_array('ocr', $available, true)) {
+            $available[] = 'ocr';
+        }
+        $unavailable = array_values(array_filter(
+            $base->unavailableExtractions,
+            static fn (string $x): bool => $x !== 'ocr'
+        ));
+
+        return new self(
+            mediaType: $base->mediaType,
+            contextType: $base->contextType,
+            availableExtractions: $available,
+            unavailableExtractions: $unavailable,
+            hasCampaignOverride: $base->hasCampaignOverride,
+            campaignDna: $base->campaignDna,
+            supplementalCreativeOcrText: $trimmed,
+            visualEvaluationRasterResolved: $base->visualEvaluationRasterResolved,
         );
     }
 }

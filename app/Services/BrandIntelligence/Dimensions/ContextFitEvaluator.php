@@ -6,6 +6,7 @@ use App\Enums\AlignmentDimension;
 use App\Enums\AssetContextType;
 use App\Enums\DimensionStatus;
 use App\Enums\EvidenceSource;
+use App\Enums\MediaType;
 use App\Models\Asset;
 use App\Models\Brand;
 
@@ -27,6 +28,27 @@ final class ContextFitEvaluator implements DimensionEvaluatorInterface
         $contextType = $context->contextType;
 
         if ($contextType === AssetContextType::OTHER && ! $context->hasCampaignOverride) {
+            if ($context->mediaType === MediaType::PDF && $context->visualEvaluationRasterResolved) {
+                $evidence = [
+                    EvidenceItem::soft(
+                        EvidenceSource::AI_ANALYSIS,
+                        'Heuristic context is generic (other); PDF page render is available for approximate layout/format fit',
+                    ),
+                ];
+
+                return new DimensionResult(
+                    dimension: AlignmentDimension::CONTEXT_FIT,
+                    status: DimensionStatus::WEAK,
+                    score: 0.48,
+                    confidence: 0.22,
+                    primaryEvidenceSource: EvidenceSource::AI_ANALYSIS,
+                    evidence: $evidence,
+                    blockers: [],
+                    evaluable: true,
+                    statusReason: 'Unclear category context; PDF page preview enables a low-confidence placement/placement-style assessment',
+                );
+            }
+
             return DimensionResult::notEvaluable(
                 AlignmentDimension::CONTEXT_FIT,
                 'Asset context could not be classified and no campaign context is configured',
@@ -86,7 +108,7 @@ final class ContextFitEvaluator implements DimensionEvaluatorInterface
         $mood = $contextAnalysis['mood'] ?? null;
         $sceneType = $contextAnalysis['scene_type'] ?? null;
 
-        if ($aiContext === null && $mood === null) {
+        if ($aiContext === null && $mood === null && ! is_string($sceneType)) {
             return $base;
         }
 
@@ -102,6 +124,12 @@ final class ContextFitEvaluator implements DimensionEvaluatorInterface
             $evidence[] = EvidenceItem::soft(
                 EvidenceSource::AI_ANALYSIS,
                 sprintf('Detected mood: %s', $mood),
+            );
+        }
+        if (is_string($sceneType) && trim($sceneType) !== '') {
+            $evidence[] = EvidenceItem::soft(
+                EvidenceSource::AI_ANALYSIS,
+                sprintf('Detected scene / layout type: %s', trim($sceneType)),
             );
         }
 

@@ -21,6 +21,7 @@ use App\Jobs\GenerateThumbnailsJob;
 use App\Jobs\PopulateAutomaticMetadataJob;
 use App\Jobs\ProcessAssetJob;
 use App\Jobs\PromoteAssetJob;
+use App\Enums\PdfBrandIntelligenceScanMode;
 use App\Jobs\ScoreAssetBrandIntelligenceJob;
 use App\Models\ActivityEvent;
 use App\Models\Asset;
@@ -28,6 +29,7 @@ use App\Models\AssetEmbedding;
 use App\Models\Brand;
 use App\Models\BrandIntelligenceFeedback;
 use App\Models\BrandIntelligenceScore;
+use App\Services\BrandIntelligence\PdfBrandIntelligenceScanGates;
 use App\Models\Category;
 use App\Models\SupportTicket;
 use App\Models\SystemIncident;
@@ -1181,6 +1183,7 @@ class AssetMetadataController extends Controller
             ]);
         }
 
+        // Re-score stays on standard PDF scan mode (single page) by design — predictable cost; deep scan is explicit only.
         ScoreAssetBrandIntelligenceJob::dispatch($asset->id, true);
 
         return response()->json(['status' => 'queued']);
@@ -1209,10 +1212,69 @@ class AssetMetadataController extends Controller
         $brand->loadMissing('brandModel');
         $published = $brand->brandModel?->active_version_id !== null;
 
+        $pdfBi = PdfBrandIntelligenceScanGates::deepScanEligibility($fresh);
+
         return response()->json([
             'has_published_guidelines' => $published,
             'brand_intelligence' => $published ? $fresh->brandIntelligencePayloadForFrontend() : null,
             'reference_promotion' => $published ? $fresh->brandReferenceAsset?->toFrontendArray() : null,
+            'pdf_brand_intelligence' => $pdfBi,
+        ]);
+    }
+
+    /**
+     * Queue a deep (multi-page raster) Brand Intelligence pass for PDF assets only.
+     *
+     * POST /assets/{asset}/brand-intelligence/deep-scan
+     */
+    public function deepScanBrandIntelligence(Asset $asset): JsonResponse
+    {
+        $tenant = app('tenant');
+        $brand = app('brand');
+
+        if ($asset->tenant_id !== $tenant->id || $asset->brand_id !== $brand->id) {
+            return response()->json(['message' => 'Asset not found'], 404);
+        }
+
+        $this->authorize('view', $asset);
+
+        if ($blocked = $this->assertPublishedBrandGuidelinesForBrand($brand)) {
+            return $blocked;
+        }
+
+        $mime = strtolower((string) ($asset->mime_type ?? ''));
+        if ($mime !== 'application/pdf') {
+            return response()->json(['message' => 'Deep scan is only available for PDF assets.'], 422);
+        }
+
+        $eligibility = PdfBrandIntelligenceScanGates::deepScanEligibility($asset);
+        if (! ($eligibility['deep_scan_eligible'] ?? false)) {
+            return response()->json([
+                'message' => 'Deep scan requires more than one rendered PDF page raster.',
+                'pdf_brand_intelligence' => $eligibility,
+            ], 422);
+        }
+
+        PdfBrandIntelligenceScanGates::assertMayDispatchDeepScan(Auth::user(), $asset);
+
+        BrandIntelligenceScore::where('asset_id', $asset->id)
+            ->where('brand_id', $asset->brand_id)
+            ->whereNull('execution_id')
+            ->delete();
+
+        ScoreAssetBrandIntelligenceJob::dispatch($asset->id, true, PdfBrandIntelligenceScanMode::Deep->value);
+
+        Log::info('[EBI] pdf_deep_scan_dispatched', [
+            'asset_id' => $asset->id,
+            'tenant_id' => $asset->tenant_id,
+            'brand_id' => $asset->brand_id,
+            'raster_page_count' => $eligibility['raster_page_count'] ?? null,
+        ]);
+
+        return response()->json([
+            'status' => 'queued',
+            'pdf_scan_mode' => PdfBrandIntelligenceScanMode::Deep->value,
+            'pdf_brand_intelligence' => $eligibility,
         ]);
     }
 
@@ -1244,7 +1306,11 @@ class AssetMetadataController extends Controller
 
         $category = $fresh->category;
         if (! $category || ! $category->isEbiEnabled()) {
-            return response()->json(['status' => 'ebi_disabled', 'brand_intelligence' => null], 422);
+            return response()->json([
+                'status' => 'ebi_disabled',
+                'brand_intelligence' => null,
+                'pdf_brand_intelligence' => PdfBrandIntelligenceScanGates::deepScanEligibility($fresh),
+            ], 422);
         }
 
         $status = $fresh->analysis_status ?? '';
@@ -1254,6 +1320,7 @@ class AssetMetadataController extends Controller
                 'analysis_status' => $status,
                 'brand_intelligence' => null,
                 'reference_promotion' => $fresh->brandReferenceAsset?->toFrontendArray(),
+                'pdf_brand_intelligence' => PdfBrandIntelligenceScanGates::deepScanEligibility($fresh),
             ]);
         }
 
@@ -1263,6 +1330,7 @@ class AssetMetadataController extends Controller
                 'status' => 'ready',
                 'brand_intelligence' => $payload,
                 'reference_promotion' => $fresh->brandReferenceAsset?->toFrontendArray(),
+                'pdf_brand_intelligence' => PdfBrandIntelligenceScanGates::deepScanEligibility($fresh),
             ]);
         }
 
@@ -1272,6 +1340,7 @@ class AssetMetadataController extends Controller
             'status' => 'queued',
             'brand_intelligence' => null,
             'reference_promotion' => $fresh->brandReferenceAsset?->toFrontendArray(),
+            'pdf_brand_intelligence' => PdfBrandIntelligenceScanGates::deepScanEligibility($fresh),
         ]);
     }
 

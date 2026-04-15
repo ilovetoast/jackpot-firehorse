@@ -15,7 +15,8 @@ interface ImageEmbeddingServiceInterface
     /**
      * Generate embedding vector for an asset's image.
      *
+     * @param  string|null  $imageUrlOverride  When set, embed from this authenticated image URL instead of the asset's default thumbnail variant.
      * @return array<float> Embedding vector (normalized, typically 512 or 1536 dimensions)
      */
-    public function embedAsset(Asset $asset): array;
+    public function embedAsset(Asset $asset, ?string $imageUrlOverride = null): array;
 }

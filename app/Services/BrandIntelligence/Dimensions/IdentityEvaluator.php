@@ -9,9 +9,8 @@ use App\Models\Asset;
 use App\Models\AssetEmbedding;
 use App\Models\Brand;
 use App\Models\BrandVisualReference;
-use App\Models\PdfTextExtraction;
+use App\Services\BrandIntelligence\BrandIntelligenceTextEvidence;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Schema;
 
 final class IdentityEvaluator implements DimensionEvaluatorInterface
 {
@@ -22,7 +21,7 @@ final class IdentityEvaluator implements DimensionEvaluatorInterface
         $evidence = [];
         $blockers = [];
 
-        $ocrResult = $this->brandNameInOcrText($asset, $brand);
+        $ocrResult = $this->brandNameInOcrText($asset, $brand, $context);
         $metadataResult = $this->brandNameInMetadata($asset, $brand);
         $embResult = $this->logoEmbeddingSimilarity($asset, $brand);
 
@@ -104,9 +103,9 @@ final class IdentityEvaluator implements DimensionEvaluatorInterface
     /**
      * @return array{matched: bool, token: string|null}
      */
-    private function brandNameInOcrText(Asset $asset, Brand $brand): array
+    private function brandNameInOcrText(Asset $asset, Brand $brand, EvaluationContext $context): array
     {
-        $haystack = $this->collectOcrTextHaystack($asset);
+        $haystack = $this->collectOcrTextHaystack($asset, $context);
         if ($haystack === '') {
             return ['matched' => false, 'token' => null];
         }
@@ -148,26 +147,12 @@ final class IdentityEvaluator implements DimensionEvaluatorInterface
     /**
      * OCR / extracted text / PDF text only -- NO title or filename.
      */
-    private function collectOcrTextHaystack(Asset $asset): string
+    private function collectOcrTextHaystack(Asset $asset, EvaluationContext $context): string
     {
-        $parts = [];
-        $meta = is_array($asset->metadata ?? null) ? $asset->metadata : [];
-        foreach (['extracted_text', 'ocr_text', 'vision_ocr', 'detected_text'] as $k) {
-            if (! empty($meta[$k]) && is_string($meta[$k])) {
-                $parts[] = $meta[$k];
-            }
-        }
-        if (Schema::hasTable('pdf_text_extractions')) {
-            $ext = PdfTextExtraction::query()
-                ->where('asset_id', $asset->id)
-                ->orderByDesc('id')
-                ->first();
-            if ($ext && is_string($ext->extracted_text ?? null) && trim($ext->extracted_text) !== '') {
-                $parts[] = $ext->extracted_text;
-            }
-        }
-
-        return mb_strtolower(trim(implode("\n", array_filter($parts))), 'UTF-8');
+        return BrandIntelligenceTextEvidence::mergedOcrBodyLowercase(
+            $asset,
+            $context->supplementalCreativeOcrText
+        );
     }
 
     /**

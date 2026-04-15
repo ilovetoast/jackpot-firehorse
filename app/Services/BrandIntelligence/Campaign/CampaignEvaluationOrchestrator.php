@@ -185,12 +185,16 @@ final class CampaignEvaluationOrchestrator
         if (! $context->hasExtraction('embeddings')) {
             $evidence[] = EvidenceItem::readiness(
                 EvidenceSource::CONFIGURATION_ONLY,
-                'Campaign identity references exist but asset has no embedding for comparison',
+                $context->mediaType === MediaType::PDF && $context->visualEvaluationRasterResolved
+                    ? 'Campaign identity references exist; PDF page render is ready but asset embedding is not stored yet'
+                    : 'Campaign identity references exist but asset has no embedding for comparison',
             );
 
             return DimensionResult::notEvaluable(
                 AlignmentDimension::IDENTITY,
-                'Asset has no embedding for campaign identity comparison',
+                $context->mediaType === MediaType::PDF && $context->visualEvaluationRasterResolved
+                    ? 'PDF page render is available but no stored embedding vector yet for identity comparison'
+                    : 'Asset has no embedding for campaign identity comparison',
                 ['Generate asset embedding to enable campaign identity evaluation'],
                 EvidenceSource::CONFIGURATION_ONLY,
                 $evidence,
@@ -451,6 +455,14 @@ final class CampaignEvaluationOrchestrator
     private function evaluateVisualStyle(Asset $asset, \Illuminate\Support\Collection $references, EvaluationContext $context): DimensionResult
     {
         if (! $context->hasExtraction('embeddings')) {
+            if ($context->mediaType === MediaType::PDF && $context->visualEvaluationRasterResolved) {
+                return DimensionResult::notEvaluable(
+                    AlignmentDimension::VISUAL_STYLE,
+                    'PDF page render is available but no stored embedding vector yet',
+                    ['Generate asset embedding for the rendered page to enable campaign visual style evaluation'],
+                );
+            }
+
             return DimensionResult::notEvaluable(
                 AlignmentDimension::VISUAL_STYLE,
                 'Asset has no visual embedding for campaign style comparison',

@@ -249,7 +249,7 @@ export default function AssetDetailDrawer({ asset, onClose }) {
                     </div>
 
                     {/* File Information */}
-                    <div className="space-y-3 border-t border-gray-200 pt-6">
+                    <div className="!mt-0 space-y-3 border-t border-gray-200 pt-6">
                         <h3 className="text-sm font-medium text-gray-900">File Information</h3>
                         <dl className="space-y-3">
                             <div className="flex justify-between">

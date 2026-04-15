@@ -4,13 +4,13 @@ namespace App\Services\BrandIntelligence;
 
 use App\Enums\AssetContextType;
 use App\Enums\BrandAlignmentState;
+use App\Enums\PdfBrandIntelligenceScanMode;
 use App\Models\Asset;
 use App\Models\AssetEmbedding;
 use App\Models\Brand;
 use App\Models\BrandIntelligenceFeedback;
 use App\Models\BrandReferenceAsset;
 use App\Models\BrandVisualReference;
-use App\Models\PdfTextExtraction;
 use App\Services\AI\Contracts\AIProviderInterface;
 use App\Services\AiMetadataGenerationService;
 use Illuminate\Support\Collection;
@@ -33,6 +33,9 @@ class BrandIntelligenceEngine
     /** Populated during {@see computeEbiSignalBreakdown()} for logging and API breakdown. */
     protected ?array $lastLogoDetectionDetail = null;
 
+    /** Creative vision detected text for the current score pass (PDF raster OCR, etc.). */
+    protected ?string $supplementalCreativeOcrForDimensions = null;
+
     public const AI_USAGE_TYPE = 'brand_intelligence_ai';
 
     /** Single-asset EBI path (default today). */
@@ -48,6 +51,7 @@ class BrandIntelligenceEngine
         protected BrandColorPaletteAlignmentEvaluator $brandColorPaletteAlignmentEvaluator,
         protected AssetContextClassifier $assetContextClassifier,
         protected CreativeIntelligenceAnalyzer $creativeIntelligenceAnalyzer,
+        protected VisualEvaluationSourceResolver $visualEvaluationSourceResolver,
     ) {}
 
     /**
@@ -63,8 +67,12 @@ class BrandIntelligenceEngine
      *     asset_id: string
      * }|null
      */
-    public function scoreAsset(Asset $asset, bool $dryRun = false): ?array
-    {
+    public function scoreAsset(
+        Asset $asset,
+        bool $dryRun = false,
+        PdfBrandIntelligenceScanMode $pdfScanMode = PdfBrandIntelligenceScanMode::Standard,
+    ): ?array {
+        $this->supplementalCreativeOcrForDimensions = null;
         $asset->loadMissing('brand');
 
         $brand = $asset->brand;
@@ -76,10 +84,10 @@ class BrandIntelligenceEngine
         $signalCount = $this->countTruthySignals($signalBreakdown);
         $assetContextType = $this->assetContextClassifier->classify($asset);
         if ($signalCount < 2) {
-            return $this->scoreAssetInsufficientEvidence($asset, $brand, $signalBreakdown, $signalCount, $dryRun, $assetContextType);
+            return $this->scoreAssetInsufficientEvidence($asset, $brand, $signalBreakdown, $signalCount, $dryRun, $assetContextType, $pdfScanMode);
         }
 
-        $embeddedRow = $this->assetEmbeddingEnsureService->ensure($asset);
+        $embeddedRow = $this->assetEmbeddingEnsureService->ensure($asset, $pdfScanMode);
         $assetVec = ($embeddedRow && ! empty($embeddedRow->embedding_vector))
             ? array_values($embeddedRow->embedding_vector)
             : [];
@@ -299,12 +307,10 @@ class BrandIntelligenceEngine
         $withRefs['style_deviation_reason'] = $styleDeviationReason;
         $withRefs['logo_detection'] = $this->lastLogoDetectionDetail;
 
-        $this->mergeCreativeIntelligenceLayer($asset, $brand, $withRefs, $assetContextType, $dryRun, $score);
+        $this->mergeCreativeIntelligenceLayer($asset, $brand, $withRefs, $assetContextType, $dryRun, $score, $pdfScanMode);
 
         $recs = $this->generateRecommendations($withRefs);
         $withRefs['recommendations'] = $recs['recommendations'];
-
-        $withRefs['debug'] = $this->buildBrandIntelligenceDebugPayload($asset, $brand, $withRefs);
 
         $withRefs['_gate_confidence'] = $confidence;
         $withRefs['_gate_level'] = $level;
@@ -322,6 +328,14 @@ class BrandIntelligenceEngine
         $withRefs['ai_used'] = $aiUsed;
 
         $withRefs = $this->appendDimensionEvaluation($asset, $brand, $withRefs);
+
+        $withRefs['pdf_deep_scan'] = PdfBrandIntelligenceDeepScanRecommendation::evaluate(
+            $asset,
+            $pdfScanMode,
+            $withRefs,
+            $this->visualEvaluationSourceResolver,
+        );
+        $withRefs['debug'] = $this->buildBrandIntelligenceDebugPayload($asset, $brand, $withRefs);
 
         return [
             'overall_score' => $score,
@@ -346,7 +360,9 @@ class BrandIntelligenceEngine
         int $signalCount,
         bool $dryRun,
         ?AssetContextType $assetContextType = null,
+        PdfBrandIntelligenceScanMode $pdfScanMode = PdfBrandIntelligenceScanMode::Standard,
     ): array {
+        $this->supplementalCreativeOcrForDimensions = null;
         $assetContextType ??= $this->assetContextClassifier->classify($asset);
         $signals = $this->detectAssetSignals($asset);
         $perAssetSignals = [[
@@ -406,9 +422,8 @@ class BrandIntelligenceEngine
         $withRefs['logo_detection'] = $this->lastLogoDetectionDetail;
 
         $insufficientScore = 50;
-        $this->mergeCreativeIntelligenceLayer($asset, $brand, $withRefs, $assetContextType, $dryRun, $insufficientScore);
+        $this->mergeCreativeIntelligenceLayer($asset, $brand, $withRefs, $assetContextType, $dryRun, $insufficientScore, $pdfScanMode);
 
-        $withRefs['debug'] = $this->buildBrandIntelligenceDebugPayload($asset, $brand, $withRefs);
         $withRefs['_gate_confidence'] = $confidence;
         $withRefs['_gate_level'] = $level;
 
@@ -423,6 +438,14 @@ class BrandIntelligenceEngine
             || (($withRefs['ebi_ai_trace']['creative_ai_ran'] ?? false) === true);
 
         $withRefs = $this->appendDimensionEvaluation($asset, $brand, $withRefs);
+
+        $withRefs['pdf_deep_scan'] = PdfBrandIntelligenceDeepScanRecommendation::evaluate(
+            $asset,
+            $pdfScanMode,
+            $withRefs,
+            $this->visualEvaluationSourceResolver,
+        );
+        $withRefs['debug'] = $this->buildBrandIntelligenceDebugPayload($asset, $brand, $withRefs);
 
         return [
             'overall_score' => 50,
@@ -447,8 +470,9 @@ class BrandIntelligenceEngine
         AssetContextType $assetContextType,
         bool $dryRun,
         int &$score,
+        PdfBrandIntelligenceScanMode $pdfScanMode = PdfBrandIntelligenceScanMode::Standard,
     ): void {
-        $layer = $this->creativeIntelligenceAnalyzer->analyze($asset, $brand, $assetContextType, $dryRun);
+        $layer = $this->creativeIntelligenceAnalyzer->analyze($asset, $brand, $assetContextType, $dryRun, $pdfScanMode);
 
         $withRefs['creative_analysis'] = $layer['creative_analysis'];
         $withRefs['copy_alignment'] = $layer['copy_alignment'];
@@ -485,6 +509,17 @@ class BrandIntelligenceEngine
             && ($withRefs['copy_alignment']['alignment_state'] ?? '') === 'off_brand'
         ) {
             $score = max(0, $score - 5);
+        }
+
+        $creative = $layer['creative_analysis'] ?? null;
+        $detected = '';
+        if (is_array($creative) && isset($creative['detected_text']) && is_string($creative['detected_text'])) {
+            $detected = trim($creative['detected_text']);
+        }
+        $this->supplementalCreativeOcrForDimensions = $detected !== '' ? $detected : null;
+        if ($this->supplementalCreativeOcrForDimensions !== null) {
+            $this->lastLogoDetectionDetail = $this->buildLogoDetectionDetail($asset, $brand, $this->supplementalCreativeOcrForDimensions);
+            $withRefs['logo_detection'] = $this->lastLogoDetectionDetail;
         }
     }
 
@@ -575,7 +610,13 @@ class BrandIntelligenceEngine
      */
     protected function shouldAbortScoringNoEmbeddingFallback(Asset $asset, array $assetVec, array $signalBreakdown): bool
     {
-        if (! ImageEmbeddingService::isImageMimeType((string) ($asset->mime_type ?? ''), $asset->original_filename)) {
+        $mime = strtolower((string) ($asset->mime_type ?? ''));
+        $resolved = $this->visualEvaluationSourceResolver->resolve($asset);
+        $expectsEmbeddingSimilarityPath = ImageEmbeddingService::isImageMimeType($mime, $asset->original_filename)
+            || VisualEvaluationSourceResolver::allowsImageLikeEmbedding($resolved)
+            || $this->visualEvaluationSourceResolver->assetHasRenderableRaster($asset);
+
+        if (! $expectsEmbeddingSimilarityPath) {
             return false;
         }
         if ($assetVec !== []) {
@@ -664,7 +705,7 @@ class BrandIntelligenceEngine
      */
     protected function computeEbiSignalBreakdown(Asset $asset, Brand $brand): array
     {
-        $this->lastLogoDetectionDetail = $this->buildLogoDetectionDetail($asset, $brand);
+        $this->lastLogoDetectionDetail = $this->buildLogoDetectionDetail($asset, $brand, null);
 
         return [
             'has_logo' => $this->lastLogoDetectionDetail['has_logo'],
@@ -714,9 +755,9 @@ class BrandIntelligenceEngine
      *     logo_reference_id: int|string|null
      * }
      */
-    protected function buildLogoDetectionDetail(Asset $asset, Brand $brand): array
+    protected function buildLogoDetectionDetail(Asset $asset, Brand $brand, ?string $supplementalOcrHaystack = null): array
     {
-        $ocr = $this->brandNameFoundInAssetText($asset, $brand);
+        $ocr = $this->brandNameFoundInAssetText($asset, $brand, $supplementalOcrHaystack);
         $emb = $this->maxCosineToBrandLogoReferences($asset, $brand);
 
         $hasLogo = $ocr['matched'] === true
@@ -750,9 +791,9 @@ class BrandIntelligenceEngine
     /**
      * @return array{matched: bool, token: string|null}
      */
-    protected function brandNameFoundInAssetText(Asset $asset, Brand $brand): array
+    protected function brandNameFoundInAssetText(Asset $asset, Brand $brand, ?string $supplementalOcrHaystack = null): array
     {
-        $haystack = $this->collectAssetTextHaystack($asset);
+        $haystack = $this->collectAssetTextHaystack($asset, $supplementalOcrHaystack);
         if ($haystack === '') {
             return ['matched' => false, 'token' => null];
         }
@@ -800,29 +841,16 @@ class BrandIntelligenceEngine
         return $tokens;
     }
 
-    protected function collectAssetTextHaystack(Asset $asset): string
+    protected function collectAssetTextHaystack(Asset $asset, ?string $supplementalOcrHaystack = null): string
     {
-        $parts = [
-            (string) ($asset->title ?? ''),
-            (string) ($asset->original_filename ?? ''),
-        ];
-        $meta = is_array($asset->metadata ?? null) ? $asset->metadata : [];
-        foreach (['extracted_text', 'ocr_text', 'vision_ocr', 'detected_text'] as $k) {
-            if (! empty($meta[$k]) && is_string($meta[$k])) {
-                $parts[] = $meta[$k];
-            }
-        }
-        if (Schema::hasTable('pdf_text_extractions')) {
-            $ext = PdfTextExtraction::query()
-                ->where('asset_id', $asset->id)
-                ->orderByDesc('id')
-                ->first();
-            if ($ext && is_string($ext->extracted_text ?? null) && trim($ext->extracted_text) !== '') {
-                $parts[] = $ext->extracted_text;
-            }
-        }
+        $prefix = array_filter([
+            trim((string) ($asset->title ?? '')),
+            trim((string) ($asset->original_filename ?? '')),
+        ], static fn (string $s): bool => $s !== '');
+        $body = BrandIntelligenceTextEvidence::orderedTextSegments($asset, $supplementalOcrHaystack);
+        $chunks = $prefix === [] ? $body : [...$prefix, ...$body];
 
-        return mb_strtolower(trim(implode("\n", array_filter($parts))), 'UTF-8');
+        return mb_strtolower(trim(implode("\n", $chunks)), 'UTF-8');
     }
 
     /**
@@ -1024,7 +1052,7 @@ class BrandIntelligenceEngine
             $this->assetContextClassifier,
         );
 
-        $evalResult = $orchestrator->evaluate($asset, $brand);
+        $evalResult = $orchestrator->evaluate($asset, $brand, $this->supplementalCreativeOcrForDimensions);
 
         $creativePayload = null;
         if (isset($breakdown['copy_alignment']) || isset($breakdown['context_analysis'])) {
@@ -1400,9 +1428,13 @@ class BrandIntelligenceEngine
 
     protected function assetHasVisual(Asset $asset): bool
     {
+        // Root image/* is treated as visual even when thumbnail metadata is absent (resolver may not pick a path yet).
         $mime = $asset->mime_type ?? '';
+        if (is_string($mime) && str_starts_with($mime, 'image/')) {
+            return true;
+        }
 
-        return is_string($mime) && str_starts_with($mime, 'image/');
+        return ($this->visualEvaluationSourceResolver->resolve($asset)['resolved'] ?? false) === true;
     }
 
     /**
@@ -2367,11 +2399,17 @@ class BrandIntelligenceEngine
         $meta = is_array($asset->metadata) ? $asset->metadata : [];
         $ebi = is_array($meta['ebi_debug'] ?? null) ? $meta['ebi_debug'] : [];
 
+        $ebiTrace = is_array($withRefs['ebi_ai_trace'] ?? null) ? $withRefs['ebi_ai_trace'] : [];
+
         $base = [
             'color_regions' => $this->heuristicColorRegionsFromAssetMetadata($asset),
             'logo_detections' => $this->heuristicLogoDetectionsFromDetail($withRefs['logo_detection'] ?? []),
             'attention_map' => null,
             'top_references' => $this->buildTopReferencesDebugList($asset, $brand),
+            'visual_evaluation_source' => VisualEvaluationSourceResolver::traceSubset(
+                $this->visualEvaluationSourceResolver->resolve($asset)
+            ),
+            'pdf_multi_page' => is_array($ebiTrace['pdf_multi_page'] ?? null) ? $ebiTrace['pdf_multi_page'] : null,
         ];
 
         if (isset($ebi['color_regions']) && is_array($ebi['color_regions'])) {
@@ -2386,6 +2424,11 @@ class BrandIntelligenceEngine
         }
         if (isset($ebi['top_references']) && is_array($ebi['top_references'])) {
             $base['top_references'] = array_values($ebi['top_references']);
+        }
+
+        $pdfDeep = $withRefs['pdf_deep_scan'] ?? null;
+        if (is_array($pdfDeep)) {
+            $base['pdf_deep_scan'] = $pdfDeep;
         }
 
         return $base;

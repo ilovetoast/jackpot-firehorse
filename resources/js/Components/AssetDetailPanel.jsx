@@ -1466,7 +1466,7 @@ export default function AssetDetailPanel({
                         )}
 
                         {/* Section 3 — File Information (at least quick-view parity: status + tooltip, publish/who, filename editable) */}
-                        <section className={sectionClass} aria-labelledby="section-file">
+                        <section className={lb ? 'mb-0 !mt-0' : sectionClass} aria-labelledby="section-file">
                             <CollapsibleSection variant={collapsibleVariant} titleInCard={lb} title="File information" defaultExpanded={detailSectionDefaultExpanded}>
                                 <div className={lb ? '' : cardClass}>
                                     <dl className={`grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3 ${lb ? 'gap-y-2.5' : 'text-sm'}`}>

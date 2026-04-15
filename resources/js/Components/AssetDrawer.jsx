@@ -5000,7 +5000,7 @@ export default function AssetDrawer({
 
                 {/* Tags and Fields */}
                 {displayAsset?.id && !isVirtualGoogleFont && (
-                    <div className="border-t border-gray-200 divide-y divide-gray-200">
+                    <div className="!mt-0 border-t border-gray-200 divide-y divide-gray-200">
                         {displayAsset?.id &&
                             !externalCollectionGuest &&
                             !isVirtualGoogleFont &&
@@ -5983,7 +5983,7 @@ export default function AssetDrawer({
                 />
 
                 {/* Lower drawer stack: consistent dividers between each collapsible (Approval optional) */}
-                <div className="border-t border-gray-200 divide-y divide-gray-200">
+                <div className="!mt-0 border-t border-gray-200 divide-y divide-gray-200">
                 {/* Phase AF-2: Approval History */}
                 {/* Phase AF-5: Only show approval history if approvals are enabled */}
                 {auth?.approval_features?.approvals_enabled && displayAsset?.id && (displayAsset.approval_status === 'pending' || displayAsset.approval_status === 'rejected' || displayAsset.approval_status === 'approved') && (

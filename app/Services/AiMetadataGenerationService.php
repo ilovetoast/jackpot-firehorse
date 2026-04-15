@@ -7,6 +7,7 @@ use App\Models\Brand;
 use App\Models\Category;
 use App\Models\Tenant;
 use App\Services\AI\Contracts\AIProviderInterface;
+use App\Services\BrandIntelligence\PdfBrandIntelligencePageRasterCatalog;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
@@ -466,6 +467,20 @@ class AiMetadataGenerationService
     }
 
     /**
+     * Fetch a specific stored raster path (e.g. PDF page render) for vision — same bucket rules as thumbnails.
+     *
+     * @return string|null Base64 data URL (data:image/webp;base64,...) or null on failure
+     */
+    public function fetchStoragePathForVisionAnalysis(Asset $asset, string $storagePath): ?string
+    {
+        if (! PdfBrandIntelligencePageRasterCatalog::isUsableStoragePath($storagePath, $asset)) {
+            return null;
+        }
+
+        return $this->fetchObjectPathAsBase64DataUrl($asset, $storagePath);
+    }
+
+    /**
      * Fetch medium thumbnail from S3/MinIO and return as base64 data URL.
      * Uses IAM role (worker) or configured credentials; never exposes S3 URLs to AI providers.
      *
@@ -478,6 +493,14 @@ class AiMetadataGenerationService
             return null;
         }
 
+        return $this->fetchObjectPathAsBase64DataUrl($asset, $thumbnailPath);
+    }
+
+    /**
+     * @return string|null Base64 data URL or null
+     */
+    protected function fetchObjectPathAsBase64DataUrl(Asset $asset, string $objectPath): ?string
+    {
         $bucket = $asset->storageBucket;
         if (! $bucket) {
             Log::warning('[AiMetadataGenerationService] Asset missing storage bucket', [
@@ -488,11 +511,11 @@ class AiMetadataGenerationService
         }
 
         try {
-            $contents = $this->bucketService->getObjectContents($bucket, $thumbnailPath);
+            $contents = $this->bucketService->getObjectContents($bucket, $objectPath);
         } catch (\Throwable $e) {
             Log::error('[AiMetadataGenerationService] AI image fetch failed before provider call', [
                 'asset_id' => $asset->id,
-                'thumbnail_path' => $thumbnailPath,
+                'thumbnail_path' => $objectPath,
                 'bucket' => $bucket->name,
                 'error' => $e->getMessage(),
             ]);
@@ -503,14 +526,14 @@ class AiMetadataGenerationService
         if (strlen($contents) === 0) {
             Log::error('[AiMetadataGenerationService] AI image fetch failed: empty file', [
                 'asset_id' => $asset->id,
-                'thumbnail_path' => $thumbnailPath,
+                'thumbnail_path' => $objectPath,
             ]);
 
             return null;
         }
 
         $base64 = base64_encode($contents);
-        $mimeType = $this->inferMimeTypeFromPath($thumbnailPath);
+        $mimeType = $this->inferMimeTypeFromPath($objectPath);
 
         return "data:{$mimeType};base64,{$base64}";
     }

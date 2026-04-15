@@ -40,6 +40,7 @@ async function pollForBrandIntelligence(assetId, { signal } = {}) {
             return {
                 brand_intelligence: data.brand_intelligence,
                 reference_promotion: data.reference_promotion,
+                pdf_brand_intelligence: data.pdf_brand_intelligence ?? null,
             }
         }
         await new Promise((resolve) => {
@@ -51,6 +52,21 @@ async function pollForBrandIntelligence(assetId, { signal } = {}) {
         }
     }
     return null
+}
+
+/**
+ * Preserve last BI payload in memory while the server row is cleared for a deep re-scan (avoid empty drawer flash).
+ * @param {object|null|undefined} src
+ */
+function cloneBrandIntelPayload(src) {
+    if (src == null || typeof src !== 'object') {
+        return null
+    }
+    try {
+        return typeof structuredClone === 'function' ? structuredClone(src) : JSON.parse(JSON.stringify(src))
+    } catch {
+        return null
+    }
 }
 
 export default function AssetBrandIntelligenceBlock({
@@ -74,6 +90,9 @@ export default function AssetBrandIntelligenceBlock({
     const [feedbackSent, setFeedbackSent] = useState(false)
     const [feedbackLoading, setFeedbackLoading] = useState(false)
     const [autoEnsureLoading, setAutoEnsureLoading] = useState(false)
+    const [deepScanLoading, setDeepScanLoading] = useState(false)
+    const [deepScanBaselineBi, setDeepScanBaselineBi] = useState(null)
+    const [pdfBrandIntelligenceMeta, setPdfBrandIntelligenceMeta] = useState(null)
     const [analysisGateNote, setAnalysisGateNote] = useState(null)
     const [campaignAlignment, setCampaignAlignment] = useState(null)
     const [campaignAlignmentFetchSettled, setCampaignAlignmentFetchSettled] = useState(true)
@@ -88,6 +107,8 @@ export default function AssetBrandIntelligenceBlock({
         setAutoEnsureLoading(false)
         setAnalysisGateNote(null)
         setCampaignAlignment(null)
+        setPdfBrandIntelligenceMeta(null)
+        setDeepScanBaselineBi(null)
     }, [asset?.id])
 
     useEffect(() => {
@@ -141,19 +162,38 @@ export default function AssetBrandIntelligenceBlock({
     }, [asset?.brand_intelligence])
 
     useEffect(() => {
+        setPdfBrandIntelligenceMeta(asset?.pdf_brand_intelligence ?? null)
+    }, [asset?.id, asset?.pdf_brand_intelligence])
+
+    useEffect(() => {
         return () => {
             abortRef.current?.abort()
         }
     }, [])
 
-    const bi = hasPublishedGuidelines ? (localBi ?? asset?.brand_intelligence) : null
+    const rawBi = hasPublishedGuidelines ? (localBi ?? asset?.brand_intelligence) : null
+    const bi = deepScanLoading && deepScanBaselineBi != null ? deepScanBaselineBi : rawBi
     const breakdown = bi?.breakdown_json
+    const pdfDeep = breakdown?.pdf_deep_scan
+    const pdfMulti = breakdown?.ebi_ai_trace?.pdf_multi_page
+    const pdfScanModeUsed = pdfDeep?.pdf_scan_mode_used ?? pdfMulti?.pdf_scan_mode ?? breakdown?.ebi_ai_trace?.pdf_scan_mode
+    const isPdfAsset = String(asset?.mime_type || '')
+        .toLowerCase()
+        .includes('pdf')
+    const deepScanEligible =
+        (pdfDeep?.deep_scan_eligible === true || pdfBrandIntelligenceMeta?.deep_scan_eligible === true) &&
+        isPdfAsset
+    const deepScanAlreadyUsed = pdfScanModeUsed === 'deep'
+    const evaluatedPdfCount = Array.isArray(pdfMulti?.evaluated_pdf_pages) ? pdfMulti.evaluated_pdf_pages.length : null
 
     const analysisStatus = asset?.analysis_status ?? ''
     const canRequestEbi = ['complete', 'scoring'].includes(analysisStatus)
 
     const applyBrandIntelligence = useCallback(
         (payload, opts = {}) => {
+            if (opts.pdf_brand_intelligence !== undefined) {
+                setPdfBrandIntelligenceMeta(opts.pdf_brand_intelligence)
+            }
             if (onAssetUpdate && asset?.id) {
                 // Merge with current asset so parents never receive a sparse object (preserves thumbnail URLs, etc.).
                 onAssetUpdate({
@@ -162,6 +202,9 @@ export default function AssetBrandIntelligenceBlock({
                     brand_intelligence: payload,
                     ...(opts.reference_promotion !== undefined
                         ? { reference_promotion: opts.reference_promotion }
+                        : {}),
+                    ...(opts.pdf_brand_intelligence !== undefined
+                        ? { pdf_brand_intelligence: opts.pdf_brand_intelligence }
                         : {}),
                 })
             } else {
@@ -176,9 +219,15 @@ export default function AssetBrandIntelligenceBlock({
 
     useEffect(() => {
         if (typeof onActivityBannerChange !== 'function') return
-        onActivityBannerChange(autoEnsureLoading ? 'Running brand analysis…' : null)
+        if (autoEnsureLoading) {
+            onActivityBannerChange('Running brand analysis…')
+        } else if (deepScanLoading) {
+            onActivityBannerChange('Deep PDF scan in progress…')
+        } else {
+            onActivityBannerChange(null)
+        }
         return () => onActivityBannerChange(null)
-    }, [autoEnsureLoading, onActivityBannerChange])
+    }, [autoEnsureLoading, deepScanLoading, onActivityBannerChange])
 
     /** When EBI is enabled and analysis is ready but no score exists yet, queue scoring and poll (or show a gate message). */
     useEffect(() => {
@@ -229,6 +278,7 @@ export default function AssetBrandIntelligenceBlock({
                 if (data.status === 'ready' && data.brand_intelligence) {
                     applyBrandIntelligenceRef.current(data.brand_intelligence, {
                         reference_promotion: data.reference_promotion,
+                        pdf_brand_intelligence: data.pdf_brand_intelligence ?? null,
                     })
                     setAutoEnsureLoading(false)
                     return
@@ -244,6 +294,7 @@ export default function AssetBrandIntelligenceBlock({
                     if (polled != null) {
                         applyBrandIntelligenceRef.current(polled.brand_intelligence, {
                             reference_promotion: polled.reference_promotion ?? data.reference_promotion,
+                            pdf_brand_intelligence: polled.pdf_brand_intelligence ?? data.pdf_brand_intelligence ?? null,
                         })
                     } else {
                         setPollTimedOut(true)
@@ -267,6 +318,54 @@ export default function AssetBrandIntelligenceBlock({
             }
         }
     }, [asset?.id, asset?.brand_intelligence, asset?.category?.ebi_enabled, asset?.analysis_status, hasPublishedGuidelines])
+
+    const handleDeepPdfScan = async () => {
+        if (!asset?.id || deepScanLoading || rescoreLoading || !hasPublishedGuidelines) return
+        ensureAbortRef.current?.abort()
+        abortRef.current?.abort()
+        const controller = new AbortController()
+        abortRef.current = controller
+        flushSync(() => {
+            setDeepScanLoading(true)
+            setPollTimedOut(false)
+        })
+        try {
+            const res = await fetch(`/app/assets/${asset.id}/brand-intelligence/deep-scan`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Accept: 'application/json',
+                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content,
+                },
+                credentials: 'same-origin',
+                signal: controller.signal,
+            })
+            if (!res.ok) {
+                return
+            }
+            const baseline = cloneBrandIntelPayload(localBi ?? asset?.brand_intelligence)
+            if (baseline != null) {
+                setDeepScanBaselineBi(baseline)
+            }
+            const payload = await pollForBrandIntelligence(asset.id, { signal: controller.signal })
+            if (controller.signal.aborted) {
+                return
+            }
+            if (payload != null) {
+                applyBrandIntelligence(payload.brand_intelligence, {
+                    reference_promotion: payload.reference_promotion,
+                    pdf_brand_intelligence: payload.pdf_brand_intelligence ?? null,
+                })
+            } else {
+                setPollTimedOut(true)
+            }
+        } finally {
+            if (!controller.signal.aborted) {
+                setDeepScanLoading(false)
+            }
+            setDeepScanBaselineBi(null)
+        }
+    }
 
     const handleRescore = async () => {
         if (!asset?.id || rescoreLoading || !hasPublishedGuidelines) return
@@ -301,6 +400,7 @@ export default function AssetBrandIntelligenceBlock({
             if (payload != null) {
                 applyBrandIntelligence(payload.brand_intelligence, {
                     reference_promotion: payload.reference_promotion,
+                    pdf_brand_intelligence: payload.pdf_brand_intelligence ?? null,
                 })
             } else {
                 setPollTimedOut(true)
@@ -393,6 +493,15 @@ export default function AssetBrandIntelligenceBlock({
                             <h3 className="text-xs font-semibold text-gray-900">Brand Intelligence</h3>
                         </div>
                     )}
+                    {deepScanLoading && (
+                        <p
+                            className="mb-2 text-xs font-medium text-sky-950/90 bg-sky-50 border border-sky-200/90 rounded px-2 py-1.5"
+                            role="status"
+                            aria-live="polite"
+                        >
+                            Deep PDF scan in progress — results will refresh when the queue finishes.
+                        </p>
+                    )}
                     {rescoreLoading ? (
                         <p className="text-sm text-slate-600" role="status" aria-live="polite">
                             Analyzing brand alignment…
@@ -447,6 +556,16 @@ export default function AssetBrandIntelligenceBlock({
                 </p>
             ) : (
                 <div className="mt-2">
+                    {deepScanLoading && (
+                        <p
+                            className="mb-2 text-xs font-medium text-sky-950/90 bg-sky-50 border border-sky-200/90 rounded px-2 py-1.5 flex items-center gap-2"
+                            role="status"
+                            aria-live="polite"
+                        >
+                            <ArrowPathIcon className="h-3.5 w-3.5 flex-shrink-0 animate-spin" aria-hidden />
+                            Deep PDF scan in progress — your last score stays visible until the new pass finishes.
+                        </p>
+                    )}
                     <BrandSignalBreakdown
                         brandIntelligence={bi}
                         brandId={asset?.brand_id ?? asset?.brand?.id}
@@ -457,6 +576,26 @@ export default function AssetBrandIntelligenceBlock({
                     />
                 </div>
             )}
+            {!rescoreLoading &&
+                !deepScanLoading &&
+                isPdfAsset &&
+                pdfScanModeUsed &&
+                evaluatedPdfCount != null &&
+                evaluatedPdfCount > 0 && (
+                    <p className="mt-2 text-xs text-slate-600">
+                        {deepScanAlreadyUsed
+                            ? `Deep PDF scan analyzed ${evaluatedPdfCount} page${evaluatedPdfCount === 1 ? '' : 's'}.`
+                            : `Standard PDF scan analyzed ${evaluatedPdfCount} page${evaluatedPdfCount === 1 ? '' : 's'}.`}
+                    </p>
+                )}
+            {!rescoreLoading &&
+                !deepScanLoading &&
+                pdfDeep?.deep_scan_recommended === true &&
+                typeof pdfDeep?.deep_scan_recommendation_reason === 'string' && (
+                    <p className="mt-2 text-xs text-amber-900/90 bg-amber-50/90 border border-amber-200/80 rounded px-2 py-1.5">
+                        {pdfDeep.deep_scan_recommendation_reason}
+                    </p>
+                )}
             {!rescoreLoading &&
                 breakdown?.ai_insight?.text &&
                 breakdown.ai_used === true && (
@@ -496,14 +635,24 @@ export default function AssetBrandIntelligenceBlock({
                         </div>
                     </div>
                 )}
-            {pollTimedOut && !rescoreLoading && (
+            {pollTimedOut && !rescoreLoading && !deepScanLoading && (
                 <p className="mt-2 text-xs text-amber-700">Could not refresh the score yet — try Re-score in a few seconds.</p>
             )}
-            {canRequestEbi && !rescoreLoading && (
+            {canRequestEbi && deepScanEligible && !deepScanAlreadyUsed && !rescoreLoading && !deepScanLoading && (
+                <button
+                    type="button"
+                    onClick={handleDeepPdfScan}
+                    disabled={deepScanLoading || rescoreLoading}
+                    className="mt-3 mr-4 inline-flex items-center rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-800 shadow-sm hover:bg-slate-50 disabled:opacity-50"
+                >
+                    Run deep PDF scan
+                </button>
+            )}
+            {canRequestEbi && !rescoreLoading && !deepScanLoading && (
                 <button
                     type="button"
                     onClick={handleRescore}
-                    disabled={rescoreLoading}
+                    disabled={rescoreLoading || deepScanLoading}
                     className="mt-3 text-xs font-medium hover:opacity-90 disabled:opacity-50"
                     style={{ color: brandColor }}
                 >

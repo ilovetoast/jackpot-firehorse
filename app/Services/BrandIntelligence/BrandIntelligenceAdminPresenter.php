@@ -60,6 +60,10 @@ final class BrandIntelligenceAdminPresenter
     ): array {
         if ($aiUsed) {
             $lines = self::aiTriggersWhenRan($breakdown, $confidence);
+            $pdfNote = self::pdfBrandIntelligenceAdminNote($breakdown, $assetMimeType);
+            if ($pdfNote !== null) {
+                $lines[] = $pdfNote;
+            }
 
             return [
                 'heading' => 'AI trigger (why insight ran)',
@@ -69,12 +73,62 @@ final class BrandIntelligenceAdminPresenter
         }
 
         $skip = self::firstAiSkipReason($breakdown, $confidence, $level, $assetMimeType);
+        $lines = $skip !== null ? [$skip] : [];
+        $pdfNote = self::pdfBrandIntelligenceAdminNote($breakdown, $assetMimeType);
+        if ($pdfNote !== null) {
+            $lines[] = $pdfNote;
+        }
 
         return [
             'heading' => 'Why AI did not run',
-            'lines' => $skip !== null ? [$skip] : [],
+            'lines' => $lines,
             'ai_used' => false,
         ];
+    }
+
+    /**
+     * Short PDF BI scan-mode / deep-scan hint for admin simulate and debugger copy.
+     */
+    protected static function pdfBrandIntelligenceAdminNote(array $breakdown, ?string $assetMimeType): ?string
+    {
+        $mime = strtolower(trim((string) $assetMimeType));
+        if ($mime === '' || ! str_contains($mime, 'pdf')) {
+            return null;
+        }
+
+        $pds = is_array($breakdown['pdf_deep_scan'] ?? null) ? $breakdown['pdf_deep_scan'] : null;
+        $pm = is_array($breakdown['ebi_ai_trace'] ?? null)
+            && is_array($breakdown['ebi_ai_trace']['pdf_multi_page'] ?? null)
+            ? $breakdown['ebi_ai_trace']['pdf_multi_page']
+            : null;
+
+        if ($pds === null && $pm === null) {
+            return null;
+        }
+
+        $mode = is_array($pds) ? (string) ($pds['pdf_scan_mode_used'] ?? '') : '';
+        if ($mode === '') {
+            $mode = is_array($pm) ? (string) ($pm['pdf_scan_mode'] ?? '') : '';
+        }
+        $evalCount = null;
+        if (is_array($pm) && isset($pm['evaluated_pdf_pages']) && is_array($pm['evaluated_pdf_pages'])) {
+            $evalCount = count($pm['evaluated_pdf_pages']);
+        }
+
+        $parts = [];
+        if ($mode === 'deep' && $evalCount !== null) {
+            $parts[] = "Deep PDF scan analyzed {$evalCount} page".($evalCount === 1 ? '' : 's').'.';
+        } elseif ($mode === 'standard' && $evalCount !== null) {
+            $parts[] = "Standard PDF scan analyzed {$evalCount} page".($evalCount === 1 ? '' : 's').'.';
+        } elseif ($mode !== '') {
+            $parts[] = 'PDF scan mode: '.$mode.'.';
+        }
+
+        if (is_array($pds) && ($pds['deep_scan_recommended'] ?? false) === true) {
+            $parts[] = 'Deeper scan recommended when you need stronger style/copy/context signals.';
+        }
+
+        return $parts === [] ? null : implode(' ', $parts);
     }
 
     /**
@@ -187,7 +241,21 @@ final class BrandIntelligenceAdminPresenter
         if (! empty($ref['used']) && $confidence >= 0.7) {
             return 'AI skipped (reference similarity used + confidence ≥ 0.7)';
         }
+        $trace = $breakdown['ebi_ai_trace'] ?? [];
+        $ves = is_array($trace['visual_evaluation_source'] ?? null) ? $trace['visual_evaluation_source'] : [];
+        $visualRasterUsed = ($ves['used'] ?? false) === true;
+
+        if (is_array($trace) && ($trace['skip_reason'] ?? null) === 'pdf_visual_source_missing') {
+            return 'AI skipped (PDF has no rendered page image / thumbnail yet)';
+        }
+        if (is_array($trace) && ($trace['skip_reason'] ?? null) === 'no_thumbnail_for_vision' && $visualRasterUsed) {
+            return 'AI skipped (vision raster path resolved in metadata but the image could not be loaded for analysis)';
+        }
         if ($assetMimeType !== null && $assetMimeType !== '' && ! str_starts_with($assetMimeType, 'image/')) {
+            if ($visualRasterUsed) {
+                return 'AI insight not produced for this run (see ebi_ai_trace.skip_reason; vision uses derived page raster, not root image MIME)';
+            }
+
             return 'AI skipped (not an image asset)';
         }
 

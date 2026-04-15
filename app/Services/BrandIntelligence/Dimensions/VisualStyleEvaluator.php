@@ -5,6 +5,7 @@ namespace App\Services\BrandIntelligence\Dimensions;
 use App\Enums\AlignmentDimension;
 use App\Enums\DimensionStatus;
 use App\Enums\EvidenceSource;
+use App\Enums\MediaType;
 use App\Models\Asset;
 use App\Models\AssetEmbedding;
 use App\Models\Brand;
@@ -21,6 +22,14 @@ final class VisualStyleEvaluator implements DimensionEvaluatorInterface
         $blockers = [];
 
         if (! $context->hasExtraction('embeddings')) {
+            if ($context->mediaType === MediaType::PDF && $context->visualEvaluationRasterResolved) {
+                return DimensionResult::notEvaluable(
+                    AlignmentDimension::VISUAL_STYLE,
+                    'PDF page render is available but no stored embedding vector yet',
+                    ['Generate asset embedding for the rendered page to enable visual style evaluation'],
+                );
+            }
+
             return DimensionResult::notEvaluable(
                 AlignmentDimension::VISUAL_STYLE,
                 'Asset has no visual embedding for style comparison',
