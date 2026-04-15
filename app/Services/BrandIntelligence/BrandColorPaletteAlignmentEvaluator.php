@@ -301,22 +301,70 @@ final class BrandColorPaletteAlignmentEvaluator
     {
         $brand->loadMissing('brandModel.activeVersion');
         $payload = $brand->brandModel?->activeVersion?->model_payload ?? [];
-        $visual = is_array($payload['visual'] ?? null) ? $payload['visual'] : [];
-        $colors = $visual['colors'] ?? $visual['palette'] ?? $visual['brand_colors'] ?? [];
-        if (! is_array($colors)) {
-            return [];
+        if (! is_array($payload)) {
+            $payload = [];
         }
 
         $out = [];
-        foreach ($colors as $c) {
+
+        $scoring = is_array($payload['scoring_rules'] ?? null) ? $payload['scoring_rules'] : [];
+        foreach ($scoring['allowed_color_palette'] ?? [] as $c) {
+            $raw = null;
             if (is_string($c) && trim($c) !== '') {
-                $h = $this->normalizeHex($c);
+                $raw = $c;
+            } elseif (is_array($c)) {
+                $raw = $this->unwrapColorCandidate($c['hex'] ?? $c['value'] ?? null);
+            }
+            if (is_string($raw) && trim($raw) !== '') {
+                $h = $this->normalizeHex($raw);
                 if ($h !== null) {
                     $out[] = $h;
                 }
             }
-            if (is_array($c)) {
-                $raw = $c['hex'] ?? $c['value'] ?? null;
+        }
+
+        if ($out !== []) {
+            return array_values(array_unique($out));
+        }
+
+        $visual = is_array($payload['visual'] ?? null) ? $payload['visual'] : [];
+        $colorSystem = $visual['color_system'] ?? [];
+        if (is_array($colorSystem)) {
+            foreach (['primary', 'secondary', 'accent'] as $role) {
+                $raw = $this->unwrapColorCandidate($colorSystem[$role] ?? null);
+                if (is_string($raw) && trim($raw) !== '') {
+                    $h = $this->normalizeHex($raw);
+                    if ($h !== null) {
+                        $out[] = $h;
+                    }
+                }
+            }
+        }
+
+        $colors = $visual['colors'] ?? $visual['palette'] ?? $visual['brand_colors'] ?? [];
+        if (is_array($colors)) {
+            foreach ($colors as $c) {
+                if (is_string($c) && trim($c) !== '') {
+                    $h = $this->normalizeHex($c);
+                    if ($h !== null) {
+                        $out[] = $h;
+                    }
+                }
+                if (is_array($c)) {
+                    $raw = $this->unwrapColorCandidate($c['hex'] ?? $c['value'] ?? null);
+                    if (is_string($raw) && trim($raw) !== '') {
+                        $h = $this->normalizeHex($raw);
+                        if ($h !== null) {
+                            $out[] = $h;
+                        }
+                    }
+                }
+            }
+        }
+
+        if ($out === []) {
+            foreach (['primary_color', 'secondary_color', 'accent_color'] as $col) {
+                $raw = $brand->{$col} ?? null;
                 if (is_string($raw) && trim($raw) !== '') {
                     $h = $this->normalizeHex($raw);
                     if ($h !== null) {
@@ -327,6 +375,26 @@ final class BrandColorPaletteAlignmentEvaluator
         }
 
         return array_values(array_unique($out));
+    }
+
+    /**
+     * Builder / DNA fields may be plain strings or wrapped { value, source } objects.
+     */
+    private function unwrapColorCandidate(mixed $val): ?string
+    {
+        if ($val === null) {
+            return null;
+        }
+        if (is_string($val)) {
+            return $val;
+        }
+        if (is_array($val) && array_key_exists('value', $val)) {
+            $inner = $val['value'] ?? null;
+
+            return is_string($inner) ? $inner : null;
+        }
+
+        return null;
     }
 
     /**
