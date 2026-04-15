@@ -1369,7 +1369,8 @@ class DownloadController extends Controller
             'message' => $message,
             'password_required' => $passwordRequired,
             'download_id' => $download->id,
-            'unlock_url' => $passwordRequired ? route('downloads.public.unlock', ['download' => $download->id]) : '',
+            // Same-origin relative paths: avoid APP_URL host mismatch (custom domains, proxy TLS, www) breaking Inertia POST / Download link.
+            'unlock_url' => $passwordRequired ? route('downloads.public.unlock', ['download' => $download->id], false) : '',
             'show_landing_layout' => $branding['show_landing_layout'],
             'branding_options' => $branding['branding_options'],
             'show_jackpot_promo' => $branding['show_jackpot_promo'] ?? false,
@@ -1385,6 +1386,12 @@ class DownloadController extends Controller
         }
         if ($shareProps !== null) {
             $props = array_merge($props, $shareProps);
+        }
+        if (! empty($props['file_url'])) {
+            $props['file_url'] = route('downloads.public.file', ['download' => $download->id], false);
+        }
+        if (! empty($props['share_email_url'])) {
+            $props['share_email_url'] = route('downloads.public.share-email', ['download' => $download->id], false);
         }
 
         return Inertia::render('Downloads/Public', $props)->toResponse(request())->setStatusCode($statusCode);

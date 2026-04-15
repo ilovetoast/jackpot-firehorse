@@ -121,6 +121,30 @@ class AssetPolicy
     }
 
     /**
+     * Queue manual Studio View (enhanced-mode crop from large source).
+     *
+     * Same pipeline touch as thumbnail retry, but editors typically have metadata.edit_post_upload
+     * without assets.retry_thumbnails — allow either tenant permission after view check.
+     */
+    public function generateEnhancedStudioPreview(User $user, Asset $asset): bool
+    {
+        if (! $this->view($user, $asset)) {
+            return false;
+        }
+
+        $tenant = $this->tenantForAsset($asset);
+        if (! $tenant) {
+            return false;
+        }
+
+        if ($user->hasPermissionForTenant($tenant, 'assets.retry_thumbnails')) {
+            return true;
+        }
+
+        return $user->hasPermissionForTenant($tenant, 'metadata.edit_post_upload');
+    }
+
+    /**
      * Determine if user can request full PDF extraction.
      * Builder-staged guidelines_pdf: allow if user can update the brand.
      */

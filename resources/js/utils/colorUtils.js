@@ -178,14 +178,16 @@ export function resolveBrandIconBackground(style, primary, secondary) {
  * @param {string|null|undefined} secondary
  * @returns {string} CSS `background` value (multiple layers, comma-separated)
  */
-export function buildBrandCinematicTileBackground(primary, secondary) {
-    const p = primary || '#6366f1'
-    const s = secondary || '#8b5cf6'
+export function buildBrandCinematicTileBackground(primary, secondary, accent = null) {
+    const { first, second, useStrongerAlpha } = pickCinematicGlowPair(primary, secondary, accent)
+    const opP = useStrongerAlpha ? 0.2 : 0.14
+    const opS = useStrongerAlpha ? 0.25 : 0.19
+    const opP2 = useStrongerAlpha ? 0.32 : 0.24
     return [
         'linear-gradient(165deg, rgba(0,0,0,0.34) 0%, transparent 42%, rgba(0,0,0,0.52) 100%)',
-        `radial-gradient(ellipse 95% 75% at 30% 40%, ${hexToRgba(p, 0.14)} 0%, transparent 58%)`,
-        `radial-gradient(circle at 78% 74%, ${hexToRgba(s, 0.19)} 0%, transparent 56%)`,
-        `radial-gradient(circle at 14% 20%, ${hexToRgba(p, 0.24)} 0%, transparent 50%)`,
+        `radial-gradient(ellipse 95% 75% at 30% 40%, ${hexToRgba(first, opP)} 0%, transparent 58%)`,
+        `radial-gradient(circle at 78% 74%, ${hexToRgba(second, opS)} 0%, transparent 56%)`,
+        `radial-gradient(circle at 14% 20%, ${hexToRgba(first, opP2)} 0%, transparent 50%)`,
         '#0B0B0D',
     ].join(', ')
 }
@@ -220,6 +222,41 @@ function hexSaturation(hex6) {
     if (mx === mn) return 0
     const l = (mx + mn) / 2
     return (mx - mn) / (l > 0.5 ? 2 - mx - mn : mx + mn)
+}
+
+/**
+ * When primary & secondary are both low-chroma, radial glows on #0B0B0D look flat black.
+ * If accent is clearly more saturated, use it (plus a shifted partner) so cinematic shells keep color.
+ *
+ * @returns {{ first: string, second: string, useStrongerAlpha: boolean }}
+ */
+function pickCinematicGlowPair(primaryHex, secondaryHex, accentHex) {
+    const primary = normalizeHexColor(primaryHex || '#6366f1')
+    const secondary = normalizeHexColor(secondaryHex || '#8b5cf6')
+    const accent =
+        accentHex != null && String(accentHex).trim() !== '' ? normalizeHexColor(accentHex) : null
+
+    const sp = hexSaturation(primary)
+    const ss = hexSaturation(secondary)
+    const sa = accent ? hexSaturation(accent) : 0
+
+    const dullThreshold = 0.11
+    const maxPrimarySecondary = Math.max(sp, ss)
+    const dullPair = maxPrimarySecondary < dullThreshold
+    const accentWins = accent && sa >= 0.135 && sa > maxPrimarySecondary + 0.02
+
+    if (dullPair && accentWins) {
+        let second = normalizeHexColor(lightenColor(accent, 26))
+        if (getLuminance(second) > 0.78) {
+            second = normalizeHexColor(darkenColor(accent, 22))
+        }
+        if (second.toLowerCase() === accent.toLowerCase()) {
+            second = normalizeHexColor(lightenColor(accent, 14))
+        }
+        return { first: accent, second, useStrongerAlpha: true }
+    }
+
+    return { first: primary, second: secondary, useStrongerAlpha: false }
 }
 
 /**
@@ -284,18 +321,20 @@ const SPINNER_ON_WHITE_BG = '#ffffff'
  */
 /**
  * Cinematic workspace sidebar / Overview shell — dual radial glows from brand colors on near-black.
- * Matches {@see overviewDefaultBackdrop} in Overview and the gateway theme base.
+ * When primary & secondary are desaturated, uses accent (if vibrant) so the shell is not flat black.
  *
  * @param {string|null|undefined} primaryHex
  * @param {string|null|undefined} secondaryHex
+ * @param {string|null|undefined} [accentHex] — brand accent; optional but recommended for dull primaries
  * @returns {string} CSS `background` value
  */
-export function workspaceOverviewBackdropCss(primaryHex, secondaryHex) {
-    const p = /^#?([0-9a-fA-F]{6})/i.exec(String(primaryHex || '').trim())
-    const s = /^#?([0-9a-fA-F]{6})/i.exec(String(secondaryHex || '').trim())
-    const p6 = p ? p[1] : '6366f1'
-    const s6 = s ? s[1] : '8b5cf6'
-    return `radial-gradient(circle at 20% 20%, #${p6}33, transparent), radial-gradient(circle at 80% 80%, #${s6}33, transparent), #0B0B0D`
+export function workspaceOverviewBackdropCss(primaryHex, secondaryHex, accentHex = null) {
+    const { first, second, useStrongerAlpha } = pickCinematicGlowPair(primaryHex, secondaryHex, accentHex)
+    const p6 = normalizeHexColor(first).replace('#', '').toLowerCase()
+    const s6 = normalizeHexColor(second).replace('#', '').toLowerCase()
+    const a1 = useStrongerAlpha ? '40' : '33'
+    const a2 = useStrongerAlpha ? '36' : '33'
+    return `radial-gradient(circle at 20% 20%, #${p6}${a1}, transparent), radial-gradient(circle at 80% 80%, #${s6}${a2}, transparent), #0B0B0D`
 }
 
 /**
@@ -307,8 +346,9 @@ export function resolveWorkspaceSidebarSurface(brand) {
     const isCinematic = settings.workspace_sidebar_style === 'cinematic'
     const primary = brand?.primary_color || '#6366f1'
     const secondary = brand?.secondary_color || brand?.accent_color || primary
+    const accent = brand?.accent_color || null
     const sidebarColor = brand?.nav_color || brand?.primary_color || '#1f2937'
-    const backdropCss = isCinematic ? workspaceOverviewBackdropCss(primary, secondary) : null
+    const backdropCss = isCinematic ? workspaceOverviewBackdropCss(primary, secondary, accent) : null
     return { isCinematic, sidebarColor, backdropCss }
 }
 

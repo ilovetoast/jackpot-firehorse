@@ -114,9 +114,10 @@ export default function Overview() {
         activeBrand?.secondary_color ||
         activeBrand?.accent_color ||
         brandColor
+    const accentForBackdrop = theme.colors?.accent || activeBrand?.accent_color || null
     const overviewBackdropBackground =
         theme.background?.value ||
-        workspaceOverviewBackdropCss(brandColor, secondaryForBackdrop)
+        workspaceOverviewBackdropCss(brandColor, secondaryForBackdrop, accentForBackdrop)
 
     const overviewIconColor = useMemo(
         () =>

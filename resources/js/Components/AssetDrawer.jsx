@@ -1938,6 +1938,8 @@ export default function AssetDrawer({
         !externalCollectionGuest
 
     const canRetryThumbnails = can('assets.retry_thumbnails')
+    /** Studio View uses enhanced-preview job; allow metadata editors, not only thumbnail-retry role. */
+    const canQueueStudioViewSave = canRetryThumbnails || can('metadata.edit_post_upload')
     const canRegenerateAiMetadata = can('assets.ai_metadata.regenerate')
     const isTenantOwnerOrAdminForAi = auth?.tenant_role === 'owner' || auth?.tenant_role === 'admin'
     const canRegenerateAiMetadataForTroubleshooting = canRegenerateAiMetadata || isTenantOwnerOrAdminForAi
@@ -1964,8 +1966,8 @@ export default function AssetDrawer({
     const cooldownMinutesAi = processingGuardStatus?.actions?.ai_metadata?.cooldown_remaining_minutes ?? 0
     const isTenantAdminForProcessing = canRegenerateAiMetadata || isTenantOwnerOrAdminForAi
     const canOfferEnhancedPreviewGenerate = useMemo(
-        () => canRetryThumbnails && showExecutionPreviewChrome,
-        [canRetryThumbnails, showExecutionPreviewChrome],
+        () => canQueueStudioViewSave && showExecutionPreviewChrome,
+        [canQueueStudioViewSave, showExecutionPreviewChrome],
     )
 
     const showEnhancedPreviewRadio = useMemo(
@@ -2587,7 +2589,16 @@ export default function AssetDrawer({
     /** @returns {Promise<boolean>} */
     const queueStudioViewSave = async (payload, opts = {}) => {
         const force = Boolean(opts.force)
-        if (!displayAsset?.id || !canRetryThumbnails) {
+        if (!displayAsset?.id) {
+            setToastType('error')
+            setToastMessage('No asset selected.')
+            return false
+        }
+        if (!canQueueStudioViewSave) {
+            setToastType('error')
+            setToastMessage(
+                'You need permission to save Studio View (metadata edit or thumbnail retry). Ask an admin to adjust your role.',
+            )
             return false
         }
         setEnhancedPreviewLoading(true)
@@ -4935,7 +4946,7 @@ export default function AssetDrawer({
                 {displayAsset?.id && isVirtualGoogleFont && (
                     <div className="border-t border-gray-200">
                         <CollapsibleSection contentInset="flush" title="Fields" defaultExpanded={false}>
-                            <dl className="space-y-3 text-sm text-gray-700">
+                            <dl className="space-y-3 pl-2.5 text-sm text-gray-700">
                                 <div>
                                     <dt className="font-medium text-gray-900">Source</dt>
                                     <dd className="mt-0.5 text-gray-600">
@@ -4967,7 +4978,7 @@ export default function AssetDrawer({
                                     </div>
                                 )}
                             </dl>
-                            <p className="mt-4 text-xs text-gray-500">
+                            <p className="mt-4 pl-2.5 text-xs text-gray-500">
                                 {displayAsset.is_campaign_collection_font && displayAsset.campaign_collection_id
                                     ? (
                                         <>
@@ -5146,7 +5157,7 @@ export default function AssetDrawer({
                             )}
 
                         <CollapsibleSection contentInset="flush" title="Fields" defaultExpanded={false}>
-                            <div className="space-y-3">
+                            <div className="space-y-3 pl-2.5">
                             {/* Step 2: Pending Metadata Section - Moved above standard metadata list */}
                             {/* Phase M-2: Only show pending metadata if metadata approval is enabled for company + brand */}
                             {auth?.metadata_approval_features?.metadata_approval_enabled && 
@@ -5588,7 +5599,7 @@ export default function AssetDrawer({
                                     defaultExpanded={drawerExpandPreviewOrProcessingSections}
                                 >
                                     <div className="space-y-3">
-                                        <div className="text-xs leading-snug text-gray-500 mb-2">
+                                        <div className="text-xs leading-snug text-gray-500">
                                             {processingStatusSummaryEl}
                                             {isProcessingDrawerBusy && (
                                                 <span className="mt-1 block text-blue-600">

@@ -717,7 +717,7 @@ export default function BulkActionsModal({
                             }}
                         >
                             <div className="space-y-8">
-                                {(generalBulkGroups.length > 0 || canSiteAdminPipeline) && (
+                                {generalBulkGroups.length > 0 && (
                                     <BulkModalSuperSection title="General">
                                         {generalBulkGroups.map((group, gIdx) => (
                                             <BulkActionGroupBlock
@@ -727,86 +727,6 @@ export default function BulkActionsModal({
                                                 onPick={handleSelectAction}
                                             />
                                         ))}
-                                        {canSiteAdminPipeline && (
-                                            <div className="rounded-xl border border-gray-200 bg-gray-50/60 p-3.5 shadow-sm">
-                                                <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 border-b border-gray-200/80 pb-1.5">
-                                                    <span className="inline-flex items-center rounded bg-indigo-600 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">
-                                                        Admin
-                                                    </span>
-                                                    <h3 className="text-xs font-semibold text-gray-800">
-                                                        Processing &amp; Automation
-                                                    </h3>
-                                                </div>
-                                                <p className="mt-2 text-[11px] leading-snug text-gray-600">
-                                                    Site admin or engineering only. Matches per-asset drawer tools. Max{' '}
-                                                    {MAX_BULK_PIPELINE_ASSETS} assets; the server dispatches in chunks of 10 with a short
-                                                    delay between chunks.{' '}
-                                                    <span className="font-medium text-amber-800">
-                                                        Background jobs — may take several minutes.
-                                                    </span>
-                                                </p>
-                                                {pipelineSelectionOverLimit && (
-                                                    <div className="mt-2 flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-900">
-                                                        <ExclamationTriangleIcon className="h-3.5 w-3.5 shrink-0" />
-                                                        <span>
-                                                            Select at most {MAX_BULK_PIPELINE_ASSETS} assets to use processing actions.
-                                                        </span>
-                                                    </div>
-                                                )}
-                                                <div className="mt-2.5 grid grid-cols-1 gap-2">
-                                                    <ProcessingActionCard
-                                                        compact
-                                                        icon="sparkles"
-                                                        title="Re-run AI tagging"
-                                                        description="Queue another pass on AI suggestions and tags for selected assets"
-                                                        onClick={() => handleSelectAction(SITE_RERUN_AI_METADATA_TAGGING)}
-                                                        disabled={pipelineSelectionOverLimit}
-                                                    />
-                                                    <ProcessingActionCard
-                                                        compact
-                                                        icon="photo"
-                                                        title="Refresh previews"
-                                                        description="Rebuild thumbnails and preview images"
-                                                        onClick={() => handleSelectAction(SITE_RERUN_THUMBNAILS)}
-                                                        disabled={pipelineSelectionOverLimit}
-                                                    />
-                                                    <ProcessingActionCard
-                                                        compact
-                                                        icon="video"
-                                                        title="Generate video previews"
-                                                        description="Rebuild hover/quick preview MP4s with correct phone/MOV rotation"
-                                                        onClick={() => handleSelectAction(SITE_GENERATE_VIDEO_PREVIEWS)}
-                                                        disabled={pipelineSelectionOverLimit}
-                                                    />
-                                                    <ProcessingActionCard
-                                                        compact
-                                                        icon="trash"
-                                                        title="Delete video quick previews"
-                                                        description="Remove hover MP4 from storage and clear paths (no regeneration)"
-                                                        variant="danger"
-                                                        onClick={() => handleSelectAction(SITE_DELETE_VIDEO_PREVIEWS)}
-                                                        disabled={pipelineSelectionOverLimit}
-                                                    />
-                                                    <ProcessingActionCard
-                                                        compact
-                                                        icon="refresh"
-                                                        title="Re-run metadata extraction"
-                                                        description="Technical file metadata only"
-                                                        onClick={() => handleSelectAction(SITE_REPROCESS_SYSTEM_METADATA)}
-                                                        disabled={pipelineSelectionOverLimit}
-                                                    />
-                                                    <ProcessingActionCard
-                                                        compact
-                                                        icon="refreshDanger"
-                                                        title="Reprocess entire asset"
-                                                        description="Full pipeline — resource intensive"
-                                                        variant="danger"
-                                                        onClick={() => handleSelectAction(SITE_REPROCESS_FULL_PIPELINE)}
-                                                        disabled={pipelineSelectionOverLimit}
-                                                    />
-                                                </div>
-                                            </div>
-                                        )}
                                     </BulkModalSuperSection>
                                 )}
 
@@ -862,6 +782,89 @@ export default function BulkActionsModal({
                                                 </button>
                                             </div>
                                         )}
+                                    </BulkModalSuperSection>
+                                )}
+
+                                {canSiteAdminPipeline && (
+                                    <BulkModalSuperSection title="Admin">
+                                        <div className="rounded-xl border border-gray-200 bg-gray-50/60 p-3.5 shadow-sm">
+                                            <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 border-b border-gray-200/80 pb-1.5">
+                                                <span className="inline-flex items-center rounded bg-indigo-600 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">
+                                                    Admin
+                                                </span>
+                                                <h3 className="text-xs font-semibold text-gray-800">
+                                                    Processing &amp; Automation
+                                                </h3>
+                                            </div>
+                                            <p className="mt-2 text-[11px] leading-snug text-gray-600">
+                                                Site admin or engineering only. Matches per-asset drawer tools. Max{' '}
+                                                {MAX_BULK_PIPELINE_ASSETS} assets; the server dispatches in chunks of 10 with a short
+                                                delay between chunks.{' '}
+                                                <span className="font-medium text-amber-800">
+                                                    Background jobs — may take several minutes.
+                                                </span>
+                                            </p>
+                                            {pipelineSelectionOverLimit && (
+                                                <div className="mt-2 flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-900">
+                                                    <ExclamationTriangleIcon className="h-3.5 w-3.5 shrink-0" />
+                                                    <span>
+                                                        Select at most {MAX_BULK_PIPELINE_ASSETS} assets to use processing actions.
+                                                    </span>
+                                                </div>
+                                            )}
+                                            <div className="mt-2.5 grid grid-cols-1 gap-2">
+                                                <ProcessingActionCard
+                                                    compact
+                                                    icon="sparkles"
+                                                    title="Re-run AI tagging"
+                                                    description="Queue another pass on AI suggestions and tags for selected assets"
+                                                    onClick={() => handleSelectAction(SITE_RERUN_AI_METADATA_TAGGING)}
+                                                    disabled={pipelineSelectionOverLimit}
+                                                />
+                                                <ProcessingActionCard
+                                                    compact
+                                                    icon="photo"
+                                                    title="Refresh previews"
+                                                    description="Rebuild thumbnails and preview images"
+                                                    onClick={() => handleSelectAction(SITE_RERUN_THUMBNAILS)}
+                                                    disabled={pipelineSelectionOverLimit}
+                                                />
+                                                <ProcessingActionCard
+                                                    compact
+                                                    icon="video"
+                                                    title="Generate video previews"
+                                                    description="Rebuild hover/quick preview MP4s with correct phone/MOV rotation"
+                                                    onClick={() => handleSelectAction(SITE_GENERATE_VIDEO_PREVIEWS)}
+                                                    disabled={pipelineSelectionOverLimit}
+                                                />
+                                                <ProcessingActionCard
+                                                    compact
+                                                    icon="trash"
+                                                    title="Delete video quick previews"
+                                                    description="Remove hover MP4 from storage and clear paths (no regeneration)"
+                                                    variant="danger"
+                                                    onClick={() => handleSelectAction(SITE_DELETE_VIDEO_PREVIEWS)}
+                                                    disabled={pipelineSelectionOverLimit}
+                                                />
+                                                <ProcessingActionCard
+                                                    compact
+                                                    icon="refresh"
+                                                    title="Re-run metadata extraction"
+                                                    description="Technical file metadata only"
+                                                    onClick={() => handleSelectAction(SITE_REPROCESS_SYSTEM_METADATA)}
+                                                    disabled={pipelineSelectionOverLimit}
+                                                />
+                                                <ProcessingActionCard
+                                                    compact
+                                                    icon="refreshDanger"
+                                                    title="Reprocess entire asset"
+                                                    description="Full pipeline — resource intensive"
+                                                    variant="danger"
+                                                    onClick={() => handleSelectAction(SITE_REPROCESS_FULL_PIPELINE)}
+                                                    disabled={pipelineSelectionOverLimit}
+                                                />
+                                            </div>
+                                        </div>
                                     </BulkModalSuperSection>
                                 )}
 

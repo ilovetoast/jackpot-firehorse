@@ -65,7 +65,9 @@ export default function CollapsibleSection({
                     className={`flex min-w-0 flex-1 items-center text-sm font-semibold ${isDark ? 'text-neutral-100' : 'text-gray-900'}`}
                 >
                     {typeof title === 'string' ? (
-                        <h3 className={`m-0 min-w-0 flex-1 truncate leading-snug ${isDark ? 'text-neutral-100' : 'text-gray-900'}`}>
+                        <h3
+                            className={`m-0 min-w-0 flex-1 basis-0 truncate leading-snug ${isDark ? 'text-neutral-100' : 'text-gray-900'}`}
+                        >
                             {title}
                         </h3>
                     ) : (

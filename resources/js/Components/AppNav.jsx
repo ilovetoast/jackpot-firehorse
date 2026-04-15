@@ -224,6 +224,19 @@ export default function AppNav({
 
     /** Cinematic app shell (Overview, etc.): keep dark translucent chrome on hover — avoid flipping to solid white. */
     const isCinematicNav = variant === 'transparent'
+
+    useEffect(() => {
+        const root = document.documentElement
+        if (!isCinematicNav) {
+            root.removeAttribute('data-cinematic-nav')
+            return undefined
+        }
+        root.setAttribute('data-cinematic-nav', 'true')
+        return () => {
+            root.removeAttribute('data-cinematic-nav')
+        }
+    }, [isCinematicNav])
+
     /** Same easing/duration as nav + agency strip so cinematic header surfaces stay in sync */
     const cinematicSurfaceTransition = 'background-color 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease, backdrop-filter 0.3s ease'
     const cinematicNavSurfaceStyle = isCinematicNav

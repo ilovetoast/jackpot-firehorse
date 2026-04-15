@@ -3373,8 +3373,9 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                         data.accent_color ||
                                         brand.accent_color ||
                                         previewPrimary
+                                    const previewAccent = data.accent_color || brand.accent_color || null
                                     const sidebarBackdropCss = sidebarCinematic
-                                        ? workspaceOverviewBackdropCss(previewPrimary, previewSecondary)
+                                        ? workspaceOverviewBackdropCss(previewPrimary, previewSecondary, previewAccent)
                                         : null
                                     const sidebarTextColor = sidebarBackdropCss
                                         ? '#ffffff'

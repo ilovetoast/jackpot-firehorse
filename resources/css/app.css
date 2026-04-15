@@ -264,6 +264,17 @@
     background: var(--primary, #6366f1) !important;
 }
 
+/* Cinematic / transparent nav (Overview, Agency dashboard, etc.): primary is often a dark navy on #0B0B0D — use accent so the bar reads */
+html[data-cinematic-nav="true"] #nprogress .bar {
+    background: var(--accent, var(--primary, #6366f1)) !important;
+}
+
+html[data-cinematic-nav="true"] #nprogress .peg {
+    box-shadow:
+        0 0 10px var(--accent, var(--primary, #6366f1)),
+        0 0 5px var(--accent, var(--primary, #6366f1)) !important;
+}
+
 .gap-7{
     gap: 1.7rem;
 }

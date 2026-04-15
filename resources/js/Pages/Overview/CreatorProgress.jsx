@@ -12,14 +12,7 @@ import {
 } from '@heroicons/react/24/outline'
 import AppHead from '../../Components/AppHead'
 import AppNav from '../../Components/AppNav'
-
-function overviewDefaultBackdrop(primaryHex, secondaryHex) {
-    const p = /^#?([0-9a-fA-F]{6})/i.exec(String(primaryHex || '').trim())
-    const s = /^#?([0-9a-fA-F]{6})/i.exec(String(secondaryHex || '').trim())
-    const p6 = p ? p[1] : '6366f1'
-    const s6 = s ? s[1] : '8b5cf6'
-    return `radial-gradient(circle at 20% 20%, #${p6}33, transparent), radial-gradient(circle at 80% 80%, #${s6}33, transparent), #0B0B0D`
-}
+import { workspaceOverviewBackdropCss } from '../../utils/colorUtils'
 
 function tenantNavFromAuth(auth) {
     const c = auth?.activeCompany
@@ -155,7 +148,8 @@ export default function CreatorProgress({ brand, creator, creator_home = {}, can
     const brandColor = brand?.primary_color || activeBrand?.primary_color || '#6366f1'
     const secondaryForBackdrop =
         brand?.secondary_color || activeBrand?.secondary_color || activeBrand?.accent_color || brandColor
-    const backdropBackground = overviewDefaultBackdrop(brandColor, secondaryForBackdrop)
+    const accentForBackdrop = brand?.accent_color || activeBrand?.accent_color || null
+    const backdropBackground = workspaceOverviewBackdropCss(brandColor, secondaryForBackdrop, accentForBackdrop)
 
     const h = creator_home || {}
     const pct = Number(h.completion_percentage)

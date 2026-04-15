@@ -709,7 +709,7 @@ class AssetThumbnailController extends Controller
      */
     public function generateEnhancedPreview(Request $request, Asset $asset): \Illuminate\Http\JsonResponse
     {
-        $this->authorize('retryThumbnails', $asset);
+        $this->authorize('generateEnhancedStudioPreview', $asset);
 
         $tenant = app('tenant');
         $brand = app('brand');

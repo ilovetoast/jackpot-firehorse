@@ -83,7 +83,7 @@ export default function AssetPlaceholder({ asset, primaryColor = null, brand = n
     const primary = brand?.primary_color || '#6366f1'
     const secondary = brand?.secondary_color || '#8b5cf6'
     const useBrandTile = Boolean(brand?.primary_color)
-    const cinematicBg = buildBrandCinematicTileBackground(primary, secondary)
+    const cinematicBg = buildBrandCinematicTileBackground(primary, secondary, brand?.accent_color)
 
     const iconChipClass =
       'flex items-center justify-center w-[4.25rem] h-[4.25rem] rounded-2xl bg-white/12 backdrop-blur-md shadow-lg ring-1 ring-white/20'
@@ -134,7 +134,7 @@ export default function AssetPlaceholder({ asset, primaryColor = null, brand = n
   const brandPrimary = primaryColor || brand?.primary_color
   if (brandPrimary) {
     const secondary = brand?.secondary_color || brand?.accent_color || brandPrimary
-    const cinematicBg = buildBrandCinematicTileBackground(brandPrimary, secondary)
+    const cinematicBg = buildBrandCinematicTileBackground(brandPrimary, secondary, brand?.accent_color)
     const iconChipClass =
       'flex items-center justify-center w-[4.25rem] h-[4.25rem] rounded-2xl bg-white/12 backdrop-blur-md shadow-lg ring-1 ring-white/20'
     return (
