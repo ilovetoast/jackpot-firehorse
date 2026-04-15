@@ -278,6 +278,7 @@ class MetadataFieldsSeeder extends Seeder
             ['value' => 'body', 'system_label' => 'Body'],
             ['value' => 'accent', 'system_label' => 'Accent'],
             ['value' => 'ui', 'system_label' => 'UI'],
+            ['value' => 'campaign', 'system_label' => 'Campaign'],
         ]);
 
         // Graphics — graphic_type

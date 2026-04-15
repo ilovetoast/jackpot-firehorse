@@ -3,6 +3,7 @@
  * Stats (composition + download links from this collection).
  */
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import {
     XMarkIcon,
     UsersIcon,
@@ -15,7 +16,9 @@ import {
     ChartBarIcon,
     Cog6ToothIcon,
     UserGroupIcon,
+    SparklesIcon,
 } from '@heroicons/react/24/outline'
+import { Link } from '@inertiajs/react'
 import Avatar from '../Avatar'
 
 const PUBLIC_TOOLTIP = 'Viewable via a shareable link. Collections do not grant access to assets outside this view.'
@@ -110,6 +113,8 @@ export default function EditCollectionModal({
     const [stats, setStats] = useState({ loading: false, error: null, data: null })
     const statsFetchedRef = useRef(false)
     const [externalAccessCountsHydrated, setExternalAccessCountsHydrated] = useState(false)
+    const [campaignData, setCampaignData] = useState({ loading: false, data: null })
+    const campaignFetchedRef = useRef(false)
 
     const showRolePickers = accessMode === 'role_limited' || accessMode === 'invite_only'
     const showInternalSection = accessMode === 'role_limited' || accessMode === 'invite_only'
@@ -181,6 +186,8 @@ export default function EditCollectionModal({
         setStats({ loading: false, error: null, data: null })
         statsFetchedRef.current = false
         setExternalAccessCountsHydrated(false)
+        setCampaignData({ loading: false, data: null })
+        campaignFetchedRef.current = false
         // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally omit `collection` reference; see comment above.
     }, [open, collection?.id])
 
@@ -200,6 +207,20 @@ export default function EditCollectionModal({
             .then((data) => setStats({ loading: false, error: null, data }))
             .catch(() => setStats({ loading: false, error: true, data: null }))
     }, [open, collection?.id, activeTab, stats.loading, stats.data])
+
+    useEffect(() => {
+        if (!open || !collection?.id || activeTab !== 'campaign') return
+        if (campaignFetchedRef.current || campaignData.loading || campaignData.data) return
+        campaignFetchedRef.current = true
+        setCampaignData((prev) => ({ ...prev, loading: true }))
+        fetch(`/app/collections/${collection.id}/campaign`, {
+            headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+            credentials: 'same-origin',
+        })
+            .then((r) => (r.ok ? r.json() : null))
+            .then((data) => setCampaignData({ loading: false, data: data?.campaign_identity ?? null }))
+            .catch(() => setCampaignData({ loading: false, data: null }))
+    }, [open, collection?.id, activeTab, campaignData.loading, campaignData.data])
 
     useEffect(() => {
         if (!open || !collection?.id || activeTab !== 'access' || !showInternalSection) return
@@ -392,11 +413,21 @@ export default function EditCollectionModal({
 
     if (!open) return null
 
-    return (
-        <div className="fixed inset-0 z-[80] overflow-y-auto" aria-labelledby="edit-modal-title" role="dialog" aria-modal="true">
+    /** Portal + z above AppNav (z-[140]) and AssetDrawer (z-[200]) so backdrop covers full viewport. */
+    const dialog = (
+        <div
+            className="fixed inset-0 z-[220] isolate overflow-y-auto"
+            aria-labelledby="edit-modal-title"
+            role="dialog"
+            aria-modal="true"
+        >
             <div className="flex min-h-full items-end justify-center p-4 text-center sm:items-center sm:p-0">
-                <div className="fixed inset-0 bg-gray-500/75 transition-opacity z-[80]" aria-hidden="true" onClick={handleClose} />
-                <div className="relative transform overflow-hidden rounded-xl bg-white text-left shadow-xl transition-all sm:my-8 sm:w-full sm:max-w-2xl z-[81] max-h-[92vh] flex flex-col">
+                <div
+                    className="fixed inset-0 bg-gray-500/75 transition-opacity z-[220]"
+                    aria-hidden="true"
+                    onClick={handleClose}
+                />
+                <div className="relative z-[221] transform overflow-hidden rounded-xl bg-white text-left shadow-xl transition-all sm:my-8 sm:w-full sm:max-w-2xl max-h-[92vh] flex flex-col">
                     <div className="bg-white px-4 pb-4 pt-5 sm:p-6 sm:pb-4 overflow-y-auto flex-1 min-h-0">
                         <div className="flex items-center justify-between mb-2">
                             <h3 className="text-lg font-semibold text-gray-900" id="edit-modal-title">Edit collection</h3>
@@ -458,6 +489,20 @@ export default function EditCollectionModal({
                                 <span className="flex items-center gap-2">
                                     <ChartBarIcon className="h-4 w-4 shrink-0" />
                                     Stats
+                                </span>
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setActiveTab('campaign')}
+                                className={`border-b-2 py-2.5 px-3 text-sm font-medium sm:px-4 ${
+                                    activeTab === 'campaign'
+                                        ? 'border-indigo-600 text-indigo-600'
+                                        : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
+                                }`}
+                            >
+                                <span className="flex items-center gap-2">
+                                    <SparklesIcon className="h-4 w-4 shrink-0" />
+                                    Campaign
                                 </span>
                             </button>
                         </nav>
@@ -929,9 +974,108 @@ export default function EditCollectionModal({
                                 </div>
                             </div>
                         )}
+                        {activeTab === 'campaign' && (
+                            <div className="space-y-4 pb-1">
+                                {campaignData.loading && <p className="text-sm text-gray-500">Loading campaign identity…</p>}
+                                {!campaignData.loading && !campaignData.data && (
+                                    <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50/50 p-6 text-center">
+                                        <SparklesIcon className="mx-auto h-10 w-10 text-gray-300" />
+                                        <h4 className="mt-3 text-sm font-semibold text-gray-900">No campaign identity yet</h4>
+                                        <p className="mt-1 text-sm text-gray-500">
+                                            Add a campaign identity to enable campaign-specific brand scoring for assets in this collection.
+                                        </p>
+                                        {collection?.id && (
+                                            <Link
+                                                href={`/app/collections/${collection.id}/campaign`}
+                                                className="mt-4 inline-flex items-center gap-2 rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500"
+                                            >
+                                                <SparklesIcon className="h-4 w-4" />
+                                                Set up campaign identity
+                                            </Link>
+                                        )}
+                                    </div>
+                                )}
+                                {!campaignData.loading && campaignData.data && (
+                                    <>
+                                        <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                                            <div className="flex items-center justify-between">
+                                                <div>
+                                                    <p className="text-sm font-semibold text-gray-900">
+                                                        {campaignData.data.campaign_name || 'Untitled campaign'}
+                                                    </p>
+                                                    {campaignData.data.campaign_goal && (
+                                                        <p className="mt-0.5 text-xs text-gray-500 line-clamp-2">{campaignData.data.campaign_goal}</p>
+                                                    )}
+                                                </div>
+                                                <span className={`rounded-full px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
+                                                    campaignData.data.campaign_status === 'active'
+                                                        ? 'bg-green-100 text-green-800'
+                                                        : campaignData.data.campaign_status === 'completed'
+                                                        ? 'bg-blue-100 text-blue-800'
+                                                        : campaignData.data.campaign_status === 'archived'
+                                                        ? 'bg-gray-200 text-gray-600'
+                                                        : 'bg-amber-100 text-amber-800'
+                                                }`}>
+                                                    {campaignData.data.campaign_status || 'draft'}
+                                                </span>
+                                            </div>
+                                        </div>
+                                        <div className="grid grid-cols-2 gap-3">
+                                            <div className="rounded-lg border border-gray-200 bg-white p-3">
+                                                <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Readiness</p>
+                                                <p className={`mt-1 text-sm font-semibold capitalize ${
+                                                    campaignData.data.readiness_status === 'ready'
+                                                        ? 'text-green-700'
+                                                        : campaignData.data.readiness_status === 'partial'
+                                                        ? 'text-amber-700'
+                                                        : 'text-gray-500'
+                                                }`}>
+                                                    {campaignData.data.readiness_status || 'incomplete'}
+                                                </p>
+                                            </div>
+                                            <div className="rounded-lg border border-gray-200 bg-white p-3">
+                                                <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Scoring</p>
+                                                <p className={`mt-1 text-sm font-semibold ${
+                                                    campaignData.data.scoring_enabled ? 'text-green-700' : 'text-gray-500'
+                                                }`}>
+                                                    {campaignData.data.scoring_enabled ? 'Enabled' : 'Disabled'}
+                                                </p>
+                                            </div>
+                                        </div>
+                                        {campaignData.data.reference_count != null && (
+                                            <div className="rounded-lg border border-gray-200 bg-white p-3">
+                                                <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Campaign references</p>
+                                                <p className="mt-1 text-sm font-semibold text-gray-900 tabular-nums">
+                                                    {campaignData.data.reference_count} reference{campaignData.data.reference_count !== 1 ? 's' : ''}
+                                                </p>
+                                            </div>
+                                        )}
+                                        {collection?.id && (
+                                            <Link
+                                                href={`/app/collections/${collection.id}/campaign`}
+                                                className="inline-flex items-center gap-2 rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500"
+                                            >
+                                                Edit campaign identity
+                                            </Link>
+                                        )}
+                                    </>
+                                )}
+                                <div className="mt-6 flex justify-end gap-3 border-t border-gray-100 pt-4">
+                                    <button
+                                        type="button"
+                                        onClick={handleClose}
+                                        className="rounded-md bg-white px-3 py-2 text-sm font-medium text-gray-700 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50"
+                                    >
+                                        Close
+                                    </button>
+                                </div>
+                            </div>
+                        )}
                     </div>
                 </div>
             </div>
         </div>
     )
+
+    return typeof document !== 'undefined' ? createPortal(dialog, document.body) : null
 }

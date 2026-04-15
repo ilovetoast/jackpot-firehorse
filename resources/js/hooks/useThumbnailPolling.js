@@ -35,6 +35,7 @@ export function useThumbnailPolling(assets, onThumbnailUpdate) {
         // Qualification filter: Only poll assets that need thumbnails
         const assetsNeedingThumbnails = assetsRef.current.filter(asset => {
             if (!asset || !asset.id) return false
+            if (asset.is_virtual_google_font) return false
 
             const thumbnailStatus = asset.thumbnail_status?.value || asset.thumbnail_status || 'pending'
             const hasThumbnail = !!(asset.thumbnail_url || asset.preview_url || asset.preview_thumbnail_url || asset.final_thumbnail_url)

@@ -21,13 +21,19 @@ import { filterActiveCategories } from '../../utils/categoryUtils'
 import AssetSidebar from '../../Components/AssetSidebar'
 import AddCategoryModal from '../../Components/Metadata/AddCategoryModal'
 import AddExistingCategoryModal from '../../Components/AddExistingCategoryModal'
-import { getWorkspaceButtonColor, getContrastTextColor, darkenColor } from '../../utils/colorUtils'
+import {
+    getWorkspaceButtonColor,
+    getWorkspaceContextualTone,
+    getContrastTextColor,
+    resolveWorkspaceSidebarSurface,
+} from '../../utils/colorUtils'
 import { shouldPurgeOnCategoryChange } from '../../utils/filterQueryOwnership'
 import { isCategoryCompatible } from '../../utils/filterScopeRules'
 import { parseFiltersFromUrl } from '../../utils/filterUrlUtils'
 import { usePermission } from '../../hooks/usePermission'
 import { canViewAssetSystemFolders } from '../../utils/canViewAssetSystemFolders'
 import LoadMoreFooter from '../../Components/LoadMoreFooter'
+import InfiniteScrollGridSpinner from '../../Components/InfiniteScrollGridSpinner'
 import axios from 'axios'
 import { motion } from 'framer-motion'
 import {
@@ -767,14 +773,13 @@ export default function AssetsIndex({
     
     // BUGFIX: Single handler to open upload dialog
     const handleOpenUploadDialog = useCallback((files = null) => {
-        // Prevent opening if auto-close is in progress
         if (isAutoClosing) {
             return
         }
-        // Store dropped files if provided
         if (files) {
             setDroppedFiles(files)
         }
+        try { sessionStorage.removeItem('uploadAssetDialogMinimized') } catch (_) { /* ignore */ }
         setIsUploadDialogOpen(true)
     }, [isAutoClosing])
     
@@ -918,8 +923,8 @@ export default function AssetsIndex({
         return () => clearInterval(interval)
     }, [])
     
-    // Get brand sidebar color (nav_color) for sidebar background, fallback to primary color
-    const sidebarColor = auth.activeBrand?.nav_color || auth.activeBrand?.primary_color || '#1f2937' // Default to gray-800 if no brand color
+    const { isCinematic: sidebarIsCinematic, sidebarColor, backdropCss: sidebarBackdropCss } =
+        resolveWorkspaceSidebarSurface(auth.activeBrand)
     const workspaceAccentColor = getWorkspaceButtonColor(auth.activeBrand)
     const isLightColor = (color) => {
         if (!color || color === '#ffffff' || color === '#FFFFFF') return true
@@ -930,9 +935,9 @@ export default function AssetsIndex({
         const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
         return luminance > 0.5
     }
-    const textColor = isLightColor(sidebarColor) ? '#000000' : '#ffffff'
+    const textColor = sidebarIsCinematic || !isLightColor(sidebarColor) ? '#ffffff' : '#000000'
     // Same solid as AddAssetButton (darken workspace accent by 20) for Library row selection
-    const contextualDarkColor = darkenColor(workspaceAccentColor, 20)
+    const contextualDarkColor = getWorkspaceContextualTone(workspaceAccentColor)
     const activeBgColor = contextualDarkColor
     const activeTextColor = getContrastTextColor(contextualDarkColor)
     const hoverBgColor = contextualDarkColor
@@ -1013,6 +1018,7 @@ export default function AssetsIndex({
                         onStagedClick={() => router.get('/app/assets/staged')}
                         onTrashClick={() => router.get('/app/assets', { lifecycle: 'deleted' })}
                         sidebarColor={sidebarColor}
+                        sidebarBackdropCss={sidebarBackdropCss}
                         workspaceAccentColor={workspaceAccentColor}
                         isLightColor={isLightColor}
                         tooltipVisible={tooltipVisible}
@@ -1033,7 +1039,11 @@ export default function AssetsIndex({
                         />
                         <div
                             className="fixed inset-y-0 left-0 z-50 w-72 max-w-[85vw] flex flex-col shadow-xl lg:hidden"
-                            style={{ backgroundColor: sidebarColor, top: '5rem' }}
+                            style={
+                                sidebarBackdropCss
+                                    ? { background: sidebarBackdropCss, backgroundColor: '#0B0B0D', top: '5rem' }
+                                    : { backgroundColor: sidebarColor, top: '5rem' }
+                            }
                             role="dialog"
                             aria-modal="true"
                             aria-label="Categories"
@@ -1396,14 +1406,7 @@ export default function AssetsIndex({
                                 />
                                 {/* Only mount sentinel when there is a next page — avoids observer firing when assets < page size */}
                                 {nextPageUrl ? <div ref={loadMoreRef} className="h-10" aria-hidden="true" /> : null}
-                                {loading && (
-                                    <div className="flex justify-center py-6">
-                                        <svg className="animate-spin h-8 w-8 text-indigo-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" aria-hidden="true">
-                                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                                        </svg>
-                                    </div>
-                                )}
+                                {loading && <InfiniteScrollGridSpinner brand={auth?.activeBrand} />}
                                 {nextPageUrl && (
                                     <LoadMoreFooter onLoadMore={loadMore} hasMore={!!nextPageUrl} isLoading={loading} />
                                 )}
@@ -1452,7 +1455,7 @@ export default function AssetsIndex({
                     {/* Drawer must tolerate temporary undefined asset object during async updates */}
                     {/* Only render drawer if activeAssetId is set - asset object may be temporarily undefined */}
                     {activeAssetId && (
-                        <div className="hidden md:block absolute right-0 top-0 bottom-0 z-[130]">
+                        <div className="hidden md:block">
                             <AssetDrawer
                                 key={activeAssetId} // Key by ID only - prevents remount on asset object changes
                                 asset={activeAsset} // May be undefined temporarily during async updates
@@ -1480,7 +1483,7 @@ export default function AssetsIndex({
                 {/* Drawer must tolerate temporary undefined asset object during async updates */}
                 {/* Only render drawer if activeAssetId is set - asset object may be temporarily undefined */}
                 {activeAssetId && (
-                    <div className="md:hidden fixed inset-0 z-[130]">
+                    <div className="md:hidden fixed inset-0 z-[150]">
                         <div className="absolute inset-0 bg-black/50" onClick={() => { userClosedDrawerRef.current = true; setActiveAssetId(null) }} aria-hidden="true" />
                         <AssetDrawer
                             key={activeAssetId} // Key by ID only - prevents remount on asset object changes

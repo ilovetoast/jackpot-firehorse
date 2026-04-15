@@ -910,6 +910,66 @@ class Asset extends Model
     }
 
     /**
+     * Campaign alignment payload for a specific collection context.
+     * Returns null if no campaign identity or no campaign score exists for this asset+collection.
+     *
+     * @return array<string, mixed>|null
+     */
+    public function campaignAlignmentPayloadForFrontend(int $collectionId): ?array
+    {
+        $campaignIdentity = CollectionCampaignIdentity::query()
+            ->where('collection_id', $collectionId)
+            ->first();
+
+        $campaignScore = CampaignAlignmentScore::query()
+            ->where('asset_id', $this->id)
+            ->where('collection_id', $collectionId)
+            ->latest()
+            ->first();
+
+        $interpreter = new \App\Services\BrandIntelligence\Campaign\CombinedAlignmentInterpreter();
+        $masterPayload = $this->brandIntelligencePayloadForFrontend();
+
+        $interpretation = $interpreter->interpret($masterPayload, $campaignScore, $campaignIdentity);
+
+        $payload = [
+            'campaign_identity' => $campaignIdentity ? [
+                'id' => $campaignIdentity->id,
+                'campaign_name' => $campaignIdentity->campaign_name,
+                'campaign_status' => $campaignIdentity->campaign_status,
+                'readiness_status' => $campaignIdentity->readiness_status,
+                'scoring_enabled' => $campaignIdentity->scoring_enabled,
+            ] : null,
+            'campaign_score' => null,
+            'interpretation' => $interpretation,
+        ];
+
+        if ($campaignScore) {
+            $bj = $campaignScore->breakdown_json ?? [];
+
+            $payload['campaign_score'] = [
+                'overall_score' => $campaignScore->overall_score,
+                'confidence' => $campaignScore->confidence,
+                'level' => $campaignScore->level,
+                'engine_version' => $campaignScore->engine_version,
+                'dimensions' => $bj['dimensions'] ?? null,
+                'evaluation_context' => $bj['evaluation_context'] ?? null,
+                'weights' => $bj['weights'] ?? null,
+                'weights_note' => $bj['weights_note'] ?? null,
+                'campaign_references_used' => $bj['campaign_references_used'] ?? null,
+                'campaign_rules_checked' => $bj['campaign_rules_checked'] ?? null,
+                'scoring_path' => $bj['scoring_path'] ?? null,
+                'v2_weighted_score' => $bj['v2_weighted_score'] ?? null,
+                'v2_overall_confidence' => $bj['v2_overall_confidence'] ?? null,
+                'v2_rating' => $bj['v2_rating'] ?? null,
+                'v2_alignment_state' => $bj['v2_alignment_state'] ?? null,
+            ];
+        }
+
+        return $payload;
+    }
+
+    /**
      * Add signed thumbnail URLs to debug top references for the app UI.
      *
      * @param  array<string, mixed>|null  $debug

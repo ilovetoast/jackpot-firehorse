@@ -5,6 +5,7 @@ import { useAssetReconciliation } from '../../hooks/useAssetReconciliation'
 import { useThumbnailSmartPoll } from '../../hooks/useThumbnailSmartPoll'
 import { usePermission } from '../../hooks/usePermission'
 import LoadMoreFooter from '../../Components/LoadMoreFooter'
+import InfiniteScrollGridSpinner from '../../Components/InfiniteScrollGridSpinner'
 import axios from 'axios'
 import AppNav from '../../Components/AppNav'
 import AppHead from '../../Components/AppHead'
@@ -22,7 +23,12 @@ import { useSelection } from '../../contexts/SelectionContext'
 import { useBucketOptional } from '../../contexts/BucketContext'
 import { mergeAsset, warnIfOverwritingCompletedThumbnail } from '../../utils/assetUtils'
 import { DELIVERABLES_ITEM_LABEL, DELIVERABLES_ITEM_LABEL_PLURAL } from '../../utils/uiLabels'
-import { getWorkspaceButtonColor, getContrastTextColor, darkenColor } from '../../utils/colorUtils'
+import {
+    getWorkspaceButtonColor,
+    getWorkspaceContextualTone,
+    getContrastTextColor,
+    resolveWorkspaceSidebarSurface,
+} from '../../utils/colorUtils'
 import {
     TagIcon,
     SparklesIcon,
@@ -369,8 +375,8 @@ function DeliverablesIndexPage({ categories, total_asset_count = 0, selected_cat
         }
     }, [])
 
-    // Get brand sidebar color (nav_color) for sidebar background, fallback to primary color
-    const sidebarColor = auth.activeBrand?.nav_color || auth.activeBrand?.primary_color || '#1f2937' // Default to gray-800 if no brand color
+    const { isCinematic: sidebarIsCinematic, sidebarColor, backdropCss: sidebarBackdropCss } =
+        resolveWorkspaceSidebarSurface(auth.activeBrand)
     const workspaceAccentColor = getWorkspaceButtonColor(auth.activeBrand)
     const isLightColor = (color) => {
         if (!color || color === '#ffffff' || color === '#FFFFFF') return true
@@ -381,9 +387,9 @@ function DeliverablesIndexPage({ categories, total_asset_count = 0, selected_cat
         const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
         return luminance > 0.5
     }
-    const textColor = isLightColor(sidebarColor) ? '#000000' : '#ffffff'
+    const textColor = sidebarIsCinematic || !isLightColor(sidebarColor) ? '#ffffff' : '#000000'
     // Match Add Execution button: selected/hover use dark hue (same as button hover state)
-    const contextualDarkColor = darkenColor(workspaceAccentColor, 20)
+    const contextualDarkColor = getWorkspaceContextualTone(workspaceAccentColor)
     const activeBgColor = contextualDarkColor
     const activeTextColor = getContrastTextColor(contextualDarkColor)
     const hoverBgColor = contextualDarkColor
@@ -571,14 +577,13 @@ function DeliverablesIndexPage({ categories, total_asset_count = 0, selected_cat
     
     // BUGFIX: Single handler to open upload dialog
     const handleOpenUploadDialog = useCallback((files = null) => {
-        // Prevent opening if auto-close is in progress
         if (isAutoClosing) {
             return
         }
-        // Store dropped files if provided
         if (files) {
             setDroppedFiles(files)
         }
+        try { sessionStorage.removeItem('uploadAssetDialogMinimized') } catch (_) { /* ignore */ }
         setIsUploadDialogOpen(true)
     }, [isAutoClosing])
     
@@ -703,6 +708,7 @@ function DeliverablesIndexPage({ categories, total_asset_count = 0, selected_cat
                         baseUrl="/app/executions"
                         onTrashClick={() => router.get('/app/executions', { lifecycle: 'deleted' })}
                         sidebarColor={sidebarColor}
+                        sidebarBackdropCss={sidebarBackdropCss}
                         workspaceAccentColor={workspaceAccentColor}
                         isLightColor={isLightColor}
                         tooltipVisible={tooltipVisible}
@@ -940,14 +946,7 @@ function DeliverablesIndexPage({ categories, total_asset_count = 0, selected_cat
                                 executionThumbnailViewMode={thumbnailViewMode}
                             />
                             {nextPageUrl ? <div ref={loadMoreRef} className="h-10" aria-hidden="true" /> : null}
-                            {loading && (
-                                <div className="flex justify-center py-6">
-                                    <svg className="animate-spin h-8 w-8 text-indigo-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" aria-hidden="true">
-                                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                                    </svg>
-                                </div>
-                            )}
+                            {loading && <InfiniteScrollGridSpinner brand={auth?.activeBrand} />}
                             {nextPageUrl && <LoadMoreFooter onLoadMore={loadMore} hasMore={!!nextPageUrl} isLoading={loading} />}
                             </>
                         ) : (
@@ -983,7 +982,7 @@ function DeliverablesIndexPage({ categories, total_asset_count = 0, selected_cat
 
                     {/* Asset Drawer - Desktop (pushes grid) */}
                     {activeAsset && (
-                        <div className="hidden md:block absolute right-0 top-0 bottom-0 z-[130]">
+                        <div className="hidden md:block">
                             <AssetDrawer
                                 asset={activeAsset}
                                 onClose={() => {
@@ -1012,7 +1011,7 @@ function DeliverablesIndexPage({ categories, total_asset_count = 0, selected_cat
                 {/* Drawer must tolerate temporary undefined asset object during async updates */}
                 {/* Only render drawer if activeAssetId is set - asset object may be temporarily undefined */}
                 {activeAssetId && (
-                    <div className="md:hidden fixed inset-0 z-[130]">
+                    <div className="md:hidden fixed inset-0 z-[150]">
                         <div className="absolute inset-0 bg-black/50" onClick={() => { userClosedDrawerRef.current = true; setActiveAssetId(null); setOpenDrawerWithZoom(false) }} aria-hidden="true" />
                         <AssetDrawer
                             key={activeAssetId} // Key by ID only - prevents remount on asset object changes

@@ -5,7 +5,7 @@
 import { usePage } from '@inertiajs/react'
 import { usePermission } from '../hooks/usePermission'
 import { DELIVERABLES_PAGE_LABEL_SINGULAR } from '../utils/uiLabels'
-import { getWorkspaceButtonColor, getContrastTextColor, darkenColor } from '../utils/colorUtils'
+import { getWorkspacePrimaryActionButtonColors, getContrastTextColor } from '../utils/colorUtils'
 
 /**
  * AddAssetButton - Button to trigger upload dialog (gated by permissions)
@@ -38,11 +38,8 @@ export default function AddAssetButton({
         ? 'Add Asset' 
         : `Add ${DELIVERABLES_PAGE_LABEL_SINGULAR}`
 
-    const workspaceBase = getWorkspaceButtonColor(auth.activeBrand)
-    // Same solid as Library "All" / category selected row (Assets Index: darken(workspace, 20))
-    const btnColor = darkenColor(workspaceBase, 20)
+    const { resting: btnColor, hover: hoverBg } = getWorkspacePrimaryActionButtonColors(auth.activeBrand)
     const labelColor = getContrastTextColor(btnColor)
-    const hoverBg = darkenColor(workspaceBase, 35)
     const hoverLabelColor = getContrastTextColor(hoverBg)
 
     return (

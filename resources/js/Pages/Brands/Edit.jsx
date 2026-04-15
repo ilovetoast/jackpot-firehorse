@@ -7,7 +7,11 @@ import { ARCHETYPES } from '../../constants/brandOptions'
 import AppHead from '../../Components/AppHead'
 import AppFooter from '../../Components/AppFooter'
 import PlanLimitCallout from '../../Components/PlanLimitCallout'
-import { getContrastTextColor } from '../../utils/colorUtils'
+import {
+    getContrastTextColor,
+    workspaceOverviewBackdropCss,
+    getWorkspacePrimaryActionButtonColors,
+} from '../../utils/colorUtils'
 import { DELIVERABLES_PAGE_LABEL_SINGULAR } from '../../utils/uiLabels'
 import BrandIconUnified from '../../Components/BrandIconUnified'
 import FontManager from '../../Components/BrandGuidelines/FontManager'
@@ -923,6 +927,8 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
             contributor_upload_requires_approval: brand.settings?.contributor_upload_requires_approval === true || brand.settings?.contributor_upload_requires_approval === '1' || brand.settings?.contributor_upload_requires_approval === 1, // Phase J.3.1
             asset_grid_style: brand.settings?.asset_grid_style || 'clean', // clean | impact
             nav_display_mode: brand.settings?.nav_display_mode || 'logo', // logo | text
+            /** solid = nav_color swatches; cinematic = Overview-style gradient on DAM sidebars */
+            workspace_sidebar_style: brand.settings?.workspace_sidebar_style || 'solid', // solid | cinematic
         },
         // D10: Brand-level download landing branding (logo from assets, color from palette, no raw URL/hex)
         download_landing_settings: {
@@ -3167,6 +3173,42 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
 
                                 <hr className="my-10 border-gray-200" />
 
+                                <div className="mb-10 max-w-2xl">
+                                    <h4 className="text-sm font-medium text-gray-900 mb-1">Sidebar background</h4>
+                                    <p className="text-sm text-gray-500 mb-4">
+                                        Solid uses a single color from your palette. Cinematic matches Overview: dark base
+                                        with soft glows from your brand primary and secondary (or accent when secondary is
+                                        unset).
+                                    </p>
+                                    <div className="flex flex-col gap-3 sm:flex-row">
+                                        {[
+                                            { value: 'solid', label: 'Solid', desc: 'Choose a swatch below' },
+                                            { value: 'cinematic', label: 'Cinematic', desc: 'Same recipe as Overview' },
+                                        ].map((opt) => (
+                                            <button
+                                                key={opt.value}
+                                                type="button"
+                                                onClick={() => {
+                                                    const newSettings = {
+                                                        ...data.settings,
+                                                        workspace_sidebar_style: opt.value,
+                                                    }
+                                                    setData('settings', newSettings)
+                                                    autoSaveBrandField({ settings: newSettings })
+                                                }}
+                                                className={`relative flex flex-1 flex-col rounded-lg border-2 p-4 text-left transition-all ${
+                                                    (data.settings?.workspace_sidebar_style || 'solid') === opt.value
+                                                        ? 'border-indigo-600 ring-2 ring-indigo-600 bg-indigo-50/30'
+                                                        : 'border-gray-200 hover:border-gray-300'
+                                                }`}
+                                            >
+                                                <span className="text-sm font-medium text-gray-900">{opt.label}</span>
+                                                <span className="mt-1 text-xs text-gray-500">{opt.desc}</span>
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+
                                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-12">
                                     {/* Button style selection */}
                                     <div>
@@ -3174,9 +3216,24 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                         <p className="text-sm text-gray-500 mb-4">
                                             Color for Add Asset and primary action buttons in the workspace.
                                         </p>
-                                        <div className="flex gap-2">
-                                            {['primary', 'secondary', 'accent'].map((style) => {
-                                                const hex = style === 'primary' ? (data.primary_color || brand.primary_color || '#6366f1') : style === 'secondary' ? (data.secondary_color || brand.secondary_color || '#64748b') : (data.accent_color || brand.accent_color || data.primary_color || brand.primary_color || '#6366f1')
+                                        <div className="grid grid-cols-3 gap-2">
+                                            {['primary', 'secondary', 'accent', 'white', 'black'].map((style) => {
+                                                const hex =
+                                                    style === 'primary'
+                                                        ? data.primary_color || brand.primary_color || '#6366f1'
+                                                        : style === 'secondary'
+                                                          ? data.secondary_color || brand.secondary_color || '#64748b'
+                                                          : style === 'accent'
+                                                            ? data.accent_color ||
+                                                              brand.accent_color ||
+                                                              data.primary_color ||
+                                                              brand.primary_color ||
+                                                              '#6366f1'
+                                                            : style === 'white'
+                                                              ? '#ffffff'
+                                                              : '#000000'
+                                                const pillLabel = style === 'white' ? '#111827' : '#ffffff'
+                                                const pillBorder = style === 'white' ? '1px solid #e5e7eb' : undefined
                                                 return (
                                                     <button
                                                         key={style}
@@ -3185,11 +3242,18 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                                             setData('workspace_button_style', style)
                                                             autoSaveBrandField({ workspace_button_style: style })
                                                         }}
-                                                        className={`flex-1 flex flex-col items-center p-3 rounded-lg border-2 transition-all ${
+                                                        className={`flex flex-col items-center p-3 rounded-lg border-2 transition-all ${
                                                             (data.workspace_button_style ?? data.settings?.button_style ?? 'primary') === style ? 'border-indigo-600 ring-2 ring-indigo-600' : 'border-gray-200 hover:border-gray-300'
                                                         }`}
                                                     >
-                                                        <div className="w-full h-10 rounded-md mb-1.5 flex items-center justify-center text-white text-xs font-medium" style={{ backgroundColor: hex }}>
+                                                        <div
+                                                            className="mb-1.5 flex h-10 w-full items-center justify-center rounded-md text-xs font-medium"
+                                                            style={{
+                                                                backgroundColor: hex,
+                                                                color: pillLabel,
+                                                                border: pillBorder,
+                                                            }}
+                                                        >
                                                             {style.charAt(0).toUpperCase() + style.slice(1)}
                                                         </div>
                                                         <span className="text-xs font-medium text-gray-900">{style.charAt(0).toUpperCase() + style.slice(1)}</span>
@@ -3227,12 +3291,19 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                             ))}
                                         </div>
                                     </div>
-                                    {/* Sidebar color selection — locked to brand palette + neutral options */}
+                                    {/* Sidebar color selection — locked to brand palette + neutral options (solid mode only) */}
                                     <div>
                                         <h4 className="text-sm font-medium text-gray-900 mb-1">Sidebar color</h4>
                                         <p className="text-sm text-gray-500 mb-4">
-                                            Choose from your brand palette or a neutral option.
+                                            Choose from your brand palette or a neutral option. Used when Sidebar
+                                            background is set to Solid.
                                         </p>
+                                        {(data.settings?.workspace_sidebar_style || 'solid') === 'cinematic' ? (
+                                            <p className="rounded-lg border border-dashed border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-600">
+                                                Cinematic mode uses your brand primary and secondary automatically. Switch
+                                                to Solid to pick a flat sidebar color.
+                                            </p>
+                                        ) : (
                                         <div className="grid grid-cols-3 sm:grid-cols-5 gap-3">
                                             {[
                                                 { label: 'Primary', color: data.primary_color || '#6366f1', available: true },
@@ -3277,6 +3348,7 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                                 )
                                             })}
                                         </div>
+                                        )}
                                         {errors.nav_color && <p className="mt-2 text-sm text-red-600">{errors.nav_color}</p>}
                                     </div>
                                 </div>
@@ -3291,10 +3363,33 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                     How the workspace will appear in the DAM.
                                 </p>
                                 {(() => {
+                                    const sidebarCinematic =
+                                        (data.settings?.workspace_sidebar_style || 'solid') === 'cinematic'
                                     const sidebarColor = data.nav_color || data.primary_color || brand.primary_color || '#6366f1'
-                                    const sidebarTextColor = getContrastTextColor(sidebarColor)
-                                    const btnStyle = data.workspace_button_style ?? data.settings?.button_style ?? 'primary'
-                                    const btnColor = btnStyle === 'primary' ? (data.primary_color || brand.primary_color || '#6366f1') : btnStyle === 'secondary' ? (data.secondary_color || brand.secondary_color || '#64748b') : (data.accent_color || brand.accent_color || data.primary_color || brand.primary_color || '#6366f1')
+                                    const previewPrimary = data.primary_color || brand.primary_color || '#6366f1'
+                                    const previewSecondary =
+                                        data.secondary_color ||
+                                        brand.secondary_color ||
+                                        data.accent_color ||
+                                        brand.accent_color ||
+                                        previewPrimary
+                                    const sidebarBackdropCss = sidebarCinematic
+                                        ? workspaceOverviewBackdropCss(previewPrimary, previewSecondary)
+                                        : null
+                                    const sidebarTextColor = sidebarBackdropCss
+                                        ? '#ffffff'
+                                        : getContrastTextColor(sidebarColor)
+                                    const previewBrandForBtn = {
+                                        workspace_button_style:
+                                            data.workspace_button_style ?? data.settings?.button_style ?? 'primary',
+                                        primary_color: data.primary_color || brand.primary_color,
+                                        secondary_color: data.secondary_color || brand.secondary_color,
+                                        accent_color: data.accent_color || brand.accent_color,
+                                        settings: data.settings,
+                                    }
+                                    const { resting: addAssetPreviewBg } =
+                                        getWorkspacePrimaryActionButtonColors(previewBrandForBtn)
+                                    const addAssetPreviewFg = getContrastTextColor(addAssetPreviewBg)
                                     const previewLogoSrc = data.logo_preview || brand.logo_thumbnail_url || brand.logo_path
                                     const previewNavMode = data.settings?.nav_display_mode || 'logo'
                                     const previewFilterValue = data.logo_filter || 'none'
@@ -3328,7 +3423,15 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                                 {/* Sidebar */}
                                                 <aside
                                                     className="w-[56px] flex flex-col flex-shrink-0"
-                                                    style={{ backgroundColor: sidebarColor, color: sidebarTextColor }}
+                                                    style={
+                                                        sidebarBackdropCss
+                                                            ? {
+                                                                  background: sidebarBackdropCss,
+                                                                  backgroundColor: '#0B0B0D',
+                                                                  color: sidebarTextColor,
+                                                              }
+                                                            : { backgroundColor: sidebarColor, color: sidebarTextColor }
+                                                    }
                                                 >
                                                     <nav className="flex-1 py-2 space-y-0.5">
                                                         {['All', 'Logos', 'Photos', 'Graphics'].map((label, idx) => (
@@ -3342,8 +3445,11 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                                 <main className="flex-1 flex flex-col bg-[#f8f9fa] min-w-0">
                                                     <div className="flex items-center gap-2 px-3 py-2 flex-shrink-0">
                                                         <span
-                                                            className="px-2.5 py-1 rounded text-[9px] font-medium text-white"
-                                                            style={{ backgroundColor: btnColor }}
+                                                            className="px-2.5 py-1 rounded text-[9px] font-medium"
+                                                            style={{
+                                                                backgroundColor: addAssetPreviewBg,
+                                                                color: addAssetPreviewFg,
+                                                            }}
                                                         >
                                                             Add Asset
                                                         </span>

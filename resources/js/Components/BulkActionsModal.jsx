@@ -380,7 +380,7 @@ function getActionLabel(actionId) {
         if (a) return a.label
     }
     if (actionId === SITE_RERUN_THUMBNAILS) return 'Refresh previews'
-    if (actionId === SITE_RERUN_AI_METADATA_TAGGING) return 'Improve AI tags'
+    if (actionId === SITE_RERUN_AI_METADATA_TAGGING) return 'Re-run AI tagging'
     if (actionId === SITE_GENERATE_VIDEO_PREVIEWS) return 'Generate video previews'
     if (actionId === SITE_DELETE_VIDEO_PREVIEWS) return 'Delete video quick previews'
     if (actionId === SITE_REPROCESS_SYSTEM_METADATA) return 'Re-run metadata extraction'
@@ -396,7 +396,7 @@ function getConfirmSummaryText(actionId, count) {
         return `This will refresh thumbnails and preview images for ${count} selected asset${count !== 1 ? 's' : ''}.${batchNote}`
     }
     if (actionId === SITE_RERUN_AI_METADATA_TAGGING) {
-        return `This will improve AI-suggested tags and metadata for ${count} selected asset${count !== 1 ? 's' : ''}. Assets without completed thumbnails will be skipped. Uses tenant AI tagging quota.${batchNote}`
+        return `This will re-run AI tagging and refresh AI-suggested metadata for ${count} selected asset${count !== 1 ? 's' : ''}. Assets without completed thumbnails will be skipped. Uses tenant AI tagging quota.${batchNote}`
     }
     if (actionId === SITE_GENERATE_VIDEO_PREVIEWS) {
         return `This will queue hover/quick preview MP4 regeneration for video assets in your selection (${count} selected), including correct orientation from metadata. Non-video assets and items without a poster/thumbnail will be skipped.${batchNote}`
@@ -757,8 +757,8 @@ export default function BulkActionsModal({
                                                     <ProcessingActionCard
                                                         compact
                                                         icon="sparkles"
-                                                        title="Improve AI tags"
-                                                        description="Refresh AI suggestions and tags"
+                                                        title="Re-run AI tagging"
+                                                        description="Queue another pass on AI suggestions and tags for selected assets"
                                                         onClick={() => handleSelectAction(SITE_RERUN_AI_METADATA_TAGGING)}
                                                         disabled={pipelineSelectionOverLimit}
                                                     />

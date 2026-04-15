@@ -660,13 +660,14 @@ class BrandController extends Controller
             'secondary_color' => ['nullable', 'string', 'regex:/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/'],
             'accent_color' => ['nullable', 'string', 'regex:/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/'],
             'nav_color' => ['nullable', 'string', 'regex:/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/'],
-            'workspace_button_style' => 'nullable|string|in:primary,secondary,accent',
+            'workspace_button_style' => 'nullable|string|in:primary,secondary,accent,white,black',
             'logo_filter' => 'nullable|string|in:none,white,black,primary',
             'settings' => 'nullable|array',
             'settings.metadata_approval_enabled' => 'nullable|boolean', // Phase M-2
             'settings.contributor_upload_requires_approval' => 'nullable|boolean', // Phase J.3.1
             'settings.asset_grid_style' => 'nullable|string|in:clean,impact',
             'settings.nav_display_mode' => 'nullable|string|in:logo,text',
+            'settings.workspace_sidebar_style' => 'nullable|string|in:solid,cinematic',
             'portal_settings' => 'nullable|array',
             'portal_settings.entry' => 'nullable|array',
             'portal_settings.entry.style' => 'nullable|string|in:cinematic,instant',

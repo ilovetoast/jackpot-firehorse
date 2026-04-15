@@ -421,6 +421,185 @@ function V2DimensionGrid({ dimensions }) {
     )
 }
 
+/* ======================================================================
+ *  Campaign Alignment helpers
+ * ====================================================================== */
+
+const CAMPAIGN_CTA_MAP = {
+    incomplete_identity: {
+        label: 'Campaign identity is still incomplete — finish setup before campaign alignment can run.',
+        action: 'settings',
+    },
+    partial_incomplete: { label: 'Complete campaign identity to improve scoring', action: 'settings' },
+    partial_disabled: { label: 'Enable campaign scoring', action: 'settings' },
+    ready_disabled: { label: 'Enable campaign scoring', action: 'settings' },
+    unscored: {
+        label: 'Not yet aligned with campaign identity for this asset — scoring will run after setup is ready (save Campaign identity or wait for the queue).',
+        action: 'score',
+    },
+}
+
+function campaignCtaState(campaignAlignment, collectionId) {
+    if (!campaignAlignment || !collectionId) return null
+    const ci = campaignAlignment.campaign_identity
+    if (!ci) return null
+    const { readiness_status, scoring_enabled } = ci
+    if (readiness_status === 'incomplete') return 'incomplete_identity'
+    if (readiness_status === 'partial' && !scoring_enabled) return 'partial_disabled'
+    if (readiness_status === 'partial' && scoring_enabled && !campaignAlignment.campaign_score) return 'partial_incomplete'
+    if (readiness_status === 'ready' && !scoring_enabled) return 'ready_disabled'
+    if (scoring_enabled && !campaignAlignment.campaign_score) return 'unscored'
+    return null
+}
+
+/**
+ * Collection selected but API returned no campaign identity — alignment cannot be campaign-based.
+ */
+function CollectionWithoutCampaignNote({ collectionId }) {
+    if (!collectionId) return null
+    return (
+        <div className="mt-1.5 rounded-md border border-slate-200 bg-slate-50/90 px-2 py-1.5 text-[10px] leading-snug text-slate-700">
+            <p className="font-semibold text-slate-800">Master brand alignment only</p>
+            <p className="mt-1">
+                Jackpot scores alignment in two ways: <strong>master brand</strong> (published guidelines) and{' '}
+                <strong>campaign</strong> (this collection&apos;s campaign identity). This collection does not have
+                campaign identity set up, so there is <strong>no separate campaign alignment</strong> to show — only
+                master brand scoring applies.
+            </p>
+            <p className="mt-1 text-[9px] text-slate-500">
+                Add a campaign on{' '}
+                <Link
+                    href={`/app/collections/${collectionId}/campaign`}
+                    className="font-medium text-indigo-600 underline decoration-indigo-300 underline-offset-2 hover:text-indigo-800"
+                >
+                    Campaign identity
+                </Link>{' '}
+                if you want palette, type, and goals from the campaign reflected in alignment.
+            </p>
+        </div>
+    )
+}
+
+/**
+ * Always-visible note when the drawer has collection context + campaign identity but the compact header is still “master first”.
+ */
+function CampaignCollectionCallout({
+    collectionId,
+    campaignAlignment,
+    showCampaignPrimary,
+    campaignAlignmentFetchSettled,
+}) {
+    if (showCampaignPrimary || !collectionId) {
+        return null
+    }
+    if (!campaignAlignmentFetchSettled) {
+        return null
+    }
+    // null after a settled fetch means the request failed — do not imply "no campaign identity".
+    if (campaignAlignment === null) {
+        return null
+    }
+    if (!campaignAlignment?.campaign_identity) {
+        return <CollectionWithoutCampaignNote collectionId={collectionId} />
+    }
+    const ci = campaignAlignment.campaign_identity
+    const name = ci.campaign_name
+    const interpretation = campaignAlignment.interpretation
+    const scored = campaignAlignment.campaign_score != null
+    const summary =
+        typeof interpretation?.interpretation_text === 'string' && interpretation.interpretation_text.trim() !== ''
+            ? interpretation.interpretation_text
+            : null
+
+    return (
+        <div className="mt-1.5 rounded-md border border-violet-200/90 bg-violet-50/80 px-2 py-1.5 text-[10px] leading-snug text-violet-950">
+            <p className="text-[9px] font-semibold uppercase tracking-wide text-violet-800/90">Two alignment modes</p>
+            <p className="mt-1 text-violet-900/95">
+                <strong>Master brand</strong> = published guidelines. <strong>Campaign</strong> = this collection&apos;s
+                campaign identity. The compact row above is still <strong>master brand</strong> until campaign scoring
+                completes and surfaces campaign-first.
+            </p>
+            <div className="mt-1.5 font-semibold text-violet-900">
+                Campaign identity{typeof name === 'string' && name.trim() !== '' ? ` · ${name}` : ''}
+            </div>
+            {summary && <p className="mt-0.5 text-violet-900/90">{summary}</p>}
+            {!scored && (
+                <p className="mt-1 text-violet-900/90">
+                    The Logo / Palette / Type / Style row reflects your <strong>master brand</strong> only. To review
+                    alignment with <strong>this campaign</strong>, campaign scoring must run for this asset in this
+                    collection — open{' '}
+                    <Link
+                        href={`/app/collections/${collectionId}/campaign`}
+                        className="font-semibold text-violet-800 underline decoration-violet-400 underline-offset-2 hover:text-violet-950"
+                    >
+                        Campaign identity
+                    </Link>
+                    , then save (or wait for the scoring queue).
+                </p>
+            )}
+            {scored && (
+                <p className="mt-0.5 text-violet-900/85">
+                    Expand for campaign dimensions and combined interpretation. The row above still summarizes master brand
+                    signals.
+                </p>
+            )}
+            <p className="mt-1 border-t border-violet-200/60 pt-1 text-[9px] text-violet-800/80">
+                <strong>Re-score</strong> below updates <strong>master brand</strong> alignment only; it does not by
+                itself run campaign alignment.
+            </p>
+        </div>
+    )
+}
+
+function CampaignCta({ campaignAlignment, collectionId }) {
+    const state = campaignCtaState(campaignAlignment, collectionId)
+    if (!state) return null
+    const cta = CAMPAIGN_CTA_MAP[state]
+    if (!cta) return null
+    if (cta.action === 'settings' && collectionId) {
+        return (
+            <div className="mt-1.5 rounded border border-amber-200/80 bg-amber-50/70 px-2 py-1.5 text-[10px] text-amber-800">
+                {cta.label}{' '}
+                <Link href={`/app/collections/${collectionId}/campaign`} className="font-medium underline underline-offset-2">
+                    Open Campaign identity
+                </Link>
+            </div>
+        )
+    }
+    if (cta.action === 'score' && collectionId) {
+        return (
+            <div className="mt-1.5 rounded border border-amber-200/80 bg-amber-50/70 px-2 py-1.5 text-[10px] text-amber-800">
+                {cta.label}{' '}
+                <Link href={`/app/collections/${collectionId}/campaign`} className="font-medium underline underline-offset-2">
+                    Open Campaign identity
+                </Link>
+            </div>
+        )
+    }
+    return (
+        <div className="mt-1.5 rounded border border-amber-200/80 bg-amber-50/70 px-2 py-1.5 text-[10px] text-amber-800">
+            {cta.label}
+        </div>
+    )
+}
+
+function CampaignMasterSummary({ interpretation }) {
+    if (!interpretation) return null
+    const { master_rating, master_state, master_confidence } = interpretation
+    if (master_rating == null) return null
+    const stateLabel = master_state ? String(master_state).replace(/_/g, ' ') : '—'
+    return (
+        <div className="mt-1.5 flex items-center gap-2 rounded border border-slate-100 bg-slate-50/60 px-2 py-1.5 text-[10px]">
+            <span className="font-medium text-slate-600">Master Brand</span>
+            <ScoreDots count={Math.min(4, Math.max(0, master_rating))} tone={v2RatingTone(master_rating)} />
+            <span className="capitalize text-slate-500">{stateLabel}</span>
+            {master_confidence != null && (
+                <span className="text-slate-400">conf {Math.round(master_confidence * 100)}%</span>
+            )}
+        </div>
+    )
+}
+
 /**
  * @param {object} props
  * @param {object} [props.brandIntelligence]
@@ -428,7 +607,15 @@ function V2DimensionGrid({ dimensions }) {
  * @param {string|number} [props.brandId] — for “Fix issues” navigation
  * @param {object} [props.asset] — optional; used for MIME (video notice) and signal source copy
  */
-export default function BrandSignalBreakdown({ brandIntelligence = null, data = null, brandId = null, asset = null }) {
+export default function BrandSignalBreakdown({
+    brandIntelligence = null,
+    data = null,
+    brandId = null,
+    asset = null,
+    campaignAlignment = null,
+    campaignAlignmentFetchSettled = true,
+    collectionId = null,
+}) {
     const [expanded, setExpanded] = useState(false)
     const [refDetailOpen, setRefDetailOpen] = useState(false)
     const [confSeg, setConfSeg] = useState(0)
@@ -489,6 +676,15 @@ export default function BrandSignalBreakdown({ brandIntelligence = null, data = 
 
     const { alignment_state, confidenceBand, signals, reference_tier_usage, signal_score, breakdown, confidence, hasV2, v2Rating, v2Dimensions, v2Recommendations } =
         normalized
+
+    const hasCampaignScore = campaignAlignment?.campaign_score != null
+    const campaignScore = campaignAlignment?.campaign_score
+    const campaignDimensions = campaignScore?.dimensions ?? null
+    const campaignRating = campaignScore?.v2_rating ?? campaignScore?.overall_score ?? null
+    const campaignConfidence = campaignScore?.v2_overall_confidence ?? campaignScore?.confidence ?? null
+    const interpretation = campaignAlignment?.interpretation
+    const campaignName = campaignAlignment?.campaign_identity?.campaign_name
+    const showCampaignPrimary = hasCampaignScore && interpretation?.primary_display === 'campaign'
 
     const creativePanel = useMemo(() => {
         if (!hasCreativeIntelligencePanel(breakdown)) return null
@@ -551,10 +747,35 @@ export default function BrandSignalBreakdown({ brandIntelligence = null, data = 
                 <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2">
-                            <h3 className="text-xs font-semibold text-slate-900">Brand Alignment</h3>
-                            <ScoreDots count={filledDots} tone={tone} />
+                            <h3 className="text-xs font-semibold text-slate-900">
+                                {showCampaignPrimary ? 'Campaign Alignment' : 'Brand Alignment'}
+                            </h3>
+                            <ScoreDots
+                                count={showCampaignPrimary ? Math.min(4, Math.max(0, campaignRating ?? 0)) : filledDots}
+                                tone={showCampaignPrimary ? v2RatingTone(campaignRating ?? 0) : tone}
+                            />
                         </div>
-                        {hasV2 ? (
+                        <CampaignCollectionCallout
+                            collectionId={collectionId}
+                            campaignAlignment={campaignAlignment}
+                            campaignAlignmentFetchSettled={campaignAlignmentFetchSettled}
+                            showCampaignPrimary={showCampaignPrimary}
+                        />
+                        {showCampaignPrimary && campaignName && (
+                            <div className="mt-0.5 text-[10px] text-slate-500">
+                                <span className="inline-flex items-center gap-1 rounded bg-violet-50 px-1.5 py-0.5 text-violet-700 font-medium">
+                                    {campaignName}
+                                </span>
+                                {interpretation?.master_rating != null && (
+                                    <span className="ml-2 text-slate-400">
+                                        Brand: {String(interpretation.master_state ?? '').replace(/_/g, ' ')}
+                                    </span>
+                                )}
+                            </div>
+                        )}
+                        {showCampaignPrimary && campaignDimensions ? (
+                            <V2DimensionChips dimensions={campaignDimensions} />
+                        ) : hasV2 ? (
                             <V2DimensionChips dimensions={v2Dimensions} />
                         ) : (
                             <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-slate-600">
@@ -638,7 +859,42 @@ export default function BrandSignalBreakdown({ brandIntelligence = null, data = 
             >
                 <div className="overflow-hidden min-h-0">
                     <div className="border-t border-slate-100 px-2.5 pb-2.5 pt-1.5 transition-opacity duration-300 ease-out">
-                        {hasV2 ? (
+                        {showCampaignPrimary ? (
+                            <>
+                                <div className="mb-2 rounded-md border border-violet-100 bg-violet-50/60 px-2 py-1.5 text-[10px] leading-snug text-slate-600">
+                                    <p className="font-semibold text-violet-900">Campaign-based alignment (this collection)</p>
+                                    <p className="mt-1">
+                                        You are viewing alignment scored against{' '}
+                                        <span className="font-medium text-violet-950">{campaignName ?? 'this campaign'}</span>
+                                        &apos;s <strong>campaign identity</strong> (palette, typography, goals — not only
+                                        master guidelines).
+                                    </p>
+                                    <p className="mt-1.5 border-t border-violet-200/70 pt-1.5 text-[9px] text-slate-600">
+                                        <span className="font-medium text-slate-700">Two modes in Jackpot:</span>{' '}
+                                        <strong>Master brand</strong> uses published brand guidelines everywhere.{' '}
+                                        <strong>Campaign</strong> adds this collection&apos;s campaign rules when you open
+                                        assets from that collection and campaign scoring has run. The dimension grid below
+                                        reflects <strong>campaign</strong> evaluation; master brand is summarized under it.
+                                    </p>
+                                </div>
+                                {isVideoAsset(asset) && (
+                                    <div className="text-xs text-yellow-600 mb-2">
+                                        Visual analysis limited for video assets.
+                                    </div>
+                                )}
+                                <V2DimensionGrid dimensions={campaignDimensions} />
+                                <CampaignMasterSummary interpretation={interpretation} />
+                                {interpretation?.interpretation_text && (
+                                    <div className="mt-1.5 rounded border border-slate-100 bg-slate-50/60 px-2 py-1.5 text-[10px] leading-snug text-slate-600">
+                                        {interpretation.interpretation_text}
+                                        {interpretation.interpretation_caveat && (
+                                            <p className="mt-0.5 text-[9px] text-slate-400">{interpretation.interpretation_caveat}</p>
+                                        )}
+                                    </div>
+                                )}
+                                <CampaignCta campaignAlignment={campaignAlignment} collectionId={collectionId} />
+                            </>
+                        ) : hasV2 ? (
                             <>
                                 <div className="mb-2 rounded-md border border-slate-100 bg-slate-50/80 px-2 py-1.5 text-[10px] leading-snug text-slate-600">
                                     <span className="font-medium text-slate-700">6 alignment dimensions</span> — each
@@ -651,6 +907,9 @@ export default function BrandSignalBreakdown({ brandIntelligence = null, data = 
                                     </div>
                                 )}
                                 <V2DimensionGrid dimensions={v2Dimensions} />
+                                {campaignAlignment && !hasCampaignScore && (
+                                    <CampaignCta campaignAlignment={campaignAlignment} collectionId={collectionId} />
+                                )}
                             </>
                         ) : (
                             <>
@@ -698,6 +957,9 @@ export default function BrandSignalBreakdown({ brandIntelligence = null, data = 
                                         )
                                     })}
                                 </div>
+                                {campaignAlignment && (
+                                    <CampaignCta campaignAlignment={campaignAlignment} collectionId={collectionId} />
+                                )}
                             </>
                         )}
 

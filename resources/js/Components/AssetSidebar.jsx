@@ -24,7 +24,7 @@ import {
 } from '@heroicons/react/24/outline'
 import { CategoryIcon } from '../Helpers/categoryIcons'
 import OnlineUsersIndicator from './OnlineUsersIndicator'
-import { darkenColor, getContrastTextColor } from '../utils/colorUtils'
+import { getWorkspaceContextualTone, getContrastTextColor } from '../utils/colorUtils'
 
 const STORAGE_KEY = 'workspace-sidebar-system-collapsed'
 
@@ -110,6 +110,8 @@ export default function AssetSidebar({
     onStagedClick,
     onTrashClick,
     sidebarColor = '#1f2937',
+    /** When set, Overview-style cinematic gradient (brand primary + secondary glows on #0B0B0D). */
+    sidebarBackdropCss = null,
     workspaceAccentColor,
     isLightColor,
     tooltipVisible,
@@ -142,8 +144,13 @@ export default function AssetSidebar({
         })
     }, [])
 
-    const textColor = isLightColor(sidebarColor) ? '#000000' : '#ffffff'
-    const contextualDarkColor = darkenColor(workspaceAccentColor || '#6366f1', 20)
+    const textColor =
+        sidebarBackdropCss != null && String(sidebarBackdropCss).trim() !== ''
+            ? '#ffffff'
+            : isLightColor(sidebarColor)
+              ? '#000000'
+              : '#ffffff'
+    const contextualDarkColor = getWorkspaceContextualTone(workspaceAccentColor || '#6366f1')
     const activeBgColor = contextualDarkColor
     const activeTextColor = getContrastTextColor(contextualDarkColor)
     const hoverBgColor = contextualDarkColor
@@ -164,7 +171,14 @@ export default function AssetSidebar({
     const filteredCategories = filterCategories ? filterCategories(categories) : categories
 
     return (
-        <div className="flex flex-col w-64 xl:w-72 h-full transition-[width] duration-200" style={{ backgroundColor: sidebarColor }}>
+        <div
+            className="flex flex-col w-64 xl:w-72 h-full transition-[width] duration-200"
+            style={
+                sidebarBackdropCss != null && String(sidebarBackdropCss).trim() !== ''
+                    ? { background: sidebarBackdropCss, backgroundColor: '#0B0B0D' }
+                    : { backgroundColor: sidebarColor }
+            }
+        >
             <div className="flex-1 flex flex-col pt-4 pb-3 lg:pt-5 lg:pb-4 overflow-y-auto">
                 <nav className="mt-3 lg:mt-5 flex-1 px-1.5 lg:px-2 space-y-1">
                     {addAssetButton && (
@@ -386,7 +400,11 @@ export default function AssetSidebar({
                 <OnlineUsersIndicator
                     textColor={sectionLabelStyle(textColor).color}
                     primaryColor={workspaceAccentColor}
-                    isLightBackground={isLightColor(sidebarColor)}
+                    isLightBackground={
+                        sidebarBackdropCss != null && String(sidebarBackdropCss).trim() !== ''
+                            ? false
+                            : isLightColor(sidebarColor)
+                    }
                 />
             </div>
         </div>

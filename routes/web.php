@@ -570,6 +570,9 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
             Route::redirect('/analytics/usage', '/insights/usage', 301);
             Route::redirect('/analytics/review', '/insights/review', 301);
             Route::get('/assets/thumbnail-status/batch', [\App\Http\Controllers\AssetController::class, 'batchThumbnailStatus'])->name('assets.thumbnail-status.batch');
+            // Virtual Fonts grid rows (brand + campaign Google fonts) — no Asset model; before /assets/{asset}/processing-status
+            Route::get('/assets/{virtualGoogleFontGridId}/processing-status', [\App\Http\Controllers\AssetController::class, 'virtualGoogleFontGridProcessingStatus'])
+                ->where('virtualGoogleFontGridId', '(campaign-google-font|google-font)-.+');
             Route::get('/assets/{asset}/processing-status', [\App\Http\Controllers\AssetController::class, 'processingStatus'])->name('assets.processing-status');
             Route::get('/assets/{asset}/preview-url', [\App\Http\Controllers\AssetController::class, 'previewUrl'])->name('assets.preview-url');
             Route::get('/assets/{asset}/pdf-page/{page}', [\App\Http\Controllers\AssetPdfPageController::class, 'show'])
@@ -774,6 +777,11 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
             Route::post('/collections/{collection}/access-invite', [\App\Http\Controllers\CollectionAccessInviteController::class, 'invite'])->name('collections.access-invite');
             Route::get('/collections/{collection}/access-invites', [\App\Http\Controllers\CollectionAccessInviteController::class, 'index'])->name('collections.access-invites');
             Route::delete('/collections/{collection}/grants/{collection_user}', [\App\Http\Controllers\CollectionAccessInviteController::class, 'revoke'])->name('collections.grants.revoke');
+            Route::get('/collections/{collection}/campaign', [\App\Http\Controllers\CampaignIdentityController::class, 'show'])->name('collections.campaign.show');
+            Route::post('/collections/{collection}/campaign', [\App\Http\Controllers\CampaignIdentityController::class, 'store'])->name('collections.campaign.store');
+            Route::put('/collections/{collection}/campaign', [\App\Http\Controllers\CampaignIdentityController::class, 'update'])->name('collections.campaign.update');
+            Route::post('/collections/{collection}/campaign/suggest-field', [\App\Http\Controllers\CampaignIdentityController::class, 'suggestCampaignField'])->name('collections.campaign.suggest-field');
+            Route::get('/assets/{asset}/campaign-alignment/{collection}', [\App\Http\Controllers\CampaignIdentityController::class, 'assetCampaignAlignment'])->name('assets.campaign-alignment');
             Route::get('/generative', [\App\Http\Controllers\GenerativeController::class, 'index'])->name('generative.index');
             Route::get('/downloads', [\App\Http\Controllers\DownloadController::class, 'index'])->name('downloads.index');
             Route::get('/brand-guidelines', [\App\Http\Controllers\BrandGuidelinesController::class, 'redirectToActive'])->name('brand-guidelines.index');

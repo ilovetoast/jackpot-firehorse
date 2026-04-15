@@ -42,6 +42,7 @@ export default function AssetMetadataEditForm({
         const mime = asset.mime_type.toLowerCase()
         if (mime.startsWith('video/')) return 'video'
         if (mime.startsWith('image/')) return 'image'
+        if (mime.startsWith('font/')) return 'document'
         if (mime.includes('pdf') || mime.includes('document') || mime.includes('text')) return 'document'
         return 'image' // Default fallback
     }

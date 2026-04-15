@@ -804,7 +804,7 @@ export default function AppNav({
               Do not use this wrapper to inject non-agency top rows — basic companies must see a single nav stack.
             */}
             <div
-                className={variant === 'transparent' ? 'relative z-[55] flex flex-col overflow-visible' : undefined}
+                className={variant === 'transparent' ? 'relative z-[140] flex flex-col overflow-visible' : undefined}
                 onMouseEnter={variant === 'transparent' ? () => setNavHovered(true) : undefined}
                 onMouseLeave={variant === 'transparent' ? () => setNavHovered(false) : undefined}
             >
@@ -823,7 +823,7 @@ export default function AppNav({
             */}
             {agencyStripVisible && (
                 <div
-                    className={`relative z-[60] flex items-center transition-colors duration-300 ${
+                    className={`relative z-[150] flex items-center transition-colors duration-300 ${
                         isCinematicNav ? 'text-white/90' : 'text-slate-800'
                     }`}
                     style={{
@@ -903,7 +903,7 @@ export default function AppNav({
             )}
 
             <nav
-                className={`relative z-50 overflow-visible app-nav ${isExternalCollectionChrome ? 'is-collection-only' : ''} ${variant === 'transparent' ? '' : 'shadow-sm'}`}
+                className={`relative z-[140] overflow-visible app-nav ${isExternalCollectionChrome ? 'is-collection-only' : ''} ${variant === 'transparent' ? '' : 'shadow-sm'}`}
                 style={{
                     ...(isCinematicNav && cinematicNavSurfaceStyle ? cinematicNavSurfaceStyle : { backgroundColor: navColor, transition: cinematicSurfaceTransition }),
                     ...(isExternalCollectionChrome ? { '--collection-only-user': '1' } : {}),

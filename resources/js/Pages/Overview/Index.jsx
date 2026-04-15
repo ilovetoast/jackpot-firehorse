@@ -17,22 +17,13 @@ import { SkeletonMetricPills, SkeletonPlanBadge } from '../../Components/Overvie
 import CreatorProgressCard from '../../Components/prostaff/CreatorProgressCard'
 import OverviewCreatorInsights from '../../Components/prostaff/OverviewCreatorInsights'
 import { summarizeMomentum } from '../../utils/summarizeMomentum'
-import { resolveOverviewIconColor } from '../../utils/colorUtils'
+import { resolveOverviewIconColor, workspaceOverviewBackdropCss } from '../../utils/colorUtils'
 
 function formatStorage(mb) {
     if (!mb || mb === 0) return '0 MB'
     if (mb < 1) return `${(mb * 1024).toFixed(0)} KB`
     if (mb < 1024) return `${mb.toFixed(1)} MB`
     return `${(mb / 1024).toFixed(1)} GB`
-}
-
-/** Match BrandThemeBuilder::resolveBackground (6-digit hex + alpha stops). */
-function overviewDefaultBackdrop(primaryHex, secondaryHex) {
-    const p = /^#?([0-9a-fA-F]{6})/i.exec(String(primaryHex || '').trim())
-    const s = /^#?([0-9a-fA-F]{6})/i.exec(String(secondaryHex || '').trim())
-    const p6 = p ? p[1] : '6366f1'
-    const s6 = s ? s[1] : '8b5cf6'
-    return `radial-gradient(circle at 20% 20%, #${p6}33, transparent), radial-gradient(circle at 80% 80%, #${s6}33, transparent), #0B0B0D`
 }
 
 function tenantNavFromAuth(auth) {
@@ -125,7 +116,7 @@ export default function Overview() {
         brandColor
     const overviewBackdropBackground =
         theme.background?.value ||
-        overviewDefaultBackdrop(brandColor, secondaryForBackdrop)
+        workspaceOverviewBackdropCss(brandColor, secondaryForBackdrop)
 
     const overviewIconColor = useMemo(
         () =>

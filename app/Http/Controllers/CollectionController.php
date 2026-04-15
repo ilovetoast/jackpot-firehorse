@@ -18,10 +18,12 @@ use App\Services\AssetSortService;
 use App\Services\CollectionAssetQueryService;
 use App\Services\CollectionAssetService;
 use App\Services\Collections\CollectionGridMetadataFilterService;
+use App\Services\BrandDNA\CampaignGoogleFontLibraryEntriesService;
 use App\Services\FeatureGate;
 use App\Services\MetadataFilterService;
 use App\Services\MetadataVisibilityResolver;
 use App\Support\Roles\RoleRegistry;
+use App\Support\Typography\CampaignBannerFontEnricher;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -30,6 +32,7 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
+use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -95,7 +98,7 @@ class CollectionController extends Controller
                 },
                 'collectionInvitations as external_guest_invites_count',
             ])
-            ->with(['brand', 'members'])
+            ->with(['brand', 'members', 'campaignIdentity'])
             ->orderBy('name');
 
         $collectionsModels = $collectionsQuery->get()
@@ -178,6 +181,8 @@ class CollectionController extends Controller
                 'featured_image_url' => isset($bestAssetIds[$c->id])
                     ? ($featuredUrls[$bestAssetIds[$c->id]] ?? null)
                     : null,
+                'has_campaign' => $c->campaignIdentity !== null,
+                'campaign_status' => $c->campaignIdentity?->campaign_status,
             ])
             ->all();
 
@@ -204,11 +209,65 @@ class CollectionController extends Controller
                     },
                     'collectionInvitations as external_guest_invites_count',
                 ])
-                ->with(['brand', 'members'])
+                ->with(['brand', 'members', 'campaignIdentity'])
                 ->find($collectionIdParam);
 
             if ($collection && Gate::forUser($user)->allows('view', $collection)) {
                 $collectionBrand = $collection->brand;
+
+                $campaignSummary = null;
+                if ($collection->campaignIdentity) {
+                    $ci = $collection->campaignIdentity;
+                    $payload = is_array($ci->identity_payload) ? $ci->identity_payload : [];
+                    $fonts = $payload['typography']['fonts'] ?? [];
+                    $fonts = is_array($fonts) ? $fonts : [];
+                    try {
+                        $fontsForBanner = CampaignBannerFontEnricher::enrich($fonts);
+                    } catch (\Throwable $e) {
+                        Log::warning('collections.campaign_fonts_enrich_failed', [
+                            'collection_id' => $collection->id,
+                            'message' => $e->getMessage(),
+                            'exception' => get_class($e),
+                        ]);
+                        $fontsForBanner = $fonts;
+                    }
+                    $primaryFont = $payload['typography']['primary_font']
+                        ?? (count($fonts) > 0 ? ($fonts[0]['name'] ?? null) : null);
+
+                    $featuredUrl = null;
+                    if ($ci->featured_asset_id) {
+                        $featuredAsset = Asset::find($ci->featured_asset_id);
+                        if ($featuredAsset) {
+                            $featuredUrl = $featuredAsset->deliveryUrl(\App\Support\AssetVariant::THUMB_LARGE, \App\Support\DeliveryContext::AUTHENTICATED)
+                                ?: $featuredAsset->deliveryUrl(\App\Support\AssetVariant::THUMB_MEDIUM, \App\Support\DeliveryContext::AUTHENTICATED);
+                        }
+                    }
+
+                    // Fallback: use the collection's own best featured image
+                    if (! $featuredUrl) {
+                        $collFeaturedId = $bestAssetIds[$collection->id] ?? null;
+                        if ($collFeaturedId && isset($featuredUrls[$collFeaturedId])) {
+                            $featuredUrl = $featuredUrls[$collFeaturedId];
+                        }
+                    }
+
+                    $campaignSummary = [
+                        'id' => $ci->id,
+                        'campaign_name' => $ci->campaign_name,
+                        'campaign_status' => $ci->campaign_status,
+                        'campaign_goal' => $ci->campaign_goal,
+                        'campaign_description' => $ci->campaign_description,
+                        'palette' => $payload['visual']['palette'] ?? [],
+                        'accent_colors' => $payload['visual']['accent_colors'] ?? [],
+                        'primary_font' => $primaryFont,
+                        'fonts' => $fontsForBanner,
+                        'readiness_status' => $ci->readiness_status,
+                        'scoring_enabled' => (bool) $ci->scoring_enabled,
+                        'featured_asset_id' => $ci->featured_asset_id,
+                        'featured_image_url' => $featuredUrl,
+                    ];
+                }
+
                 $selectedCollection = [
                     'id' => $collection->id,
                     'name' => $collection->name,
@@ -222,6 +281,7 @@ class CollectionController extends Controller
                     'slug' => $collection->slug,
                     'brand_slug' => $collectionBrand?->slug,
                     'is_public' => $collection->is_public,
+                    'campaign_summary' => $campaignSummary,
                 ];
 
                 try {
@@ -237,6 +297,13 @@ class CollectionController extends Controller
                         $collectionType,
                         $tenant->id,
                         $brand->id
+                    );
+                    $filterCategories = $this->ensureFontsCategoryInCollectionFilterChips(
+                        $collection,
+                        $brand,
+                        $tenant,
+                        $collectionType,
+                        $filterCategories,
                     );
 
                     $categoryFilterId = $request->query('category_id');
@@ -302,6 +369,16 @@ class CollectionController extends Controller
                         $lookups['categories_by_id'],
                         $lookups['uploaders_by_id']
                     ))->values()->all();
+                    $assets = $this->prependCampaignGoogleFontVirtualRowsForCollection(
+                        $request,
+                        $collection,
+                        $tenant,
+                        $brand,
+                        $collectionType,
+                        $categoryFilterId,
+                        $paginator,
+                        $assets,
+                    );
                     $collectionTypeFilter = $collectionType;
                     $categoryFilterIdForProps = ($categoryFilterId !== null && $categoryFilterId > 0) ? $categoryFilterId : null;
                     $groupByCategoryEnabled = $groupByCategory;
@@ -391,7 +468,7 @@ class CollectionController extends Controller
             'grid_folder_total' => $gridFolderTotal,
             'selected_collection' => $selectedCollection,
             'can_update_collection' => $canUpdateCollection,
-            'can_create_collection' => Gate::forUser($user)->allows('create', $brand),
+            'can_create_collection' => Gate::forUser($user)->allows('create', [Collection::class, $brand]),
             'can_add_to_collection' => $canAddToCollection,
             'can_remove_from_collection' => $canRemoveFromCollection,
             'public_collections_enabled' => $publicCollectionsEnabled,
@@ -466,6 +543,13 @@ class CollectionController extends Controller
                 $tenant->id,
                 $brand->id
             );
+            $filterCategories = $this->ensureFontsCategoryInCollectionFilterChips(
+                $collection,
+                $brand,
+                $tenant,
+                $collectionType,
+                $filterCategories,
+            );
 
             $categoryFilterId = $request->query('category_id');
             $categoryFilterId = is_numeric($categoryFilterId) ? (int) $categoryFilterId : null;
@@ -529,6 +613,16 @@ class CollectionController extends Controller
                 $lookups['categories_by_id'],
                 $lookups['uploaders_by_id']
             ))->values()->all();
+            $assets = $this->prependCampaignGoogleFontVirtualRowsForCollection(
+                $request,
+                $collection,
+                $tenant,
+                $brand,
+                $collectionType,
+                $categoryFilterId,
+                $paginator,
+                $assets,
+            );
 
             $filters = $parsedMetadataFilters;
             $filterable_schema = [];
@@ -967,6 +1061,13 @@ class CollectionController extends Controller
 
         $this->collectionAssetService->attach($collection, $asset);
 
+        $this->autoSelectCampaignFeaturedImage($collection, $asset);
+
+        \App\Services\BrandIntelligence\Campaign\CampaignScoringDispatcher::dispatchForAsset(
+            $asset->id,
+            $collection->id,
+        );
+
         return response()->json(['attached' => true], 201);
     }
 
@@ -1111,6 +1212,11 @@ class CollectionController extends Controller
             try {
                 $this->collectionAssetService->attach($collection, $asset);
                 $attached[] = $collectionId;
+
+                \App\Services\BrandIntelligence\Campaign\CampaignScoringDispatcher::dispatchForAsset(
+                    $asset->id,
+                    $collection->id,
+                );
             } catch (\Throwable $e) {
                 $errors[] = "Failed to add to collection {$collection->name}: {$e->getMessage()}";
             }
@@ -1185,6 +1291,23 @@ class CollectionController extends Controller
         }
 
         return $bestId ?? ($assetIds[0] ?? null);
+    }
+
+    /**
+     * Auto-select a campaign featured image when an asset is added to a campaign collection
+     * that doesn't already have one set.
+     */
+    private function autoSelectCampaignFeaturedImage(Collection $collection, Asset $asset): void
+    {
+        $ci = $collection->campaignIdentity;
+        if (! $ci || $ci->featured_asset_id) {
+            return;
+        }
+
+        $mime = $asset->mime_type ?? '';
+        if (str_starts_with(strtolower($mime), 'image/')) {
+            $ci->update(['featured_asset_id' => $asset->id]);
+        }
     }
 
     /**
@@ -1408,6 +1531,103 @@ class CollectionController extends Controller
         } elseif ($collectionType === 'ai_generated') {
             $query->where('assets.type', AssetType::AI_GENERATED);
         }
+    }
+
+    private function resolveFontsCategoryForBrand(Tenant $tenant, Brand $brand): ?Category
+    {
+        return Category::query()
+            ->where('tenant_id', $tenant->id)
+            ->where('brand_id', $brand->id)
+            ->where('asset_type', AssetType::ASSET)
+            ->where('slug', 'fonts')
+            ->visible()
+            ->first();
+    }
+
+    /**
+     * Adds Fonts to collection category chips when campaign identity declares Google Fonts (no DAM member required).
+     *
+     * @param  list<array{id: int, name: string, asset_type: string}>  $filterCategories
+     * @return list<array{id: int, name: string, asset_type: string}>
+     */
+    private function ensureFontsCategoryInCollectionFilterChips(
+        Collection $collection,
+        Brand $brand,
+        Tenant $tenant,
+        string $collectionType,
+        array $filterCategories,
+    ): array {
+        if (! in_array($collectionType, ['all', 'asset'], true)) {
+            return $filterCategories;
+        }
+
+        $fontsCategory = $this->resolveFontsCategoryForBrand($tenant, $brand);
+        if (! $fontsCategory) {
+            return $filterCategories;
+        }
+
+        $existingIds = collect($filterCategories)->pluck('id')->map(fn ($id) => (int) $id)->all();
+        if (in_array((int) $fontsCategory->id, $existingIds, true)) {
+            return $filterCategories;
+        }
+
+        $virtual = app(CampaignGoogleFontLibraryEntriesService::class)
+            ->virtualAssetsForCollection($brand, $fontsCategory, $collection);
+        if ($virtual === []) {
+            return $filterCategories;
+        }
+
+        $filterCategories[] = [
+            'id' => $fontsCategory->id,
+            'name' => $fontsCategory->name,
+            'asset_type' => $fontsCategory->asset_type instanceof AssetType ? $fontsCategory->asset_type->value : (string) $fontsCategory->asset_type,
+        ];
+        usort($filterCategories, fn ($a, $b) => strcmp((string) $a['name'], (string) $b['name']));
+
+        return array_values($filterCategories);
+    }
+
+    /**
+     * Prepend campaign Google font virtual rows (same shape as library Fonts) on collection grid page 1.
+     *
+     * @param  list<array<string, mixed>>  $mappedAssets
+     * @return list<array<string, mixed>>
+     */
+    private function prependCampaignGoogleFontVirtualRowsForCollection(
+        Request $request,
+        Collection $collection,
+        Tenant $tenant,
+        Brand $brand,
+        string $collectionType,
+        ?int $categoryFilterId,
+        ?LengthAwarePaginator $paginator,
+        array $mappedAssets,
+    ): array {
+        if ($paginator === null || $request->boolean('load_more')) {
+            return $mappedAssets;
+        }
+        if ($paginator->currentPage() !== 1) {
+            return $mappedAssets;
+        }
+        if (! in_array($collectionType, ['all', 'asset'], true)) {
+            return $mappedAssets;
+        }
+
+        $fontsCategory = $this->resolveFontsCategoryForBrand($tenant, $brand);
+        if (! $fontsCategory) {
+            return $mappedAssets;
+        }
+        if ($categoryFilterId !== null && $categoryFilterId > 0 && $categoryFilterId !== (int) $fontsCategory->id) {
+            return $mappedAssets;
+        }
+
+        $virtual = app(CampaignGoogleFontLibraryEntriesService::class)
+            ->virtualAssetsForCollection($brand, $fontsCategory, $collection);
+        if ($virtual === []) {
+            return $mappedAssets;
+        }
+
+        return array_merge($virtual, $mappedAssets);
     }
 
     /**

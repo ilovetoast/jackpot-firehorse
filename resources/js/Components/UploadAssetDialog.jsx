@@ -691,14 +691,16 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
         return ['legal', 'legal_rights', 'license', 'expiration']
     }, [selectedCategoryForUpload])
     
-    // Debug: Log all categories received vs filtered
-    if (categories && categories.length > 0) {
-        console.log('[UploadDialog] Categories received:', categories.length, 'Filtered:', filteredCategories.length)
-        const filteredOut = categories.filter(cat => !filteredCategories.find(fc => fc.id === cat.id))
-        if (filteredOut.length > 0) {
-            console.log('[UploadDialog] Categories filtered out:', filteredOut.map(c => ({ name: c.name, id: c.id, asset_type: c.asset_type, is_private: c.is_private, is_hidden: c.is_hidden })))
+    // Debug: Log all categories received vs filtered (in useEffect to avoid render side-effects)
+    useEffect(() => {
+        if (categories && categories.length > 0) {
+            console.log('[UploadDialog] Categories received:', categories.length, 'Filtered:', filteredCategories.length)
+            const filteredOut = categories.filter(cat => !filteredCategories.find(fc => fc.id === cat.id))
+            if (filteredOut.length > 0) {
+                console.log('[UploadDialog] Categories filtered out:', filteredOut.map(c => ({ name: c.name, id: c.id, asset_type: c.asset_type, is_private: c.is_private, is_hidden: c.is_hidden })))
+            }
         }
-    }
+    }, [categories, filteredCategories])
 
     /**
      * ═══════════════════════════════════════════════════════════════

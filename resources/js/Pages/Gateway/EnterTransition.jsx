@@ -7,7 +7,7 @@ const DESTINATION_ROUTES = {
     collections: '/app/collections',
 }
 
-export default function EnterTransition() {
+export default function EnterTransition({ suppressAutoRedirect = false }) {
     const { theme } = usePage().props
     const [stage, setStage] = useState('init')
 
@@ -16,13 +16,19 @@ export default function EnterTransition() {
     const destination = DESTINATION_ROUTES[portal.default_destination] || '/app/overview'
 
     useEffect(() => {
+        if (suppressAutoRedirect) {
+            return undefined
+        }
         if (isInstant) {
             // Instant mode: quick 150ms fade-out, no progress bar — feels intentional, not jarring
             const t1 = setTimeout(() => setStage('fade'), 10)
             const t2 = setTimeout(() => {
                 window.location.href = destination
             }, 160)
-            return () => { clearTimeout(t1); clearTimeout(t2) }
+            return () => {
+                clearTimeout(t1)
+                clearTimeout(t2)
+            }
         }
 
         const t1 = setTimeout(() => setStage('enter'), 100)
@@ -30,8 +36,12 @@ export default function EnterTransition() {
         const t3 = setTimeout(() => {
             window.location.href = destination
         }, 2800)
-        return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3) }
-    }, [isInstant, destination])
+        return () => {
+            clearTimeout(t1)
+            clearTimeout(t2)
+            clearTimeout(t3)
+        }
+    }, [isInstant, destination, suppressAutoRedirect])
 
     const primary = theme?.colors?.primary || '#6366f1'
     const isJackpotDefault = theme?.mode === 'default'

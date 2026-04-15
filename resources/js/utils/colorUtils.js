@@ -36,10 +36,54 @@ export function getLuminance(hexColor) {
  */
 export function getWorkspaceButtonColor(brand) {
     if (!brand) return '#6366f1'
-    const style = brand.workspace_button_style ?? 'primary'
+    const style = brand.workspace_button_style ?? brand.settings?.button_style ?? 'primary'
     if (style === 'primary') return brand.primary_color || '#6366f1'
     if (style === 'secondary') return brand.secondary_color || '#64748b'
-    return brand.accent_color || '#6366f1' // accent
+    if (style === 'accent') return brand.accent_color || '#6366f1'
+    if (style === 'white') return '#ffffff'
+    if (style === 'black') return '#000000'
+    return brand.accent_color || '#6366f1'
+}
+
+/**
+ * Single “inked” tone derived from the workspace accent/base (library row selection, etc.).
+ * Pure black/white brand picks map to neutrals so darken() does not collapse to flat black.
+ * @param {string} baseHex
+ * @returns {string} Hex background
+ */
+export function getWorkspaceContextualTone(baseHex) {
+    const base = baseHex || '#6366f1'
+    const lum = getLuminance(base)
+    const sat = hexSaturation(normalizeHexColor(base))
+    if (lum < 0.06 && sat < 0.15) return '#171717'
+    if (lum > 0.94) return darkenColor(base, 14)
+    return darkenColor(base, 20)
+}
+
+/**
+ * Resting + hover backgrounds for the primary workspace action (Add Asset).
+ * Resting = darken(20), hover = darken(35) — gives depth while preserving the brand hue.
+ * Only truly achromatic near-black (low saturation) maps to neutral dark; saturated dark
+ * colors (e.g. deep purple) are darkened normally so the hue is preserved.
+ * @param {Object} brand
+ * @returns {{ resting: string, hover: string }}
+ */
+export function getWorkspacePrimaryActionButtonColors(brand) {
+    const base = getWorkspaceButtonColor(brand)
+    const lum = getLuminance(base)
+    const sat = hexSaturation(normalizeHexColor(base))
+
+    // True near-black (low luminance AND low saturation) → neutral dark
+    if (lum < 0.06 && sat < 0.15) {
+        const resting = '#171717'
+        return { resting, hover: lightenColor(resting, 34) }
+    }
+    // Near-white → darken so button is visible on white backgrounds
+    if (lum > 0.94) {
+        return { resting: darkenColor(base, 14), hover: darkenColor(base, 26) }
+    }
+    // Standard: darkened resting state with deeper hover
+    return { resting: darkenColor(base, 20), hover: darkenColor(base, 35) }
 }
 
 /**
@@ -72,6 +116,22 @@ export function darkenColor(hexColor, amount = 20) {
     let r = Math.max(0, parseInt(hex.substring(0, 2), 16) - amount)
     let g = Math.max(0, parseInt(hex.substring(2, 4), 16) - amount)
     let b = Math.max(0, parseInt(hex.substring(4, 6), 16) - amount)
+    return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`
+}
+
+/**
+ * Lighten a hex color by adding to each RGB channel (mirrors darkenColor).
+ * @param {string} hexColor
+ * @param {number} amount
+ * @returns {string} Hex color
+ */
+export function lightenColor(hexColor, amount = 20) {
+    if (!hexColor) return '#fafafa'
+    let hex = String(hexColor).replace('#', '')
+    if (hex.length === 3) hex = hex.split('').map((c) => c + c).join('')
+    let r = Math.min(255, parseInt(hex.substring(0, 2), 16) + amount)
+    let g = Math.min(255, parseInt(hex.substring(2, 4), 16) + amount)
+    let b = Math.min(255, parseInt(hex.substring(4, 6), 16) + amount)
     return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`
 }
 
@@ -207,6 +267,87 @@ export function getContrastRatio(foregroundHex, backgroundHex) {
     const lighter = Math.max(L1, L2)
     const darker = Math.min(L1, L2)
     return (lighter + 0.05) / (darker + 0.05)
+}
+
+/** Product default accent (Tailwind `indigo-600`) when tenant colors are unusable on white. */
+export const SITE_DEFAULT_ACCENT_HEX = '#4f46e5'
+
+const SPINNER_ON_WHITE_BG = '#ffffff'
+
+/**
+ * Pick a hex for a loading spinner on a white grid footer: prefer brand primary when contrast vs white
+ * is sufficient, then secondary / accent, then progressively darkened primary, then slate, then site default.
+ *
+ * @param {string|null|undefined} brandPrimaryHex
+ * @param {{ secondary?: string|null, accent?: string|null, minRatio?: number }} [options]
+ * @returns {string} #RRGGBB
+ */
+/**
+ * Cinematic workspace sidebar / Overview shell — dual radial glows from brand colors on near-black.
+ * Matches {@see overviewDefaultBackdrop} in Overview and the gateway theme base.
+ *
+ * @param {string|null|undefined} primaryHex
+ * @param {string|null|undefined} secondaryHex
+ * @returns {string} CSS `background` value
+ */
+export function workspaceOverviewBackdropCss(primaryHex, secondaryHex) {
+    const p = /^#?([0-9a-fA-F]{6})/i.exec(String(primaryHex || '').trim())
+    const s = /^#?([0-9a-fA-F]{6})/i.exec(String(secondaryHex || '').trim())
+    const p6 = p ? p[1] : '6366f1'
+    const s6 = s ? s[1] : '8b5cf6'
+    return `radial-gradient(circle at 20% 20%, #${p6}33, transparent), radial-gradient(circle at 80% 80%, #${s6}33, transparent), #0B0B0D`
+}
+
+/**
+ * @param {{ nav_color?: string|null, primary_color?: string|null, secondary_color?: string|null, accent_color?: string|null, settings?: Record<string, unknown>|null }} [brand]
+ * @returns {{ isCinematic: boolean, sidebarColor: string, backdropCss: string|null }}
+ */
+export function resolveWorkspaceSidebarSurface(brand) {
+    const settings = brand?.settings && typeof brand.settings === 'object' ? brand.settings : {}
+    const isCinematic = settings.workspace_sidebar_style === 'cinematic'
+    const primary = brand?.primary_color || '#6366f1'
+    const secondary = brand?.secondary_color || brand?.accent_color || primary
+    const sidebarColor = brand?.nav_color || brand?.primary_color || '#1f2937'
+    const backdropCss = isCinematic ? workspaceOverviewBackdropCss(primary, secondary) : null
+    return { isCinematic, sidebarColor, backdropCss }
+}
+
+export function resolveSpinnerColorOnWhite(brandPrimaryHex, options = {}) {
+    const minRatio = options.minRatio ?? 2.85
+    const bg = SPINNER_ON_WHITE_BG
+
+    const tryColor = (raw) => {
+        if (raw == null || String(raw).trim() === '') return null
+        const c = normalizeHexColor(raw)
+        return getContrastRatio(c, bg) >= minRatio ? c : null
+    }
+
+    const primaryOk = tryColor(brandPrimaryHex)
+    if (primaryOk) return primaryOk
+
+    const secondaryOk = tryColor(options.secondary)
+    if (secondaryOk) return secondaryOk
+
+    const accentOk = tryColor(options.accent)
+    if (accentOk) return accentOk
+
+    const base = brandPrimaryHex && String(brandPrimaryHex).trim() ? normalizeHexColor(brandPrimaryHex) : null
+    if (base) {
+        let c = base
+        for (let i = 0; i < 6; i++) {
+            c = normalizeHexColor(darkenColor(c, 16 + i * 12))
+            if (getContrastRatio(c, bg) >= minRatio) {
+                return c
+            }
+        }
+    }
+
+    const slate = '#475569'
+    if (getContrastRatio(slate, bg) >= minRatio) {
+        return slate
+    }
+
+    return normalizeHexColor(SITE_DEFAULT_ACCENT_HEX)
 }
 
 /** Approximate “card interior” on cinematic overview (#0B0B0D + ~6% white glass). */

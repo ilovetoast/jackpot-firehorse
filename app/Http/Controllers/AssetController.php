@@ -2290,6 +2290,38 @@ class AssetController extends Controller
     }
 
     /**
+     * Stable processing JSON for virtual Google font grid rows (brand DNA + campaign; no DB asset).
+     *
+     * GET /app/assets/google-font-{n}-{hash}/processing-status
+     * GET /app/assets/campaign-google-font-{collectionId}-{hash}/processing-status
+     */
+    public function virtualGoogleFontGridProcessingStatus(string $virtualGoogleFontGridId): JsonResponse
+    {
+        if (! preg_match('/^(campaign-google-font|google-font)-/', $virtualGoogleFontGridId)) {
+            return response()->json(['message' => 'Asset not found'], 404);
+        }
+
+        // Satisfies drawer (processingGuardStatus) and thumbnail polling (processingStatus) callers.
+        return response()->json([
+            'thumbnail_status' => 'completed',
+            'preview_thumbnail_url' => null,
+            'final_thumbnail_url' => null,
+            'thumbnail_version' => null,
+            'thumbnail_url' => null,
+            'thumbnails_generated_at' => null,
+            'thumbnail_skip_reason' => null,
+            'preview_unavailable_user_message' => null,
+            'pdf_page_count' => null,
+            'pdf_pages_rendered' => false,
+            'thumbnail_mode_urls' => [],
+            'thumbnail_modes_meta' => [],
+            'thumbnail_modes_status' => null,
+            'analysis_status' => null,
+            'actions' => [],
+        ], 200);
+    }
+
+    /**
      * Processing guard status for drawer UI (cooldowns, last run).
      *
      * GET /app/assets/{asset}/processing-status
@@ -3130,8 +3162,18 @@ class AssetController extends Controller
         // see the category via shouldIncludeHiddenFontsCategory (font assets / filter) without manage categories.
 
         $virtual = app(GoogleFontLibraryEntriesService::class)->virtualAssetsForFontsCategory($brand, $category);
+        $campaignVirtual = app(\App\Services\BrandDNA\CampaignGoogleFontLibraryEntriesService::class)
+            ->virtualAssetsForFontsCategory($brand, $category);
 
-        return $virtual === [] ? $mappedAssets : array_merge($virtual, $mappedAssets);
+        $prefix = [];
+        if ($virtual !== []) {
+            $prefix = array_merge($prefix, $virtual);
+        }
+        if ($campaignVirtual !== []) {
+            $prefix = array_merge($prefix, $campaignVirtual);
+        }
+
+        return $prefix === [] ? $mappedAssets : array_merge($prefix, $mappedAssets);
     }
 
     /**

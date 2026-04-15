@@ -179,6 +179,9 @@ export default function AssetCard({
     const isFontMime = Boolean(asset?.mime_type?.startsWith('font/') || fontExtensions.includes(extLower))
 
     const categorySlug = asset?.category?.slug
+    const isCampaignCollectionFont = Boolean(asset?.is_campaign_collection_font)
+    const isCampaignFontRole =
+        categorySlug === 'fonts' && String(asset?.metadata?.fields?.font_role ?? '').toLowerCase() === 'campaign'
     const showFontSwatch =
         isVirtualGoogleFont ||
         categorySlug === 'fonts' ||
@@ -644,6 +647,11 @@ export default function AssetCard({
                                 {asset.google_font_role_label}
                             </p>
                         )}
+                        {!isVirtualGoogleFont && isCampaignFontRole && (
+                            <p className="mt-1 px-3 text-center text-[10px] uppercase tracking-wider text-violet-700">
+                                Campaign
+                            </p>
+                        )}
                     </div>
                 ) : (
                     <>
@@ -854,12 +862,32 @@ export default function AssetCard({
                                 Guideline
                             </span>
                         )}
+                        {isCampaignCollectionFont && (
+                            <span
+                                className="inline-flex items-center rounded-md bg-violet-700/90 backdrop-blur-sm px-2 py-1 text-xs font-medium text-white"
+                                title="Campaign identity font (not the master brand library default)"
+                            >
+                                Campaign
+                            </span>
+                        )}
                         {isVirtualGoogleFont && (
                             <span
                                 className="inline-flex items-center rounded-md bg-sky-600/90 backdrop-blur-sm px-2 py-1 text-xs font-medium text-white"
-                                title="From Brand Guidelines (Google Fonts)"
+                                title={
+                                    isCampaignCollectionFont
+                                        ? 'Google Fonts (from a collection’s campaign identity)'
+                                        : 'From Brand Guidelines (Google Fonts)'
+                                }
                             >
                                 Google Fonts
+                            </span>
+                        )}
+                        {!isVirtualGoogleFont && isCampaignFontRole && (
+                            <span
+                                className="inline-flex items-center rounded-md bg-violet-700/90 backdrop-blur-sm px-2 py-1 text-xs font-medium text-white"
+                                title="Filed under Fonts with role Campaign"
+                            >
+                                Campaign
                             </span>
                         )}
                     </div>

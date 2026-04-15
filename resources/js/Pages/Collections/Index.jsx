@@ -9,6 +9,7 @@ import AppNav from '../../Components/AppNav'
 import AppHead from '../../Components/AppHead'
 import CollectionsSidebar from '../../Components/Collections/CollectionsSidebar'
 import CollectionPublicBar from '../../Components/Collections/CollectionPublicBar'
+import CampaignIdentityBanner from '../../Components/Collections/CampaignIdentityBanner'
 import CreateCollectionModal from '../../Components/Collections/CreateCollectionModal'
 import EditCollectionModal from '../../Components/Collections/EditCollectionModal'
 import AssetGrid from '../../Components/AssetGrid'
@@ -22,8 +23,16 @@ import { useSelection } from '../../contexts/SelectionContext'
 import { useBucketOptional } from '../../contexts/BucketContext'
 import { RectangleStackIcon, PlusIcon, FolderIcon } from '@heroicons/react/24/outline'
 import LoadMoreFooter from '../../Components/LoadMoreFooter'
+import InfiniteScrollGridSpinner from '../../Components/InfiniteScrollGridSpinner'
 import CollectionFiltersBar from '../../Components/Collections/CollectionFiltersBar'
-import { getWorkspaceButtonColor, hexToRgba, getContrastTextColor } from '../../utils/colorUtils'
+import {
+    getWorkspaceButtonColor,
+    getWorkspaceContextualTone,
+    getLuminance,
+    hexToRgba,
+    getContrastTextColor,
+    resolveWorkspaceSidebarSurface,
+} from '../../utils/colorUtils'
 import axios from 'axios'
 
 const COLLECTIONS_PARTIAL_RELOAD = [
@@ -48,14 +57,6 @@ const COLLECTIONS_PARTIAL_RELOAD = [
 /** Collections URL params — not metadata filters (avoid collision with `collection` in SPECIAL_FILTER_KEYS). */
 const COLLECTIONS_FILTER_URL_NAV_KEYS = ['collection', 'collection_type', 'category_id']
 
-/** Match Overview page ambient backdrop (brand-tinted dark). */
-function collectionsDefaultBackdrop(primaryHex, secondaryHex) {
-    const p = /^#?([0-9a-fA-F]{6})/i.exec(String(primaryHex || '').trim())
-    const s = /^#?([0-9a-fA-F]{6})/i.exec(String(secondaryHex || '').trim())
-    const p6 = p ? p[1] : '6366f1'
-    const s6 = s ? s[1] : '8b5cf6'
-    return `radial-gradient(circle at 20% 20%, #${p6}33, transparent), radial-gradient(circle at 80% 80%, #${s6}33, transparent), #0B0B0D`
-}
 
 export default function CollectionsIndex({
     collections = [],
@@ -84,8 +85,10 @@ export default function CollectionsIndex({
     const availableValues = availableValuesProp || page.props.available_values || {}
     const selectedCollectionId = selected_collection?.id ?? null
 
-    const sidebarColor = auth.activeBrand?.nav_color || auth.activeBrand?.primary_color || '#1f2937'
+    const { isCinematic: sidebarIsCinematic, sidebarColor, backdropCss: sidebarBackdropCss } =
+        resolveWorkspaceSidebarSurface(auth.activeBrand)
     const workspaceAccentColor = getWorkspaceButtonColor(auth.activeBrand)
+    const accentLum = getLuminance(workspaceAccentColor)
     const isLightColor = (color) => {
         if (!color || color === '#ffffff' || color === '#FFFFFF') return true
         const hex = color.replace('#', '')
@@ -95,19 +98,16 @@ export default function CollectionsIndex({
         const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
         return luminance > 0.5
     }
-    const textColor = isLightColor(sidebarColor) ? '#000000' : '#ffffff'
-    // Use full accent color for selected collection; hover uses subtle tint
-    const activeBgColor = workspaceAccentColor
-    const activeTextColor = getContrastTextColor(workspaceAccentColor)
+    const textColor = sidebarIsCinematic || !isLightColor(sidebarColor) ? '#ffffff' : '#000000'
+    // Full brand tint for normal accents; neutral chrome when style is white/black so selection stays visible
+    const activeBgColor =
+        accentLum < 0.06 || accentLum > 0.94
+            ? getWorkspaceContextualTone(workspaceAccentColor)
+            : workspaceAccentColor
+    const activeTextColor = getContrastTextColor(activeBgColor)
     const hoverBgColor = hexToRgba(workspaceAccentColor, 0.12)
 
     const brandPrimaryHex = auth?.activeBrand?.primary_color || '#6366f1'
-    const brandSecondaryHex =
-        auth?.activeBrand?.secondary_color || auth?.activeBrand?.accent_color || brandPrimaryHex
-    const collectionsBackdropBackground = useMemo(
-        () => collectionsDefaultBackdrop(brandPrimaryHex, brandSecondaryHex),
-        [brandPrimaryHex, brandSecondaryHex]
-    )
 
     const [assetsList, setAssetsList] = useState(Array.isArray(assets) ? assets.filter(Boolean) : [])
     const [nextPageUrl, setNextPageUrl] = useState(next_page_url ?? null)
@@ -427,37 +427,18 @@ export default function CollectionsIndex({
             <AppNav brand={auth.activeBrand} tenant={null} />
 
             <div className="relative flex flex-1 overflow-hidden" style={{ height: 'calc(100vh - 5rem)' }}>
-                {!showGrid && (
-                    <>
-                        <div
-                            className="pointer-events-none absolute inset-0 z-0"
-                            style={{ background: collectionsBackdropBackground }}
-                            aria-hidden
-                        />
-                        <div
-                            className="pointer-events-none absolute inset-0 z-0"
-                            style={{
-                                background: `radial-gradient(circle at 30% 40%, ${hexToRgba(workspaceAccentColor, 0.09)}, transparent 58%)`,
-                            }}
-                            aria-hidden
-                        />
-                        <div
-                            className="pointer-events-none absolute inset-0 z-0 bg-gradient-to-b from-black/30 via-transparent to-black/55"
-                            aria-hidden
-                        />
-                    </>
-                )}
-                {/* Sidebar */}
+                {/* Sidebar — always uses brand sidebar styling (same as Assets / Executions) */}
                 <div className="relative z-[1] hidden lg:flex lg:flex-shrink-0">
                     <CollectionsSidebar
                         collections={collections}
                         selectedCollectionId={selectedCollectionId}
                         sidebarColor={sidebarColor}
+                        sidebarBackdropCss={sidebarBackdropCss}
                         textColor={textColor}
                         activeBgColor={activeBgColor}
                         activeTextColor={activeTextColor}
                         hoverBgColor={hoverBgColor}
-                        transparentBackground={!showGrid}
+                        transparentBackground={false}
                         canCreateCollection={can_create_collection}
                         onCreateCollection={() => setShowCreateModal(true)}
                         publicCollectionsEnabled={public_collections_enabled}
@@ -480,12 +461,9 @@ export default function CollectionsIndex({
                     }}
                 />
 
-                {/* Main content — cinematic dark landing vs light grid (landing backdrop spans full row for transparent sidebar) */}
-                <div
-                    className={`relative z-[1] flex flex-1 flex-col overflow-hidden h-full motion-reduce:transition-none ${
-                        showGrid ? 'bg-gray-50' : 'bg-transparent'
-                    }`}
-                >
+                {/* Main content */}
+                <div className="relative z-[1] flex flex-1 flex-col overflow-hidden h-full motion-reduce:transition-none bg-gray-50">
+
                     <div className="lg:hidden border-b border-gray-200 bg-white/95 backdrop-blur-sm shrink-0 sticky top-0 z-20">
                         <div className="px-4 sm:px-6 py-2 flex items-center gap-2">
                             <div className="flex-1 flex items-center gap-2 overflow-x-auto pb-0.5">
@@ -546,7 +524,7 @@ export default function CollectionsIndex({
                             <AnimatePresence mode="wait">
                                 {!showGrid ? (
                                     <motion.div
-                                        key="collections-cinematic"
+                                        key="collections-landing"
                                         className="relative z-10"
                                         initial={{ opacity: 0 }}
                                         animate={{ opacity: 1 }}
@@ -555,72 +533,82 @@ export default function CollectionsIndex({
                                     >
                                         {collections.length === 0 ? (
                                             <div className="max-w-2xl mx-auto py-16 px-6 text-center">
-                                                <div className="mb-8">
-                                                    <RectangleStackIcon className="mx-auto h-16 w-16 text-white/25" />
+                                                <div className="mb-6">
+                                                    <RectangleStackIcon className="mx-auto h-14 w-14 text-gray-300" />
                                                 </div>
-                                                <h2 className="text-xl font-bold tracking-tight text-white sm:text-2xl">
+                                                <h2 className="text-2xl font-bold text-gray-900">
                                                     No collections yet
                                                 </h2>
-                                                <p className="mt-4 text-base leading-7 text-white/55">
-                                                    Collections let you group and share assets. No collections have been created yet.
+                                                <p className="mt-3 text-sm leading-6 text-gray-500">
+                                                    Collections let you group and share assets. Create your first collection to get started.
                                                 </p>
+                                                {can_create_collection && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setShowCreateModal(true)}
+                                                        className="mt-6 inline-flex items-center gap-2 rounded-lg px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-all hover:brightness-110 focus:outline-none focus:ring-2 focus:ring-offset-2"
+                                                        style={{ backgroundColor: workspaceAccentColor }}
+                                                    >
+                                                        <PlusIcon className="h-4 w-4" />
+                                                        Create collection
+                                                    </button>
+                                                )}
                                             </div>
                                         ) : (
                                             <div className="min-h-[60vh]">
-                                                <div className="mb-10">
-                                                    <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/40">
-                                                        Library
-                                                    </p>
-                                                    <h2 className="mt-2 text-3xl font-semibold tracking-tight text-white sm:text-4xl">
+                                                <div className="mb-8">
+                                                    <h2 className="text-3xl font-bold text-gray-900">
                                                         Your collections
                                                     </h2>
-                                                    <p className="mt-3 max-w-xl text-base text-white/55">
+                                                    <p className="mt-2 text-sm text-gray-500">
                                                         Choose a collection to open the grid.
                                                     </p>
                                                 </div>
                                                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5 sm:gap-6">
-                                                    {collections.map((c) => {
-                                                        const placeholderGradient = `linear-gradient(145deg, ${hexToRgba(workspaceAccentColor, 0.35)} 0%, #0a0a0c 100%)`
-                                                        return (
-                                                            <motion.button
-                                                                key={c.id}
-                                                                type="button"
-                                                                onClick={() => navigateToCollection(c.id)}
-                                                                whileHover={{ scale: 1.02, y: -2 }}
-                                                                whileTap={{ scale: 0.99 }}
-                                                                transition={{ type: 'spring', stiffness: 420, damping: 28 }}
-                                                                className="group relative overflow-hidden rounded-2xl border border-white/10 bg-white/[0.04] text-left shadow-[0_24px_60px_-20px_rgba(0,0,0,0.85)] backdrop-blur-sm ring-1 ring-white/5 transition-shadow duration-300 hover:border-white/20 hover:ring-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40 motion-reduce:transform-none motion-reduce:hover:transform-none"
-                                                            >
-                                                                <div className="aspect-[16/10] w-full overflow-hidden bg-black/40">
-                                                                    {c.featured_image_url ? (
-                                                                        <img
-                                                                            src={c.featured_image_url}
-                                                                            alt=""
-                                                                            className="h-full w-full object-cover opacity-95 transition-transform duration-500 ease-out group-hover:scale-[1.04]"
-                                                                        />
-                                                                    ) : (
-                                                                        <div
-                                                                            className="flex h-full w-full items-center justify-center"
-                                                                            style={{ background: placeholderGradient }}
-                                                                        >
-                                                                            <RectangleStackIcon className="h-14 w-14 text-white/35" />
-                                                                        </div>
-                                                                    )}
-                                                                    <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-[#0B0B0D] via-[#0B0B0D]/20 to-transparent opacity-90" />
-                                                                </div>
-                                                                <div className="absolute inset-x-0 bottom-0 p-4 sm:p-5">
-                                                                    <h3 className="text-lg font-semibold tracking-tight text-white drop-shadow-sm truncate">
+                                                    {collections.map((c) => (
+                                                        <motion.button
+                                                            key={c.id}
+                                                            type="button"
+                                                            onClick={() => navigateToCollection(c.id)}
+                                                            whileHover={{ scale: 1.02, y: -2 }}
+                                                            whileTap={{ scale: 0.99 }}
+                                                            transition={{ type: 'spring', stiffness: 420, damping: 28 }}
+                                                            className="group relative overflow-hidden rounded-xl bg-gray-900 text-left shadow-md transition-shadow duration-300 hover:shadow-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 motion-reduce:transform-none motion-reduce:hover:transform-none"
+                                                        >
+                                                            <div className="aspect-[16/10] w-full overflow-hidden">
+                                                                {c.featured_image_url ? (
+                                                                    <img
+                                                                        src={c.featured_image_url}
+                                                                        alt=""
+                                                                        className="h-full w-full object-cover opacity-90 transition-transform duration-500 ease-out group-hover:scale-[1.04]"
+                                                                    />
+                                                                ) : (
+                                                                    <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-gray-800 to-gray-900">
+                                                                        <RectangleStackIcon className="h-12 w-12 text-white/20" />
+                                                                    </div>
+                                                                )}
+                                                                <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-gray-900/90 via-gray-900/30 to-transparent" />
+                                                            </div>
+                                                            <div className="absolute inset-x-0 bottom-0 p-4">
+                                                                <div className="flex items-center gap-2">
+                                                                    <h3 className="text-sm font-semibold text-white truncate">
                                                                         {c.name}
                                                                     </h3>
-                                                                    <p className="mt-1 text-sm text-white/60">
-                                                                        {typeof c.assets_count === 'number'
-                                                                            ? `${c.assets_count} asset${c.assets_count !== 1 ? 's' : ''}`
-                                                                            : ''}
-                                                                    </p>
+                                                                    {c.has_campaign && (
+                                                                        <span className={`inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide ${c.campaign_status === 'active' ? 'bg-emerald-500/20 text-emerald-300' : 'bg-white/10 text-white/50'}`}>
+                                                                            <svg className="h-2.5 w-2.5" viewBox="0 0 24 24" fill="currentColor"><path d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.455 2.456L21.75 6l-1.036.259a3.375 3.375 0 00-2.455 2.456z" /></svg>
+                                                                            Campaign
+                                                                        </span>
+                                                                    )}
                                                                 </div>
-                                                            </motion.button>
-                                                        )
-                                                    })}
+                                                                <p className="mt-0.5 text-xs text-white/60">
+                                                                    {typeof c.assets_count === 'number'
+                                                                        ? `${c.assets_count} asset${c.assets_count !== 1 ? 's' : ''}`
+                                                                        : ''}
+                                                                </p>
+                                                            </div>
+                                                        </motion.button>
+                                                    ))}
                                                 </div>
                                             </div>
                                         )}
@@ -635,19 +623,36 @@ export default function CollectionsIndex({
                                         transition={{ duration: 0.32, ease: [0.22, 1, 0.36, 1] }}
                                     >
                                 <>
-                                    {/* C10: Collection bar: name + Public toggle (only when feature enabled) */}
+                                    {/* Collection header: combined when campaign exists, standalone bar otherwise */}
                                     {selected_collection && (
-                                        <CollectionPublicBar
-                                            collection={selected_collection}
-                                            publicCollectionsEnabled={public_collections_enabled}
-                                            assetCount={assetsList.length}
-                                            canUpdateCollection={can_update_collection}
-                                            onEditClick={() => setShowEditModal(true)}
-                                            onPublicChange={() => {
-                                                router.reload()
-                                            }}
-                                            primaryColor={auth?.activeBrand?.primary_color}
-                                        />
+                                        selected_collection.campaign_summary ? (
+                                            <CampaignIdentityBanner
+                                                campaignSummary={selected_collection.campaign_summary}
+                                                collectionId={selected_collection.id}
+                                                canUpdateCollection={can_update_collection}
+                                                collection={selected_collection}
+                                                publicCollectionsEnabled={public_collections_enabled}
+                                                assetCount={assetsList.length}
+                                                onEditClick={() => setShowEditModal(true)}
+                                                onPublicChange={() => { router.reload() }}
+                                                primaryColor={auth?.activeBrand?.primary_color}
+                                                brandColors={{
+                                                    primary: auth?.activeBrand?.primary_color,
+                                                    secondary: auth?.activeBrand?.secondary_color,
+                                                    accent: auth?.activeBrand?.accent_color,
+                                                }}
+                                            />
+                                        ) : (
+                                            <CollectionPublicBar
+                                                collection={selected_collection}
+                                                publicCollectionsEnabled={public_collections_enabled}
+                                                assetCount={assetsList.length}
+                                                canUpdateCollection={can_update_collection}
+                                                onEditClick={() => setShowEditModal(true)}
+                                                onPublicChange={() => { router.reload() }}
+                                                primaryColor={auth?.activeBrand?.primary_color}
+                                            />
+                                        )
                                     )}
                                     <div className="mb-8">
                                         <AssetGridToolbar
@@ -775,14 +780,7 @@ export default function CollectionsIndex({
                                         />
                                         )}
                                         {nextPageUrl ? <div ref={loadMoreRef} className="h-10" aria-hidden="true" /> : null}
-                                        {loading && (
-                                            <div className="flex justify-center py-6">
-                                                <svg className="animate-spin h-8 w-8 text-indigo-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" aria-hidden="true">
-                                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                                                </svg>
-                                            </div>
-                                        )}
+                                        {loading && <InfiniteScrollGridSpinner brand={auth?.activeBrand} />}
                                         {nextPageUrl && <LoadMoreFooter onLoadMore={loadMore} hasMore={!!nextPageUrl} isLoading={loading} />}
                                         </>
                                     ) : (
@@ -790,10 +788,18 @@ export default function CollectionsIndex({
                                         <div className="max-w-2xl mx-auto py-16 px-6 text-center">
                                             <FolderIcon className="mx-auto h-16 w-16 text-gray-300" />
                                             <h2 className="mt-4 text-xl font-bold tracking-tight text-gray-900 sm:text-2xl">
-                                                This collection doesn&apos;t contain any assets yet.
+                                                This collection is empty
                                             </h2>
                                             <p className="mt-4 text-base leading-7 text-gray-600">
-                                                Assets added to this collection will appear here.
+                                                Add assets to this collection from the{' '}
+                                                <a href="/app/assets" className="font-medium text-indigo-600 hover:text-indigo-500 underline underline-offset-2">
+                                                    Assets
+                                                </a>{' '}
+                                                or{' '}
+                                                <a href="/app/executions" className="font-medium text-indigo-600 hover:text-indigo-500 underline underline-offset-2">
+                                                    Executions
+                                                </a>{' '}
+                                                page by selecting items and choosing &ldquo;Add to collection.&rdquo;
                                             </p>
                                         </div>
                                     )}
@@ -808,7 +814,7 @@ export default function CollectionsIndex({
 
                     {/* Asset Drawer - Desktop */}
                     {activeAssetId && (
-                        <div className="hidden md:block absolute right-0 top-0 bottom-0 z-[130]">
+                        <div className="hidden md:block">
                             <AssetDrawer
                                 key={activeAssetId}
                                 asset={activeAsset}
@@ -844,7 +850,7 @@ export default function CollectionsIndex({
 
             {/* Asset Drawer - Mobile */}
             {activeAssetId && (
-                <div className="md:hidden fixed inset-0 z-[130]">
+                <div className="md:hidden fixed inset-0 z-[150]">
                     <div className="absolute inset-0 bg-black/50" onClick={() => { setActiveAssetId(null); setOpenDrawerWithZoom(false) }} aria-hidden="true" />
                     <AssetDrawer
                         key={activeAssetId}

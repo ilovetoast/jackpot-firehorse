@@ -18,6 +18,7 @@ import AppHead from '../../Components/AppHead'
 import DashboardLinksRow from '../../Components/DashboardLinksRow'
 import ManagedCompaniesClientList from '../../Components/dashboard/ManagedCompaniesClientList'
 import AgencyBrandQuickJump from '../../Components/agency/AgencyBrandQuickJump'
+import JackpotQuietFooterMark from '../../Components/JackpotQuietFooterMark'
 import { showWorkspaceSwitchingOverlay } from '../../utils/workspaceSwitchOverlay'
 
 /**
@@ -322,7 +323,7 @@ export default function AgencyDashboard({
                             {agencySyncToast}
                         </div>
                     )}
-                    <div className="mx-auto w-full max-w-7xl px-4 pb-16 pt-[calc(8rem+env(safe-area-inset-top))] sm:px-6 sm:pt-[calc(8.5rem+env(safe-area-inset-top))] lg:px-12">
+                    <div className="mx-auto w-full max-w-7xl px-4 pb-16 pt-[calc(9.25rem+env(safe-area-inset-top))] sm:px-6 sm:pt-[calc(10rem+env(safe-area-inset-top))] lg:px-12">
                         <header className="mb-8 w-full max-w-none">
                             <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
                                 <div className="min-w-0">
@@ -1182,6 +1183,7 @@ export default function AgencyDashboard({
                         </div>
 
                         <footer className="mt-12 border-t border-white/10 pt-8 text-center text-xs text-white/30">
+                            <JackpotQuietFooterMark className="mb-3 sm:mb-4" />
                             <span>Jackpot</span> © {new Date().getFullYear()} —{' '}
                             <a
                                 href="https://velvetysoft.com"

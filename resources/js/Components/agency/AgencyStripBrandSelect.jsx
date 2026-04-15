@@ -82,7 +82,7 @@ export default function AgencyStripBrandSelect({
             {open && (
                 <ul
                     role="listbox"
-                    className={`absolute right-0 z-[60] mt-1 max-h-60 min-w-[12rem] overflow-y-auto rounded-lg py-1 shadow-lg ring-1 ring-black/5 ${
+                    className={`absolute right-0 z-[160] mt-1 max-h-60 min-w-[12rem] overflow-y-auto rounded-lg py-1 shadow-lg ring-1 ring-black/5 ${
                         isTransparentVariant ? 'bg-slate-900 text-white' : 'bg-white text-slate-900'
                     }`}
                 >

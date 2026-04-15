@@ -367,7 +367,7 @@ export default function CollectionOnlyView({
                 </div>
 
                 {activeAssetId && (
-                    <div className="absolute bottom-0 right-0 top-0 z-[130] hidden md:block">
+                    <div className="hidden md:block">
                         <AssetDrawer
                             key={activeAssetId}
                             asset={activeAsset}
@@ -389,7 +389,7 @@ export default function CollectionOnlyView({
             </div>
 
             {activeAssetId && (
-                <div className="fixed inset-0 z-[130] md:hidden">
+                <div className="fixed inset-0 z-[150] md:hidden">
                     <div
                         className="absolute inset-0 bg-black/50"
                         onClick={() => {

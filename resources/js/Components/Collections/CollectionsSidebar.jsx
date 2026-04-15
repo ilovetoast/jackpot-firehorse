@@ -4,12 +4,14 @@
  * Lists collections for the current brand; selection is URL-driven (?collection=id).
  */
 import { router } from '@inertiajs/react'
-import { RectangleStackIcon, PlusIcon, GlobeAltIcon, UserGroupIcon } from '@heroicons/react/24/outline'
+import { RectangleStackIcon, PlusIcon, GlobeAltIcon, UserGroupIcon, SparklesIcon } from '@heroicons/react/24/outline'
 
 export default function CollectionsSidebar({
     collections = [],
     selectedCollectionId = null,
     sidebarColor = '#1f2937',
+    /** Overview-style gradient; when set, overrides solid `sidebarColor` unless `transparentBackground`. */
+    sidebarBackdropCss = null,
     textColor = '#ffffff',
     activeBgColor = null, // Accent-based highlight when provided
     activeTextColor = null, // Contrast text for selected item (when using full accent bg)
@@ -20,9 +22,11 @@ export default function CollectionsSidebar({
     /** Landing grid: no collection selected — show through cinematic backdrop (desktop row). */
     transparentBackground = false,
 }) {
-    const isLight = textColor === '#000000'
+    const onCinematic = Boolean(sidebarBackdropCss && String(sidebarBackdropCss).trim() !== '')
+    const effectiveTextColor = onCinematic ? '#ffffff' : textColor
+    const isLight = effectiveTextColor === '#000000'
     const onDarkBackdrop = transparentBackground
-    const listTextColor = onDarkBackdrop && isLight ? '#ffffff' : textColor
+    const listTextColor = onDarkBackdrop && isLight ? '#ffffff' : effectiveTextColor
     const mutedStyle = onDarkBackdrop
         ? { color: 'rgba(255, 255, 255, 0.55)' }
         : { color: isLight ? 'rgba(0, 0, 0, 0.6)' : 'rgba(255, 255, 255, 0.6)' }
@@ -44,7 +48,13 @@ export default function CollectionsSidebar({
     return (
         <div
             className="relative flex flex-col w-72 h-full flex-shrink-0"
-            style={{ backgroundColor: transparentBackground ? 'transparent' : sidebarColor }}
+            style={
+                transparentBackground
+                    ? { backgroundColor: 'transparent' }
+                    : onCinematic
+                      ? { background: sidebarBackdropCss, backgroundColor: '#0B0B0D' }
+                      : { backgroundColor: sidebarColor }
+            }
         >
             <div className="flex-1 flex flex-col pt-5 pb-4 overflow-y-auto">
                 <nav className="mt-5 flex-1 px-2 space-y-1">
@@ -74,6 +84,7 @@ export default function CollectionsSidebar({
                                     const isActive = selectedCollectionId != null && c.id === selectedCollectionId
                                     const showPublic = publicCollectionsEnabled && !!c.is_public
                                     const showExternalGuests = !!c.allows_external_guests
+                                    const showCampaign = !!c.has_campaign
                                     const count = typeof c.assets_count === 'number' ? c.assets_count : null
                                     const itemTextColor = isActive && activeTextColor ? activeTextColor : listTextColor
                                     return (
@@ -114,6 +125,14 @@ export default function CollectionsSidebar({
                                                     className="h-4 w-4 flex-shrink-0 opacity-80"
                                                     style={{ color: itemTextColor }}
                                                     title="External guests allowed — collection-only access by email"
+                                                    aria-hidden="true"
+                                                />
+                                            )}
+                                            {showCampaign && (
+                                                <SparklesIcon
+                                                    className="h-3.5 w-3.5 flex-shrink-0 opacity-70"
+                                                    style={{ color: itemTextColor }}
+                                                    title="Campaign identity configured"
                                                     aria-hidden="true"
                                                 />
                                             )}

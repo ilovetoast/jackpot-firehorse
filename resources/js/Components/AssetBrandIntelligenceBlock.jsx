@@ -60,6 +60,8 @@ export default function AssetBrandIntelligenceBlock({
     drawerInsightGroup = false,
     /** When set, called with a short status line while auto-ensure is running (drawer banner), or null when idle. */
     onActivityBannerChange = null,
+    /** Optional collection ID for campaign context. When present, campaign alignment is fetched. */
+    collectionId = null,
 }) {
     const { auth } = usePage().props
     const brandColor = primaryColor || auth?.activeBrand?.primary_color || '#6366f1'
@@ -73,8 +75,11 @@ export default function AssetBrandIntelligenceBlock({
     const [feedbackLoading, setFeedbackLoading] = useState(false)
     const [autoEnsureLoading, setAutoEnsureLoading] = useState(false)
     const [analysisGateNote, setAnalysisGateNote] = useState(null)
+    const [campaignAlignment, setCampaignAlignment] = useState(null)
+    const [campaignAlignmentFetchSettled, setCampaignAlignmentFetchSettled] = useState(true)
     const abortRef = useRef(null)
     const ensureAbortRef = useRef(null)
+    const campaignAbortRef = useRef(null)
 
     useEffect(() => {
         setLocalBi(null)
@@ -82,7 +87,52 @@ export default function AssetBrandIntelligenceBlock({
         setFeedbackSent(false)
         setAutoEnsureLoading(false)
         setAnalysisGateNote(null)
+        setCampaignAlignment(null)
     }, [asset?.id])
+
+    useEffect(() => {
+        if (!asset?.id || !collectionId) {
+            setCampaignAlignment(null)
+            setCampaignAlignmentFetchSettled(true)
+            return
+        }
+        campaignAbortRef.current?.abort()
+        const ac = new AbortController()
+        campaignAbortRef.current = ac
+        setCampaignAlignment(null)
+        setCampaignAlignmentFetchSettled(false)
+        const csrf = document.querySelector('meta[name="csrf-token"]')?.content
+        fetch(`/app/assets/${asset.id}/campaign-alignment/${collectionId}`, {
+            headers: { Accept: 'application/json', ...(csrf ? { 'X-CSRF-TOKEN': csrf } : {}) },
+            credentials: 'same-origin',
+            signal: ac.signal,
+        })
+            .then(async (r) => {
+                if (!r.ok) return { ok: false }
+                try {
+                    const data = await r.json()
+                    return {
+                        ok: true,
+                        data: data && typeof data === 'object' ? data : {},
+                    }
+                } catch {
+                    return { ok: true, data: {} }
+                }
+            })
+            .then((result) => {
+                if (ac.signal.aborted) return
+                if (result.ok) {
+                    setCampaignAlignment(result.data)
+                }
+            })
+            .catch(() => {
+                if (!ac.signal.aborted) setCampaignAlignment(null)
+            })
+            .finally(() => {
+                if (!ac.signal.aborted) setCampaignAlignmentFetchSettled(true)
+            })
+        return () => ac.abort()
+    }, [asset?.id, collectionId])
 
     useEffect(() => {
         if (asset?.brand_intelligence) {
@@ -401,6 +451,9 @@ export default function AssetBrandIntelligenceBlock({
                         brandIntelligence={bi}
                         brandId={asset?.brand_id ?? asset?.brand?.id}
                         asset={asset}
+                        campaignAlignment={campaignAlignment}
+                        campaignAlignmentFetchSettled={campaignAlignmentFetchSettled}
+                        collectionId={collectionId}
                     />
                 </div>
             )}

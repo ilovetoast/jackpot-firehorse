@@ -68,6 +68,101 @@ function PathRow({ status, title, text }) {
     )
 }
 
+function DimensionBreakdownSection({ title, dimensions, borderColor = 'border-slate-100' }) {
+    if (!dimensions || typeof dimensions !== 'object') return null
+    return (
+        <Section title={title}>
+            <p className="text-xs text-slate-500 mb-3">Each dimension shows what was evaluated, the evidence found, and what was unavailable.</p>
+            {['identity', 'color', 'typography', 'visual_style', 'copy_voice', 'context_fit'].map((key) => {
+                const dim = dimensions[key]
+                if (!dim) return null
+                const statusColor = dim.status === 'aligned' ? 'text-emerald-700' : dim.status === 'fail' ? 'text-red-700' : dim.status === 'partial' ? 'text-amber-700' : 'text-slate-600'
+                return (
+                    <details key={key} className={`mb-3 rounded border ${borderColor} bg-slate-50/50 p-3`}>
+                        <summary className="cursor-pointer text-sm font-medium text-slate-800 flex items-center gap-2">
+                            <span className="uppercase tracking-wide text-xs">{key.replace(/_/g, ' ')}</span>
+                            <span className={`text-xs font-normal ${statusColor}`}>{dim.status}</span>
+                            {dim.evaluable && dim.confidence > 0 && (
+                                <span className="text-xs text-slate-400 font-normal">conf {(dim.confidence * 100).toFixed(0)}%</span>
+                            )}
+                        </summary>
+                        <div className="mt-2 space-y-1.5 text-sm">
+                            {dim.status_reason && (
+                                <p className="text-slate-700 font-medium">{dim.status_reason}</p>
+                            )}
+                            {kv('Score', dim.score != null ? String(dim.score) : '—')}
+                            {kv('Primary evidence', dim.primary_evidence_source ?? '—')}
+                            {Array.isArray(dim.evidence) && dim.evidence.length > 0 && (
+                                <div className="mt-2">
+                                    <div className="text-xs font-medium text-slate-600 mb-1">Evidence items</div>
+                                    <div className="space-y-1">
+                                        {dim.evidence.map((ev, i) => (
+                                            <div key={i} className="flex items-start gap-2 text-xs text-slate-700 border-b border-slate-100 pb-1 last:border-0">
+                                                <span className={`shrink-0 rounded px-1 py-0.5 text-[10px] font-mono ${
+                                                    ev.weight === 'hard' ? 'bg-emerald-100 text-emerald-800' :
+                                                    ev.weight === 'soft' ? 'bg-amber-100 text-amber-800' :
+                                                    'bg-slate-100 text-slate-600'
+                                                }`}>
+                                                    {ev.weight}
+                                                </span>
+                                                <span className="shrink-0 text-slate-500 font-mono text-[10px]">{ev.type}</span>
+                                                <span className="text-slate-800">{ev.detail}</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+                            {Array.isArray(dim.blockers) && dim.blockers.length > 0 && (
+                                <div className="mt-2">
+                                    <div className="text-xs font-medium text-amber-700 mb-1">Blockers / improvements</div>
+                                    <ul className="list-disc list-inside text-xs text-amber-900 space-y-0.5">
+                                        {dim.blockers.map((b, i) => <li key={i}>{b}</li>)}
+                                    </ul>
+                                </div>
+                            )}
+                        </div>
+                    </details>
+                )
+            })}
+        </Section>
+    )
+}
+
+function CampaignStateNotice({ campaignData }) {
+    if (!campaignData) {
+        return (
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+                No campaign identity configured for this collection. Master brand alignment only.
+            </div>
+        )
+    }
+    const ci = campaignData.campaign_identity
+    if (!ci) return null
+    const { readiness_status, scoring_enabled } = ci
+    if (readiness_status === 'incomplete') {
+        return (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+                Campaign identity is incomplete. Campaign scoring requires more configuration. Master brand alignment shown.
+            </div>
+        )
+    }
+    if (!scoring_enabled) {
+        return (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+                Campaign scoring is not enabled for this collection.
+            </div>
+        )
+    }
+    if (!campaignData.campaign_score) {
+        return (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+                Campaign alignment has not been scored yet.
+            </div>
+        )
+    }
+    return null
+}
+
 export default function BrandIntelligenceShow({
     auth,
     asset,
@@ -78,12 +173,16 @@ export default function BrandIntelligenceShow({
     scoring_path: scoringPath,
     ai_explanation: aiExplanation,
     reference_top_matches: referenceTopMatches,
+    campaign_alignment: campaignData = null,
 }) {
     const [simResult, setSimResult] = useState(null)
     const [simError, setSimError] = useState(null)
     const [simLoading, setSimLoading] = useState(false)
 
     const breakdown = score?.breakdown_json ?? {}
+    const hasCampaignScore = campaignData?.campaign_score != null
+    const campaignBreakdown = campaignData?.campaign_score ?? {}
+    const interpretation = campaignData?.interpretation
     const refs = breakdown.reference_similarity ?? {}
     const signals = breakdown.signals ?? {}
     const recs = breakdown.recommendations ?? []
@@ -212,60 +311,7 @@ export default function BrandIntelligenceShow({
                                         {kv('Campaign override', String(breakdown.evaluation_context?.campaign_override ?? false))}
                                     </Section>
 
-                                    <Section title="V2. Dimension Breakdown">
-                                        <p className="text-xs text-slate-500 mb-3">Each dimension shows what was evaluated, the evidence found, and what was unavailable.</p>
-                                        {['identity', 'color', 'typography', 'visual_style', 'copy_voice', 'context_fit'].map((key) => {
-                                            const dim = breakdown.dimensions[key]
-                                            if (!dim) return null
-                                            const statusColor = dim.status === 'aligned' ? 'text-emerald-700' : dim.status === 'fail' ? 'text-red-700' : dim.status === 'partial' ? 'text-amber-700' : 'text-slate-600'
-                                            return (
-                                                <details key={key} className="mb-3 rounded border border-slate-100 bg-slate-50/50 p-3">
-                                                    <summary className="cursor-pointer text-sm font-medium text-slate-800 flex items-center gap-2">
-                                                        <span className="uppercase tracking-wide text-xs">{key.replace(/_/g, ' ')}</span>
-                                                        <span className={`text-xs font-normal ${statusColor}`}>{dim.status}</span>
-                                                        {dim.evaluable && dim.confidence > 0 && (
-                                                            <span className="text-xs text-slate-400 font-normal">conf {(dim.confidence * 100).toFixed(0)}%</span>
-                                                        )}
-                                                    </summary>
-                                                    <div className="mt-2 space-y-1.5 text-sm">
-                                                        {dim.status_reason && (
-                                                            <p className="text-slate-700 font-medium">{dim.status_reason}</p>
-                                                        )}
-                                                        {kv('Score', dim.score != null ? String(dim.score) : '—')}
-                                                        {kv('Primary evidence', dim.primary_evidence_source ?? '—')}
-                                                        {Array.isArray(dim.evidence) && dim.evidence.length > 0 && (
-                                                            <div className="mt-2">
-                                                                <div className="text-xs font-medium text-slate-600 mb-1">Evidence items</div>
-                                                                <div className="space-y-1">
-                                                                    {dim.evidence.map((ev, i) => (
-                                                                        <div key={i} className="flex items-start gap-2 text-xs text-slate-700 border-b border-slate-100 pb-1 last:border-0">
-                                                                            <span className={`shrink-0 rounded px-1 py-0.5 text-[10px] font-mono ${
-                                                                                ev.weight === 'hard' ? 'bg-emerald-100 text-emerald-800' :
-                                                                                ev.weight === 'soft' ? 'bg-amber-100 text-amber-800' :
-                                                                                'bg-slate-100 text-slate-600'
-                                                                            }`}>
-                                                                                {ev.weight}
-                                                                            </span>
-                                                                            <span className="shrink-0 text-slate-500 font-mono text-[10px]">{ev.type}</span>
-                                                                            <span className="text-slate-800">{ev.detail}</span>
-                                                                        </div>
-                                                                    ))}
-                                                                </div>
-                                                            </div>
-                                                        )}
-                                                        {Array.isArray(dim.blockers) && dim.blockers.length > 0 && (
-                                                            <div className="mt-2">
-                                                                <div className="text-xs font-medium text-amber-700 mb-1">Blockers / improvements</div>
-                                                                <ul className="list-disc list-inside text-xs text-amber-900 space-y-0.5">
-                                                                    {dim.blockers.map((b, i) => <li key={i}>{b}</li>)}
-                                                                </ul>
-                                                            </div>
-                                                        )}
-                                                    </div>
-                                                </details>
-                                            )
-                                        })}
-                                    </Section>
+                                    <DimensionBreakdownSection title="V2. Dimension Breakdown (Master Brand)" dimensions={breakdown.dimensions} />
 
                                     {breakdown.dimension_weights && (
                                         <Section title="V2. Scoring Path">
@@ -287,6 +333,76 @@ export default function BrandIntelligenceShow({
                                         </Section>
                                     )}
                                 </>
+                            )}
+
+                            {campaignData && (
+                                <Section title="Campaign Context">
+                                    <CampaignStateNotice campaignData={campaignData} />
+                                    {campaignData.campaign_identity && (
+                                        <div className="mt-3 space-y-1">
+                                            {kv('Campaign name', campaignData.campaign_identity.campaign_name ?? '—')}
+                                            {kv('Campaign status', campaignData.campaign_identity.campaign_status ?? '—')}
+                                            {kv('Readiness', campaignData.campaign_identity.readiness_status ?? '—')}
+                                            {kv('Scoring enabled', String(campaignData.campaign_identity.scoring_enabled ?? false))}
+                                        </div>
+                                    )}
+                                </Section>
+                            )}
+
+                            {hasCampaignScore && (
+                                <>
+                                    <Section title="Campaign Alignment">
+                                        {kv('Campaign alignment state', campaignBreakdown.v2_alignment_state ?? campaignBreakdown.level ?? '—')}
+                                        {kv('Campaign rating (1-4)', campaignBreakdown.v2_rating ?? campaignBreakdown.overall_score ?? '—')}
+                                        {kv('Campaign confidence', campaignBreakdown.v2_overall_confidence ?? campaignBreakdown.confidence ?? '—')}
+                                        {kv('Campaign weighted score', campaignBreakdown.v2_weighted_score ?? '—')}
+                                        {kv('Engine version', campaignBreakdown.engine_version ?? '—')}
+                                        {campaignBreakdown.campaign_references_used && (
+                                            <div className="mt-2">
+                                                <div className="text-xs font-medium text-slate-600 mb-1">Campaign references used</div>
+                                                {Object.entries(campaignBreakdown.campaign_references_used).map(([type, count]) => (
+                                                    kv(`  ${type}`, String(count))
+                                                ))}
+                                            </div>
+                                        )}
+                                        {Array.isArray(campaignBreakdown.campaign_rules_checked) && campaignBreakdown.campaign_rules_checked.length > 0 && (
+                                            <div className="mt-2">
+                                                <div className="text-xs font-medium text-slate-600 mb-1">Campaign rules checked</div>
+                                                <p className="text-sm text-slate-700">{campaignBreakdown.campaign_rules_checked.join(', ')}</p>
+                                            </div>
+                                        )}
+                                    </Section>
+
+                                    {campaignBreakdown.dimensions && (
+                                        <DimensionBreakdownSection
+                                            title="Campaign Dimension Breakdown"
+                                            dimensions={campaignBreakdown.dimensions}
+                                            borderColor="border-violet-100"
+                                        />
+                                    )}
+                                </>
+                            )}
+
+                            {interpretation && (
+                                <Section title="Combined Interpretation">
+                                    <div className="space-y-1">
+                                        {kv('Combined key', interpretation.combined_key ?? '—')}
+                                        {kv('Interpretation', interpretation.interpretation_text ?? '—')}
+                                        {interpretation.interpretation_caveat && (
+                                            <p className="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded px-2 py-1.5 mt-2">
+                                                {interpretation.interpretation_caveat}
+                                            </p>
+                                        )}
+                                        {kv('Primary display', interpretation.primary_display ?? '—')}
+                                        {kv('Campaign scored', String(interpretation.campaign_scored ?? false))}
+                                        {kv('Campaign data sufficient', String(interpretation.campaign_data_sufficient ?? false))}
+                                        {kv('Campaign readiness', interpretation.campaign_readiness ?? '—')}
+                                        {kv('Master rating', interpretation.master_rating ?? '—')}
+                                        {kv('Campaign rating', interpretation.campaign_rating ?? '—')}
+                                        {kv('Master confidence', interpretation.master_confidence ?? '—')}
+                                        {kv('Campaign confidence', interpretation.campaign_confidence ?? '—')}
+                                    </div>
+                                </Section>
                             )}
 
                             <Section title="B. Signals (legacy)">

@@ -902,7 +902,7 @@ export default function AssetDrawer({
     const [processingGuardStatus, setProcessingGuardStatus] = useState(null)
 
     useEffect(() => {
-        if (!displayAsset?.id || externalCollectionGuest) {
+        if (!displayAsset?.id || externalCollectionGuest || displayAsset.is_virtual_google_font) {
             setProcessingGuardStatus(null)
             return undefined
         }
@@ -918,15 +918,15 @@ export default function AssetDrawer({
         return () => {
             cancelled = true
         }
-    }, [displayAsset?.id, externalCollectionGuest])
+    }, [displayAsset?.id, displayAsset?.is_virtual_google_font, externalCollectionGuest])
 
     const refetchProcessingGuardStatus = useCallback(() => {
-        if (!displayAsset?.id || externalCollectionGuest) return
+        if (!displayAsset?.id || externalCollectionGuest || displayAsset.is_virtual_google_font) return
         window.axios
             .get(`/app/assets/${displayAsset.id}/processing-status`)
             .then((r) => setProcessingGuardStatus(r.data))
             .catch(() => {})
-    }, [displayAsset?.id, externalCollectionGuest])
+    }, [displayAsset?.id, displayAsset?.is_virtual_google_font, externalCollectionGuest])
 
     useEffect(() => {
         setExecutionTripleCompareOpen(false)
@@ -1044,30 +1044,6 @@ export default function AssetDrawer({
         setDrawerReviewSlots((s) => ({ ...s, ai_tags: state }))
     }, [])
 
-    /** Shown when metadata/tag review slots are resolved and neither has items (EBI may still render above). */
-    const showDrawerReviewEmptyState = useMemo(() => {
-        if (!showRevueCollapsible || externalCollectionGuest || isVirtualGoogleFont) {
-            return false
-        }
-        if (pipelineBannerForRevue) {
-            return false
-        }
-        const { metadata_candidates: m, ai_tags: t } = drawerReviewSlots
-        if (m === 'loading' || t === 'loading') {
-            return false
-        }
-        if (m === 'content' || t === 'content') {
-            return false
-        }
-        return true
-    }, [
-        showRevueCollapsible,
-        externalCollectionGuest,
-        isVirtualGoogleFont,
-        pipelineBannerForRevue,
-        drawerReviewSlots,
-    ])
-
     /** Show “Use as a brand reference” only for strong signals (curation or usage), or when already promoted */
     const showBrandReferenceCard = useMemo(() => {
         if (!displayAsset?.id || displayAsset.is_virtual_google_font) {
@@ -1172,6 +1148,70 @@ export default function AssetDrawer({
         const ext = filename.split('.').pop()?.toLowerCase() || ''
         return mimeType.startsWith('video/') || videoExtensions.includes(ext)
     }, [displayAsset])
+
+    /** True only when MetadataAnalysisRunningBanner actually renders (not merely pipeline eligible). */
+    const drawerAnalysisBannerVisible = useMemo(() => {
+        if (!pipelineBannerForRevue || !drawerPipelineBanner?.metadataHealth) {
+            return false
+        }
+        const mh = drawerPipelineBanner.metadataHealth
+        const as = drawerPipelineBanner.analysisStatus
+        if (mh.is_complete || as === 'complete') {
+            return false
+        }
+        return true
+    }, [pipelineBannerForRevue, drawerPipelineBanner])
+
+    const drawerVideoReviewVisible = useMemo(() => {
+        if (!isVideo) return false
+        const vs = String(displayAsset?.metadata?.ai_video_status ?? '').toLowerCase()
+        if (vs === 'queued' || vs === 'processing' || vs === 'skipped') return true
+        if (vs === 'failed') return can('metadata.edit_post_upload')
+        if (vs === 'completed') {
+            return Boolean(displayAsset?.metadata?.ai_video_insights_completed_at)
+        }
+        return false
+    }, [
+        isVideo,
+        displayAsset?.metadata?.ai_video_status,
+        displayAsset?.metadata?.ai_video_insights_completed_at,
+        can,
+    ])
+
+    /**
+     * Assets / Collections / Deliverables drawer: when Review has no suggestions, no visible pipeline banner,
+     * no video-insight panel, and no Brand Intelligence block (EBI owns that slot when enabled for the category).
+     */
+    const showDrawerReviewEmptyState = useMemo(() => {
+        if (!showRevueCollapsible || externalCollectionGuest || isVirtualGoogleFont) {
+            return false
+        }
+        if (ebiEnabledForAsset) {
+            return false
+        }
+        if (drawerAnalysisBannerVisible) {
+            return false
+        }
+        if (drawerVideoReviewVisible) {
+            return false
+        }
+        const { metadata_candidates: m, ai_tags: t } = drawerReviewSlots
+        if (m === 'loading' || t === 'loading') {
+            return false
+        }
+        if (m === 'content' || t === 'content') {
+            return false
+        }
+        return true
+    }, [
+        showRevueCollapsible,
+        externalCollectionGuest,
+        isVirtualGoogleFont,
+        ebiEnabledForAsset,
+        drawerAnalysisBannerVisible,
+        drawerVideoReviewVisible,
+        drawerReviewSlots,
+    ])
 
     const bulkActionUrl =
         typeof route !== 'undefined' ? route('assets.bulk-action') : '/app/assets/bulk-action'
@@ -2917,21 +2957,6 @@ export default function AssetDrawer({
         return x === 'complete' || x === 'completed'
     }, [analysisStatusForPanel])
 
-    /** Green header check: hide when video insights are in a bad or in-flight state */
-    const processingDrawerPipelineGreen = useMemo(() => {
-        if (!aiPipelineCompleteForDrawer) {
-            return false
-        }
-        if (!isVideo) {
-            return true
-        }
-        const v = String(displayAsset?.metadata?.ai_video_status || '').toLowerCase()
-        if (v === 'queued' || v === 'processing' || v === 'failed') {
-            return false
-        }
-        return true
-    }, [aiPipelineCompleteForDrawer, isVideo, displayAsset?.metadata?.ai_video_status])
-
     const showPreviewContentSection = useMemo(
         () =>
             !externalCollectionGuest &&
@@ -2960,6 +2985,12 @@ export default function AssetDrawer({
             remove_preview: null,
         }),
         [processingGuardStatus],
+    )
+
+    /** True once analysis has completed or this action was run before — then “Re-run” is clearer than “Improve”. */
+    const drawerAiTaggingIsRepeat = useMemo(
+        () => Boolean(processingDrawerLastRuns.ai_metadata) || aiPipelineCompleteForDrawer,
+        [processingDrawerLastRuns.ai_metadata, aiPipelineCompleteForDrawer],
     )
 
     const drawerLastRunLine = useCallback(
@@ -3230,7 +3261,11 @@ export default function AssetDrawer({
                 setTimeout(() => setToastMessage(null), 6000)
             }
             if (!taggingWarned) {
-                setToastMessage('Improve AI tags started. This may take a few minutes.')
+                setToastMessage(
+                    drawerAiTaggingIsRepeat
+                        ? 'Re-run AI tagging started. This may take a few minutes.'
+                        : 'AI tagging started. This may take a few minutes.',
+                )
                 setToastType('success')
                 setTimeout(() => setToastMessage(null), 5000)
             }
@@ -3568,14 +3603,14 @@ export default function AssetDrawer({
         }
     }
 
-    return (
+    // Portal to document.body so fixed + z-index are not trapped under Collections (transform / z-stacking) or AppNav.
+    return typeof document !== 'undefined'
+        ? createPortal(
         <div
             ref={drawerRef}
             tabIndex={-1}
-            className="fixed inset-y-0 right-0 z-[130] w-full overflow-y-auto bg-white shadow-xl md:w-auto pb-[calc(env(safe-area-inset-bottom)+5rem)] md:pb-6" /* above AppNav dropdowns z-[100] / agency z-[60] / nav z-50 */
-            style={{
-                maxWidth: '480px',
-            }}
+            className="fixed inset-y-0 right-0 z-[200] w-full overflow-y-auto bg-white shadow-xl md:w-auto pb-[calc(env(safe-area-inset-bottom)+5rem)] md:pb-6"
+            style={{ maxWidth: '480px' }}
             role="dialog"
             aria-modal="true"
             aria-labelledby="drawer-title"
@@ -4903,17 +4938,29 @@ export default function AssetDrawer({
                             <dl className="space-y-3 text-sm text-gray-700">
                                 <div>
                                     <dt className="font-medium text-gray-900">Source</dt>
-                                    <dd className="mt-0.5 text-gray-600">Google Fonts (referenced from Brand Guidelines; not stored as a file)</dd>
+                                    <dd className="mt-0.5 text-gray-600">
+                                        {displayAsset.is_campaign_collection_font
+                                            ? 'Google Fonts (from Campaign Identity for this collection; not stored as a file in the DAM)'
+                                            : 'Google Fonts (referenced from Brand Guidelines; not stored as a file)'}
+                                    </dd>
                                 </div>
+                                {displayAsset.is_campaign_collection_font && displayAsset.campaign_collection_name && (
+                                    <div>
+                                        <dt className="font-medium text-gray-900">Collection</dt>
+                                        <dd className="mt-0.5 text-gray-600">{displayAsset.campaign_collection_name}</dd>
+                                    </div>
+                                )}
                                 {(displayAsset.metadata?.fields?.font_role || displayAsset.google_font_role_label) && (
                                     <div>
                                         <dt className="font-medium text-gray-900">Typographic role</dt>
                                         <dd className="mt-0.5 text-gray-600">
                                             {displayAsset.google_font_role_label
-                                                || (displayAsset.metadata?.fields?.font_role === 'body_copy' ||
-                                                    displayAsset.metadata?.fields?.font_role === 'body'
-                                                    ? 'Body'
-                                                    : displayAsset.metadata?.fields?.font_role === 'headline'
+                                                || (displayAsset.metadata?.fields?.font_role === 'campaign'
+                                                    ? 'Campaign'
+                                                    : displayAsset.metadata?.fields?.font_role === 'body_copy' ||
+                                                        displayAsset.metadata?.fields?.font_role === 'body'
+                                                      ? 'Body'
+                                                      : displayAsset.metadata?.fields?.font_role === 'headline'
                                                         ? 'Headline'
                                                         : displayAsset.metadata?.fields?.font_role)}
                                         </dd>
@@ -4921,7 +4968,20 @@ export default function AssetDrawer({
                                 )}
                             </dl>
                             <p className="mt-4 text-xs text-gray-500">
-                                To edit font families and roles, use Brand Guidelines → Standards (typography).
+                                {displayAsset.is_campaign_collection_font && displayAsset.campaign_collection_id
+                                    ? (
+                                        <>
+                                            To edit this campaign font, open{' '}
+                                            <a
+                                                href={`/app/collections/${displayAsset.campaign_collection_id}/campaign`}
+                                                className="text-indigo-600 hover:text-indigo-500"
+                                            >
+                                                Campaign Identity
+                                            </a>
+                                            {' '}for that collection. Use Assets → Fonts to change the Font role field on uploaded font files.
+                                        </>
+                                    )
+                                    : 'To edit font families and roles, use Brand Guidelines → Standards (typography).'}
                             </p>
                         </CollapsibleSection>
                     </div>
@@ -4929,7 +4989,7 @@ export default function AssetDrawer({
 
                 {/* Tags and Fields */}
                 {displayAsset?.id && !isVirtualGoogleFont && (
-                    <div className="border-t border-gray-200 space-y-4">
+                    <div className="border-t border-gray-200 divide-y divide-gray-200">
                         {displayAsset?.id &&
                             !externalCollectionGuest &&
                             !isVirtualGoogleFont &&
@@ -4939,7 +4999,7 @@ export default function AssetDrawer({
                                     title="Review"
                                     defaultExpanded={true}
                                 >
-                                    <div className="space-y-4 px-3 py-2">
+                                    <div className="space-y-3 px-3 py-1.5">
                                         {isVideo &&
                                             ['queued', 'processing'].includes(
                                                 String(displayAsset.metadata?.ai_video_status || ''),
@@ -5043,6 +5103,7 @@ export default function AssetDrawer({
                                                 primaryColor={brandPrimary}
                                                 drawerInsightGroup
                                                 onActivityBannerChange={setBrandIntelActivityBanner}
+                                                collectionId={collectionContext?.selectedCollectionId ?? null}
                                             />
                                         )}
                                         <MetadataCandidateReview
@@ -5064,22 +5125,19 @@ export default function AssetDrawer({
                                         />
                                         {showDrawerReviewEmptyState && (
                                             <div
-                                                className="flex flex-col items-center justify-center rounded-xl border border-slate-200/80 bg-slate-50/60 px-5 py-10 text-center"
+                                                className="flex flex-col items-center justify-center rounded-lg border border-gray-100 bg-gray-50/90 px-4 py-8 text-center"
                                                 role="status"
                                             >
                                                 <div
-                                                    className="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl border border-slate-200/90 bg-white/80 text-slate-300"
+                                                    className="mb-2.5 flex h-10 w-10 items-center justify-center rounded-full bg-white text-gray-300 ring-1 ring-gray-100"
                                                     aria-hidden
                                                 >
-                                                    <SparklesIcon className="h-6 w-6 stroke-[1]" />
+                                                    <CheckCircleIcon className="h-5 w-5" strokeWidth={1.25} />
                                                 </div>
-                                                <p className="text-sm font-medium text-slate-700">
-                                                    Nothing to review for this asset right now
-                                                </p>
-                                                <p className="mt-2 max-w-sm text-xs leading-relaxed text-slate-500">
-                                                    There are no pending metadata suggestions or AI tag ideas here.
-                                                    When something needs your attention, it will appear in this
-                                                    section.
+                                                <p className="text-sm font-medium text-gray-600">No action required</p>
+                                                <p className="mt-1 max-w-[260px] text-xs leading-relaxed text-gray-400">
+                                                    Nothing is waiting for your review here. If suggestions or tag
+                                                    ideas are added, they will show in this section.
                                                 </p>
                                             </div>
                                         )}
@@ -5526,17 +5584,7 @@ export default function AssetDrawer({
                         {showProcessingAutomationSection && (
                                 <CollapsibleSection
                                     contentInset="flush"
-                                    title={
-                                        <span className="flex w-full min-w-0 items-center justify-between gap-2">
-                                            <span className="min-w-0 truncate">Processing & Automation</span>
-                                            {processingDrawerPipelineGreen ? (
-                                                <CheckCircleIcon
-                                                    className="h-4 w-4 shrink-0 text-green-500"
-                                                    aria-label="Pipeline complete"
-                                                />
-                                            ) : null}
-                                        </span>
-                                    }
+                                    title="Processing & Automation"
                                     defaultExpanded={drawerExpandPreviewOrProcessingSections}
                                 >
                                     <div className="space-y-3">
@@ -5558,8 +5606,16 @@ export default function AssetDrawer({
                                                     {canRegenerateAiMetadataForTroubleshooting && (
                                                         <ProcessingActionCard
                                                             icon="sparkles"
-                                                            title="Improve AI tags"
-                                                            description="Refresh AI suggestions and tags"
+                                                            title={
+                                                                drawerAiTaggingIsRepeat
+                                                                    ? 'Re-run AI tagging'
+                                                                    : 'Run AI tagging'
+                                                            }
+                                                            description={
+                                                                drawerAiTaggingIsRepeat
+                                                                    ? 'Queue another pass; AI suggestions and tags refresh when processing finishes.'
+                                                                    : 'Generate AI suggestions and tags for this asset (queues metadata + tagging).'
+                                                            }
                                                             onClick={() => void handleDrawerRegenerateAiAnalysis()}
                                                             disabled={
                                                                 regeneratingAiAnalysisDrawer ||
@@ -5915,10 +5971,12 @@ export default function AssetDrawer({
                     }}
                 />
 
+                {/* Lower drawer stack: consistent dividers between each collapsible (Approval optional) */}
+                <div className="border-t border-gray-200 divide-y divide-gray-200">
                 {/* Phase AF-2: Approval History */}
                 {/* Phase AF-5: Only show approval history if approvals are enabled */}
                 {auth?.approval_features?.approvals_enabled && displayAsset?.id && (displayAsset.approval_status === 'pending' || displayAsset.approval_status === 'rejected' || displayAsset.approval_status === 'approved') && (
-                    <div className="border-t border-gray-200">
+                    <div>
                         <CollapsibleSection contentInset="flush" title="Approval History" defaultExpanded={false}>
                             {/* Phase AF-6: Approval Summary (AI-generated) */}
                             {auth?.approval_features?.approval_summaries_enabled && displayAsset?.approval_summary && (
@@ -5955,7 +6013,7 @@ export default function AssetDrawer({
                 {/* Buttons moved up to analytics section */}
 
                 {/* File Information */}
-                <div className="border-t border-gray-200">
+                <div>
                     <CollapsibleSection contentInset="flush" title="File Information" defaultExpanded={false}>
                     
                     {/* Created By - moved below preview, at top of file info */}
@@ -6301,7 +6359,7 @@ export default function AssetDrawer({
 
                 {/* Reliability Timeline (Unified Operations) — only when there are incidents */}
                 {!reliabilityTimelineLoading && reliabilityTimeline.length > 0 && (
-                <div className="border-t border-gray-200">
+                <div>
                     <CollapsibleSection
                         contentInset="flush"
                         title="Reliability Timeline"
@@ -6341,7 +6399,7 @@ export default function AssetDrawer({
                 )}
 
                 {/* Asset Timeline */}
-                <div className="border-t border-gray-200">
+                <div>
                     <CollapsibleSection contentInset="flush" title="Timeline" defaultExpanded={false}>
                         <AssetTimeline 
                             events={activityEvents} 
@@ -6356,6 +6414,7 @@ export default function AssetDrawer({
                             onVideoPreviewRetry={handleRetryVideoPreview}
                         />
                     </CollapsibleSection>
+                </div>
                 </div>
                 
             </div>
@@ -7259,7 +7318,7 @@ export default function AssetDrawer({
                 </div>
             )}
 
-            {/* Video AI insights — summary, tags, transcript, moments (above drawer z-[130]) */}
+            {/* Video AI insights — summary, tags, transcript, moments */}
             {showVideoInsightsModal && displayAsset?.id && isVideo && (
                 <div className="fixed inset-0 z-[10060] overflow-y-auto" role="dialog" aria-modal="true" aria-labelledby="video-insights-modal-title">
                     <div className="flex min-h-full items-end justify-center p-4 text-center sm:items-center sm:p-0">
@@ -7695,6 +7754,8 @@ export default function AssetDrawer({
                     }}
                 />
             )}
-        </div>
-    )
+        </div>,
+        document.body,
+        )
+        : null
 }

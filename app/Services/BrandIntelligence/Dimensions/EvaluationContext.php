@@ -5,6 +5,8 @@ namespace App\Services\BrandIntelligence\Dimensions;
 use App\Enums\AssetContextType;
 use App\Enums\MediaType;
 use App\Models\Asset;
+use App\Models\CollectionCampaignIdentity;
+use App\Services\BrandIntelligence\Campaign\CampaignIdentityPayloadNormalizer;
 
 final class EvaluationContext
 {
@@ -109,6 +111,27 @@ final class EvaluationContext
             unavailableExtractions: $unavailable,
             hasCampaignOverride: false,
             campaignDna: null,
+        );
+    }
+
+    public static function fromAssetWithCampaign(
+        Asset $asset,
+        AssetContextType $contextType,
+        CollectionCampaignIdentity $campaignIdentity,
+    ): self {
+        $base = self::fromAsset($asset, $contextType);
+
+        $normalized = CampaignIdentityPayloadNormalizer::normalize(
+            is_array($campaignIdentity->identity_payload) ? $campaignIdentity->identity_payload : []
+        );
+
+        return new self(
+            mediaType: $base->mediaType,
+            contextType: $base->contextType,
+            availableExtractions: $base->availableExtractions,
+            unavailableExtractions: $base->unavailableExtractions,
+            hasCampaignOverride: true,
+            campaignDna: $normalized,
         );
     }
 }

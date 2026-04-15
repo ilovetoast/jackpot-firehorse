@@ -24,6 +24,13 @@ export default function GatewayIndex({ context, mode: initialMode, invite_token,
     const { flash, theme } = usePage().props
     const [mode, setMode] = useState(initialMode || MODES.LOGIN)
     const [switchOpen, setSwitchOpen] = useState(false)
+    /** Stops EnterTransition redirect timers when user opens Switch (interrupt auto-enter). */
+    const [suppressAutoRedirect, setSuppressAutoRedirect] = useState(false)
+
+    const openSwitch = useCallback(() => {
+        setSuppressAutoRedirect(true)
+        setSwitchOpen(true)
+    }, [])
 
     const handleToggleMode = useCallback((newMode) => {
         setMode(newMode)
@@ -33,8 +40,8 @@ export default function GatewayIndex({ context, mode: initialMode, invite_token,
         return (
             <>
                 <Head title={theme?.name || 'Jackpot'} />
-                <GatewayLayout onSwitchOpen={() => setSwitchOpen(true)}>
-                    <EnterTransition />
+                <GatewayLayout onSwitchOpen={openSwitch}>
+                    <EnterTransition suppressAutoRedirect={suppressAutoRedirect} />
                 </GatewayLayout>
 
                 {switchOpen && (
@@ -84,7 +91,7 @@ export default function GatewayIndex({ context, mode: initialMode, invite_token,
                 )
 
             case MODES.ENTER:
-                return <EnterTransition />
+                return <EnterTransition suppressAutoRedirect={suppressAutoRedirect} />
 
             case MODES.INVITE_ACCEPT:
             case MODES.INVITE_REGISTER:
@@ -109,7 +116,7 @@ export default function GatewayIndex({ context, mode: initialMode, invite_token,
     return (
         <>
             <Head title={theme?.name || 'Jackpot'} />
-            <GatewayLayout onSwitchOpen={() => setSwitchOpen(true)}>
+            <GatewayLayout onSwitchOpen={openSwitch}>
                 {(flash?.error || flash_error) && (
                     <div className="mb-6 px-4 py-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-300 text-sm text-center max-w-md mx-auto">
                         {flash?.error || flash_error}

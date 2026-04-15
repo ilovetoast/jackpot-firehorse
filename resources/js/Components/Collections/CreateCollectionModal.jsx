@@ -2,6 +2,7 @@
  * Create collection — name, description, access preset (icon cards), optional isolated external guests.
  */
 import { useState } from 'react'
+import { createPortal } from 'react-dom'
 import {
     XMarkIcon,
     UsersIcon,
@@ -132,11 +133,16 @@ export default function CreateCollectionModal({ open, onClose, onCreated }) {
 
     if (!open) return null
 
-    return (
-        <div className="fixed inset-0 z-[80] overflow-y-auto" aria-labelledby="modal-title" role="dialog" aria-modal="true">
+    /** Portal + z above AppNav (z-[140]) and AssetDrawer (z-[200]) so backdrop covers full viewport. */
+    const dialog = (
+        <div className="fixed inset-0 z-[220] isolate overflow-y-auto" aria-labelledby="modal-title" role="dialog" aria-modal="true">
             <div className="flex min-h-full items-end justify-center p-4 text-center sm:items-center sm:p-0">
-                <div className="fixed inset-0 bg-gray-500/75 transition-opacity z-[80]" aria-hidden="true" onClick={handleClose} />
-                <div className="relative transform overflow-hidden rounded-xl bg-white text-left shadow-xl transition-all sm:my-8 sm:w-full sm:max-w-2xl z-[81] max-h-[92vh] flex flex-col">
+                <div
+                    className="fixed inset-0 bg-gray-500/75 transition-opacity z-[220]"
+                    aria-hidden="true"
+                    onClick={handleClose}
+                />
+                <div className="relative z-[221] transform overflow-hidden rounded-xl bg-white text-left shadow-xl transition-all sm:my-8 sm:w-full sm:max-w-2xl max-h-[92vh] flex flex-col">
                     <div className="bg-white px-4 pb-4 pt-5 sm:p-6 sm:pb-4 overflow-y-auto flex-1 min-h-0">
                         <div className="flex items-center justify-between mb-4">
                             <h3 className="text-lg font-semibold text-gray-900" id="modal-title">Create collection</h3>
@@ -336,4 +342,6 @@ export default function CreateCollectionModal({ open, onClose, onCreated }) {
             </div>
         </div>
     )
+
+    return typeof document !== 'undefined' ? createPortal(dialog, document.body) : null
 }
