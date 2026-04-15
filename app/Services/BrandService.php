@@ -6,12 +6,14 @@ use App\Exceptions\PlanLimitExceededException;
 use App\Models\Brand;
 use App\Models\Tenant;
 use App\Models\User;
+use App\Services\BrandDNA\BrandModelService;
 use Illuminate\Support\Str;
 
 class BrandService
 {
     public function __construct(
-        protected PlanService $planService
+        protected PlanService $planService,
+        protected BrandModelService $brandModelService,
     ) {
     }
 
@@ -126,6 +128,10 @@ class BrandService
         }
 
         $brand->update($data);
+
+        // Backfill published DNA Standards (active version only) when palette / allowed_fonts
+        // are still empty — e.g. identity colors or typography were added after guidelines publish.
+        $this->brandModelService->syncPublishedStandardsFromBrandWhenUnset($brand);
 
         return $brand->fresh();
     }
