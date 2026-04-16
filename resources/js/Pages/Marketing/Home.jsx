@@ -74,9 +74,9 @@ export default function MarketingHome() {
     return (
         <MarketingLayout>
             <HeroSection
-                logo={{ src: '/jp-wordmark-inverted.svg', alt: 'Jackpot', variant: 'inverted' }}
+                slotMachine
                 title="Brand execution, not asset management"
-                subtitle="One place to run creative work so every deliverable stays on-brand — from intake to approval — without the chaos of folders and one-off requests."
+                subtitle="Not another digital asset manager — a brand asset manager built for execution. Every asset, every brand, every deliverable lined up and ready to hit. Like the reels above, when everything clicks into place, that's the jackpot."
                 primaryCta={{ text: primaryLabel, href: primaryHref }}
                 secondaryCta={{ text: 'See how it works', href: '/product' }}
             />
@@ -132,7 +132,7 @@ export default function MarketingHome() {
                         className="mb-16"
                     />
                     <ComparisonBlock
-                        leftTitle="Traditional DAM"
+                        leftTitle="Traditional asset tools"
                         rightTitle="Jackpot"
                         leftItems={[
                             'Starts and ends with "where is the file?"',
@@ -184,7 +184,7 @@ export default function MarketingHome() {
                     <div className="grid grid-cols-1 gap-16 lg:grid-cols-2 lg:items-center">
                         <div>
                             <p className="text-sm font-semibold uppercase tracking-[0.2em] text-emerald-400/90">AI</p>
-                            <h2 className="mt-3 text-3xl font-bold tracking-tight text-white sm:text-4xl lg:text-5xl text-balance">
+                            <h2 className="mt-3 font-display text-3xl font-bold tracking-tight text-white sm:text-4xl lg:text-5xl text-balance">
                                 Not a feature. The fabric.
                             </h2>
                             <p className="mt-6 text-lg text-white/50 leading-relaxed">

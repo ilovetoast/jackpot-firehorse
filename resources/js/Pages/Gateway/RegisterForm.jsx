@@ -4,15 +4,15 @@ import { firstError } from '../../utils/inertiaErrors'
 import { refreshCsrfTokenFromServer } from '../../utils/csrf'
 
 export default function RegisterForm({ context, onToggleLogin }) {
-    const { theme, errors: sharedErrors = {} } = usePage().props
+    const { theme, errors: sharedErrors = {}, old = {} } = usePage().props
 
     const { data, setData, post, processing, errors: formErrors } = useForm({
-        first_name: '',
-        last_name: '',
-        email: '',
+        first_name: old.first_name || '',
+        last_name: old.last_name || '',
+        email: old.email || '',
         password: '',
         password_confirmation: '',
-        company_name: '',
+        company_name: old.company_name || '',
     })
 
     const errors = useMemo(
@@ -33,7 +33,10 @@ export default function RegisterForm({ context, onToggleLogin }) {
         } catch {
             /* still attempt */
         }
-        post('/gateway/register')
+        post('/gateway/register', {
+            preserveState: true,
+            preserveScroll: true,
+        })
     }
 
     const primary = theme?.colors?.primary || '#6366f1'
@@ -78,7 +81,7 @@ export default function RegisterForm({ context, onToggleLogin }) {
                         />
                     </div>
                 )}
-                <h1 className="text-4xl md:text-5xl font-semibold tracking-tight leading-tight text-white/95 mb-2">
+                <h1 className="font-display text-4xl md:text-5xl font-semibold tracking-tight leading-tight text-white/95 mb-2">
                     Get Started
                 </h1>
                 <p className="text-sm text-white/60 mt-2 max-w-md">

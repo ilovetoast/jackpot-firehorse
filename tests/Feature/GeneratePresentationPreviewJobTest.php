@@ -173,6 +173,7 @@ class GeneratePresentationPreviewJobTest extends TestCase
             $aiMock,
             app(\App\Services\PresentationPreviewPromptBuilder::class),
             $persist,
+            app(\App\Services\AiUsageService::class),
         );
 
         $version->refresh();

@@ -7,7 +7,7 @@ import CTASection from '../../Components/Marketing/CTASection'
 const PAINS = [
     {
         title: 'Multiple brands, one team',
-        description: 'Switching clients shouldn't mean switching mental models — or losing track of what each brand allows.',
+        description: "Switching clients shouldn't mean switching mental models — or losing track of what each brand allows.",
         iconPath: 'M2.25 12.75V12A2.25 2.25 0 014.5 9h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z',
     },
     {
@@ -55,9 +55,9 @@ const TIERS = [
         threshold: '5+ activated clients',
         incubation: '60-day incubation window',
         extensions: 'Up to 30 days extension',
-        color: 'from-amber-400/20 to-amber-500/10',
-        ring: 'ring-amber-400/20',
-        text: 'text-amber-300',
+        color: 'from-purple-400/20 to-purple-500/10',
+        ring: 'ring-purple-400/20',
+        text: 'text-purple-300',
     },
     {
         name: 'Platinum',
@@ -109,8 +109,8 @@ export default function MarketingAgency() {
             {/* Pain points */}
             <section className="border-t border-white/[0.06] py-24 sm:py-28">
                 <div className="mx-auto max-w-7xl px-6 lg:px-8">
-                    <p className="text-center text-sm font-semibold uppercase tracking-[0.2em] text-amber-400/80">Pain points</p>
-                    <h2 className="mt-3 text-center text-3xl font-bold text-white sm:text-4xl text-balance">Sound familiar?</h2>
+                    <p className="text-center text-sm font-semibold uppercase tracking-[0.2em] text-purple-400/80">Pain points</p>
+                    <h2 className="mt-3 text-center font-display text-3xl font-bold text-white sm:text-4xl text-balance">Sound familiar?</h2>
                     <div className="mt-16">
                         <FeatureGrid columns={3} items={PAINS} />
                     </div>
@@ -121,7 +121,7 @@ export default function MarketingAgency() {
             <section className="border-t border-white/[0.06] py-24 sm:py-28">
                 <div className="mx-auto max-w-7xl px-6 lg:px-8">
                     <p className="text-center text-sm font-semibold uppercase tracking-[0.2em] text-emerald-400/80">Solutions</p>
-                    <h2 className="mt-3 text-center text-3xl font-bold text-white sm:text-4xl text-balance">How Jackpot fits agency life</h2>
+                    <h2 className="mt-3 text-center font-display text-3xl font-bold text-white sm:text-4xl text-balance">How Jackpot fits agency life</h2>
                     <div className="mt-16">
                         <FeatureGrid columns={3} items={SOLUTIONS} />
                     </div>
@@ -133,7 +133,7 @@ export default function MarketingAgency() {
                 <div className="mx-auto max-w-5xl px-6 lg:px-8">
                     <div className="text-center mb-14">
                         <p className="text-sm font-semibold uppercase tracking-[0.2em] text-indigo-400/90">Incubation</p>
-                        <h2 className="mt-3 text-3xl font-bold text-white sm:text-4xl text-balance">From setup to handoff</h2>
+                        <h2 className="mt-3 font-display text-3xl font-bold text-white sm:text-4xl text-balance">From setup to handoff</h2>
                         <p className="mt-4 text-base text-white/40">Build out client workspaces on their target plan, then transfer when they're ready.</p>
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -154,8 +154,8 @@ export default function MarketingAgency() {
             <section className="border-t border-white/[0.06] py-24 sm:py-28">
                 <div className="mx-auto max-w-5xl px-6 lg:px-8">
                     <div className="text-center mb-14">
-                        <p className="text-sm font-semibold uppercase tracking-[0.2em] text-amber-400/90">Partner Tiers</p>
-                        <h2 className="mt-3 text-3xl font-bold text-white sm:text-4xl text-balance">Grow with every client you activate</h2>
+                        <p className="text-sm font-semibold uppercase tracking-[0.2em] text-purple-400/90">Partner Tiers</p>
+                        <h2 className="mt-3 font-display text-3xl font-bold text-white sm:text-4xl text-balance">Grow with every client you activate</h2>
                         <p className="mt-4 text-base text-white/40">Your tier advances automatically as you bring clients onto the platform.</p>
                     </div>
                     <div className="grid grid-cols-1 gap-6 sm:grid-cols-3">
@@ -187,7 +187,7 @@ export default function MarketingAgency() {
             <section className="border-t border-white/[0.06] py-20 sm:py-24">
                 <div className="mx-auto max-w-7xl px-6 lg:px-8">
                     <div className="rounded-2xl bg-white/[0.02] ring-1 ring-white/[0.06] p-8 sm:p-12">
-                        <h2 className="text-2xl font-bold text-white mb-8">What agency partners get</h2>
+                        <h2 className="font-display text-2xl font-bold text-white mb-8">What agency partners get</h2>
                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-8 gap-y-5">
                             {[
                                 'Agency dashboard with client overview',
@@ -197,7 +197,7 @@ export default function MarketingAgency() {
                                 'Partner reward tracking (by tier)',
                                 'Agency-scoped user sync across brands',
                                 'Extension requests for incubation windows',
-                                'Multi-brand asset management',
+                                'Multi-brand asset execution',
                                 'Approval workflows across all clients',
                             ].map((item) => (
                                 <div key={item} className="flex items-center gap-2">

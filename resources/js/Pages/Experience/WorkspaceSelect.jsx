@@ -17,10 +17,10 @@ export default function WorkspaceSelect({ brand, onSelectBrandGuidelines, onSele
                         className="group relative overflow-hidden rounded-lg border border-white/[0.08] bg-white/[0.04] p-8 text-left transition-all duration-500 ease-in-out hover:border-[var(--brand-primary)] hover:bg-white/[0.06] hover:translate-y-[-2px]"
                     >
                         <h2 className="text-2xl font-medium text-white mb-2">
-                            Digital Asset Management
+                            Brand Asset Manager
                         </h2>
                         <p className="text-sm text-white/65">
-                            Organize. Govern. Distribute.
+                            Manage. Execute. Deliver.
                         </p>
                         <div
                             className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none"

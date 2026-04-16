@@ -543,7 +543,7 @@ export default function AppNav({
                         className={
                             variant === 'transparent'
                                 ? 'rounded-md bg-[#0f1115]/95 py-0.5 text-sm shadow-xl ring-1 ring-white/10 backdrop-blur-xl'
-                                : 'rounded-md bg-white py-0.5 text-sm shadow-sm ring-1 ring-slate-200/90 backdrop-blur-sm dark:bg-gray-900 dark:ring-white/10'
+                                : 'rounded-md bg-white py-0.5 text-sm shadow-sm ring-1 ring-slate-200/90 backdrop-blur-sm'
                         }
                         style={{ '--overview-dd-accent': accent }}
                     >
@@ -653,7 +653,7 @@ export default function AppNav({
                                 className={
                                     variant === 'transparent'
                                         ? 'mx-2 my-1 border-t border-white/10'
-                                        : 'mx-2 my-1 border-t border-slate-200/90 dark:border-white/10'
+                                        : 'mx-2 my-1 border-t border-slate-200/90'
                                 }
                             />
                         ) : null}
@@ -719,64 +719,97 @@ export default function AppNav({
     return (
         <div>
             {/* Plan Limit Alert Banner */}
-            {showPlanAlert && planLimitInfo && (
-                <div className="relative bg-white border-b border-yellow-200 shadow-sm">
-                    {/* Yellow accent bar */}
-                    <div className="absolute left-0 top-0 bottom-0 w-1 bg-yellow-500"></div>
-                    <div className={isAppPage ? "px-4 sm:px-6 lg:px-8" : "mx-auto max-w-7xl px-4 sm:px-6 lg:px-8"}>
-                        <div className="py-3 flex items-center justify-between relative">
-                            <div className="flex items-center ml-4">
-                                {/* Warning icon */}
-                                <svg className="h-5 w-5 text-yellow-600 mr-3 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                                    <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
-                                </svg>
-                                <div className="text-sm">
-                                    {hasAdminOrOwnerRole ? (
-                                        <div className="text-gray-700">
-                                            <span className="font-medium text-yellow-600">Plan Limit Exceeded:</span>{' '}
-                                            You have <strong>{planLimitInfo.current_brand_count} brands</strong> but {tenant?.name ? `${tenant.name}'s` : 'your'} plan only allows <strong>{planLimitInfo.max_brands}</strong>.
-                                            {planLimitInfo.disabled_brand_names && planLimitInfo.disabled_brand_names.length > 0 && (
-                                                <span> <strong>{planLimitInfo.disabled_brand_names.join(', ')}</strong> {planLimitInfo.disabled_brand_names.length === 1 ? 'is' : 'are'} not accessible on {tenant?.name ? `${tenant.name}'s` : 'your'} current plan.</span>
-                                            )}
-                                            {' '}
-                                            <Link href="/app/billing" className="font-medium text-yellow-600 underline hover:text-yellow-700" onClick={handleDismissPlanAlert}>
-                                                Upgrade your plan
-                                            </Link> to access all brands.
-                                        </div>
+            {showPlanAlert && planLimitInfo && (() => {
+                const isFree = planLimitInfo.plan_name === 'free'
+                const disabledNames = planLimitInfo.disabled_brand_names || []
+                const accentColor = isFree ? 'indigo' : 'yellow'
+
+                return (
+                    <div className={`relative border-b shadow-sm ${isFree ? 'bg-indigo-50 border-indigo-100' : 'bg-white border-yellow-200'}`}>
+                        <div className={`absolute left-0 top-0 bottom-0 w-1 ${isFree ? 'bg-indigo-400' : 'bg-yellow-500'}`} />
+                        <div className={isAppPage ? "px-4 sm:px-6 lg:px-8" : "mx-auto max-w-7xl px-4 sm:px-6 lg:px-8"}>
+                            <div className="py-3 flex items-center justify-between relative">
+                                <div className="flex items-center ml-4">
+                                    {isFree ? (
+                                        <svg className="h-5 w-5 text-indigo-500 mr-3 flex-shrink-0" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
+                                            <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.455 2.456L21.75 6l-1.036.259a3.375 3.375 0 00-2.455 2.456zM16.894 20.567L16.5 21.75l-.394-1.183a2.25 2.25 0 00-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 001.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 001.423 1.423l1.183.394-1.183.394a2.25 2.25 0 00-1.423 1.423z" />
+                                        </svg>
                                     ) : (
-                                        planLimitInfo.disabled_brand_names && planLimitInfo.disabled_brand_names.length > 0 && (
-                                            <div className="text-gray-700">
-                                                You've been added to <strong>{planLimitInfo.disabled_brand_names.join(', ')}</strong>, but {planLimitInfo.disabled_brand_names.length === 1 ? 'it is' : 'they are'} not accessible on {tenant?.name ? `${tenant.name}'s` : 'your'} current plan.
-                                            </div>
-                                        )
+                                        <svg className="h-5 w-5 text-yellow-600 mr-3 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                                            <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
+                                        </svg>
                                     )}
+                                    <div className="text-sm">
+                                        {hasAdminOrOwnerRole ? (
+                                            <div className={isFree ? 'text-indigo-900' : 'text-gray-700'}>
+                                                {isFree ? (
+                                                    <>
+                                                        Your free plan includes <strong>{planLimitInfo.max_brands} brand{planLimitInfo.max_brands !== 1 ? 's' : ''}</strong>.
+                                                        {disabledNames.length > 0 && (
+                                                            <span> <strong>{disabledNames.join(', ')}</strong> {disabledNames.length === 1 ? 'is' : 'are'} paused until you upgrade.</span>
+                                                        )}
+                                                        {' '}
+                                                        <Link href="/app/billing" className="font-medium text-indigo-600 underline hover:text-indigo-700" onClick={handleDismissPlanAlert}>
+                                                            See plans
+                                                        </Link> to unlock more.
+                                                    </>
+                                                ) : (
+                                                    <>
+                                                        <span className="font-medium text-yellow-600">Brand limit reached:</span>{' '}
+                                                        Your plan supports <strong>{planLimitInfo.max_brands} brand{planLimitInfo.max_brands !== 1 ? 's' : ''}</strong> but you have <strong>{planLimitInfo.current_brand_count}</strong>.
+                                                        {disabledNames.length > 0 && (
+                                                            <span> <strong>{disabledNames.join(', ')}</strong> {disabledNames.length === 1 ? 'is' : 'are'} not accessible.</span>
+                                                        )}
+                                                        {' '}
+                                                        <Link href="/app/billing" className="font-medium text-yellow-600 underline hover:text-yellow-700" onClick={handleDismissPlanAlert}>
+                                                            Upgrade your plan
+                                                        </Link> to access all brands.
+                                                    </>
+                                                )}
+                                            </div>
+                                        ) : (
+                                            disabledNames.length > 0 && (
+                                                <div className={isFree ? 'text-indigo-800' : 'text-gray-700'}>
+                                                    <strong>{disabledNames.join(', ')}</strong> {disabledNames.length === 1 ? 'is' : 'are'} not available on the current plan. Ask your admin to upgrade.
+                                                </div>
+                                            )
+                                        )}
+                                    </div>
                                 </div>
-                            </div>
-                            <div className="ml-4 flex items-center gap-2">
-                                {hasAdminOrOwnerRole && (
-                                    <Link
-                                        href="/app/billing"
+                                <div className="ml-4 flex items-center gap-2">
+                                    {hasAdminOrOwnerRole && (
+                                        <Link
+                                            href="/app/billing"
+                                            onClick={handleDismissPlanAlert}
+                                            className={`inline-flex items-center rounded-md px-3 py-1.5 text-sm font-semibold text-white shadow-sm ${
+                                                isFree
+                                                    ? 'bg-indigo-500 hover:bg-indigo-400'
+                                                    : 'bg-yellow-500 hover:bg-yellow-400'
+                                            }`}
+                                        >
+                                            {isFree ? 'See Plans' : 'Upgrade Plan'}
+                                        </Link>
+                                    )}
+                                    <button
+                                        type="button"
                                         onClick={handleDismissPlanAlert}
-                                        className="inline-flex items-center rounded-md bg-yellow-500 px-3 py-1.5 text-sm font-semibold text-white shadow-sm hover:bg-yellow-400"
+                                        className={`inline-flex rounded-md p-1.5 focus:outline-none focus:ring-2 focus:ring-offset-2 ${
+                                            isFree
+                                                ? 'bg-indigo-50 text-indigo-400 hover:text-indigo-500 hover:bg-indigo-100 focus:ring-indigo-500 focus:ring-offset-indigo-50'
+                                                : 'bg-white text-gray-400 hover:text-gray-500 hover:bg-gray-100 focus:ring-yellow-500 focus:ring-offset-white'
+                                        }`}
                                     >
-                                        Upgrade Plan
-                                    </Link>
-                                )}
-                                <button
-                                    type="button"
-                                    onClick={handleDismissPlanAlert}
-                                    className="inline-flex rounded-md bg-white p-1.5 text-gray-400 hover:text-gray-500 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-yellow-500 focus:ring-offset-2 focus:ring-offset-white"
-                                >
-                                    <span className="sr-only">Dismiss</span>
-                                    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
-                                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                                    </svg>
-                                </button>
+                                        <span className="sr-only">Dismiss</span>
+                                        <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
+                                            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                                        </svg>
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     </div>
-                </div>
-            )}
+                )
+            })()}
 
             {/* No brand access alert — user is in company but has no brand access */}
             {showNoBrandAccessAlert && (

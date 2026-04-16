@@ -24,6 +24,11 @@ import AppNav from '../Components/AppNav'
 import Avatar from '../Components/Avatar'
 import BrandAvatar from '../Components/BrandAvatar'
 import { isUnlimitedCount, isUnlimitedStorageMB } from '../utils/planLimitDisplay'
+import {
+    formatAiCreditsSubtext,
+    formatThumbnailEnhancementSubtext,
+    isUnifiedAiCreditsPayload,
+} from '../utils/aiCreditsUsageDisplay'
 import ThumbnailPreview from '../Components/ThumbnailPreview'
 import PendingAiSuggestionsTile from '../Components/PendingAiSuggestionsTile'
 import PendingMetadataTile from '../Components/PendingMetadataTile'
@@ -243,7 +248,7 @@ export default function Dashboard({ auth, tenant, brand, plan_limits, plan, stat
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                         <div>
                             <h2 className="text-3xl font-bold tracking-tight text-gray-900">Dashboard</h2>
-                            <p className="mt-2 text-sm text-gray-700">Welcome to your asset management dashboard</p>
+                            <p className="mt-2 text-sm text-gray-700">Welcome to your brand asset dashboard</p>
                         </div>
                         {plan?.show_badge && plan?.name && (
                             <span className="inline-flex w-fit items-center rounded-full px-3 py-1 text-sm font-medium bg-indigo-100 text-indigo-800">
@@ -483,117 +488,47 @@ export default function Dashboard({ auth, tenant, brand, plan_limits, plan, stat
                         </div>
                     )}
 
-                    {/* AI Tagging Card - Only show if user has permission and data is available */}
-                    {ai_usage && (
+                    {ai_usage && isUnifiedAiCreditsPayload(ai_usage) && (
                         <div className="overflow-hidden rounded-lg bg-white px-4 py-5 shadow sm:p-6 border border-gray-200">
                             <div className="flex items-center">
                                 <div className="flex-shrink-0">
                                     <SparklesIcon className="h-6 w-6 text-purple-400" aria-hidden="true" />
                                 </div>
                                 <div className="ml-5 w-0 flex-1">
-                                    <dt className="text-sm font-medium text-gray-500 truncate">AI Tagging</dt>
+                                    <dt className="text-sm font-medium text-gray-500 truncate">AI credits</dt>
                                     <dd className="mt-1">
                                         <div className="flex items-baseline">
                                             <span className="text-2xl font-semibold tracking-tight text-gray-900">
-                                                {ai_usage.tagging.usage.toLocaleString()}
+                                                {(ai_usage.credits_used ?? 0).toLocaleString()}
                                             </span>
-                                            {!ai_usage.tagging.is_unlimited && (
+                                            {!ai_usage.is_unlimited && (
                                                 <span className="ml-2 text-sm text-gray-500">
-                                                    of {ai_usage.tagging.cap.toLocaleString()}
+                                                    of {(ai_usage.credits_cap ?? 0).toLocaleString()}
                                                 </span>
                                             )}
                                         </div>
-                                        {ai_usage.tagging.is_unlimited ? (
-                                            <p className="mt-1 text-xs text-gray-500">Unlimited</p>
-                                        ) : ai_usage.tagging.is_disabled ? (
-                                            <p className="mt-1 text-xs text-gray-500">Disabled</p>
-                                        ) : (
-                                            <>
-                                                <p className="mt-1 text-xs text-gray-500">
-                                                    {ai_usage.tagging.remaining !== null 
-                                                        ? `${ai_usage.tagging.remaining.toLocaleString()} remaining this month`
-                                                        : 'N/A'}
-                                                </p>
-                                                <div className="mt-2">
-                                                    <div className="flex items-center justify-between text-xs text-gray-500 mb-1">
-                                                        <span>Usage</span>
-                                                        <span>{ai_usage.tagging.percentage.toFixed(1)}%</span>
-                                                    </div>
-                                                    <div className="w-full bg-gray-200 rounded-full h-2">
-                                                        <div
-                                                            className={`h-2 rounded-full transition-all ${
-                                                                ai_usage.tagging.is_exceeded
-                                                                    ? 'bg-red-500'
-                                                                    : ai_usage.tagging.percentage >= 80
-                                                                    ? 'bg-yellow-500'
-                                                                    : 'bg-purple-500'
-                                                            }`}
-                                                            style={{
-                                                                width: `${Math.min(100, ai_usage.tagging.percentage)}%`
-                                                            }}
-                                                        />
-                                                    </div>
+                                        <p className="mt-1 text-xs text-gray-500">{formatAiCreditsSubtext(ai_usage)}</p>
+                                        {!ai_usage.is_unlimited && (ai_usage.credits_cap ?? 0) > 0 && (
+                                            <div className="mt-2">
+                                                <div className="flex items-center justify-between text-xs text-gray-500 mb-1">
+                                                    <span>Pool used</span>
+                                                    <span>{(ai_usage.credits_percentage ?? 0).toFixed(1)}%</span>
                                                 </div>
-                                            </>
-                                        )}
-                                    </dd>
-                                </div>
-                            </div>
-                        </div>
-                    )}
-
-                    {/* AI Suggestions Card - Only show if user has permission and data is available */}
-                    {ai_usage && (
-                        <div className="overflow-hidden rounded-lg bg-white px-4 py-5 shadow sm:p-6 border border-gray-200">
-                            <div className="flex items-center">
-                                <div className="flex-shrink-0">
-                                    <SparklesIcon className="h-6 w-6 text-indigo-400" aria-hidden="true" />
-                                </div>
-                                <div className="ml-5 w-0 flex-1">
-                                    <dt className="text-sm font-medium text-gray-500 truncate">AI Suggestions</dt>
-                                    <dd className="mt-1">
-                                        <div className="flex items-baseline">
-                                            <span className="text-2xl font-semibold tracking-tight text-gray-900">
-                                                {ai_usage.suggestions.usage.toLocaleString()}
-                                            </span>
-                                            {!ai_usage.suggestions.is_unlimited && (
-                                                <span className="ml-2 text-sm text-gray-500">
-                                                    of {ai_usage.suggestions.cap.toLocaleString()}
-                                                </span>
-                                            )}
-                                        </div>
-                                        {ai_usage.suggestions.is_unlimited ? (
-                                            <p className="mt-1 text-xs text-gray-500">Unlimited</p>
-                                        ) : ai_usage.suggestions.is_disabled ? (
-                                            <p className="mt-1 text-xs text-gray-500">Disabled</p>
-                                        ) : (
-                                            <>
-                                                <p className="mt-1 text-xs text-gray-500">
-                                                    {ai_usage.suggestions.remaining !== null 
-                                                        ? `${ai_usage.suggestions.remaining.toLocaleString()} remaining this month`
-                                                        : 'N/A'}
-                                                </p>
-                                                <div className="mt-2">
-                                                    <div className="flex items-center justify-between text-xs text-gray-500 mb-1">
-                                                        <span>Usage</span>
-                                                        <span>{ai_usage.suggestions.percentage.toFixed(1)}%</span>
-                                                    </div>
-                                                    <div className="w-full bg-gray-200 rounded-full h-2">
-                                                        <div
-                                                            className={`h-2 rounded-full transition-all ${
-                                                                ai_usage.suggestions.is_exceeded
-                                                                    ? 'bg-red-500'
-                                                                    : ai_usage.suggestions.percentage >= 80
-                                                                    ? 'bg-yellow-500'
-                                                                    : 'bg-indigo-500'
-                                                            }`}
-                                                            style={{
-                                                                width: `${Math.min(100, ai_usage.suggestions.percentage)}%`
-                                                            }}
-                                                        />
-                                                    </div>
+                                                <div className="w-full bg-gray-200 rounded-full h-2">
+                                                    <div
+                                                        className={`h-2 rounded-full transition-all ${
+                                                            (ai_usage.warning_level ?? 0) >= 100
+                                                                ? 'bg-red-500'
+                                                                : (ai_usage.warning_level ?? 0) >= 80
+                                                                  ? 'bg-yellow-500'
+                                                                  : 'bg-purple-500'
+                                                        }`}
+                                                        style={{
+                                                            width: `${Math.min(100, ai_usage.credits_percentage ?? 0)}%`,
+                                                        }}
+                                                    />
                                                 </div>
-                                            </>
+                                            </div>
                                         )}
                                     </dd>
                                 </div>
@@ -608,22 +543,14 @@ export default function Dashboard({ auth, tenant, brand, plan_limits, plan, stat
                                     <SparklesIcon className="h-6 w-6 text-teal-400" aria-hidden="true" />
                                 </div>
                                 <div className="ml-5 w-0 flex-1">
-                                    <dt className="text-sm font-medium text-gray-500 truncate">Thumbnail enhancement</dt>
+                                    <dt className="text-sm font-medium text-gray-500 truncate">Studio enhanced (local)</dt>
                                     <dd className="mt-1">
                                         <span className="text-2xl font-semibold tracking-tight text-gray-900">
                                             {(ai_usage.thumbnail_enhancement.count ?? 0).toLocaleString()}
                                         </span>
                                         <span className="ml-2 text-sm text-gray-500">runs this month</span>
                                         <p className="mt-1 text-xs text-gray-500">
-                                            {(ai_usage.thumbnail_enhancement.count ?? 0) === 0
-                                                ? 'No completed runs yet'
-                                                : `${ai_usage.thumbnail_enhancement.success_rate ?? '—'}% success rate · avg ${ai_usage.thumbnail_enhancement.avg_duration_ms != null ? `${Math.round(ai_usage.thumbnail_enhancement.avg_duration_ms)} ms` : '—'}` +
-                                                  (ai_usage.thumbnail_enhancement.p95_duration_ms != null
-                                                      ? ` · p95 ${Math.round(ai_usage.thumbnail_enhancement.p95_duration_ms)} ms`
-                                                      : '') +
-                                                  ((ai_usage.thumbnail_enhancement.skipped_count ?? 0) > 0
-                                                      ? ` · ${ai_usage.thumbnail_enhancement.skipped_count} skipped (guardrails)`
-                                                      : '')}
+                                            {formatThumbnailEnhancementSubtext(ai_usage.thumbnail_enhancement)}
                                         </p>
                                     </dd>
                                 </div>

@@ -52,11 +52,17 @@ class SupportTicketCreated extends BaseMailable
             );
         }
 
-        $subjectLine = $vars['ticket_subject'];
-
         return new Content(
-            htmlString: '<p style="margin:0 0 12px;">A new support ticket was assigned to you.</p>'
-                . '<p style="margin:0;"><strong>' . e($subjectLine) . '</strong></p>',
+            view: 'emails.support-ticket-created',
+            with: [
+                'ticketNumber'  => $vars['ticket_number'],
+                'ticketSubject' => $vars['ticket_subject'],
+                'categoryLabel' => $vars['category_label'],
+                'tenantName'    => $vars['tenant_name'],
+                'creatorName'   => $vars['creator_name'],
+                'assigneeName'  => $vars['assignee_name'],
+                'ticketUrl'     => $vars['ticket_url'],
+            ],
         );
     }
 

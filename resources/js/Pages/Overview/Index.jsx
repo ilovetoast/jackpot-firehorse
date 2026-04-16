@@ -1,7 +1,7 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { usePage } from '@inertiajs/react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { usePage, router } from '@inertiajs/react'
 import { motion } from 'framer-motion'
-import { SparklesIcon } from '@heroicons/react/24/outline'
+import { SparklesIcon, EnvelopeIcon, CheckCircleIcon } from '@heroicons/react/24/outline'
 import AppHead from '../../Components/AppHead'
 import DashboardLinksRow from '../../Components/DashboardLinksRow'
 import AppNav from '../../Components/AppNav'
@@ -89,6 +89,28 @@ export default function Overview() {
     /** Prostaff self dashboard for active brand; null if not prostaff or error. */
     const [prostaffMe, setProstaffMe] = useState(null)
     const [prostaffMeLoading, setProstaffMeLoading] = useState(false)
+
+    const canUploadAssets = page.props.can_upload_assets !== false
+    const emailVerified = Boolean(authFromPage?.user?.email_verified_at)
+    const showVerifyTask = !canUploadAssets && !emailVerified
+    const [resendingVerification, setResendingVerification] = useState(false)
+    const [verificationSent, setVerificationSent] = useState(false)
+
+    const handleResendVerification = useCallback(() => {
+        if (resendingVerification) return
+        setResendingVerification(true)
+        setVerificationSent(false)
+        router.post('/email/resend', {}, {
+            preserveState: true,
+            preserveScroll: true,
+            onSuccess: () => {
+                setVerificationSent(true)
+                setResendingVerification(false)
+                setTimeout(() => setVerificationSent(false), 5000)
+            },
+            onError: () => setResendingVerification(false),
+        })
+    }, [resendingVerification])
 
     const activeBrand = authFromPage?.activeBrand ?? auth?.activeBrand
     const brandId = activeBrand?.id
@@ -526,6 +548,60 @@ export default function Overview() {
                                             ))}
                                         </div>
                                     )
+                                )}
+
+                                {showVerifyTask && (
+                                    <motion.div
+                                        initial={{ opacity: 0, y: 8 }}
+                                        animate={{ opacity: 1, y: 0 }}
+                                        transition={{ duration: 0.35 }}
+                                        className="mt-3 sm:mt-4"
+                                    >
+                                        <div
+                                            className="overflow-hidden rounded-xl border px-4 py-3.5 backdrop-blur-md"
+                                            style={{
+                                                borderColor: 'rgba(99, 102, 241, 0.45)',
+                                                background: 'linear-gradient(to bottom right, rgba(99, 102, 241, 0.18), rgba(12, 12, 14, 0.42))',
+                                                boxShadow: '0 0 32px rgba(99, 102, 241, 0.12), inset 0 1px 0 rgba(99, 102, 241, 0.2)',
+                                            }}
+                                        >
+                                            <div className="flex items-start gap-3">
+                                                <div
+                                                    className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl"
+                                                    style={{ backgroundColor: 'rgba(99, 102, 241, 0.2)' }}
+                                                >
+                                                    <EnvelopeIcon className="h-5 w-5 text-indigo-300" aria-hidden />
+                                                </div>
+                                                <div className="min-w-0 flex-1">
+                                                    <p className="text-[11px] font-bold uppercase tracking-wider text-indigo-300/90">
+                                                        Getting started
+                                                    </p>
+                                                    <p className="mt-1.5 text-[15px] font-semibold leading-snug text-white">
+                                                        Verify your email to enable uploads
+                                                    </p>
+                                                    <p className="mt-1 text-sm leading-relaxed text-white/50">
+                                                        Check your inbox for a verification link. Once verified, you can start uploading assets to your workspace.
+                                                    </p>
+                                                    <div className="mt-2.5 flex items-center gap-3">
+                                                        <button
+                                                            type="button"
+                                                            onClick={handleResendVerification}
+                                                            disabled={resendingVerification}
+                                                            className="inline-flex items-center gap-1.5 text-sm font-semibold text-indigo-300 transition-colors hover:text-indigo-200 disabled:opacity-60 disabled:cursor-default"
+                                                        >
+                                                            {resendingVerification ? 'Sending…' : 'Resend verification email'}
+                                                        </button>
+                                                        {verificationSent && (
+                                                            <span className="inline-flex items-center gap-1 text-sm font-medium text-emerald-400 animate-fadeInUp">
+                                                                <CheckCircleIcon className="h-4 w-4" />
+                                                                Sent!
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </motion.div>
                                 )}
 
                                 {brandId != null ? (

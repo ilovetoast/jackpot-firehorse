@@ -1,36 +1,32 @@
+{{-- MODE: tenant | Collection Invitation --}}
 @php
-    $headerLine = $brand?->name ?? $tenant?->name ?? null;
+    $logoUrl     = $brand?->logoUrlForTransactionalEmail();
+    $accentColor = $brand?->primary_color;
+    $orgName     = $brand?->name ?? $tenant?->name;
 @endphp
-<x-email.layout :title="'Collection invitation — '.config('app.name')" :headerText="$headerLine">
-    <h2 style="margin-top: 0;">You've been invited to a collection</h2>
+<x-email.layout
+    title="Collection invitation"
+    mode="tenant"
+    :tenantName="$orgName"
+    :tenantLogoUrl="$logoUrl"
+    :tenantAccentColor="$accentColor"
+    preheader="{{ $inviter->name }} invited you to view {{ $collection->name }}"
+>
 
-    <p>Hi there,</p>
+    <x-email.eyebrow>Collection Invitation</x-email.eyebrow>
+    <x-email.heading>You&rsquo;ve been invited to a collection</x-email.heading>
 
-    <p>
+    <x-email.text>
         <strong>{{ $inviter->name }}</strong> has invited you to view the collection
-        <strong>{{ $collection->name }}</strong>
-        @if($brand)
-            for <strong>{{ $brand->name }}</strong>
-        @elseif($tenant)
-            on <strong>{{ $tenant->name }}</strong>
-        @endif
+        <strong>{{ $collection->name }}</strong>@if($brand) for <strong>{{ $brand->name }}</strong>@elseif($tenant) on <strong>{{ $tenant->name }}</strong>@endif
         on {{ config('app.name') }}.
-    </p>
+    </x-email.text>
 
-    <p>
-        Click the button below to accept the invitation:
-    </p>
+    <x-email.text>Click below to accept the invitation:</x-email.text>
 
-    <div style="text-align: center;">
-        <a href="{{ $inviteUrl }}" class="button">View collection invitation</a>
-    </div>
+    <x-email.button :url="$inviteUrl">View collection invitation</x-email.button>
+    <x-email.link-fallback :url="$inviteUrl" />
 
-    <p style="margin-top: 24px; font-size: 14px; color: #6b7280;">
-        Or copy and paste this link into your browser:<br>
-        <a href="{{ $inviteUrl }}" style="color: #6366f1; word-break: break-all;">{{ $inviteUrl }}</a>
-    </p>
+    <x-email.text :muted="true">If you didn&rsquo;t expect this invitation, you can safely ignore this email.</x-email.text>
 
-    <p style="margin-top: 24px; font-size: 14px; color: #6b7280;">
-        If you didn't expect this invitation, you can safely ignore this email.
-    </p>
 </x-email.layout>

@@ -1,4 +1,5 @@
 import { Link } from '@inertiajs/react'
+import SlotMachineLogo from './SlotMachineLogo'
 
 /**
  * Large-type hero with optional secondary link.
@@ -12,6 +13,8 @@ export default function HeroSection({
     className = '',
     /** Optional brand lockup above the headline. `variant: 'inverted'` = light wordmark on dark (no panel). */
     logo,
+    /** When true, replaces the static logo with an animated slot-machine reel. */
+    slotMachine = false,
 }) {
     const alignCls = align === 'left' ? 'text-left items-start' : 'text-center items-center'
     const logoJustify = align === 'left' ? 'justify-start' : 'justify-center'
@@ -20,7 +23,11 @@ export default function HeroSection({
     return (
         <section className={`relative px-6 pt-16 pb-20 sm:pt-20 sm:pb-28 lg:px-8 ${className}`}>
             <div className={`mx-auto max-w-4xl flex flex-col ${alignCls}`}>
-                {logo?.src ? (
+                {slotMachine ? (
+                    <div className={`mb-10 sm:mb-12 flex w-full ${logoJustify}`}>
+                        <SlotMachineLogo className="h-24 sm:h-32 md:h-40 lg:h-48 xl:h-52" />
+                    </div>
+                ) : logo?.src ? (
                     <div className={`mb-10 sm:mb-12 flex w-full ${logoJustify}`}>
                         {inverted ? (
                             <img
@@ -41,7 +48,7 @@ export default function HeroSection({
                         )}
                     </div>
                 ) : null}
-                <h1 className="text-4xl font-bold tracking-tight text-white sm:text-5xl lg:text-6xl text-balance leading-[1.08]">
+                <h1 className="font-display text-4xl font-bold tracking-tight text-white sm:text-5xl lg:text-6xl text-balance leading-[1.08]">
                     {title}
                 </h1>
                 {subtitle && (

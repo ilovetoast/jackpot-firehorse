@@ -953,7 +953,7 @@ export default function ManageAssetModal({
                                                 disabled={publishLoading}
                                                 onChange={handlePublishToggle}
                                             />
-                                            <span>Published (visible per your DAM rules)</span>
+                                            <span>Published (visible per your workspace rules)</span>
                                         </label>
                                     )}
                                 </div>

@@ -5,7 +5,9 @@ namespace App\Jobs;
 use App\Enums\AITaskType;
 use App\Models\Asset;
 use App\Models\AssetVersion;
+use App\Exceptions\PlanLimitExceededException;
 use App\Services\AIService;
+use App\Services\AiUsageService;
 use App\Services\EditorGenerativeImagePersistService;
 use App\Services\PresentationPreviewPromptBuilder;
 use App\Services\ThumbnailEnhancementAiTaskRecorder;
@@ -44,6 +46,7 @@ class GeneratePresentationPreviewJob implements ShouldQueue
         AIService $aiService,
         PresentationPreviewPromptBuilder $promptBuilder,
         EditorGenerativeImagePersistService $imagePersist,
+        AiUsageService $aiUsageService,
     ): void {
         $asset = Asset::query()
             ->with(['storageBucket', 'tenant', 'category', 'currentVersion'])
@@ -176,6 +179,22 @@ class GeneratePresentationPreviewJob implements ShouldQueue
             return;
         }
 
+        $tenant = $asset->tenant;
+        if ($tenant) {
+            try {
+                $aiUsageService->checkUsage($tenant, 'presentation_preview', 1);
+            } catch (PlanLimitExceededException $e) {
+                Log::warning('[GeneratePresentationPreviewJob] Blocked by AI credit budget', [
+                    'asset_id' => $asset->id,
+                    'tenant_id' => $tenant->id,
+                    'message' => $e->getMessage(),
+                ]);
+                $this->persistTerminal($asset, $version, 'failed', 'Monthly AI credit budget exceeded. Upgrade your plan or add AI credits to generate presentation previews.');
+
+                return;
+            }
+        }
+
         $t0 = microtime(true);
 
         try {
@@ -184,7 +203,7 @@ class GeneratePresentationPreviewJob implements ShouldQueue
                 AITaskType::THUMBNAIL_PRESENTATION_PREVIEW,
                 $prompt,
                 [
-                    'tenant' => $asset->tenant,
+                    'tenant' => $tenant,
                     'user' => null,
                     'triggering_context' => 'system',
                     'asset_id' => $asset->id,
@@ -216,6 +235,19 @@ class GeneratePresentationPreviewJob implements ShouldQueue
         $tokensOut = (int) ($aiOut['tokens_out'] ?? 0);
         $cost = (float) ($aiOut['cost'] ?? 0);
         $resolvedModelKey = (string) ($aiOut['resolved_model_key'] ?? $modelKey);
+
+        // Debit unified AI credits as soon as the provider call succeeds (downstream raster work is local).
+        if ($tenant) {
+            $aiUsageService->trackUsageWithCost(
+                $tenant,
+                'presentation_preview',
+                1,
+                $cost,
+                $tokensIn,
+                $tokensOut,
+                $resolvedModelKey
+            );
+        }
 
         $presentationTemp = null;
         try {

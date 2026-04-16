@@ -677,19 +677,8 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
         return true
     })
 
-    /** System Photography category: collapse Legal / Rights (usage, expiration, license) until expanded */
-    const selectedCategoryForUpload = useMemo(
-        () => filteredCategories.find((c) => String(c.id) === String(selectedCategoryId)),
-        [filteredCategories, selectedCategoryId]
-    )
-    const photographyUploadCollapsedGroupKeys = useMemo(() => {
-        if (!selectedCategoryForUpload) return null
-        const slug = (selectedCategoryForUpload.slug || '').toLowerCase().trim()
-        const name = (selectedCategoryForUpload.name || '').toLowerCase().trim()
-        const isPhotography = slug === 'photography' || name === 'photography'
-        if (!isPhotography) return null
-        return ['legal', 'legal_rights', 'license', 'expiration']
-    }, [selectedCategoryForUpload])
+    /** Collapse Legal / Rights (usage, expiration, license) by default for all categories */
+    const defaultCollapsedGroups = ['legal', 'legal_rights', 'license', 'expiration']
     
     // Debug: Log all categories received vs filtered (in useEffect to avoid render side-effects)
     useEffect(() => {
@@ -4551,7 +4540,7 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                                                         onCreateClick: () => setShowCreateCollectionModal(true),
                                                     } : null}
                                                     tagFieldInputRef={tagFieldInputRef}
-                                                    defaultCollapsedGroupKeys={photographyUploadCollapsedGroupKeys || undefined}
+                                                    defaultCollapsedGroupKeys={defaultCollapsedGroups}
                                                 />
                                             ) : (
                                                 <div className="rounded-md bg-gray-50 border border-gray-200 p-3">

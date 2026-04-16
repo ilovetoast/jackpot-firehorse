@@ -98,13 +98,13 @@ function ExperienceFlow() {
         return (
             <div className="min-h-screen bg-[#0B0B0D] text-white flex flex-col items-center justify-center px-6">
                 <h1 className="text-[56px] md:text-[96px] font-light tracking-tight text-white/95 mb-4">
-                    Digital Asset Management
+                    Brand Asset Manager
                 </h1>
                 <p className="text-lg text-white/65">
-                    Organize. Govern. Distribute.
+                    Manage. Execute. Deliver.
                 </p>
                 <p className="mt-8 text-sm text-white/40 uppercase tracking-widest">
-                    Placeholder — DAM not connected
+                    Placeholder — not connected
                 </p>
             </div>
         )

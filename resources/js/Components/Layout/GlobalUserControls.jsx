@@ -171,96 +171,100 @@ export default function GlobalUserControls({
                                             borderLeftColor: workspaceBrandColor,
                                         }}
                                     >
-                                        <div className="px-3 pt-3 pb-2">
-                                            <p className="text-xs font-medium uppercase tracking-wider text-gray-500">
-                                                Active workspace
-                                            </p>
-                                            {hasMultipleDirectCompanyWorkspaces && (
-                                                <p className="mt-0.5 text-[10px] leading-snug text-gray-500">
-                                                    Switch company below.
-                                                </p>
-                                            )}
-                                        </div>
+                                        {hasMultipleCompanies && (
+                                            <>
+                                                <div className="px-3 pt-3 pb-2">
+                                                    <p className="text-xs font-medium uppercase tracking-wider text-gray-500">
+                                                        Active workspace
+                                                    </p>
+                                                    {hasMultipleDirectCompanyWorkspaces && (
+                                                        <p className="mt-0.5 text-[10px] leading-snug text-gray-500">
+                                                            Switch company below.
+                                                        </p>
+                                                    )}
+                                                </div>
 
-                                        {activeCompany && (
-                                            <div className="border-t border-gray-100">
-                                                {hasMultipleDirectCompanyWorkspaces ? (
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => setCompanyDropdownOpen(!companyDropdownOpen)}
-                                                        className="flex w-full min-h-[44px] items-center gap-2 border-0 bg-gray-50/80 px-3 py-2.5 text-left transition hover:bg-gray-100/90 focus:outline-none focus-visible:bg-gray-100 focus-visible:ring-2 focus-visible:ring-inset"
-                                                        style={{ '--tw-ring-color': `${workspaceBrandColor}99` }}
-                                                        aria-expanded={companyDropdownOpen}
-                                                        aria-haspopup="listbox"
-                                                        aria-label={`Switch company, current workspace ${activeCompany.name}`}
-                                                        title="Choose which company you are working in"
-                                                    >
-                                                        <svg className="h-4 w-4 flex-shrink-0 text-gray-500" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor" aria-hidden>
-                                                            <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 21h19.5m-18-18v18m10.5-18v18m6-13.5V21M6.75 6.75h.75m-.75 3h.75m-.75 3h.75m3-6h.75m-.75 3h.75m-.75 3h.75M6.75 21v-3.375c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21M3 3h12m-.75 4.5H21m-3.75 3.75h.008v.008h-.008v-.008zm0 3h.008v.008h-.008v-.008zm0 3h.008v.008h-.008v-.008z" />
-                                                        </svg>
-                                                        <span className="min-w-0 flex-1 truncate text-sm font-semibold text-gray-900" title={activeCompany.name}>
-                                                            {activeCompany.name}
-                                                        </span>
-                                                        <span className="shrink-0 rounded border border-gray-200 bg-white px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-gray-500">
-                                                            {activeWorkspaceKindPill}
-                                                        </span>
-                                                        <svg className={`h-4 w-4 flex-shrink-0 text-gray-500 transition-transform ${companyDropdownOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor" aria-hidden>
-                                                            <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
-                                                        </svg>
-                                                    </button>
-                                                ) : (
-                                                    <div
-                                                        className="flex min-h-[44px] items-center gap-2 bg-gray-50/80 px-3 py-2.5"
-                                                        title={activeCompany.name}
-                                                    >
-                                                        <svg className="h-4 w-4 flex-shrink-0 text-gray-500" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor" aria-hidden>
-                                                            <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 21h19.5m-18-18v18m10.5-18v18m6-13.5V21M6.75 6.75h.75m-.75 3h.75m-.75 3h.75m3-6h.75m-.75 3h.75m-.75 3h.75M6.75 21v-3.375c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21M3 3h12m-.75 4.5H21m-3.75 3.75h.008v.008h-.008v-.008zm0 3h.008v.008h-.008v-.008zm0 3h.008v.008h-.008v-.008z" />
-                                                        </svg>
-                                                        <div className="min-w-0 flex-1">
-                                                            <p className="truncate text-sm font-semibold text-gray-900">{activeCompany.name}</p>
-                                                            <p className="text-[10px] text-gray-500">
-                                                                {onlyAgencyLinkedExtraWorkspaces
-                                                                    ? 'Client workspaces: use the agency workspace bar above.'
-                                                                    : oneDirectAmongAgencyWorkspaces
-                                                                      ? 'Other client workspaces: use the agency bar above.'
-                                                                      : 'Your only workspace right now'}
-                                                            </p>
-                                                        </div>
-                                                    </div>
-                                                )}
-                                                {hasMultipleDirectCompanyWorkspaces && companyDropdownOpen && (
-                                                    <div className="max-h-[280px] overflow-y-auto border-t border-gray-200 bg-white py-1">
-                                                        {directWorkspaceCompanies.map((company) => (
+                                                {activeCompany && (
+                                                    <div className="border-t border-gray-100">
+                                                        {hasMultipleDirectCompanyWorkspaces ? (
                                                             <button
-                                                                key={company.id}
                                                                 type="button"
-                                                                onClick={() => handleSwitchCompany(company.id)}
-                                                                className={`flex w-full items-center px-3 py-2 text-left text-sm transition-colors ${
-                                                                    company.is_active
-                                                                        ? 'bg-primary text-white'
-                                                                        : 'text-gray-700 hover:bg-gray-50'
-                                                                }`}
-                                                                title={company.name}
+                                                                onClick={() => setCompanyDropdownOpen(!companyDropdownOpen)}
+                                                                className="flex w-full min-h-[44px] items-center gap-2 border-0 bg-gray-50/80 px-3 py-2.5 text-left transition hover:bg-gray-100/90 focus:outline-none focus-visible:bg-gray-100 focus-visible:ring-2 focus-visible:ring-inset"
+                                                                style={{ '--tw-ring-color': `${workspaceBrandColor}99` }}
+                                                                aria-expanded={companyDropdownOpen}
+                                                                aria-haspopup="listbox"
+                                                                aria-label={`Switch company, current workspace ${activeCompany.name}`}
+                                                                title="Choose which company you are working in"
                                                             >
-                                                                <svg className={`h-4 w-4 mr-2 flex-shrink-0 ${company.is_active ? 'text-white' : 'text-gray-400'}`} fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
+                                                                <svg className="h-4 w-4 flex-shrink-0 text-gray-500" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor" aria-hidden>
                                                                     <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 21h19.5m-18-18v18m10.5-18v18m6-13.5V21M6.75 6.75h.75m-.75 3h.75m-.75 3h.75m3-6h.75m-.75 3h.75m-.75 3h.75M6.75 21v-3.375c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21M3 3h12m-.75 4.5H21m-3.75 3.75h.008v.008h-.008v-.008zm0 3h.008v.008h-.008v-.008zm0 3h.008v.008h-.008v-.008z" />
                                                                 </svg>
-                                                                <span className="flex-1 font-medium truncate">{company.name}</span>
-                                                                {activeCompany?.is_agency && managedClientIdSet.has(company.id) && (
-                                                                    <span className="ml-1 shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide bg-indigo-100 text-indigo-800">
-                                                                        Client
-                                                                    </span>
-                                                                )}
-                                                                {company.is_active && (
-                                                                    <svg className="h-4 w-4 text-white flex-shrink-0 ml-1" fill="currentColor" viewBox="0 0 20 20">
-                                                                        <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                                                                    </svg>
-                                                                )}
+                                                                <span className="min-w-0 flex-1 truncate text-sm font-semibold text-gray-900" title={activeCompany.name}>
+                                                                    {activeCompany.name}
+                                                                </span>
+                                                                <span className="shrink-0 rounded border border-gray-200 bg-white px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-gray-500">
+                                                                    {activeWorkspaceKindPill}
+                                                                </span>
+                                                                <svg className={`h-4 w-4 flex-shrink-0 text-gray-500 transition-transform ${companyDropdownOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor" aria-hidden>
+                                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+                                                                </svg>
                                                             </button>
-                                                        ))}
+                                                        ) : (
+                                                            <div
+                                                                className="flex min-h-[44px] items-center gap-2 bg-gray-50/80 px-3 py-2.5"
+                                                                title={activeCompany.name}
+                                                            >
+                                                                <svg className="h-4 w-4 flex-shrink-0 text-gray-500" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor" aria-hidden>
+                                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 21h19.5m-18-18v18m10.5-18v18m6-13.5V21M6.75 6.75h.75m-.75 3h.75m-.75 3h.75m3-6h.75m-.75 3h.75m-.75 3h.75M6.75 21v-3.375c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21M3 3h12m-.75 4.5H21m-3.75 3.75h.008v.008h-.008v-.008zm0 3h.008v.008h-.008v-.008zm0 3h.008v.008h-.008v-.008z" />
+                                                                </svg>
+                                                                <div className="min-w-0 flex-1">
+                                                                    <p className="truncate text-sm font-semibold text-gray-900">{activeCompany.name}</p>
+                                                                    <p className="text-[10px] text-gray-500">
+                                                                        {onlyAgencyLinkedExtraWorkspaces
+                                                                            ? 'Client workspaces: use the agency workspace bar above.'
+                                                                            : oneDirectAmongAgencyWorkspaces
+                                                                              ? 'Other client workspaces: use the agency bar above.'
+                                                                              : 'Your only workspace right now'}
+                                                                    </p>
+                                                                </div>
+                                                            </div>
+                                                        )}
+                                                        {hasMultipleDirectCompanyWorkspaces && companyDropdownOpen && (
+                                                            <div className="max-h-[280px] overflow-y-auto border-t border-gray-200 bg-white py-1">
+                                                                {directWorkspaceCompanies.map((company) => (
+                                                                    <button
+                                                                        key={company.id}
+                                                                        type="button"
+                                                                        onClick={() => handleSwitchCompany(company.id)}
+                                                                        className={`flex w-full items-center px-3 py-2 text-left text-sm transition-colors ${
+                                                                            company.is_active
+                                                                                ? 'bg-primary text-white'
+                                                                                : 'text-gray-700 hover:bg-gray-50'
+                                                                        }`}
+                                                                        title={company.name}
+                                                                    >
+                                                                        <svg className={`h-4 w-4 mr-2 flex-shrink-0 ${company.is_active ? 'text-white' : 'text-gray-400'}`} fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
+                                                                            <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 21h19.5m-18-18v18m10.5-18v18m6-13.5V21M6.75 6.75h.75m-.75 3h.75m-.75 3h.75m3-6h.75m-.75 3h.75m-.75 3h.75M6.75 21v-3.375c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21M3 3h12m-.75 4.5H21m-3.75 3.75h.008v.008h-.008v-.008zm0 3h.008v.008h-.008v-.008zm0 3h.008v.008h-.008v-.008z" />
+                                                                        </svg>
+                                                                        <span className="flex-1 font-medium truncate">{company.name}</span>
+                                                                        {activeCompany?.is_agency && managedClientIdSet.has(company.id) && (
+                                                                            <span className="ml-1 shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide bg-indigo-100 text-indigo-800">
+                                                                                Client
+                                                                            </span>
+                                                                        )}
+                                                                        {company.is_active && (
+                                                                            <svg className="h-4 w-4 text-white flex-shrink-0 ml-1" fill="currentColor" viewBox="0 0 20 20">
+                                                                                <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                                                                            </svg>
+                                                                        )}
+                                                                    </button>
+                                                                ))}
+                                                            </div>
+                                                        )}
                                                     </div>
                                                 )}
-                                            </div>
+                                            </>
                                         )}
 
                                         <div className="border-t border-gray-100 bg-gray-50/60">

@@ -3036,7 +3036,7 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                 <div className="mb-1">
                                     <h2 className="text-xl font-semibold text-gray-900">Workspace Appearance</h2>
                                     <p className="mt-3 text-sm text-gray-600 leading-relaxed max-w-xl">
-                                        Control how the DAM interface looks for this brand.
+                                        Control how the workspace looks for this brand.
                                     </p>
                                 </div>
 
@@ -3360,7 +3360,7 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                             <div className="sticky top-8">
                                 <h4 className="text-sm font-medium text-gray-900 mb-1">Preview</h4>
                                 <p className="text-sm text-gray-500 mb-4">
-                                    How the workspace will appear in the DAM.
+                                    How the workspace will appear to your team.
                                 </p>
                                 {(() => {
                                     const sidebarCinematic =

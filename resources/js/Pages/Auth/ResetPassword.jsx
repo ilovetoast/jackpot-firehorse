@@ -12,7 +12,10 @@ export default function ResetPassword({ email, token }) {
 
     const submit = (e) => {
         e.preventDefault()
-        post('/reset-password')
+        post('/reset-password', {
+            preserveState: true,
+            preserveScroll: true,
+        })
     }
 
     return (

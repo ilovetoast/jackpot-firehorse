@@ -23,9 +23,15 @@ return [
         'insights' => 1,
         'brand_research' => 25,
         'pdf_extraction' => 5,
+        // Drawer / thumbnail-mode “presentation” previews: OpenAI/Gemini/FLUX image edit (see GeneratePresentationPreviewJob).
         'presentation_preview' => 10,
         'generative_editor_edits' => 15,
         'generative_editor_images' => 20,
+        /*
+         * Intentionally no weight for `thumbnail_enhancement` (Studio View enhanced mode):
+         * GenerateEnhancedPreviewJob composites locally via TemplateRenderer + GD/ImageMagick — no LLM/provider API.
+         * Operational counts still appear in Insights (AIAgentRun THUMBNAIL_ENHANCEMENT) for latency/quality only.
+         */
     ],
 
     /*

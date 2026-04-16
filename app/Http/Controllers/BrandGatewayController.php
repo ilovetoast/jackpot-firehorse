@@ -12,9 +12,12 @@ use App\Services\ActivityRecorder;
 use App\Services\BrandGateway\BrandContextResolver;
 use App\Services\BrandGateway\BrandThemeBuilder;
 use App\Services\Prostaff\ApplyProstaffAfterBrandInvitationAccept;
+use App\Mail\EmailVerification;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\URL;
 use Illuminate\Validation\Rules\Password as PasswordRule;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
@@ -281,15 +284,21 @@ class BrandGatewayController extends Controller
 
         $user->tenants()->attach($tenant->id, ['role' => 'owner']);
 
-        $brand = $tenant->brands()->create([
-            'name' => $validated['company_name'],
-            'slug' => $slug,
-            'is_default' => true,
+        // Tenant::created boot hook already creates a default brand — reuse it
+        // instead of creating a duplicate.
+        $brand = $tenant->brands()->where('is_default', true)->first();
+        $user->brands()->syncWithoutDetaching([
+            $brand->id => ['role' => 'brand_manager'],
         ]);
 
-        $user->brands()->attach($brand->id, ['role' => 'brand_manager']);
-
         Auth::login($user);
+
+        $verifyUrl = URL::temporarySignedRoute(
+            'verification.verify',
+            now()->addMinutes(60),
+            ['id' => $user->getKey(), 'hash' => sha1($user->getEmailForVerification())]
+        );
+        Mail::to($user->email)->send(new EmailVerification($verifyUrl));
 
         session([
             'tenant_id' => $tenant->id,

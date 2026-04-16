@@ -9,7 +9,7 @@
  */
 import { useState, useEffect, useRef } from 'react'
 import { usePage } from '@inertiajs/react'
-import { ArrowDownCircleIcon, XMarkIcon } from '@heroicons/react/24/outline'
+import { XMarkIcon } from '@heroicons/react/24/outline'
 
 const PWA_POPOVER_DISMISSED_KEY = 'jackpot:pwa_popover_dismissed'
 
@@ -121,8 +121,15 @@ export default function PWAInstallPopover({ auth }) {
                 </button>
 
                 <div className="flex items-start gap-3 pr-8">
-                    <div className="flex-shrink-0 rounded-lg bg-indigo-100 p-2">
-                        <ArrowDownCircleIcon className="h-6 w-6 text-indigo-600" />
+                    <div className="flex-shrink-0 rounded-xl bg-white p-1 ring-1 ring-gray-200 shadow-sm">
+                        <img
+                            src="/icons/pwa-192.png"
+                            alt=""
+                            width={48}
+                            height={48}
+                            className="h-12 w-12 rounded-lg"
+                            decoding="async"
+                        />
                     </div>
                     <div className="min-w-0 flex-1">
                         <h2 id="pwa-install-title" className="text-sm font-semibold text-gray-900">

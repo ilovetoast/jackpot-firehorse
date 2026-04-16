@@ -488,6 +488,7 @@ class HandleInertiaRequests extends Middleware
                     'site_roles' => $user ? $user->getSiteRoles() : [],
                     'push_prompted_at' => $user->push_prompted_at?->toIso8601String(),
                     'push_enabled' => (bool) $user->push_enabled,
+                    'email_verified_at' => $user->email_verified_at?->toIso8601String(),
                 ] : null,
                 'companies' => $user ? $user->tenants->map(fn ($tenant) => [
                     'id' => $tenant->id,

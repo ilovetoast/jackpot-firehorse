@@ -24,8 +24,13 @@ use Throwable;
  * Studio View: user-defined crop on the large source thumbnail, then template compositing into the enhanced mode bucket.
  * Never auto-dispatched — queued only from the Studio save API.
  *
+ * This path does **not** call third-party LLM/image APIs — local raster work only — so it does **not**
+ * consume {@see \App\Services\AiUsageService} unified credits. {@see ThumbnailEnhancementAiTaskRecorder} rows
+ * are for operational metrics (latency, success) only.
+ *
  * @see \App\Services\TemplateRenderer
  * @see \App\Services\ThumbnailGenerationService::generateEnhancedPreviewsFromLocalRaster()
+ * @see \App\Jobs\GeneratePresentationPreviewJob For drawer “presentation” previews that **do** call providers and debit credits.
  */
 class GenerateEnhancedPreviewJob implements ShouldQueue
 {

@@ -71,7 +71,7 @@ export default function MarketingProduct() {
             <section className="px-6 pt-16 pb-8 lg:px-8">
                 <div className="mx-auto max-w-3xl text-center">
                     <p className="text-sm font-semibold uppercase tracking-[0.2em] text-indigo-400/90">Product</p>
-                    <h1 className="mt-3 text-4xl font-bold tracking-tight text-white sm:text-5xl lg:text-6xl text-balance">
+                    <h1 className="mt-3 font-display text-4xl font-bold tracking-tight text-white sm:text-5xl lg:text-6xl text-balance">
                         How Jackpot works
                     </h1>
                     <p className="mt-6 text-lg text-white/50 leading-relaxed">
@@ -93,7 +93,7 @@ export default function MarketingProduct() {
                                 <div className="p-8 sm:p-10">
                                     <div className="flex items-center gap-3 mb-4">
                                         <span className={`text-xs font-mono font-bold ${c.eyebrow}`}>{sys.eyebrow}</span>
-                                        <h2 className="text-2xl font-bold text-white tracking-tight sm:text-3xl">{sys.title}</h2>
+                                        <h2 className="font-display text-2xl font-bold text-white tracking-tight sm:text-3xl">{sys.title}</h2>
                                     </div>
                                     <p className="text-base text-white/45 max-w-2xl">{sys.description}</p>
 

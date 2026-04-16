@@ -10,7 +10,7 @@ function csrf() {
 const CREATOR_MODULE_CALLOUTS = [
     'Per-creator targets, completion, and performance at a glance',
     'Structured approvals so creator uploads stay on-brand',
-    'Jump from a creator to their assets in the DAM in one click',
+    'Jump from a creator to their assets in the library in one click',
 ]
 
 /**

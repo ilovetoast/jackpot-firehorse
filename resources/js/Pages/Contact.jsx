@@ -43,7 +43,7 @@ export default function Contact({ plan }) {
             <section className="px-6 pt-16 pb-8 lg:px-8">
                 <div className="mx-auto max-w-3xl text-center">
                     <p className="text-sm font-semibold uppercase tracking-[0.2em] text-violet-400/90">Contact</p>
-                    <h1 className="mt-3 text-4xl font-bold tracking-tight text-white sm:text-5xl text-balance">
+                    <h1 className="mt-3 font-display text-4xl font-bold tracking-tight text-white sm:text-5xl text-balance">
                         {ctx.title}
                     </h1>
                     <p className="mt-6 text-lg text-white/50 leading-relaxed">{ctx.subtitle}</p>

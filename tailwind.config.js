@@ -9,6 +9,9 @@ export default {
   ],
   theme: {
     extend: {
+      fontFamily: {
+        display: ['"Proxima Nova"', 'ui-sans-serif', 'system-ui', '-apple-system', 'sans-serif'],
+      },
       colors: {
         primary: 'var(--primary)',
         secondary: 'var(--secondary)',

@@ -4951,7 +4951,7 @@ export default function AssetDrawer({
                                     <dt className="font-medium text-gray-900">Source</dt>
                                     <dd className="mt-0.5 text-gray-600">
                                         {displayAsset.is_campaign_collection_font
-                                            ? 'Google Fonts (from Campaign Identity for this collection; not stored as a file in the DAM)'
+                                            ? 'Google Fonts (from Campaign Identity for this collection; not stored as a file in the library)'
                                             : 'Google Fonts (referenced from Brand Guidelines; not stored as a file)'}
                                     </dd>
                                 </div>

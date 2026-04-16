@@ -22,7 +22,7 @@ export default function CompanySelector({ companies }) {
     return (
         <div className="w-full max-w-md animate-fade-in" style={{ animationDuration: '500ms' }}>
             <div className="text-center mb-12">
-                <h1 className="text-4xl md:text-5xl font-semibold tracking-tight leading-tight text-white/95 mb-3">
+                <h1 className="font-display text-4xl md:text-5xl font-semibold tracking-tight leading-tight text-white/95 mb-3">
                     Choose Workspace
                 </h1>
                 <p className="text-sm text-white/60 mt-2 max-w-md mx-auto">

@@ -2,6 +2,11 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { Link } from '@inertiajs/react'
 import InsightsLayout from '../../layouts/InsightsLayout'
 import { isUnlimitedCount, isUnlimitedStorageMB } from '../../utils/planLimitDisplay'
+import {
+    formatAiCreditsSubtext,
+    formatAiMonthlyCapAlertFeatures,
+    isUnifiedAiCreditsPayload,
+} from '../../utils/aiCreditsUsageDisplay'
 import PendingAiSuggestionsModal from '../../Components/PendingAiSuggestionsModal'
 import CreatorInsights from '../../Components/insights/CreatorInsights'
 import {
@@ -207,11 +212,9 @@ export default function AnalyticsOverview({
                             <div className="min-w-0">
                                 <h2 className="text-base font-semibold text-amber-900">Monthly AI limit reached</h2>
                                 <p className="mt-1 text-sm text-amber-950/90">
-                                    Your plan&apos;s monthly allowance for{' '}
-                                    <span className="font-medium">
-                                        {ai_monthly_cap_alert.features.map((f) => (f === 'tagging' ? 'AI tagging' : 'AI suggestions')).join(' and ')}
-                                    </span>{' '}
-                                    has been used. Automated tagging and related AI runs may be paused until usage resets or you upgrade.
+                                    Your{' '}
+                                    <span className="font-medium">{formatAiMonthlyCapAlertFeatures(ai_monthly_cap_alert.features)}</span>{' '}
+                                    has been used. AI features that consume credits may be paused until usage resets or you upgrade.
                                 </p>
                                 {ai_monthly_cap_alert.reset_hint && (
                                     <p className="mt-2 text-sm text-amber-900/80">{ai_monthly_cap_alert.reset_hint}</p>
@@ -356,39 +359,12 @@ export default function AnalyticsOverview({
                             value={stats.executions ?? 0}
                             formatValue={(v) => v.toLocaleString()}
                         />
-                        {ai_usage && (
+                        {ai_usage && isUnifiedAiCreditsPayload(ai_usage) && (
                             <StatCard
                                 icon={SparklesIcon}
-                                title="AI Usage"
-                                value={
-                                    ai_usage.tagging?.usage ?? 0
-                                }
-                                subtext={
-                                    ai_usage.tagging?.is_unlimited
-                                        ? 'Unlimited'
-                                        : ai_usage.tagging?.cap
-                                          ? `${ai_usage.tagging.usage ?? 0} / ${ai_usage.tagging.cap} tagging`
-                                          : null
-                                }
-                                formatValue={(v) => v.toLocaleString()}
-                            />
-                        )}
-                        {ai_usage?.thumbnail_enhancement && (
-                            <StatCard
-                                icon={SparklesIcon}
-                                title="Thumbnail enhancement"
-                                value={ai_usage.thumbnail_enhancement.count ?? 0}
-                                subtext={
-                                    (ai_usage.thumbnail_enhancement.count ?? 0) === 0
-                                        ? 'This month'
-                                        : `${ai_usage.thumbnail_enhancement.success_rate ?? '—'}% success · avg ${ai_usage.thumbnail_enhancement.avg_duration_ms != null ? `${Math.round(ai_usage.thumbnail_enhancement.avg_duration_ms)} ms` : '—'}` +
-                                          (ai_usage.thumbnail_enhancement.p95_duration_ms != null
-                                              ? ` · p95 ${Math.round(ai_usage.thumbnail_enhancement.p95_duration_ms)} ms`
-                                              : '') +
-                                          ((ai_usage.thumbnail_enhancement.skipped_count ?? 0) > 0
-                                              ? ` · ${ai_usage.thumbnail_enhancement.skipped_count} skipped`
-                                              : '')
-                                }
+                                title="AI credits"
+                                value={ai_usage.credits_used ?? 0}
+                                subtext={formatAiCreditsSubtext(ai_usage)}
                                 formatValue={(v) => v.toLocaleString()}
                             />
                         )}

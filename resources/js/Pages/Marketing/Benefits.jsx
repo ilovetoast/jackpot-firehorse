@@ -58,11 +58,11 @@ export default function MarketingBenefits() {
             <section className="px-6 pt-16 pb-8 lg:px-8">
                 <div className="mx-auto max-w-3xl text-center">
                     <p className="text-sm font-semibold uppercase tracking-[0.2em] text-violet-400/90">Benefits</p>
-                    <h1 className="mt-3 text-4xl font-bold tracking-tight text-white sm:text-5xl lg:text-6xl text-balance">
+                    <h1 className="mt-3 font-display text-4xl font-bold tracking-tight text-white sm:text-5xl lg:text-6xl text-balance">
                         Why teams choose Jackpot
                     </h1>
                     <p className="mt-6 text-lg text-white/50 leading-relaxed">
-                        Outcomes you can explain to leadership in one sentence — without selling "another DAM."
+                        Outcomes you can explain to leadership in one sentence — without selling "another asset tool."
                     </p>
                 </div>
             </section>
@@ -83,7 +83,7 @@ export default function MarketingBenefits() {
                                         </svg>
                                     </div>
                                     <div>
-                                        <h2 className="text-xl font-bold text-white tracking-tight">{b.title}</h2>
+                                        <h2 className="font-display text-xl font-bold text-white tracking-tight">{b.title}</h2>
                                     </div>
                                 </div>
                                 <p className="text-sm text-white/45 leading-relaxed flex-1">{b.body}</p>

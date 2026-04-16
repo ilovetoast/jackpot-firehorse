@@ -1,26 +1,25 @@
+{{-- MODE: tenant (free plan) | Download Share --}}
 <x-email.layout
     title="Files shared with you"
-    headerText="Files shared with you"
-    footerText="Provided by {{ config('app.name') }} — Free asset management for teams"
+    mode="tenant"
+    :tenantIsFree="true"
+    preheader="Someone shared files with you"
 >
-    <p>Hi there,</p>
 
-    <p>Someone has shared files with you.</p>
+    <x-email.eyebrow>Shared Files</x-email.eyebrow>
+    <x-email.heading>Files shared with you</x-email.heading>
+
+    <x-email.text>Someone has shared files with you.</x-email.text>
 
     @if($personalMessage)
-        <p style="font-style: italic; color: #4b5563;">{{ $personalMessage }}</p>
+        <div style="margin:0 0 20px;padding:14px 18px;background-color:#f9fafb;border-radius:8px;border:1px solid #e5e7eb;font-size:14px;font-style:italic;color:#4b5563;line-height:1.55;">
+            &ldquo;{{ $personalMessage }}&rdquo;
+        </div>
     @endif
 
-    <div style="text-align: center; margin: 24px 0;">
-        <a href="{{ $shareUrl }}" class="button">Download Files</a>
-    </div>
+    <x-email.button :url="$shareUrl">Download files</x-email.button>
+    <x-email.link-fallback :url="$shareUrl" />
 
-    <p style="font-size: 14px; color: #6b7280;">
-        Or copy and paste this link into your browser:<br>
-        <a href="{{ $shareUrl }}" style="color: #6366f1; word-break: break-all;">{{ $shareUrl }}</a>
-    </p>
+    <x-email.text :muted="true">This link may expire. If you didn&rsquo;t expect this email, you can safely ignore it.</x-email.text>
 
-    <p style="font-size: 14px; color: #6b7280;">
-        This link may expire. If you didn't expect this email, you can safely ignore it.
-    </p>
 </x-email.layout>

@@ -15,7 +15,6 @@ export default function CompanyTabs({ variant = 'default', showAgencyTab = true 
     const currentPath = typeof url === 'string' ? new URL(url, 'http://localhost').pathname : (typeof window !== 'undefined' ? window.location.pathname : '')
     const isAgency = auth?.activeCompany?.is_agency === true
     const cinematic = variant === 'cinematic'
-    const workspaceName = auth?.activeCompany?.name?.trim()
 
     const tabClass = (isActive) =>
         cinematic
@@ -29,12 +28,7 @@ export default function CompanyTabs({ variant = 'default', showAgencyTab = true 
               }`
 
     return (
-        <div className={cinematic ? 'mb-8 border-b border-white/10' : 'mb-8 border-b border-gray-200'}>
-            {workspaceName && (
-                <p className={`mb-3 text-sm font-semibold ${cinematic ? 'text-white/70' : 'text-gray-600'}`}>
-                    {workspaceName}
-                </p>
-            )}
+        <div className={cinematic ? 'mb-6 border-b border-white/10' : 'mb-6 border-b border-gray-200'}>
             <nav className="-mb-px flex flex-wrap gap-x-6" aria-label="Company sections">
                 <Link href="/app" className={tabClass(currentPath === '/app' || currentPath === '/app/')}>
                     Overview

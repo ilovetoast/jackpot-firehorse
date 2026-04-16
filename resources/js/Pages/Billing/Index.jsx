@@ -1,5 +1,5 @@
 import { router, Link, usePage } from '@inertiajs/react'
-import { useState } from 'react'
+import { Fragment, useState } from 'react'
 import AppNav from '../../Components/AppNav'
 import AppHead from '../../Components/AppHead'
 import AppFooter from '../../Components/AppFooter'
@@ -7,7 +7,7 @@ import AppFooter from '../../Components/AppFooter'
 const PLAN_ORDER = ['free', 'starter', 'pro', 'business']
 
 const PLAN_DESCRIPTIONS = {
-    free: 'Try the platform. See what AI-powered DAM can do.',
+    free: 'Try the platform. See what AI-powered brand asset management can do.',
     starter: 'Everything a small brand needs to stay organized and on-brand.',
     pro: 'For growing teams that need advanced permissions, approvals, and more AI.',
     business: 'Full platform power with SSO, Creator Module, and premium controls.',
@@ -67,10 +67,34 @@ const PLAN_HIGHLIGHTS = {
 }
 
 const PLAN_KEY_LIMITS = {
-    free: { brands: '1', users: '2', upload: '10 MB max' },
-    starter: { brands: '1', users: '5', upload: '50 MB max' },
-    pro: { brands: '3', users: '20', upload: 'Unlimited' },
-    business: { brands: '10', users: '75', upload: 'Unlimited' },
+    free: [
+        { label: 'Storage', value: '1 GB' },
+        { label: 'Brands', value: '1' },
+        { label: 'Users', value: '2' },
+        { label: 'Upload', value: '10 MB' },
+        { label: 'AI', value: '75/mo' },
+    ],
+    starter: [
+        { label: 'Storage', value: '50 GB' },
+        { label: 'Brands', value: '1' },
+        { label: 'Users', value: '5' },
+        { label: 'Upload', value: '50 MB' },
+        { label: 'AI', value: '300/mo' },
+    ],
+    pro: [
+        { label: 'Storage', value: '250 GB' },
+        { label: 'Brands', value: '3' },
+        { label: 'Users', value: '20' },
+        { label: 'Upload', value: 'Unlimited' },
+        { label: 'AI', value: '1,500/mo' },
+    ],
+    business: [
+        { label: 'Storage', value: '1 TB' },
+        { label: 'Brands', value: '10' },
+        { label: 'Users', value: '75' },
+        { label: 'Upload', value: 'Unlimited' },
+        { label: 'AI', value: '6,000/mo' },
+    ],
 }
 
 export default function BillingIndex({ tenant, current_plan, plans, subscription, payment_method, current_usage, current_plan_limits, site_primary_color, storage_info, storage_addon_packages, ai_credits_addon_packages, credit_weights, creator_addon_config, available_addons }) {
@@ -205,7 +229,7 @@ export default function BillingIndex({ tenant, current_plan, plans, subscription
                             const isCurrent = plan.id === current_plan
                             const isPopular = plan.id === 'pro'
                             const highlights = PLAN_HIGHLIGHTS[plan.id] || []
-                            const keyLimits = PLAN_KEY_LIMITS[plan.id] || {}
+                            const keyLimits = PLAN_KEY_LIMITS[plan.id] || []
 
                             return (
                                 <div
@@ -247,19 +271,18 @@ export default function BillingIndex({ tenant, current_plan, plans, subscription
                                         </div>
 
                                         {/* Key limits row */}
-                                        <div className="grid grid-cols-3 gap-2 rounded-lg bg-gray-50 p-3 mb-5 text-center">
-                                            <div>
-                                                <div className="text-sm font-semibold text-gray-900">{keyLimits.brands}</div>
-                                                <div className="text-xs text-gray-500">{keyLimits.brands === '1' ? 'Brand' : 'Brands'}</div>
-                                            </div>
-                                            <div>
-                                                <div className="text-sm font-semibold text-gray-900">{keyLimits.users}</div>
-                                                <div className="text-xs text-gray-500">Users</div>
-                                            </div>
-                                            <div>
-                                                <div className="text-sm font-semibold text-gray-900">{keyLimits.upload}</div>
-                                                <div className="text-xs text-gray-500">Upload</div>
-                                            </div>
+                                        <div className="flex items-center justify-between rounded-lg bg-gray-50 px-3 py-3 mb-5">
+                                            {keyLimits.map((s, i, arr) => (
+                                                <Fragment key={s.label}>
+                                                    <div className="flex-1 text-center">
+                                                        <div className="text-sm font-bold text-gray-900">{s.value}</div>
+                                                        <div className="text-[10px] uppercase tracking-wider text-gray-400 mt-0.5">{s.label}</div>
+                                                    </div>
+                                                    {i < arr.length - 1 && (
+                                                        <div className="h-5 w-px bg-gray-200 shrink-0" />
+                                                    )}
+                                                </Fragment>
+                                            ))}
                                         </div>
 
                                         {/* Feature highlights */}
@@ -488,7 +511,7 @@ export default function BillingIndex({ tenant, current_plan, plans, subscription
                     <div className="rounded-xl bg-gradient-to-br from-gray-900 to-gray-800 p-8 sm:p-10">
                         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
                             <div className="max-w-xl">
-                                <div className="inline-flex items-center gap-1.5 rounded-full bg-amber-400/10 px-3 py-1 text-xs font-semibold text-amber-400 mb-3">
+                                <div className="inline-flex items-center gap-1.5 rounded-full bg-purple-400/10 px-3 py-1 text-xs font-semibold text-purple-400 mb-3">
                                     <svg className="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 20 20">
                                         <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
                                     </svg>
@@ -508,7 +531,7 @@ export default function BillingIndex({ tenant, current_plan, plans, subscription
                                         'Scoped brand-level access',
                                     ].map((item) => (
                                         <li key={item} className="flex items-center gap-2 text-sm text-gray-300">
-                                            <svg className="h-4 w-4 text-amber-400 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                                            <svg className="h-4 w-4 text-purple-400 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
                                                 <path fillRule="evenodd" d="M16.704 4.153a.75.75 0 01.143 1.052l-8 10.5a.75.75 0 01-1.127.075l-4.5-4.5a.75.75 0 011.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 011.05-.143z" clipRule="evenodd" />
                                             </svg>
                                             {item}
@@ -519,7 +542,7 @@ export default function BillingIndex({ tenant, current_plan, plans, subscription
                             <div className="flex flex-col items-start lg:items-center gap-3">
                                 <Link
                                     href="/agency"
-                                    className="inline-flex items-center justify-center rounded-lg bg-amber-500 px-6 py-3 text-sm font-semibold text-gray-900 hover:bg-amber-400 transition whitespace-nowrap"
+                                    className="inline-flex items-center justify-center rounded-lg bg-purple-500 px-6 py-3 text-sm font-semibold text-white hover:bg-purple-400 transition whitespace-nowrap"
                                 >
                                     Learn about the Agency Program
                                 </Link>

@@ -136,6 +136,7 @@ function GuestRegistration({ invitation, token, primary, portalInvite, focusedFi
             /* still attempt */
         }
         post(`/gateway/invite/${token}/complete`, {
+            preserveState: true,
             preserveScroll: true,
             withAllErrors: true,
         })

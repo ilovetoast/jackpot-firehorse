@@ -8,7 +8,10 @@ use App\Models\Asset;
 use App\Models\AssetVersion;
 
 /**
- * AI agent run records for enhanced (template / future AI) previews — audit + dashboards without LLM.
+ * AI agent run records for Studio **enhanced** mode (template compositing). No third-party LLM calls —
+ * see {@see \App\Jobs\GenerateEnhancedPreviewJob}. Runs are for audit, latency, and success dashboards only;
+ * they do not debit {@see AiUsageService} credits. Provider-backed drawer previews use
+ * {@see \App\Jobs\GeneratePresentationPreviewJob} and the `presentation_preview` credit bucket instead.
  */
 final class ThumbnailEnhancementAiTaskRecorder
 {

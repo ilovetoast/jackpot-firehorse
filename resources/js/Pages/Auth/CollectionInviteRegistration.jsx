@@ -49,6 +49,7 @@ export default function CollectionInviteRegistration({
     const handleSubmit = (e) => {
         e.preventDefault()
         post(route('collection-invite.complete', { token }), {
+            preserveState: true,
             preserveScroll: true,
             withAllErrors: true,
         })

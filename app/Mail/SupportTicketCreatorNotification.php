@@ -59,11 +59,25 @@ class SupportTicketCreatorNotification extends BaseMailable
             );
         }
 
-        $subjectLine = $vars['ticket_subject'];
+        $with = [
+            'kind'          => $this->kind,
+            'ticketNumber'  => $vars['ticket_number'],
+            'ticketSubject' => $vars['ticket_subject'],
+            'categoryLabel' => $vars['category_label'],
+            'ticketUrl'     => $vars['ticket_url'],
+        ];
+
+        if (isset($vars['replier_name'])) {
+            $with['replierName']  = $vars['replier_name'];
+            $with['replyExcerpt'] = $vars['reply_excerpt'] ?? '';
+        }
+        if (isset($vars['status_label'])) {
+            $with['statusLabel'] = $vars['status_label'];
+        }
 
         return new Content(
-            htmlString: '<p style="margin:0 0 12px;">Update regarding your support ticket.</p>'
-                . '<p style="margin:0;"><strong>' . e($subjectLine) . '</strong></p>',
+            view: 'emails.support-ticket-creator-notification',
+            with: $with,
         );
     }
 

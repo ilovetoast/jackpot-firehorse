@@ -89,6 +89,10 @@ Route::middleware('guest')->group(function () {
     Route::post('/invite/complete/{token}/{tenant}', [\App\Http\Controllers\TeamController::class, 'completeInviteRegistration'])->name('invite.complete');
 });
 
+// Email verification
+Route::get('/email/verify/{id}/{hash}', [\App\Http\Controllers\Auth\EmailVerificationController::class, 'verify'])->middleware('signed')->name('verification.verify');
+Route::post('/email/resend', [\App\Http\Controllers\Auth\EmailVerificationController::class, 'resend'])->middleware('auth')->name('verification.resend');
+
 // Phase C12.0: Collection-only invite accept (guest or auth; no tenant required)
 Route::get('/invite/collection/{token}', [\App\Http\Controllers\CollectionAccessInviteController::class, 'acceptShow'])->name('collection-invite.accept');
 Route::post('/invite/collection/{token}/accept', [\App\Http\Controllers\CollectionAccessInviteController::class, 'accept'])->middleware('auth')->name('collection-invite.accept.submit');

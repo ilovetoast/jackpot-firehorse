@@ -5,6 +5,11 @@ import AppFooter from '../../Components/AppFooter'
 import BrandAvatar from '../../Components/BrandAvatar'
 import ActivityActorAvatar from '../../Components/ActivityActorAvatar'
 import { isUnlimitedCount, isUnlimitedStorageMB } from '../../utils/planLimitDisplay'
+import {
+    formatAiCreditsSubtext,
+    formatThumbnailEnhancementSubtext,
+    isUnifiedAiCreditsPayload,
+} from '../../utils/aiCreditsUsageDisplay'
 import PendingAiSuggestionsTile from '../../Components/PendingAiSuggestionsTile'
 import PendingMetadataTile from '../../Components/PendingMetadataTile'
 import {
@@ -302,50 +307,25 @@ export default function Dashboard({
                 </div>
 
                 {/* AI Usage */}
-                {ai_usage && (
+                {ai_usage && isUnifiedAiCreditsPayload(ai_usage) && (
                     <div className="mb-8">
                         <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-4">
-                            AI Usage
+                            AI credits
                         </h2>
                         <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
                             <StatCard
                                 icon={SparklesIcon}
-                                title="AI Tagging"
-                                value={ai_usage.tagging.usage}
-                                subtext={ai_usage.tagging.is_unlimited
-                                    ? 'Unlimited'
-                                    : `${ai_usage.tagging.remaining ?? 0} remaining this month`}
-                                formatValue={(v) => ai_usage.tagging.is_unlimited
-                                    ? `${v.toLocaleString()}`
-                                    : `${v.toLocaleString()} of ${ai_usage.tagging.cap.toLocaleString()}`}
-                            />
-                            <StatCard
-                                icon={SparklesIcon}
-                                title="AI Suggestions"
-                                value={ai_usage.suggestions.usage}
-                                subtext={ai_usage.suggestions.is_unlimited
-                                    ? 'Unlimited'
-                                    : `${ai_usage.suggestions.remaining ?? 0} remaining this month`}
-                                formatValue={(v) => ai_usage.suggestions.is_unlimited
-                                    ? `${v.toLocaleString()}`
-                                    : `${v.toLocaleString()} of ${ai_usage.suggestions.cap.toLocaleString()}`}
+                                title="AI credits"
+                                value={ai_usage.credits_used ?? 0}
+                                subtext={formatAiCreditsSubtext(ai_usage)}
+                                formatValue={(v) => v.toLocaleString()}
                             />
                             {ai_usage.thumbnail_enhancement && (
                                 <StatCard
                                     icon={SparklesIcon}
-                                    title="Thumbnail enhancement"
+                                    title="Studio enhanced (local)"
                                     value={ai_usage.thumbnail_enhancement.count ?? 0}
-                                    subtext={
-                                        (ai_usage.thumbnail_enhancement.count ?? 0) === 0
-                                            ? 'No completed runs this month'
-                                            : `${ai_usage.thumbnail_enhancement.success_rate ?? '—'}% success rate · avg ${ai_usage.thumbnail_enhancement.avg_duration_ms != null ? `${Math.round(ai_usage.thumbnail_enhancement.avg_duration_ms)} ms` : '—'}` +
-                                              (ai_usage.thumbnail_enhancement.p95_duration_ms != null
-                                                  ? ` · p95 ${Math.round(ai_usage.thumbnail_enhancement.p95_duration_ms)} ms`
-                                                  : '') +
-                                              ((ai_usage.thumbnail_enhancement.skipped_count ?? 0) > 0
-                                                  ? ` · ${ai_usage.thumbnail_enhancement.skipped_count} skipped (guardrails)`
-                                                  : '')
-                                    }
+                                    subtext={formatThumbnailEnhancementSubtext(ai_usage.thumbnail_enhancement)}
                                     formatValue={(v) => v.toLocaleString()}
                                 />
                             )}

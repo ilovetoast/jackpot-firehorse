@@ -4,11 +4,11 @@ import GatewayLayout from '../Gateway/GatewayLayout'
 import { firstError } from '../../utils/inertiaErrors'
 
 export default function ForgotPassword({ status }) {
-    const { flash, theme, errors: sharedErrors = {} } = usePage().props
+    const { flash, theme, errors: sharedErrors = {}, old = {} } = usePage().props
     const displayStatus = status || flash?.status
 
     const { data, setData, post, processing, errors: formErrors } = useForm({
-        email: '',
+        email: old.email || '',
     })
 
     const errors = useMemo(
@@ -31,7 +31,10 @@ export default function ForgotPassword({ status }) {
 
     const submit = (e) => {
         e.preventDefault()
-        post('/forgot-password')
+        post('/forgot-password', {
+            preserveState: true,
+            preserveScroll: true,
+        })
     }
 
     return (
@@ -54,7 +57,7 @@ export default function ForgotPassword({ status }) {
                                 )}
                             </div>
                         </div>
-                        <h1 className="text-4xl md:text-5xl font-semibold tracking-tight leading-tight text-white/95 mb-2">
+                        <h1 className="font-display text-4xl md:text-5xl font-semibold tracking-tight leading-tight text-white/95 mb-2">
                             Forgot your password?
                         </h1>
                         <p className="text-sm text-white/60 mt-2 max-w-md mx-auto">

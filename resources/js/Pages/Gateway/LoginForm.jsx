@@ -4,12 +4,12 @@ import { firstError } from '../../utils/inertiaErrors'
 import { refreshCsrfTokenFromServer } from '../../utils/csrf'
 
 export default function LoginForm({ context, onToggleRegister, inviteToken = null }) {
-    const { theme, errors: sharedErrors = {} } = usePage().props
+    const { theme, errors: sharedErrors = {}, old = {} } = usePage().props
 
     const { data, setData, post, processing, errors: formErrors } = useForm({
-        email: context?.invitation?.email || '',
+        email: old.email || context?.invitation?.email || '',
         password: '',
-        remember: false,
+        remember: old.remember || false,
         invite_token: inviteToken || '',
     })
 
@@ -31,7 +31,10 @@ export default function LoginForm({ context, onToggleRegister, inviteToken = nul
         } catch {
             /* still attempt; meta may already be valid */
         }
-        post('/gateway/login')
+        post('/gateway/login', {
+            preserveState: true,
+            preserveScroll: true,
+        })
     }
 
     const primary = theme?.colors?.primary || '#6366f1'
@@ -77,7 +80,7 @@ export default function LoginForm({ context, onToggleRegister, inviteToken = nul
                         />
                     </div>
                 ) : (
-                    <h1 className="text-4xl md:text-5xl font-semibold tracking-tight leading-tight text-white/95 mb-2">
+                    <h1 className="font-display text-4xl md:text-5xl font-semibold tracking-tight leading-tight text-white/95 mb-2">
                         {theme?.name || 'Jackpot'}
                     </h1>
                 )}

@@ -41,34 +41,38 @@ export default function PlanLimitAlert({
     }
 
     if (type === 'brand_limit' && planLimitInfo.brand_limit_exceeded) {
+        const isFree = planLimitInfo.plan_name === 'free'
+        const disabledNames = planLimitInfo.disabled_brand_names || []
+
         if (isAdminOrOwner) {
-            // Admin/Owner gets full upgrade prompt
             return (
-                <div className="mb-4 rounded-md bg-yellow-50 border border-yellow-200 p-4" role="alert">
+                <div className={`mb-4 rounded-md border p-4 ${isFree ? 'bg-indigo-50 border-indigo-200' : 'bg-yellow-50 border-yellow-200'}`} role="alert">
                     <div className="flex items-start">
                         <div className="flex-shrink-0">
-                            <ExclamationTriangleIcon className="h-5 w-5 text-yellow-600" />
+                            {isFree ? (
+                                <InformationCircleIcon className="h-5 w-5 text-indigo-500" />
+                            ) : (
+                                <ExclamationTriangleIcon className="h-5 w-5 text-yellow-600" />
+                            )}
                         </div>
                         <div className="ml-3 flex-1">
-                            <h3 className="text-sm font-medium text-yellow-800">
-                                Plan Limit Exceeded
+                            <h3 className={`text-sm font-medium ${isFree ? 'text-indigo-800' : 'text-yellow-800'}`}>
+                                {isFree ? 'Ready to grow?' : 'Brand limit reached'}
                             </h3>
-                            <div className="mt-2 text-sm text-yellow-700">
+                            <div className={`mt-2 text-sm ${isFree ? 'text-indigo-700' : 'text-yellow-700'}`}>
                                 <p>
-                                    You have <strong>{planLimitInfo.current_brand_count} brands</strong>, but your current plan only allows <strong>{planLimitInfo.max_brands} brand{planLimitInfo.max_brands !== 1 ? 's' : ''}</strong>.
+                                    Your {isFree ? 'free' : 'current'} plan includes <strong>{planLimitInfo.max_brands} brand{planLimitInfo.max_brands !== 1 ? 's' : ''}</strong>.
+                                    {disabledNames.length > 0 && (
+                                        <> <strong>{disabledNames.join(', ')}</strong> {disabledNames.length === 1 ? 'is' : 'are'} paused until you upgrade.</>
+                                    )}
                                 </p>
-                                {planLimitInfo.disabled_brand_names && planLimitInfo.disabled_brand_names.length > 0 && (
-                                    <p className="mt-1">
-                                        The following brands are not accessible: <strong>{planLimitInfo.disabled_brand_names.join(', ')}</strong>
-                                    </p>
-                                )}
                                 <p className="mt-2">
-                                    <Link 
-                                        href="/app/billing" 
-                                        className="font-medium text-yellow-800 underline hover:text-yellow-900"
+                                    <Link
+                                        href="/app/billing"
+                                        className={`font-medium underline ${isFree ? 'text-indigo-700 hover:text-indigo-800' : 'text-yellow-800 hover:text-yellow-900'}`}
                                     >
-                                        Upgrade your plan
-                                    </Link> to access all your brands.
+                                        {isFree ? 'See plans' : 'Upgrade your plan'}
+                                    </Link> to unlock more brands.
                                 </p>
                             </div>
                         </div>
@@ -76,7 +80,11 @@ export default function PlanLimitAlert({
                             <button
                                 type="button"
                                 onClick={handleDismiss}
-                                className="inline-flex rounded-md bg-yellow-50 p-1.5 text-yellow-600 hover:bg-yellow-100 focus:outline-none focus:ring-2 focus:ring-yellow-600 focus:ring-offset-2 focus:ring-offset-yellow-50"
+                                className={`inline-flex rounded-md p-1.5 focus:outline-none focus:ring-2 focus:ring-offset-2 ${
+                                    isFree
+                                        ? 'bg-indigo-50 text-indigo-500 hover:bg-indigo-100 focus:ring-indigo-600 focus:ring-offset-indigo-50'
+                                        : 'bg-yellow-50 text-yellow-600 hover:bg-yellow-100 focus:ring-yellow-600 focus:ring-offset-yellow-50'
+                                }`}
                             >
                                 <span className="sr-only">Dismiss</span>
                                 <XMarkIcon className="h-5 w-5" />
@@ -86,8 +94,7 @@ export default function PlanLimitAlert({
                 </div>
             )
         } else {
-            // Regular members get quick warning
-            if (planLimitInfo.disabled_brand_names && planLimitInfo.disabled_brand_names.length > 0) {
+            if (disabledNames.length > 0) {
                 return (
                     <div className="mb-4 rounded-md bg-blue-50 border border-blue-200 p-3" role="alert">
                         <div className="flex items-start">
@@ -96,7 +103,7 @@ export default function PlanLimitAlert({
                             </div>
                             <div className="ml-3 flex-1">
                                 <p className="text-sm text-blue-700">
-                                    You've been added to <strong>{planLimitInfo.disabled_brand_names.join(', ')}</strong>, but {planLimitInfo.disabled_brand_names.length === 1 ? 'it is' : 'they are'} not accessible on your current plan.
+                                    <strong>{disabledNames.join(', ')}</strong> {disabledNames.length === 1 ? 'is' : 'are'} not available on the current plan. Ask your admin to upgrade.
                                 </p>
                             </div>
                             <div className="ml-auto pl-3">

@@ -8,10 +8,17 @@ const PLANS = [
         name: 'Free',
         price: '$0',
         period: 'forever',
-        tagline: 'Try the platform. See what AI-powered DAM can do.',
-        limits: { storage: '1 GB', users: '2', brands: '1', ai: '75 credits/mo', downloads: '25/mo' },
+        tagline: 'Try the platform. See what AI-powered brand asset management can do.',
+        limits: [
+            { value: '1 GB', label: 'Storage' },
+            { value: '2', label: 'Users' },
+            { value: '10 MB', label: 'Max upload' },
+            { value: '1', label: 'Brand' },
+            { value: '75', label: 'AI credits/mo' },
+            { value: '25/mo', label: 'Downloads' },
+        ],
         features: [
-            'Basic asset management',
+            'Brand asset management',
             'AI auto-tagging & suggestions',
             'Edge content delivery',
             'Basic analytics',
@@ -24,7 +31,14 @@ const PLANS = [
         price: '$59',
         period: '/month',
         tagline: 'Everything a small brand needs to stay organized.',
-        limits: { storage: '50 GB', users: '5', brands: '1', ai: '300 credits/mo', downloads: '200/mo' },
+        limits: [
+            { value: '50 GB', label: 'Storage' },
+            { value: '5', label: 'Users' },
+            { value: '50 MB', label: 'Max upload' },
+            { value: '1', label: 'Brand' },
+            { value: '300', label: 'AI credits/mo' },
+            { value: '200/mo', label: 'Downloads' },
+        ],
         features: [
             'All Free features',
             'Asset versioning (5 per file)',
@@ -43,7 +57,14 @@ const PLANS = [
         period: '/month',
         tagline: 'For teams that need approvals, roles, and more AI.',
         popular: true,
-        limits: { storage: '250 GB', users: '20', brands: '3', ai: '1,500 credits/mo', downloads: '1,000/mo' },
+        limits: [
+            { value: '250 GB', label: 'Storage' },
+            { value: '20', label: 'Users' },
+            { value: 'Unlimited', label: 'Upload' },
+            { value: '3', label: 'Brands' },
+            { value: '1,500', label: 'AI credits/mo' },
+            { value: '1,000/mo', label: 'Downloads' },
+        ],
         features: [
             'All Starter features',
             'Full approval workflows',
@@ -64,7 +85,14 @@ const PLANS = [
         price: '$599',
         period: '/month',
         tagline: 'Full platform power for large teams and agencies.',
-        limits: { storage: '1 TB', users: '75', brands: '10', ai: '6,000 credits/mo', downloads: 'Unlimited' },
+        limits: [
+            { value: '1 TB', label: 'Storage' },
+            { value: '75', label: 'Users' },
+            { value: 'Unlimited', label: 'Upload' },
+            { value: '10', label: 'Brands' },
+            { value: '6,000', label: 'AI credits/mo' },
+            { value: 'Unlimited', label: 'Downloads' },
+        ],
         features: [
             'All Pro features',
             'Creator Module included (50 seats)',
@@ -119,7 +147,7 @@ export default function MarketingPricing() {
             <section className="px-6 pt-16 pb-4 lg:px-8">
                 <div className="mx-auto max-w-3xl text-center">
                     <p className="text-sm font-semibold uppercase tracking-[0.2em] text-indigo-400/90">Pricing</p>
-                    <h1 className="mt-3 text-4xl font-bold tracking-tight text-white sm:text-5xl lg:text-6xl text-balance">
+                    <h1 className="mt-3 font-display text-4xl font-bold tracking-tight text-white sm:text-5xl lg:text-6xl text-balance">
                         Simple pricing. No surprises.
                     </h1>
                     <p className="mt-6 text-lg text-white/50 leading-relaxed">
@@ -135,10 +163,10 @@ export default function MarketingPricing() {
                         {PLANS.map((plan) => (
                             <div
                                 key={plan.id}
-                                className={`relative flex flex-col rounded-2xl p-8 ${
+                                className={`relative flex flex-col rounded-2xl p-8 transition-all duration-300 ease-out hover:scale-[1.015] hover:-translate-y-0.5 motion-reduce:hover:scale-100 motion-reduce:hover:translate-y-0 ${
                                     plan.popular
-                                        ? 'bg-gradient-to-b from-indigo-500/[0.12] to-violet-500/[0.06] ring-1 ring-indigo-400/30 shadow-xl shadow-indigo-900/30 lg:scale-[1.03]'
-                                        : 'bg-white/[0.03] ring-1 ring-white/[0.06]'
+                                        ? 'bg-gradient-to-b from-indigo-500/[0.12] to-violet-500/[0.06] ring-1 ring-indigo-400/30 shadow-xl shadow-indigo-900/30 lg:scale-[1.03] hover:ring-indigo-400/50 hover:shadow-2xl hover:shadow-indigo-800/40'
+                                        : 'bg-white/[0.03] ring-1 ring-white/[0.06] hover:bg-white/[0.05] hover:ring-white/[0.12] hover:shadow-lg hover:shadow-indigo-900/20'
                                 }`}
                             >
                                 {plan.popular && (
@@ -157,11 +185,11 @@ export default function MarketingPricing() {
                                 </div>
 
                                 {/* Key limits */}
-                                <div className="grid grid-cols-2 gap-2 rounded-xl bg-white/[0.04] p-3 mb-6 text-center">
-                                    {Object.entries(plan.limits).map(([key, val]) => (
-                                        <div key={key} className="py-1">
-                                            <div className="text-sm font-semibold text-white">{val}</div>
-                                            <div className="text-[10px] uppercase tracking-wider text-white/30">{key}</div>
+                                <div className="grid grid-cols-3 gap-px rounded-xl bg-white/[0.06] overflow-hidden mb-6">
+                                    {plan.limits.map((item) => (
+                                        <div key={item.label} className="bg-[#0B0B0D] px-2 py-2.5 text-center">
+                                            <div className="text-sm font-bold text-white leading-tight">{item.value}</div>
+                                            <div className="text-[9px] uppercase tracking-wider text-white/35 mt-1 leading-tight">{item.label}</div>
                                         </div>
                                     ))}
                                 </div>
@@ -232,7 +260,7 @@ export default function MarketingPricing() {
                 <div className="mx-auto max-w-7xl px-6 lg:px-8">
                     <div className="text-center mb-14">
                         <p className="text-sm font-semibold uppercase tracking-[0.2em] text-violet-400/90">Add-ons</p>
-                        <h2 className="mt-3 text-3xl font-bold text-white sm:text-4xl text-balance">Boost any plan</h2>
+                        <h2 className="mt-3 font-display text-3xl font-bold text-white sm:text-4xl text-balance">Boost any plan</h2>
                         <p className="mt-4 text-base text-white/40">Need more storage, AI credits, or creator seats? Add them month-to-month.</p>
                     </div>
                     <div className="grid grid-cols-1 gap-6 sm:grid-cols-3">
@@ -261,7 +289,7 @@ export default function MarketingPricing() {
                 <div className="mx-auto max-w-3xl px-6 lg:px-8">
                     <div className="text-center mb-12">
                         <p className="text-sm font-semibold uppercase tracking-[0.2em] text-emerald-400/90">AI Credits</p>
-                        <h2 className="mt-3 text-3xl font-bold text-white sm:text-4xl text-balance">What do credits cost?</h2>
+                        <h2 className="mt-3 font-display text-3xl font-bold text-white sm:text-4xl text-balance">What do credits cost?</h2>
                         <p className="mt-4 text-base text-white/40">Every AI action has a transparent credit cost. No hidden charges.</p>
                     </div>
                     <div className="rounded-2xl bg-white/[0.03] ring-1 ring-white/[0.06] overflow-hidden">
@@ -286,10 +314,10 @@ export default function MarketingPricing() {
             {/* Agency callout */}
             <section className="border-t border-white/[0.06] py-20 sm:py-24">
                 <div className="mx-auto max-w-7xl px-6 lg:px-8">
-                    <div className="rounded-2xl bg-gradient-to-br from-amber-500/[0.08] to-orange-500/[0.04] ring-1 ring-amber-400/20 p-10 sm:p-14 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-8">
+                    <div className="rounded-2xl bg-gradient-to-br from-purple-500/[0.08] to-violet-500/[0.04] ring-1 ring-purple-400/20 p-10 sm:p-14 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-8">
                         <div className="max-w-xl">
-                            <p className="text-xs font-semibold uppercase tracking-wider text-amber-400/80">Agency Partner Program</p>
-                            <h2 className="mt-3 text-2xl font-bold text-white sm:text-3xl">Run an agency or studio?</h2>
+                            <p className="text-xs font-semibold uppercase tracking-wider text-purple-400/80">Agency Partner Program</p>
+                            <h2 className="mt-3 font-display text-2xl font-bold text-white sm:text-3xl">Run an agency or studio?</h2>
                             <p className="mt-3 text-sm text-white/45 leading-relaxed">
                                 Client incubation, ownership transfers, referral tracking, and tiered partner rewards. Talk to our partnerships team about volume pricing and multi-brand rollout.
                             </p>
@@ -297,7 +325,7 @@ export default function MarketingPricing() {
                         <div className="flex flex-col sm:flex-row gap-3">
                             <Link
                                 href="/agency"
-                                className="inline-flex items-center justify-center rounded-xl bg-amber-500 px-6 py-3 text-sm font-semibold text-gray-900 hover:bg-amber-400 transition"
+                                className="inline-flex items-center justify-center rounded-xl bg-purple-500 px-6 py-3 text-sm font-semibold text-white hover:bg-purple-400 transition"
                             >
                                 Learn more
                             </Link>

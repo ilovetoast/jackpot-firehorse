@@ -3,104 +3,77 @@
 namespace App\Support;
 
 /**
- * Table-based, inline-styled HTML shells for transactional email (Stripe-like layout).
- * Uses {{app_url}}, {{app_name}} placeholders — replaced by {@see NotificationTemplate::render()}.
+ * Table-based, inline-styled HTML shells for DB-driven transactional email.
+ *
+ * Uses {{app_url}}, {{app_name}} placeholders — replaced by {@see \App\Models\NotificationTemplate::render()}.
+ *
+ * Design system: light card layout on #f5f6f8 background, white card with 3px accent rule,
+ * clean typography, indigo/violet accent (system) or tenant color (tenant mode).
  */
 final class TransactionalEmailHtml
 {
+    private const FONT_STACK = "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif";
+    private const INDIGO     = '#4f46e5';
+    private const GRADIENT   = 'linear-gradient(90deg,#4f46e5 0%,#7c3aed 50%,#06b6d4 100%)';
+
     /**
-     * System emails: light header + Jackpot logo + gradient accent stripe (readable in all clients).
-     *
-     * @param  string  $cardInnerHtml  Body HTML inside the white card (headings, copy, CTA)
+     * System emails: Jackpot branding — cherry icon + wordmark header, gradient accent.
      */
     public static function systemShell(string $cardInnerHtml, ?string $copyrightYear = null): string
     {
-        $y = $copyrightYear ?? date('Y');
+        $y    = $copyrightYear ?? date('Y');
+        $font = self::FONT_STACK;
+        $grad = self::GRADIENT;
 
         return <<<HTML
-<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color:#f4f5f7;margin:0;padding:24px 12px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;">
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color:#f5f6f8;margin:0;padding:0;font-family:{$font};">
   <tr>
-    <td align="center">
-      <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="max-width:600px;background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.06);border:1px solid #e8e8e8;">
-        <tr>
-          <td style="background:#ffffff;padding:0;border-bottom:1px solid #e8e8e8;">
-            <div style="height:3px;background:linear-gradient(90deg,#4f46e5 0%,#7c3aed 50%,#06b6d4 100%);"></div>
-            <div style="padding:24px 28px 20px;">
-              <img src="{{app_url}}/jp-logo.svg" alt="Jackpot" width="132" height="32" style="display:block;height:32px;width:auto;max-width:100%;border:0;outline:none;" />
-            </div>
-          </td>
-        </tr>
-        <tr>
-          <td style="padding:8px 32px 36px;color:#425466;font-size:15px;line-height:1.6;">
-            {$cardInnerHtml}
-          </td>
-        </tr>
-      </table>
-      <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="max-width:600px;">
-        <tr>
-          <td style="padding:20px 8px 8px;font-size:12px;line-height:1.5;color:#8898aa;text-align:center;">
-            <p style="margin:0 0 8px;">© {$y} {{app_name}}. All rights reserved.</p>
-            <p style="margin:0;"><a href="{{app_url}}" style="color:#556cd6;text-decoration:none;">{{app_name}}</a></p>
-          </td>
-        </tr>
-      </table>
-    </td>
-  </tr>
-</table>
-HTML;
-    }
+    <td align="center" style="padding:32px 16px;">
 
-    /**
-     * Tenant-scoped emails (invite): white header + Jackpot + optional tenant logo cells from {@see tenantLogoBlockFromBrand()}.
-     *
-     * @param  string  $cardInnerHtml  Body below the dual-logo row
-     * @param  string|null  $headerCaptionLine  Uppercase caption under logos; supports {{mustache}} vars (default: Invitation · {{tenant_name}})
-     */
-    public static function tenantShell(string $cardInnerHtml, ?string $copyrightYear = null, ?string $headerCaptionLine = null): string
-    {
-        $y = $copyrightYear ?? date('Y');
-        $caption = $headerCaptionLine ?? 'Invitation · {{tenant_name}}';
-
-        return <<<HTML
-<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color:#f4f5f7;margin:0;padding:24px 12px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;">
-  <tr>
-    <td align="center">
-      <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="max-width:600px;background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.06);border:1px solid #e8e8e8;">
+      <!-- Header -->
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="max-width:640px;">
         <tr>
-          <td style="background:#ffffff;padding:0;border-bottom:1px solid #e8e8e8;">
-            <div style="height:3px;background:linear-gradient(90deg,#4f46e5 0%,#7c3aed 50%,#06b6d4 100%);"></div>
-            <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">
+          <td style="padding:0 0 16px;">
+            <table role="presentation" cellpadding="0" cellspacing="0" border="0">
               <tr>
-                <td style="padding:20px 24px 16px;vertical-align:middle;">
-                  <table role="presentation" cellpadding="0" cellspacing="0" border="0">
-                    <tr>
-                      <td style="vertical-align:middle;padding-right:16px;">
-                        <img src="{{app_url}}/jp-logo.svg" alt="Jackpot" width="120" height="28" style="display:block;height:28px;width:auto;max-width:100%;border:0;" />
-                      </td>
-                      {{tenant_logo_block}}
-                    </tr>
-                  </table>
-                  <p style="margin:12px 0 0;font-size:11px;letter-spacing:0.06em;text-transform:uppercase;color:#64748b;">{$caption}</p>
+                <td style="vertical-align:middle;padding-right:10px;">
+                  <img src="{{app_url}}/icons/pwa-192.png" alt="" width="28" height="28" style="display:block;width:28px;height:28px;border-radius:6px;border:0;" />
+                </td>
+                <td style="vertical-align:middle;">
+                  <span style="font-size:15px;font-weight:700;color:#111827;letter-spacing:-0.01em;">{{app_name}}</span>
                 </td>
               </tr>
             </table>
           </td>
         </tr>
+      </table>
+
+      <!-- Card -->
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="max-width:640px;">
         <tr>
-          <td style="padding:8px 32px 36px;color:#425466;font-size:15px;line-height:1.6;">
-            {$cardInnerHtml}
+          <td>
+            <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #e5e7eb;">
+              <tr><td style="height:3px;background:{$grad};font-size:0;line-height:0;">&nbsp;</td></tr>
+              <tr>
+                <td style="padding:36px 40px 40px;color:#374151;font-size:15px;line-height:1.65;">
+                  {$cardInnerHtml}
+                </td>
+              </tr>
+            </table>
           </td>
         </tr>
       </table>
-      <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="max-width:600px;">
+
+      <!-- Footer -->
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="max-width:640px;">
         <tr>
-          <td style="padding:20px 8px 8px;font-size:12px;line-height:1.5;color:#8898aa;text-align:center;">
-            <p style="margin:0 0 8px;">© {$y} {{app_name}}. All rights reserved.</p>
-            <p style="margin:0;">This message was sent by {{app_name}} on behalf of {{tenant_name}}.</p>
-            <p style="margin:8px 0 0;"><a href="{{app_url}}" style="color:#556cd6;text-decoration:none;">Visit {{app_name}}</a></p>
+          <td style="padding:24px 4px 0;text-align:center;">
+            <p style="margin:0 0 6px;font-size:12px;color:#9ca3af;line-height:1.5;">&copy; {$y} {{app_name}}. All rights reserved.</p>
+            <p style="margin:0;font-size:12px;"><a href="{{app_url}}" style="color:#6b7280;text-decoration:none;">{{app_name}}</a></p>
           </td>
         </tr>
       </table>
+
     </td>
   </tr>
 </table>
@@ -108,32 +81,103 @@ HTML;
     }
 
     /**
-     * Extra table cells after Jackpot logo: thin divider + brand logo image, or brand name as text if no logo.
+     * Tenant-scoped emails: tenant identity first, "via Jackpot" treatment, powered-by footer.
+     */
+    public static function tenantShell(string $cardInnerHtml, ?string $copyrightYear = null, ?string $headerCaptionLine = null): string
+    {
+        $y       = $copyrightYear ?? date('Y');
+        $font    = self::FONT_STACK;
+        $indigo  = self::INDIGO;
+
+        return <<<HTML
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color:#f5f6f8;margin:0;padding:0;font-family:{$font};">
+  <tr>
+    <td align="center" style="padding:32px 16px;">
+
+      <!-- Tenant Header -->
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="max-width:640px;">
+        <tr>
+          <td style="padding:0 0 16px;">
+            <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">
+              <tr>
+                {{tenant_logo_block}}
+                <td style="vertical-align:middle;text-align:right;">
+                  <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="display:inline-table;">
+                    <tr>
+                      <td style="vertical-align:middle;padding-right:6px;">
+                        <img src="{{app_url}}/icons/pwa-192.png" alt="" width="18" height="18" style="display:block;width:18px;height:18px;border-radius:4px;border:0;" />
+                      </td>
+                      <td style="vertical-align:middle;">
+                        <span style="font-size:11px;color:#9ca3af;font-weight:500;">via {{app_name}}</span>
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
+
+      <!-- Card -->
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="max-width:640px;">
+        <tr>
+          <td>
+            <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #e5e7eb;">
+              <tr><td style="height:3px;background:{$indigo};font-size:0;line-height:0;">&nbsp;</td></tr>
+              <tr>
+                <td style="padding:36px 40px 40px;color:#374151;font-size:15px;line-height:1.65;">
+                  {$cardInnerHtml}
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
+
+      <!-- Footer -->
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="max-width:640px;">
+        <tr>
+          <td style="padding:24px 4px 0;text-align:center;">
+            <p style="margin:0 0 6px;font-size:12px;color:#9ca3af;line-height:1.5;">Sent via <a href="{{app_url}}" style="color:#6b7280;text-decoration:none;">{{app_name}}</a></p>
+            <p style="margin:0;font-size:11px;color:#d1d5db;">&copy; {$y} {{tenant_name}}</p>
+          </td>
+        </tr>
+      </table>
+
+    </td>
+  </tr>
+</table>
+HTML;
+    }
+
+    /**
+     * Tenant logo block: returns `<td>` cell(s) for insertion into a `<tr>` alongside "via Jackpot".
+     * Used as {{tenant_logo_block}} in DB-stored notification templates.
      */
     public static function tenantLogoBlockFromBrand(?\App\Models\Brand $brand): string
     {
         if ($brand === null) {
-            return '';
+            return '<td style="vertical-align:middle;"></td>';
         }
 
         $url = $brand->logoUrlForTransactionalEmail();
         if ($url !== null && $url !== '') {
             $safe = htmlspecialchars($url, ENT_QUOTES, 'UTF-8');
-            $img = '<img src="'.$safe.'" alt="'.htmlspecialchars($brand->name, ENT_QUOTES, 'UTF-8').'" width="140" height="40" style="display:inline-block;max-height:40px;max-width:160px;width:auto;height:auto;vertical-align:middle;" />';
+            $alt  = htmlspecialchars($brand->name, ENT_QUOTES, 'UTF-8');
+            $img  = '<img src="'.$safe.'" alt="'.$alt.'" width="140" height="36" style="display:block;max-height:36px;max-width:160px;width:auto;height:auto;border:0;" />';
 
-            return '<td style="width:1px;background:#e5e7eb;font-size:0;line-height:0;">&nbsp;</td>'
-                .'<td style="vertical-align:middle;padding-left:16px;">'.$img.'</td>';
+            return '<td style="vertical-align:middle;">'.$img.'</td>';
         }
 
         $name = trim((string) $brand->name);
         if ($name === '') {
-            return '';
+            return '<td style="vertical-align:middle;"></td>';
         }
 
         $safeName = htmlspecialchars($name, ENT_QUOTES, 'UTF-8');
-        $wordmark = '<span style="font-size:20px;font-weight:700;color:#0f172a;letter-spacing:-0.02em;line-height:1.2;">'.$safeName.'</span>';
+        $wordmark = '<span style="font-size:16px;font-weight:700;color:#111827;letter-spacing:-0.01em;line-height:1.2;">'.$safeName.'</span>';
 
-        return '<td style="width:1px;background:#e5e7eb;font-size:0;line-height:0;">&nbsp;</td>'
-            .'<td style="vertical-align:middle;padding-left:16px;">'.$wordmark.'</td>';
+        return '<td style="vertical-align:middle;">'.$wordmark.'</td>';
     }
 }

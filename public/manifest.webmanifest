@@ -22,7 +22,7 @@
       "purpose": "any"
     },
     {
-      "src": "/android-chrome-512x512.png",
+      "src": "/icons/pwa-512-maskable.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable"

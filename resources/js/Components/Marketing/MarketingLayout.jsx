@@ -31,12 +31,12 @@ export default function MarketingLayout({ children }) {
     const nb = navButton()
 
     return (
-        <div className="bg-[#0a0a0f] text-white min-h-screen relative overflow-hidden">
+        <div className="bg-[#0B0B0D] text-white min-h-screen relative overflow-hidden">
             <div className="pointer-events-none fixed inset-0 z-0" aria-hidden="true">
-                <div className="absolute -top-[40%] -left-[20%] w-[80%] h-[80%] rounded-full bg-indigo-900/25 blur-[160px]" />
-                <div className="absolute -bottom-[30%] -right-[15%] w-[60%] h-[70%] rounded-full bg-violet-900/20 blur-[140px]" />
-                <div className="absolute top-[25%] right-[5%] w-[40%] h-[45%] rounded-full bg-emerald-900/10 blur-[100px]" />
-                <div className="absolute inset-0 bg-gradient-to-b from-[#0a0a0f] via-transparent to-[#0a0a0f]/90" />
+                <div className="absolute -top-[40%] -left-[20%] w-[80%] h-[80%] rounded-full bg-[#6366f1]/[0.12] blur-[160px]" />
+                <div className="absolute -bottom-[30%] -right-[15%] w-[60%] h-[70%] rounded-full bg-[#8b5cf6]/[0.10] blur-[140px]" />
+                <div className="absolute top-[25%] right-[5%] w-[40%] h-[45%] rounded-full bg-[#06b6d4]/[0.04] blur-[100px]" />
+                <div className="absolute inset-0 bg-gradient-to-b from-[#0B0B0D] via-transparent to-[#0B0B0D]/90" />
             </div>
 
             <div
@@ -48,7 +48,7 @@ export default function MarketingLayout({ children }) {
                 }}
             />
 
-            <nav className="relative z-50 border-b border-white/[0.06] backdrop-blur-sm bg-[#0a0a0f]/40">
+            <nav className="relative z-50 border-b border-white/[0.06] backdrop-blur-sm bg-[#0B0B0D]/40">
                 <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
                     <div className="flex h-16 items-center justify-between gap-4">
                         <Link href="/" className="flex shrink-0 items-center">
