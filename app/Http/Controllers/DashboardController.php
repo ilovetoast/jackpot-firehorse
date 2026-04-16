@@ -192,24 +192,14 @@ class DashboardController extends Controller
         if ($user->hasPermissionForTenant($tenant, 'ai.usage.view')) {
             $usageStatus = $this->aiUsageService->getUsageStatus($tenant);
             $aiUsageData = [
-                'tagging' => [
-                    'usage' => $usageStatus['tagging']['usage'] ?? 0,
-                    'cap' => $usageStatus['tagging']['cap'] ?? 0,
-                    'is_unlimited' => $usageStatus['tagging']['is_unlimited'] ?? false,
-                    'is_disabled' => $usageStatus['tagging']['is_disabled'] ?? false,
-                    'is_exceeded' => $usageStatus['tagging']['is_exceeded'] ?? false,
-                    'remaining' => $usageStatus['tagging']['remaining'] ?? null,
-                    'percentage' => $usageStatus['tagging']['percentage'] ?? 0,
-                ],
-                'suggestions' => [
-                    'usage' => $usageStatus['suggestions']['usage'] ?? 0,
-                    'cap' => $usageStatus['suggestions']['cap'] ?? 0,
-                    'is_unlimited' => $usageStatus['suggestions']['is_unlimited'] ?? false,
-                    'is_disabled' => $usageStatus['suggestions']['is_disabled'] ?? false,
-                    'is_exceeded' => $usageStatus['suggestions']['is_exceeded'] ?? false,
-                    'remaining' => $usageStatus['suggestions']['remaining'] ?? null,
-                    'percentage' => $usageStatus['suggestions']['percentage'] ?? 0,
-                ],
+                'credits_used' => $usageStatus['credits_used'],
+                'credits_cap' => $usageStatus['credits_cap'],
+                'credits_remaining' => $usageStatus['credits_remaining'],
+                'credits_percentage' => $usageStatus['credits_percentage'],
+                'is_unlimited' => $usageStatus['is_unlimited'],
+                'is_exceeded' => $usageStatus['is_exceeded'],
+                'warning_level' => $usageStatus['warning_level'],
+                'per_feature' => $usageStatus['per_feature'],
             ];
             $aiUsageData = $this->aiUsageService->augmentAiUsageDashboardPayload($aiUsageData, $tenant);
         }

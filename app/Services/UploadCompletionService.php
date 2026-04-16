@@ -114,6 +114,12 @@ class UploadCompletionService
         // Refresh to get latest state
         $uploadSession->refresh();
 
+        // Free plan upload protection: require owner email verification
+        $tenantForUploadGate = Tenant::query()->find($uploadSession->tenant_id);
+        if ($tenantForUploadGate && ! app(FeatureGate::class)->canUploadAssets($tenantForUploadGate)) {
+            throw new \RuntimeException('Please verify your email address to start uploading assets. Check the inbox of the account owner.');
+        }
+
         // Creator module: fail before any upload-side mutation (parity with downstream check + replace paths).
         $brandIdForCreatorGate = app()->bound('brand')
             ? (int) app('brand')->id

@@ -26,7 +26,7 @@ class EnterpriseDownloadPolicy
     protected function getPolicy(Tenant $tenant): ?array
     {
         $planName = $this->planService->getCurrentPlan($tenant);
-        if (!in_array($planName, ['premium', 'enterprise'])) {
+        if (!in_array($planName, ['business', 'premium', 'enterprise'])) {
             return null;
         }
         $plan = config("plans.{$planName}");

@@ -54,6 +54,9 @@ class Tenant extends Model
         'cdn_distribution_id', // CloudFront distribution (Enterprise)
         'infrastructure_tier', // 'shared' | 'dedicated' — decoupled from plan; local always shared
         'ai_insights_enabled', // Scheduled metadata insights (value/field suggestion sync)
+        'ai_credits_addon',
+        'ai_credits_addon_stripe_price_id',
+        'ai_credits_addon_stripe_subscription_item_id',
     ];
 
     /**

@@ -61,7 +61,7 @@ class BillingController extends Controller
         $startOfMonth = now()->startOfMonth();
         $endOfMonth = now()->endOfMonth();
         
-        // Get AI usage for current month
+        // Get AI usage for current month (unified credit system)
         $aiUsageStatus = $this->aiUsageService->getUsageStatus($tenant);
         $storageInfo = $planService->getStorageInfo($tenant);
 
@@ -81,9 +81,7 @@ class BillingController extends Controller
                 ->where('scope', 'tenant')
                 ->where('is_active', true)
                 ->count(),
-            'ai_tagging' => $aiUsageStatus['tagging']['usage'] ?? 0,
-            'ai_suggestions' => $aiUsageStatus['suggestions']['usage'] ?? 0,
-            'ai_generative_editor_images' => $aiUsageStatus['generative_editor_images']['usage'] ?? 0,
+            'ai_credits' => $aiUsageStatus,
         ];
 
         // Fetch Stripe price data for each plan
@@ -219,6 +217,16 @@ class BillingController extends Controller
             ] : null,
             'storage_info' => $storageInfo,
             'storage_addon_packages' => $storageAddonPackages,
+            'ai_credits_addon_packages' => collect(config('ai_credits.addons', []))
+                ->filter(fn ($pkg) => ! empty($pkg['stripe_price_id'] ?? null))
+                ->values()
+                ->all(),
+            'credit_weights' => config('ai_credits.weights', []),
+            'creator_addon_config' => [
+                'base' => config('creator_addon.base'),
+                'seat_packs' => config('creator_addon.seat_packs'),
+            ],
+            'available_addons' => $planService->getAvailableAddons($tenant),
         ]);
     }
 
@@ -663,6 +671,17 @@ class BillingController extends Controller
             'on_demand_usage' => $onDemandUsage,
             'monthly_average' => $monthlyAverage,
             'currency' => $currency,
+            'ai_credits' => $this->aiUsageService->getUsageStatus($tenant),
+            'credit_weights' => config('ai_credits.weights', []),
+            'ai_credits_addon_packages' => collect(config('ai_credits.addons', []))
+                ->filter(fn ($pkg) => ! empty($pkg['stripe_price_id'] ?? null))
+                ->values()
+                ->all(),
+            'creator_addon_config' => [
+                'base' => config('creator_addon.base'),
+                'seat_packs' => config('creator_addon.seat_packs'),
+            ],
+            'available_addons' => $planService->getAvailableAddons($tenant),
         ]);
     }
 
@@ -821,6 +840,161 @@ class BillingController extends Controller
                 'message' => 'Storage add-on removed successfully.',
                 'storage' => $storageInfo,
             ]);
+        } catch (\Exception $e) {
+            return response()->json(['message' => $e->getMessage()], 500);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // AI Credit Add-on
+    // -------------------------------------------------------------------------
+
+    public function addAiCreditsAddon(Request $request)
+    {
+        $request->validate([
+            'package_id' => 'required|string',
+        ]);
+
+        $user = $request->user();
+        $tenantId = session('tenant_id');
+        $tenant = $tenantId ? \App\Models\Tenant::find($tenantId) : $user->tenants->first();
+
+        if (! $tenant || ! $user->tenants()->where('tenants.id', $tenant->id)->exists()) {
+            return response()->json(['message' => 'Invalid company.'], 403);
+        }
+
+        $role = strtolower($user->getRoleForTenant($tenant) ?? '');
+        if (! in_array($role, ['owner', 'admin'])) {
+            return response()->json(['message' => 'Only company owners and admins can manage add-ons.'], 403);
+        }
+
+        try {
+            $result = $this->billingService->addAiCreditsAddon($tenant, $request->package_id);
+
+            return response()->json([
+                'message' => 'AI credit add-on added successfully.',
+                'credits' => $result,
+            ]);
+        } catch (\InvalidArgumentException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        } catch (\Exception $e) {
+            return response()->json(['message' => $e->getMessage()], 500);
+        }
+    }
+
+    public function removeAiCreditsAddon(Request $request)
+    {
+        $user = $request->user();
+        $tenantId = session('tenant_id');
+        $tenant = $tenantId ? \App\Models\Tenant::find($tenantId) : $user->tenants->first();
+
+        if (! $tenant || ! $user->tenants()->where('tenants.id', $tenant->id)->exists()) {
+            return response()->json(['message' => 'Invalid company.'], 403);
+        }
+
+        $role = strtolower($user->getRoleForTenant($tenant) ?? '');
+        if (! in_array($role, ['owner', 'admin'])) {
+            return response()->json(['message' => 'Only company owners and admins can manage add-ons.'], 403);
+        }
+
+        try {
+            $result = $this->billingService->removeAiCreditsAddon($tenant);
+
+            return response()->json([
+                'message' => 'AI credit add-on removed successfully.',
+                'credits' => $result,
+            ]);
+        } catch (\Exception $e) {
+            return response()->json(['message' => $e->getMessage()], 500);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Creator Module Add-on
+    // -------------------------------------------------------------------------
+
+    public function addCreatorModule(Request $request)
+    {
+        $user = $request->user();
+        $tenantId = session('tenant_id');
+        $tenant = $tenantId ? \App\Models\Tenant::find($tenantId) : $user->tenants->first();
+
+        if (! $tenant || ! $user->tenants()->where('tenants.id', $tenant->id)->exists()) {
+            return response()->json(['message' => 'Invalid company.'], 403);
+        }
+
+        $role = strtolower($user->getRoleForTenant($tenant) ?? '');
+        if (! in_array($role, ['owner', 'admin'])) {
+            return response()->json(['message' => 'Only company owners and admins can manage modules.'], 403);
+        }
+
+        try {
+            $result = $this->billingService->addCreatorModule($tenant);
+
+            return response()->json([
+                'message' => 'Creator Module activated successfully.',
+                'module' => $result,
+            ]);
+        } catch (\Exception $e) {
+            return response()->json(['message' => $e->getMessage()], 500);
+        }
+    }
+
+    public function removeCreatorModule(Request $request)
+    {
+        $user = $request->user();
+        $tenantId = session('tenant_id');
+        $tenant = $tenantId ? \App\Models\Tenant::find($tenantId) : $user->tenants->first();
+
+        if (! $tenant || ! $user->tenants()->where('tenants.id', $tenant->id)->exists()) {
+            return response()->json(['message' => 'Invalid company.'], 403);
+        }
+
+        $role = strtolower($user->getRoleForTenant($tenant) ?? '');
+        if (! in_array($role, ['owner', 'admin'])) {
+            return response()->json(['message' => 'Only company owners and admins can manage modules.'], 403);
+        }
+
+        try {
+            $result = $this->billingService->removeCreatorModule($tenant);
+
+            return response()->json([
+                'message' => 'Creator Module removed successfully.',
+                'module' => $result,
+            ]);
+        } catch (\Exception $e) {
+            return response()->json(['message' => $e->getMessage()], 500);
+        }
+    }
+
+    public function addCreatorSeatPack(Request $request)
+    {
+        $request->validate([
+            'pack_id' => 'required|string',
+        ]);
+
+        $user = $request->user();
+        $tenantId = session('tenant_id');
+        $tenant = $tenantId ? \App\Models\Tenant::find($tenantId) : $user->tenants->first();
+
+        if (! $tenant || ! $user->tenants()->where('tenants.id', $tenant->id)->exists()) {
+            return response()->json(['message' => 'Invalid company.'], 403);
+        }
+
+        $role = strtolower($user->getRoleForTenant($tenant) ?? '');
+        if (! in_array($role, ['owner', 'admin'])) {
+            return response()->json(['message' => 'Only company owners and admins can manage modules.'], 403);
+        }
+
+        try {
+            $result = $this->billingService->addCreatorSeatPack($tenant, $request->pack_id);
+
+            return response()->json([
+                'message' => 'Creator seat pack added successfully.',
+                'module' => $result,
+            ]);
+        } catch (\InvalidArgumentException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
         } catch (\Exception $e) {
             return response()->json(['message' => $e->getMessage()], 500);
         }

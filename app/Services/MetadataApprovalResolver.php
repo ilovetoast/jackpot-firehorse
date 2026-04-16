@@ -47,7 +47,7 @@ class MetadataApprovalResolver
 
         // Check plan: Pro plans and higher have approval workflow
         $planName = $this->planService->getCurrentPlan($tenant);
-        $proPlans = ['pro', 'premium', 'enterprise'];
+        $proPlans = ['pro', 'business', 'premium', 'enterprise'];
 
         return in_array($planName, $proPlans);
     }

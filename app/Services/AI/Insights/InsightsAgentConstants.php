@@ -5,7 +5,7 @@ namespace App\Services\AI\Insights;
 /**
  * Metadata insights batch job: usage feature + stable agent label for logs.
  *
- * AiUsageService maps {@see self::USAGE_FEATURE} to plan key max_ai_insights_per_month.
+ * AiUsageService maps {@see self::USAGE_FEATURE} to credit weight via config/ai_credits.php.
  */
 final class InsightsAgentConstants
 {

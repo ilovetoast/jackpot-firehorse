@@ -33,6 +33,10 @@ class PlanService
 
     /**
      * Resolve plan name from tenant override, Cashier subscription, and config.
+     *
+     * Legacy mapping: if the resolved key is 'premium' (grandfathered customers),
+     * it stays as 'premium' — config/plans.php has a 'premium' block with
+     * legacy_alias_for => 'business' and identical feature limits.
      */
     protected function resolveCurrentPlan(Tenant $tenant): string
     {
@@ -62,7 +66,6 @@ class PlanService
         }
 
         // Get the most recent active subscription with name 'default'
-        // Use relationship query (not lazy load) to avoid LazyLoadingViolationException
         $subscription = $tenant->subscriptions()
             ->where('name', 'default')
             ->where('stripe_status', 'active')
@@ -73,10 +76,8 @@ class PlanService
             return 'free';
         }
 
-        // First try to get price from subscription
         $priceId = $subscription->stripe_price;
 
-        // If not found, try to get from subscription items
         if (! $priceId && $subscription->items->count() > 0) {
             $priceId = $subscription->items->first()->stripe_price;
         }
@@ -87,13 +88,70 @@ class PlanService
 
         // Find plan by Stripe price ID
         foreach (config('plans') as $planName => $planConfig) {
-            if ($planConfig['stripe_price_id'] === $priceId) {
+            if (($planConfig['stripe_price_id'] ?? null) === $priceId) {
                 return $planName;
             }
         }
 
-        // Default to free if price ID not found
         return 'free';
+    }
+
+    /**
+     * Canonical plan key, resolving legacy aliases.
+     * 'premium' -> 'business', everything else stays the same.
+     */
+    public function getCanonicalPlan(Tenant $tenant): string
+    {
+        $plan = $this->getCurrentPlan($tenant);
+        $alias = config("plans.{$plan}.legacy_alias_for");
+
+        return $alias ?? $plan;
+    }
+
+    /**
+     * Effective AI credit cap = plan base + purchased add-on.
+     * Returns 0 for unlimited (enterprise).
+     */
+    public function getEffectiveAiCredits(Tenant $tenant): int
+    {
+        $limits = $this->getPlanLimits($tenant);
+        $baseCap = (int) ($limits['max_ai_credits_per_month'] ?? 0);
+
+        if ($baseCap === 0) {
+            return 0; // unlimited
+        }
+
+        return $baseCap + (int) ($tenant->ai_credits_addon ?? 0);
+    }
+
+    /**
+     * Whether the tenant's plan includes SSO.
+     */
+    public function ssoEnabled(Tenant $tenant): bool
+    {
+        $plan = $this->getPlanConfig($tenant);
+
+        return (bool) ($plan['sso_enabled'] ?? false);
+    }
+
+    /**
+     * Whether free-plan upload protection requires the owner to verify email.
+     */
+    public function requiresEmailVerificationForUploads(Tenant $tenant): bool
+    {
+        $plan = $this->getPlanConfig($tenant);
+
+        return (bool) ($plan['requires_email_verification_for_uploads'] ?? false);
+    }
+
+    /**
+     * Get add-ons available for the tenant's current plan.
+     */
+    public function getAvailableAddons(Tenant $tenant): array
+    {
+        $plan = $this->getPlanConfig($tenant);
+
+        return $plan['addons_available'] ?? [];
     }
 
     /**
@@ -267,21 +325,19 @@ class PlanService
 
     /**
      * Check if tenant can create a private category for a brand.
-     * Requires Pro or Enterprise plan, and checks private category limit.
+     * Requires Pro, Business, or Enterprise plan, and checks private category limit.
      */
     public function canCreatePrivateCategory(Tenant $tenant, Brand $brand): bool
     {
         $planName = $this->getCurrentPlan($tenant);
 
-        // Only Pro, Premium, and Enterprise plans can create private categories
-        if (! in_array($planName, ['pro', 'premium', 'enterprise'])) {
+        if (! in_array($planName, ['pro', 'business', 'premium', 'enterprise'])) {
             return false;
         }
 
         $limits = $this->getPlanLimits($tenant);
         $maxPrivateCategories = $limits['max_private_categories'] ?? 0;
 
-        // Count only private custom (non-system) categories for the brand
         $currentPrivateCount = $brand->categories()
             ->custom()
             ->where('is_private', true)
@@ -297,8 +353,7 @@ class PlanService
     {
         $planName = $this->getCurrentPlan($tenant);
 
-        // Only Pro, Premium, and Enterprise plans can create private categories
-        if (! in_array($planName, ['pro', 'premium', 'enterprise'])) {
+        if (! in_array($planName, ['pro', 'business', 'premium', 'enterprise'])) {
             return 0;
         }
 

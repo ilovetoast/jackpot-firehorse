@@ -221,25 +221,23 @@ class AnalyticsOverviewController extends Controller
         $aiUsageData = null;
         if ($user->hasPermissionForTenant($tenant, 'ai.usage.view')) {
             $aiUsageData = $this->aiUsageService->augmentAiUsageDashboardPayload([
-                'tagging' => $usageStatusFull['tagging'] ?? [],
-                'suggestions' => $usageStatusFull['suggestions'] ?? [],
+                'credits_used' => $usageStatusFull['credits_used'],
+                'credits_cap' => $usageStatusFull['credits_cap'],
+                'credits_remaining' => $usageStatusFull['credits_remaining'],
+                'credits_percentage' => $usageStatusFull['credits_percentage'],
+                'is_unlimited' => $usageStatusFull['is_unlimited'],
+                'is_exceeded' => $usageStatusFull['is_exceeded'],
+                'warning_level' => $usageStatusFull['warning_level'],
+                'per_feature' => $usageStatusFull['per_feature'],
             ], $tenant);
         }
 
-        /** Shown when AI tagging or suggestions monthly cap is reached (same audience as insights overview). */
         $aiMonthlyCapAlert = null;
         if ($user->canViewBrandWorkspaceInsights($tenant, $brand)) {
-            $exceeded = [];
-            foreach (['tagging', 'suggestions'] as $feature) {
-                $row = $usageStatusFull[$feature] ?? [];
-                if (($row['is_exceeded'] ?? false) && ($row['cap'] ?? 0) > 0) {
-                    $exceeded[] = $feature;
-                }
-            }
-            if ($exceeded !== []) {
+            if (($usageStatusFull['is_exceeded'] ?? false)) {
                 $aiMonthlyCapAlert = [
-                    'features' => $exceeded,
-                    'reset_hint' => 'Usage resets at the start of the next calendar month. Upgrade your plan or adjust AI settings if you need more capacity.',
+                    'features' => ['credits'],
+                    'reset_hint' => 'AI credit budget exceeded. Usage resets at the start of the next calendar month. Upgrade your plan or purchase a credit add-on.',
                 ];
             }
         }

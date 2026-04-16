@@ -505,10 +505,273 @@ class BillingService
         }
     }
 
+    // -------------------------------------------------------------------------
+    // AI Credit Add-on
+    // -------------------------------------------------------------------------
+
+    /**
+     * Add an AI credit add-on to the tenant's subscription.
+     * Only one credit add-on active at a time; adding a new one replaces the previous.
+     */
+    public function addAiCreditsAddon(Tenant $tenant, string $packageId): array
+    {
+        $packages = config('ai_credits.addons', []);
+        $package = collect($packages)->firstWhere('id', $packageId);
+
+        if (! $package) {
+            throw new \InvalidArgumentException("Invalid AI credit add-on package: {$packageId}");
+        }
+
+        $stripePriceId = $package['stripe_price_id'] ?? null;
+        if (empty($stripePriceId)) {
+            throw new \RuntimeException("Stripe price not configured for AI credit add-on: {$packageId}");
+        }
+
+        $subscription = $tenant->subscription('default');
+        if (! $subscription || ! $subscription->stripe_id || $subscription->stripe_status !== 'active') {
+            throw new \RuntimeException('Tenant must have an active subscription to add AI credits.');
+        }
+
+        $stripeSecret = config('services.stripe.secret');
+        if (empty($stripeSecret)) {
+            throw new \RuntimeException('Stripe is not configured.');
+        }
+        Stripe::setApiKey($stripeSecret);
+
+        try {
+            if (! empty($tenant->ai_credits_addon_stripe_subscription_item_id)) {
+                $this->removeStripeSubscriptionItem($tenant->ai_credits_addon_stripe_subscription_item_id);
+            }
+
+            $item = SubscriptionItem::create([
+                'subscription' => $subscription->stripe_id,
+                'price' => $stripePriceId,
+                'quantity' => 1,
+            ], [
+                'idempotency_key' => "tenant-{$tenant->id}-ai-credits-addon",
+            ]);
+
+            $tenant->update([
+                'ai_credits_addon' => $package['credits'],
+                'ai_credits_addon_stripe_price_id' => $stripePriceId,
+                'ai_credits_addon_stripe_subscription_item_id' => $item->id,
+            ]);
+
+            return [
+                'credits_added' => $package['credits'],
+                'package_id' => $packageId,
+                'effective_credits' => (new PlanService())->getEffectiveAiCredits($tenant),
+            ];
+        } catch (ApiErrorException $e) {
+            throw new \RuntimeException('Failed to add AI credit add-on: '.$e->getMessage());
+        }
+    }
+
+    /**
+     * Remove the AI credit add-on from the tenant's subscription.
+     */
+    public function removeAiCreditsAddon(Tenant $tenant): array
+    {
+        $itemId = $tenant->ai_credits_addon_stripe_subscription_item_id;
+
+        if (empty($itemId)) {
+            return ['credits_added' => 0, 'effective_credits' => (new PlanService())->getEffectiveAiCredits($tenant)];
+        }
+
+        $stripeSecret = config('services.stripe.secret');
+        if (empty($stripeSecret)) {
+            throw new \RuntimeException('Stripe is not configured.');
+        }
+        Stripe::setApiKey($stripeSecret);
+
+        try {
+            $this->removeStripeSubscriptionItem($itemId);
+
+            $tenant->update([
+                'ai_credits_addon' => 0,
+                'ai_credits_addon_stripe_price_id' => null,
+                'ai_credits_addon_stripe_subscription_item_id' => null,
+            ]);
+
+            return ['credits_added' => 0, 'effective_credits' => (new PlanService())->getEffectiveAiCredits($tenant)];
+        } catch (ApiErrorException $e) {
+            throw new \RuntimeException('Failed to remove AI credit add-on: '.$e->getMessage());
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Creator Module Add-on
+    // -------------------------------------------------------------------------
+
+    /**
+     * Purchase the Creator Module add-on for a Pro tenant.
+     */
+    public function addCreatorModule(Tenant $tenant): array
+    {
+        $config = config('creator_addon.base');
+        $stripePriceId = $config['stripe_price_id'] ?? null;
+
+        if (empty($stripePriceId)) {
+            throw new \RuntimeException('Stripe price not configured for Creator Module.');
+        }
+
+        $subscription = $tenant->subscription('default');
+        if (! $subscription || ! $subscription->stripe_id || $subscription->stripe_status !== 'active') {
+            throw new \RuntimeException('Tenant must have an active subscription to add Creator Module.');
+        }
+
+        $stripeSecret = config('services.stripe.secret');
+        if (empty($stripeSecret)) {
+            throw new \RuntimeException('Stripe is not configured.');
+        }
+        Stripe::setApiKey($stripeSecret);
+
+        try {
+            $item = SubscriptionItem::create([
+                'subscription' => $subscription->stripe_id,
+                'price' => $stripePriceId,
+                'quantity' => 1,
+            ], [
+                'idempotency_key' => "tenant-{$tenant->id}-creator-module",
+            ]);
+
+            $module = \App\Models\TenantModule::updateOrCreate(
+                ['tenant_id' => $tenant->id, 'module_key' => \App\Models\TenantModule::KEY_CREATOR],
+                [
+                    'status' => 'active',
+                    'seats_limit' => $config['included_seats'] ?? 25,
+                    'stripe_price_id' => $stripePriceId,
+                    'stripe_subscription_item_id' => $item->id,
+                    'granted_by_admin' => false,
+                    'expires_at' => null,
+                ]
+            );
+
+            return ['status' => 'active', 'seats_limit' => $module->seats_limit];
+        } catch (ApiErrorException $e) {
+            throw new \RuntimeException('Failed to add Creator Module: '.$e->getMessage());
+        }
+    }
+
+    /**
+     * Remove the Creator Module add-on.
+     */
+    public function removeCreatorModule(Tenant $tenant): array
+    {
+        $module = \App\Models\TenantModule::query()
+            ->where('tenant_id', $tenant->id)
+            ->where('module_key', \App\Models\TenantModule::KEY_CREATOR)
+            ->first();
+
+        if (! $module || empty($module->stripe_subscription_item_id)) {
+            return ['status' => 'removed'];
+        }
+
+        $stripeSecret = config('services.stripe.secret');
+        if (empty($stripeSecret)) {
+            throw new \RuntimeException('Stripe is not configured.');
+        }
+        Stripe::setApiKey($stripeSecret);
+
+        try {
+            // Remove seat pack first if exists
+            if (! empty($module->seat_pack_stripe_subscription_item_id)) {
+                $this->removeStripeSubscriptionItem($module->seat_pack_stripe_subscription_item_id);
+            }
+
+            $this->removeStripeSubscriptionItem($module->stripe_subscription_item_id);
+
+            $module->update([
+                'status' => 'inactive',
+                'stripe_price_id' => null,
+                'stripe_subscription_item_id' => null,
+                'seat_pack_stripe_price_id' => null,
+                'seat_pack_stripe_subscription_item_id' => null,
+            ]);
+
+            return ['status' => 'removed'];
+        } catch (ApiErrorException $e) {
+            throw new \RuntimeException('Failed to remove Creator Module: '.$e->getMessage());
+        }
+    }
+
+    /**
+     * Add a creator seat pack to the tenant's Creator Module.
+     */
+    public function addCreatorSeatPack(Tenant $tenant, string $packId): array
+    {
+        $packs = config('creator_addon.seat_packs', []);
+        $pack = collect($packs)->firstWhere('id', $packId);
+
+        if (! $pack) {
+            throw new \InvalidArgumentException("Invalid creator seat pack: {$packId}");
+        }
+
+        $stripePriceId = $pack['stripe_price_id'] ?? null;
+        if (empty($stripePriceId)) {
+            throw new \RuntimeException("Stripe price not configured for seat pack: {$packId}");
+        }
+
+        $module = \App\Models\TenantModule::query()
+            ->where('tenant_id', $tenant->id)
+            ->where('module_key', \App\Models\TenantModule::KEY_CREATOR)
+            ->whereIn('status', ['active', 'trial'])
+            ->first();
+
+        if (! $module) {
+            throw new \RuntimeException('Creator Module must be active to add seat packs.');
+        }
+
+        $subscription = $tenant->subscription('default');
+        if (! $subscription || ! $subscription->stripe_id || $subscription->stripe_status !== 'active') {
+            throw new \RuntimeException('Tenant must have an active subscription.');
+        }
+
+        $stripeSecret = config('services.stripe.secret');
+        if (empty($stripeSecret)) {
+            throw new \RuntimeException('Stripe is not configured.');
+        }
+        Stripe::setApiKey($stripeSecret);
+
+        try {
+            if (! empty($module->seat_pack_stripe_subscription_item_id)) {
+                $this->removeStripeSubscriptionItem($module->seat_pack_stripe_subscription_item_id);
+            }
+
+            $item = SubscriptionItem::create([
+                'subscription' => $subscription->stripe_id,
+                'price' => $stripePriceId,
+                'quantity' => 1,
+            ], [
+                'idempotency_key' => "tenant-{$tenant->id}-creator-seats",
+            ]);
+
+            $baseSeats = (int) ($module->seats_limit ?? 25);
+            $module->update([
+                'seats_limit' => $baseSeats + $pack['seats'],
+                'seat_pack_stripe_price_id' => $stripePriceId,
+                'seat_pack_stripe_subscription_item_id' => $item->id,
+            ]);
+
+            return ['seats_limit' => $module->seats_limit, 'pack_id' => $packId];
+        } catch (ApiErrorException $e) {
+            throw new \RuntimeException('Failed to add creator seat pack: '.$e->getMessage());
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Internal helpers
+    // -------------------------------------------------------------------------
+
     /**
      * Delete a Stripe subscription item (storage add-on).
      */
     private function removeStorageAddonStripeItem(string $stripeSubscriptionItemId): void
+    {
+        $this->removeStripeSubscriptionItem($stripeSubscriptionItemId);
+    }
+
+    private function removeStripeSubscriptionItem(string $stripeSubscriptionItemId): void
     {
         SubscriptionItem::retrieve($stripeSubscriptionItemId)->delete();
     }

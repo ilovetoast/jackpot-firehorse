@@ -9,40 +9,43 @@ return [
     | Define subscription plans with their Stripe price IDs and feature limits.
     | Plans define feature limits, not access logic.
     |
+    | AI usage is tracked per-feature for analytics but enforced via a unified
+    | credit pool (max_ai_credits_per_month). Credit weights live in
+    | config/ai_credits.php.
+    |
     | Note: max_categories is legacy; custom category count is not plan-gated.
     | Per-brand visible category caps use config/categories.php (asset + deliverable).
+    |
+    | Stable plan keys: free, starter, pro, business, enterprise.
+    | "premium" is a legacy alias — see PlanService::resolveCurrentPlan().
     |
     */
 
     'free' => [
         'name' => 'Free',
         'stripe_price_id' => env('STRIPE_PRICE_FREE', 'price_free'),
+        'selectable' => true,
         'limits' => [
             'max_brands' => 1,
             'max_categories' => 0,
-            'max_storage_mb' => 100,
+            'max_storage_mb' => 1024, // 1 GB
             'max_upload_size_mb' => 10,
             'max_users' => 2,
-            'max_downloads_per_month' => 50,
-            'max_download_assets' => 50, // Phase D1: max assets per download
-            'max_download_zip_mb' => 500, // Phase D1: max ZIP size (MB)
-            'max_custom_metadata_fields' => 0, // Phase C3: No custom fields on free plan
-            'max_tags_per_asset' => 1, // Maximum tags allowed per asset
-            // AI Usage caps (per month)
-            'max_ai_tagging_per_month' => 5,
-            'max_ai_suggestions_per_month' => 10,
-            'max_ai_brand_research_per_month' => 0, // Brand research requires a paid plan
-            'max_ai_insights_per_month' => 15, // Metadata insight sync runs (value/field suggestions)
-            /** Video AI: completed insight jobs per month (tenant-scoped). */
-            'max_ai_video_insights_per_month' => 3,
-            /** Video AI: billable minutes per month (capped timeline per asset); 0 = unlimited. */
-            'max_video_ai_minutes_per_month' => 5,
-            /** Generative asset editor — image generations per month (tenant-scoped). */
-            'max_editor_generative_images_per_month' => 3,
+            'max_downloads_per_month' => 25,
+            'max_download_assets' => 25,
+            'max_download_zip_mb' => 250,
+            'max_custom_metadata_fields' => 0,
+            'max_tags_per_asset' => 1,
+            'max_ai_credits_per_month' => 75,
         ],
         'features' => [
             'basic_asset_types',
         ],
+        'sso_enabled' => false,
+        'creator_module_included' => false,
+        'creator_module_included_seats' => 0,
+        'requires_email_verification_for_uploads' => true,
+        'addons_available' => [],
         'approval_features' => [
             'approvals.enabled' => false,
             'notifications.enabled' => false,
@@ -60,78 +63,7 @@ return [
         ],
         'download_features' => [
             'download_links_limited' => true,
-            'download_links_limit' => 50,
-            'custom_download_permissions' => false,
-            'share_downloads_with_permissions' => false,
-        ],
-        'download_management' => [
-            'extend_expiration' => false,
-            'revoke' => false,
-            'restrict_access_brand' => false,
-            'restrict_access_company' => false,
-            'restrict_access_users' => false,
-            'non_expiring' => false,
-            'regenerate' => false,
-            'rename' => false,
-            'password_protection' => false,
-            'branding' => false,
-            'require_landing_page' => false,
-            'max_expiration_days' => 30,
-        ],
-        'notes' => [
-            'No "All" button in Assets/Executions category sidebar',
-            'Download links limited to 50 per month',
-            'Limited to 1 tag per asset for basic organization',
-            '5 AI tagging operations and 10 AI suggestions per month',
-            'AI brand research not available (manual entry only)',
-        ],
-    ],
-
-    'starter' => [
-        'name' => 'Starter',
-        'stripe_price_id' => env('STRIPE_PRICE_STARTER', 'price_1Slzw9BF7ZSvskYAxVgeMPlz'),
-        'fallback_monthly_price' => 29.00, // Fallback price if Stripe unavailable
-        'limits' => [
-            'max_brands' => 3,
-            'max_categories' => 2,
-            'max_storage_mb' => 5120, // 5 GB
-            'max_upload_size_mb' => 50,
-            'max_users' => 5,
-            'max_downloads_per_month' => 200,
-            'max_download_assets' => 100,
-            'max_download_zip_mb' => 1000,
-            'max_custom_metadata_fields' => 5, // Phase C3: 5 custom fields on starter plan
-            'max_tags_per_asset' => 5, // Maximum tags allowed per asset
-            // AI Usage caps (per month)
-            'max_ai_tagging_per_month' => 50,
-            'max_ai_suggestions_per_month' => 100,
-            'max_ai_brand_research_per_month' => 3, // ~$0.16/call = ~$0.48/mo max
-            'max_ai_insights_per_month' => 40,
-            'max_ai_video_insights_per_month' => 25,
-            'max_video_ai_minutes_per_month' => 30,
-            'max_editor_generative_images_per_month' => 100,
-        ],
-        'features' => [
-            'all_asset_types',
-        ],
-        'approval_features' => [
-            'approvals.enabled' => false,
-            'notifications.enabled' => false,
-            'approval_summaries.enabled' => false,
-        ],
-        'public_collections_enabled' => false,
-        'brand_portal' => [
-            'customization' => false,
-            'public_access' => false,
-            'sharing' => false,
-            'agency_templates' => false,
-        ],
-        'brand_guidelines' => [
-            'customization' => false,
-        ],
-        'download_features' => [
-            'download_links_limited' => true,
-            'download_links_limit' => 200,
+            'download_links_limit' => 25,
             'custom_download_permissions' => false,
             'share_downloads_with_permissions' => false,
         ],
@@ -152,44 +84,122 @@ return [
         'versions_enabled' => false,
         'max_versions_per_asset' => 1,
         'notes' => [
-            '"All" button in Assets/Executions category sidebar to view all assets across categories',
-            'Download links limited to 200 per month',
-            'Up to 5 tags per asset for better organization',
-            '50 AI tagging operations and 100 AI suggestions per month',
-            '3 AI brand research analyses per month',
+            '1 GB storage, 10 MB max upload',
+            '75 AI credits per month',
+            '25 downloads per month',
+            'Owner email verification required before uploads',
+            'No add-ons — upgrade to unlock',
+        ],
+    ],
+
+    'starter' => [
+        'name' => 'Starter',
+        'stripe_price_id' => env('STRIPE_PRICE_STARTER', 'price_starter'),
+        'fallback_monthly_price' => 59.00,
+        'selectable' => true,
+        'limits' => [
+            'max_brands' => 1,
+            'max_categories' => 0,
+            'max_storage_mb' => 51200, // 50 GB
+            'max_upload_size_mb' => 50,
+            'max_users' => 5,
+            'max_downloads_per_month' => 200,
+            'max_download_assets' => 100,
+            'max_download_zip_mb' => 1024, // 1 GB
+            'max_custom_metadata_fields' => 5,
+            'max_tags_per_asset' => 5,
+            'max_ai_credits_per_month' => 300,
+        ],
+        'features' => [
+            'all_asset_types',
+        ],
+        'sso_enabled' => false,
+        'creator_module_included' => false,
+        'creator_module_included_seats' => 0,
+        'requires_email_verification_for_uploads' => false,
+        'addons_available' => [
+            'storage' => ['storage_100gb'],
+            'ai_credits' => ['credits_500'],
+        ],
+        'approval_features' => [
+            'approvals.enabled' => false,
+            'notifications.enabled' => true,
+            'approval_summaries.enabled' => false,
+        ],
+        'public_collections_enabled' => false,
+        'brand_portal' => [
+            'customization' => false,
+            'public_access' => false,
+            'sharing' => false,
+            'agency_templates' => false,
+        ],
+        'brand_guidelines' => [
+            'customization' => false,
+        ],
+        'download_features' => [
+            'download_links_limited' => true,
+            'download_links_limit' => 200,
+            'custom_download_permissions' => true,
+            'share_downloads_with_permissions' => true,
+        ],
+        'download_management' => [
+            'extend_expiration' => false,
+            'revoke' => false,
+            'restrict_access_brand' => false,
+            'restrict_access_company' => false,
+            'restrict_access_users' => false,
+            'non_expiring' => false,
+            'regenerate' => false,
+            'rename' => false,
+            'password_protection' => false,
+            'branding' => false,
+            'require_landing_page' => false,
+            'max_expiration_days' => 30,
+        ],
+        'versions_enabled' => true,
+        'max_versions_per_asset' => 5,
+        'notes' => [
+            '50 GB storage, 50 MB max upload',
+            '300 AI credits per month',
+            '200 downloads per month',
+            'Versioning enabled (max 5 per asset)',
+            'Basic sharing with custom permissions',
         ],
     ],
 
     'pro' => [
         'name' => 'Pro',
-        'stripe_price_id' => env('STRIPE_PRICE_PRO', 'price_1SlzwcBF7ZSvskYAAAZScLWz'),
-        'fallback_monthly_price' => 99.00, // Fallback price if Stripe unavailable
+        'stripe_price_id' => env('STRIPE_PRICE_PRO', 'price_pro'),
+        'fallback_monthly_price' => 199.00,
+        'selectable' => true,
         'limits' => [
-            'max_brands' => 5, // Unlimited
-            'max_categories' => 5, // Unlimited
+            'max_brands' => 3,
+            'max_categories' => 0,
             'max_private_categories' => 5,
             'max_storage_mb' => 256000, // 250 GB
             'max_upload_size_mb' => 999999,
             'max_users' => 20,
             'max_downloads_per_month' => 1000,
             'max_download_assets' => 500,
-            'max_download_zip_mb' => 2048,
-            'max_custom_metadata_fields' => 20, // Phase C3: 20 custom fields on pro plan
-            'max_tags_per_asset' => 10, // Maximum tags allowed per asset
-            // AI Usage caps (per month)
-            'max_ai_tagging_per_month' => 500,
-            'max_ai_suggestions_per_month' => 1000,
-            'max_ai_brand_research_per_month' => 10, // ~$0.16/call = ~$1.60/mo max
-            'max_ai_insights_per_month' => 100,
-            'max_ai_video_insights_per_month' => 60,
-            'max_video_ai_minutes_per_month' => 60,
-            'max_editor_generative_images_per_month' => 300,
+            'max_download_zip_mb' => 2048, // 2 GB
+            'max_custom_metadata_fields' => 20,
+            'max_tags_per_asset' => 10,
+            'max_ai_credits_per_month' => 1500,
         ],
         'features' => [
             'all_asset_types',
             'advanced_features',
             'access_to_more_roles',
             'edit_system_categories',
+        ],
+        'sso_enabled' => false,
+        'creator_module_included' => false,
+        'creator_module_included_seats' => 0,
+        'requires_email_verification_for_uploads' => false,
+        'addons_available' => [
+            'storage' => ['storage_100gb', 'storage_500gb', 'storage_1tb'],
+            'ai_credits' => ['credits_500', 'credits_2000'],
+            'creator_module' => true,
         ],
         'versions_enabled' => true,
         'max_versions_per_asset' => 25,
@@ -229,39 +239,32 @@ return [
             'max_expiration_days' => 90,
         ],
         'notes' => [
-            '"All" button in Assets/Executions category sidebar to view all assets across categories',
-            'Download links limited to 1,000 per month',
-            'Share downloads with custom permissions',
-            'Up to 10 tags per asset for comprehensive categorization',
-            '500 AI tagging operations and 1,000 AI suggestions per month',
-            '10 AI brand research analyses per month',
+            '250 GB storage, unlimited upload size',
+            '1,500 AI credits per month',
+            '1,000 downloads per month',
+            'Full approvals and advanced permissions',
+            'Creator Module available as add-on ($99/mo)',
         ],
     ],
 
-    'premium' => [
-        'name' => 'Premium',
-        'stripe_price_id' => env('STRIPE_PRICE_ENTERPRISE', 'price_1SlzxCBF7ZSvskYAigcdiKKj'),
-        'fallback_monthly_price' => 299.00, // Fallback price if Stripe unavailable
+    'business' => [
+        'name' => 'Business',
+        'stripe_price_id' => env('STRIPE_PRICE_BUSINESS', 'price_business'),
+        'fallback_monthly_price' => 599.00,
+        'selectable' => true,
         'limits' => [
-            'max_brands' => 25, // Unlimited
-            'max_categories' => 10, // Unlimited
+            'max_brands' => 10,
+            'max_categories' => 0,
             'max_private_categories' => 10,
-            'max_storage_mb' => 5242880, // 5 TB included (1024-based: 5 * 1024 * 1024 MB)
-            'max_upload_size_mb' => 999999, // Unlimited per-file
-            'max_users' => 200, // Unlimited
-            'max_downloads_per_month' => 999999, // Unlimited
+            'max_storage_mb' => 1048576, // 1 TB (1024 * 1024 MB)
+            'max_upload_size_mb' => 999999,
+            'max_users' => 75,
+            'max_downloads_per_month' => 999999,
             'max_download_assets' => 2000,
-            'max_download_zip_mb' => 5120,
-            'max_custom_metadata_fields' => 100, // Phase C3: 100 custom fields on premium plan
-            'max_tags_per_asset' => 15, // Maximum tags allowed per asset
-            // AI Usage caps (per month)
-            'max_ai_tagging_per_month' => 10000,
-            'max_ai_suggestions_per_month' => 10000,
-            'max_ai_brand_research_per_month' => 50, // ~$0.16/call = ~$8.00/mo max
-            'max_ai_insights_per_month' => 500,
-            'max_ai_video_insights_per_month' => 250,
-            'max_video_ai_minutes_per_month' => 600,
-            'max_editor_generative_images_per_month' => 5000,
+            'max_download_zip_mb' => 5120, // 5 GB
+            'max_custom_metadata_fields' => 100,
+            'max_tags_per_asset' => 15,
+            'max_ai_credits_per_month' => 6000,
         ],
         'features' => [
             'all_asset_types',
@@ -270,6 +273,15 @@ return [
             'access_to_more_roles',
             'edit_system_categories',
         ],
+        'sso_enabled' => true,
+        'creator_module_included' => true,
+        'creator_module_included_seats' => 50,
+        'requires_email_verification_for_uploads' => false,
+        'addons_available' => [
+            'storage' => ['storage_500gb', 'storage_1tb'],
+            'ai_credits' => ['credits_2000', 'credits_10000'],
+            'creator_seats' => ['creator_seats_25', 'creator_seats_100'],
+        ],
         'versions_enabled' => true,
         'max_versions_per_asset' => 250,
         'approval_features' => [
@@ -277,7 +289,8 @@ return [
             'notifications.enabled' => true,
             'approval_summaries.enabled' => true,
         ],
-        'public_collections_enabled' => true, // C10: Premium
+        'public_collections_enabled' => true,
+        'public_collection_downloads_enabled' => true,
         'brand_portal' => [
             'customization' => true,
             'public_access' => true,
@@ -289,7 +302,7 @@ return [
         ],
         'download_features' => [
             'download_links_limited' => false,
-            'download_links_limit' => 999999, // Unlimited
+            'download_links_limit' => 999999,
             'custom_download_permissions' => true,
             'share_downloads_with_permissions' => true,
         ],
@@ -307,7 +320,6 @@ return [
             'require_landing_page' => true,
             'max_expiration_days' => 365,
         ],
-        // D11/D12: Base download policy; tenant overrides in settings['download_policy'] merge over this
         'download_policy' => [
             'disable_single_asset_downloads' => false,
             'require_password_for_public' => false,
@@ -315,13 +327,109 @@ return [
             'disallow_non_expiring' => false,
         ],
         'notes' => [
-            '"All" button in Assets/Executions category sidebar to view all assets across categories',
-            'Unlimited download links',
-            'Share downloads with custom permissions',
-            'Up to 15 tags per asset for maximum flexibility',
-            '5 TB storage included',
-            '10,000 AI tagging operations and 10,000 AI suggestions per month',
-            '50 AI brand research analyses per month',
+            '1 TB storage, unlimited upload size',
+            '6,000 AI credits per month',
+            'SSO enabled',
+            'Creator Module included (50 seats)',
+            'Full download management with policy controls',
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Legacy alias: "premium" maps to "business"
+    |--------------------------------------------------------------------------
+    |
+    | Existing customers on the old Premium ($499) Stripe price are
+    | grandfathered. PlanService::resolveCurrentPlan() maps the legacy
+    | STRIPE_PRICE_ENTERPRISE env var to the 'business' plan key.
+    | This block keeps config('plans.premium') lookups working during
+    | migration. Remove after all legacy customers are migrated.
+    |
+    */
+    'premium' => [
+        'name' => 'Business (Legacy)',
+        'stripe_price_id' => env('STRIPE_PRICE_ENTERPRISE', 'price_1SlzxCBF7ZSvskYAigcdiKKj'),
+        'fallback_monthly_price' => 499.00,
+        'selectable' => false,
+        'legacy_alias_for' => 'business',
+        'limits' => [
+            'max_brands' => 10,
+            'max_categories' => 0,
+            'max_private_categories' => 10,
+            'max_storage_mb' => 1048576, // 1 TB
+            'max_upload_size_mb' => 999999,
+            'max_users' => 75,
+            'max_downloads_per_month' => 999999,
+            'max_download_assets' => 2000,
+            'max_download_zip_mb' => 5120,
+            'max_custom_metadata_fields' => 100,
+            'max_tags_per_asset' => 15,
+            'max_ai_credits_per_month' => 6000,
+        ],
+        'features' => [
+            'all_asset_types',
+            'advanced_features',
+            'custom_integrations',
+            'access_to_more_roles',
+            'edit_system_categories',
+        ],
+        'sso_enabled' => true,
+        'creator_module_included' => true,
+        'creator_module_included_seats' => 50,
+        'requires_email_verification_for_uploads' => false,
+        'addons_available' => [
+            'storage' => ['storage_500gb', 'storage_1tb'],
+            'ai_credits' => ['credits_2000', 'credits_10000'],
+            'creator_seats' => ['creator_seats_25', 'creator_seats_100'],
+        ],
+        'versions_enabled' => true,
+        'max_versions_per_asset' => 250,
+        'approval_features' => [
+            'approvals.enabled' => true,
+            'notifications.enabled' => true,
+            'approval_summaries.enabled' => true,
+        ],
+        'public_collections_enabled' => true,
+        'public_collection_downloads_enabled' => true,
+        'brand_portal' => [
+            'customization' => true,
+            'public_access' => true,
+            'sharing' => true,
+            'agency_templates' => false,
+        ],
+        'brand_guidelines' => [
+            'customization' => true,
+        ],
+        'download_features' => [
+            'download_links_limited' => false,
+            'download_links_limit' => 999999,
+            'custom_download_permissions' => true,
+            'share_downloads_with_permissions' => true,
+        ],
+        'download_management' => [
+            'extend_expiration' => true,
+            'revoke' => true,
+            'restrict_access_brand' => true,
+            'restrict_access_company' => true,
+            'restrict_access_users' => true,
+            'non_expiring' => true,
+            'regenerate' => true,
+            'rename' => true,
+            'password_protection' => true,
+            'branding' => true,
+            'require_landing_page' => true,
+            'max_expiration_days' => 365,
+        ],
+        'download_policy' => [
+            'disable_single_asset_downloads' => false,
+            'require_password_for_public' => false,
+            'force_expiration_days' => null,
+            'disallow_non_expiring' => false,
+        ],
+        'notes' => [
+            'Legacy Premium plan — grandfathered at $499/mo',
+            'Same features as Business plan',
         ],
     ],
 
@@ -342,13 +450,7 @@ return [
             'max_download_zip_mb' => 10240,
             'max_custom_metadata_fields' => 500,
             'max_tags_per_asset' => 50,
-            'max_ai_tagging_per_month' => 999999,
-            'max_ai_suggestions_per_month' => 999999,
-            'max_ai_brand_research_per_month' => 999999,
-            'max_ai_insights_per_month' => 999999,
-            'max_ai_video_insights_per_month' => 999999,
-            'max_video_ai_minutes_per_month' => 0,
-            'max_editor_generative_images_per_month' => -1,
+            'max_ai_credits_per_month' => 0, // 0 = unlimited
         ],
         'features' => [
             'all_asset_types',
@@ -357,6 +459,11 @@ return [
             'access_to_more_roles',
             'edit_system_categories',
         ],
+        'sso_enabled' => true,
+        'creator_module_included' => true,
+        'creator_module_included_seats' => 200,
+        'requires_email_verification_for_uploads' => false,
+        'addons_available' => [],
         'versions_enabled' => true,
         'max_versions_per_asset' => 500,
         'approval_features' => [

@@ -21,6 +21,10 @@ class TenantModule extends Model
         'expires_at',
         'granted_by_admin',
         'seats_limit',
+        'stripe_price_id',
+        'stripe_subscription_item_id',
+        'seat_pack_stripe_price_id',
+        'seat_pack_stripe_subscription_item_id',
     ];
 
     /**

@@ -413,6 +413,8 @@ class HandleInertiaRequests extends Middleware
                 'type' => $tenant->is_agency ? 'agency_workspace' : 'company',
             ] : null,
             'creator_module_status' => app(CreatorModuleStatusService::class)->sharedPayload($tenant),
+            'ai_credit_warning_level' => $tenant ? app(\App\Services\AiUsageService::class)->getCreditWarningLevel($tenant) : null,
+            'can_upload_assets' => $tenant ? app(\App\Services\FeatureGate::class)->canUploadAssets($tenant) : true,
             'signup_enabled' => ! app()->environment('staging'),
             'performance_client_metrics_enabled' => config('performance.client_metrics_enabled', false),
             // DAM file registry → uploader accept + thumbnail UI (single source: config/file_types.php via FileTypeService)

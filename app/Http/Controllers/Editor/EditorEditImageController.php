@@ -194,7 +194,7 @@ class EditorEditImageController extends Controller
         }
 
         try {
-            $this->aiUsageService->checkUsage($tenant, 'generative_editor_images');
+            $this->aiUsageService->checkUsage($tenant, 'generative_editor_edits');
         } catch (PlanLimitExceededException $e) {
             return response()->json(['message' => 'Monthly limit reached'], 429);
         }
@@ -246,7 +246,7 @@ class EditorEditImageController extends Controller
         try {
             $this->aiUsageService->trackUsageWithCost(
                 $tenant,
-                'generative_editor_images',
+                'generative_editor_edits',
                 1,
                 (float) ($result['cost'] ?? 0.0),
                 isset($result['tokens_in']) ? (int) $result['tokens_in'] : null,

@@ -194,22 +194,14 @@ class CompanyViewController extends Controller
             ];
         }
 
-        // Get AI usage and billing estimates
+        // Get AI usage and billing estimates (unified credit system)
         $aiUsageData = null;
         try {
-            // Get usage status and breakdown
             $usageStatus = $aiUsageService->getUsageStatus($tenant);
 
-            // Get individual feature usage for current month
-            $taggingUsage = $aiUsageService->getMonthlyUsage($tenant, 'tagging');
-            $suggestionsUsage = $aiUsageService->getMonthlyUsage($tenant, 'suggestions');
-            $totalUsage = $taggingUsage + $suggestionsUsage;
-
-            // Get AI cost report for current month (filter by tenant in query)
             $monthStart = now()->startOfMonth();
             $monthEnd = now()->endOfMonth();
 
-            // Query AIAgentRun directly for tenant-specific cost data
             $tenantCostData = \App\Models\AIAgentRun::where('tenant_id', $tenant->id)
                 ->whereBetween('started_at', [$monthStart, $monthEnd])
                 ->get();
@@ -217,40 +209,29 @@ class CompanyViewController extends Controller
             $totalCost = $tenantCostData->sum('estimated_cost');
             $totalRuns = $tenantCostData->count();
 
-            // Get monthly cap data
-            $taggingCap = $aiUsageService->getMonthlyCap($tenant, 'tagging');
-            $suggestionsCap = $aiUsageService->getMonthlyCap($tenant, 'suggestions');
+            $creditsUsed = $usageStatus['credits_used'];
+            $creditsCap = $usageStatus['credits_cap'];
 
-            // Calculate projections based on current usage
             $daysInMonth = $monthEnd->day;
             $daysElapsed = now()->day;
-            $dailyAverageUsage = $daysElapsed > 0 ? $totalUsage / $daysElapsed : 0;
-            $projectedMonthlyUsage = $dailyAverageUsage * $daysInMonth;
+            $dailyAverageCredits = $daysElapsed > 0 ? $creditsUsed / $daysElapsed : 0;
+            $projectedMonthlyCredits = $dailyAverageCredits * $daysInMonth;
 
-            // Calculate estimated costs
             $dailyAverageCost = $daysElapsed > 0 ? $totalCost / $daysElapsed : 0;
             $projectedMonthlyCost = $dailyAverageCost * $daysInMonth;
 
-            // Calculate usage percentage against highest cap
-            $maxCap = max($taggingCap ?: 0, $suggestionsCap ?: 0);
-            $usagePercentage = $maxCap > 0 ? min(100, ($projectedMonthlyUsage / $maxCap) * 100) : 0;
+            $usagePercentage = $creditsCap > 0 ? min(100, ($projectedMonthlyCredits / $creditsCap) * 100) : 0;
 
             $aiUsageData = [
                 'current_usage' => [
-                    'total_calls' => $totalUsage,
-                    'features' => [
-                        'tagging' => $taggingUsage,
-                        'suggestions' => $suggestionsUsage,
-                    ],
+                    'credits_used' => $creditsUsed,
+                    'credits_cap' => $creditsCap,
+                    'per_feature' => $usageStatus['per_feature'],
                     'cost_to_date' => round($totalCost, 4),
                     'total_runs' => $totalRuns,
                 ],
-                'caps' => [
-                    'tagging' => $taggingCap,
-                    'suggestions' => $suggestionsCap,
-                ],
                 'projections' => [
-                    'monthly_usage' => round($projectedMonthlyUsage),
+                    'monthly_credits' => round($projectedMonthlyCredits),
                     'monthly_cost' => round($projectedMonthlyCost, 2),
                     'usage_percentage' => round($usagePercentage, 1),
                 ],

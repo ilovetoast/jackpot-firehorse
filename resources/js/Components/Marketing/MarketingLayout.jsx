@@ -4,6 +4,7 @@ const NAV = [
     { label: 'Home', href: '/' },
     { label: 'Product', href: '/product' },
     { label: 'Benefits', href: '/benefits' },
+    { label: 'Pricing', href: '/pricing' },
     { label: 'Agency', href: '/agency' },
     { label: 'Contact', href: '/contact' },
 ]

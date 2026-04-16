@@ -55,6 +55,7 @@ Route::get('/', fn () => Inertia::render('Home'));
 Route::get('/product', fn () => Inertia::render('Marketing/Product'))->name('marketing.product');
 Route::get('/benefits', fn () => Inertia::render('Marketing/Benefits'))->name('marketing.benefits');
 Route::get('/agency', fn () => Inertia::render('Marketing/Agency'))->name('marketing.agency');
+Route::get('/pricing', fn () => Inertia::render('Marketing/Pricing'))->name('marketing.pricing');
 
 // Contact / sales inquiry (e.g. Enterprise plan)
 Route::get('/contact', fn (Request $request) => Inertia::render('Contact', [
@@ -518,6 +519,11 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
     Route::post('/billing/resume', [\App\Http\Controllers\BillingController::class, 'resume'])->name('billing.resume');
     Route::post('/billing/storage-addon', [\App\Http\Controllers\BillingController::class, 'addStorageAddon'])->name('billing.storage-addon');
     Route::delete('/billing/storage-addon', [\App\Http\Controllers\BillingController::class, 'removeStorageAddon'])->name('billing.storage-addon.remove');
+    Route::post('/billing/ai-credits-addon', [\App\Http\Controllers\BillingController::class, 'addAiCreditsAddon'])->name('billing.ai-credits-addon');
+    Route::delete('/billing/ai-credits-addon', [\App\Http\Controllers\BillingController::class, 'removeAiCreditsAddon'])->name('billing.ai-credits-addon.remove');
+    Route::post('/billing/creator-module', [\App\Http\Controllers\BillingController::class, 'addCreatorModule'])->name('billing.creator-module');
+    Route::delete('/billing/creator-module', [\App\Http\Controllers\BillingController::class, 'removeCreatorModule'])->name('billing.creator-module.remove');
+    Route::post('/billing/creator-seats', [\App\Http\Controllers\BillingController::class, 'addCreatorSeatPack'])->name('billing.creator-seats');
     Route::get('/billing/success', [\App\Http\Controllers\BillingController::class, 'success'])->name('billing.success');
     Route::get('/billing/portal', [\App\Http\Controllers\BillingController::class, 'customerPortal'])->name('billing.portal');
 

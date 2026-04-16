@@ -348,7 +348,7 @@ class CompanyController extends Controller
 
         // Enterprise Download Policy (read-only UX surface; Premium/Enterprise plans)
         $enterpriseDownloadPolicy = null;
-        if (in_array($currentPlan, ['premium', 'enterprise'])) {
+        if (in_array($currentPlan, ['business', 'premium', 'enterprise'])) {
             $policy = app(EnterpriseDownloadPolicy::class);
             $enterpriseDownloadPolicy = [
                 'disable_single_asset_downloads' => $policy->disableSingleAssetDownloads($tenant),
@@ -550,8 +550,8 @@ class CompanyController extends Controller
         }
 
         $currentPlan = $this->billingService->getCurrentPlan($tenant);
-        if (! in_array($currentPlan, ['premium', 'enterprise'])) {
-            return redirect()->back()->withErrors(['download_policy' => 'Download policy is available on the Premium or Enterprise plan.']);
+        if (! in_array($currentPlan, ['business', 'premium', 'enterprise'])) {
+            return redirect()->back()->withErrors(['download_policy' => 'Download policy is available on the Business or Enterprise plan.']);
         }
 
         $validated = $request->validate([

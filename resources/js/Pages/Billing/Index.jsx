@@ -4,724 +4,320 @@ import AppNav from '../../Components/AppNav'
 import AppHead from '../../Components/AppHead'
 import AppFooter from '../../Components/AppFooter'
 
-export default function BillingIndex({ tenant, current_plan, plans, subscription, payment_method, current_usage, current_plan_limits, site_primary_color, storage_info, storage_addon_packages }) {
+const PLAN_ORDER = ['free', 'starter', 'pro', 'business']
+
+const PLAN_DESCRIPTIONS = {
+    free: 'Try the platform. See what AI-powered DAM can do.',
+    starter: 'Everything a small brand needs to stay organized and on-brand.',
+    pro: 'For growing teams that need advanced permissions, approvals, and more AI.',
+    business: 'Full platform power with SSO, Creator Module, and premium controls.',
+}
+
+const PLAN_HIGHLIGHTS = {
+    free: [
+        { text: '1 GB storage', included: true },
+        { text: '75 AI credits / month', included: true },
+        { text: '25 downloads / month', included: true },
+        { text: 'Basic asset types', included: true },
+        { text: 'AI auto-tagging', included: true },
+        { text: 'Approvals & workflows', included: false },
+        { text: 'Versioning', included: false },
+        { text: 'Brand portal', included: false },
+        { text: 'Add-ons', included: false },
+    ],
+    starter: [
+        { text: '50 GB storage', included: true },
+        { text: '300 AI credits / month', included: true },
+        { text: '200 downloads / month', included: true },
+        { text: 'All asset types', included: true },
+        { text: 'Asset versioning (5 per file)', included: true },
+        { text: 'Custom sharing & permissions', included: true },
+        { text: 'Internal collections', included: true },
+        { text: '5 custom metadata fields', included: true },
+        { text: 'Storage & credit add-ons', included: true },
+        { text: 'Approvals & workflows', included: false },
+        { text: 'Brand portal', included: false },
+    ],
+    pro: [
+        { text: '250 GB storage', included: true },
+        { text: '1,500 AI credits / month', included: true },
+        { text: '1,000 downloads / month', included: true },
+        { text: 'Full approval workflows', included: true },
+        { text: 'Versioning (25 per file)', included: true },
+        { text: 'Brand portal customization', included: true },
+        { text: 'Brand guidelines editor', included: true },
+        { text: 'Advanced roles & permissions', included: true },
+        { text: 'Private categories', included: true },
+        { text: 'Creator Module available', included: true, addon: true },
+        { text: 'All add-ons available', included: true },
+    ],
+    business: [
+        { text: '1 TB storage', included: true },
+        { text: '6,000 AI credits / month', included: true },
+        { text: 'Unlimited downloads', included: true },
+        { text: 'SSO / Single sign-on', included: true },
+        { text: 'Creator Module included (50 seats)', included: true },
+        { text: 'Public collections & portal', included: true },
+        { text: 'Password-protected links', included: true },
+        { text: 'Download policy controls', included: true },
+        { text: 'Non-expiring links', included: true },
+        { text: 'Versioning (250 per file)', included: true },
+        { text: 'Priority support', included: true },
+    ],
+}
+
+const PLAN_KEY_LIMITS = {
+    free: { brands: '1', users: '2', upload: '10 MB max' },
+    starter: { brands: '1', users: '5', upload: '50 MB max' },
+    pro: { brands: '3', users: '20', upload: 'Unlimited' },
+    business: { brands: '10', users: '75', upload: 'Unlimited' },
+}
+
+export default function BillingIndex({ tenant, current_plan, plans, subscription, payment_method, current_usage, current_plan_limits, site_primary_color, storage_info, storage_addon_packages, ai_credits_addon_packages, credit_weights, creator_addon_config, available_addons }) {
     const { auth, errors, flash } = usePage().props
     const [processingPlanId, setProcessingPlanId] = useState(null)
-    const [storageAddonSubmitting, setStorageAddonSubmitting] = useState(false)
-    const [storageAddonError, setStorageAddonError] = useState(null)
+    const [addonSubmitting, setAddonSubmitting] = useState(null)
+    const [addonError, setAddonError] = useState(null)
+
+    const sitePrimaryColor = site_primary_color || '#6366f1'
+    const currentPlanData = plans?.find((p) => p.id === current_plan)
+    const visiblePlans = plans?.filter(p => PLAN_ORDER.includes(p.id)).sort((a, b) => PLAN_ORDER.indexOf(a.id) - PLAN_ORDER.indexOf(b.id)) || []
 
     const handleSubscribe = (priceId, planId) => {
-        if (!priceId || priceId === 'price_free' || priceId === 'price_FREE') {
-            alert('This plan cannot be purchased. Please select a paid plan.')
-            return
-        }
-        
+        if (!priceId || priceId === 'price_free' || priceId === 'price_FREE') return
         setProcessingPlanId(planId)
-        // Submit form to create checkout session and redirect
-        router.post('/app/billing/subscribe', 
-            { price_id: priceId },
-            {
-                preserveState: false,
-                preserveScroll: false,
-                onFinish: () => {
-                    setProcessingPlanId(null)
-                },
-                onError: (errors) => {
-                    setProcessingPlanId(null)
-                    if (errors.price_id) {
-                        console.error('Price ID error:', errors.price_id)
-                    }
-                }
-            }
-        )
+        router.post('/app/billing/subscribe', { price_id: priceId }, {
+            preserveState: false,
+            onFinish: () => setProcessingPlanId(null),
+            onError: () => setProcessingPlanId(null),
+        })
     }
 
     const handleUpdateSubscription = (priceId, planId) => {
-        if (!priceId) {
-            console.error('Price ID is required')
-            return
-        }
-        
+        if (!priceId) return
         setProcessingPlanId(planId)
-        router.post('/app/billing/update-subscription', {
-            price_id: priceId,
-            plan_id: planId,
-        }, {
+        router.post('/app/billing/update-subscription', { price_id: priceId, plan_id: planId }, {
             preserveScroll: false,
-            onFinish: () => {
-                setProcessingPlanId(null)
-            },
-            onError: () => {
-                setProcessingPlanId(null)
-            }
-        })
-    }
-    
-    // Determine if a plan is higher or lower than current plan
-    const getPlanAction = (plan) => {
-        if (!currentPlanData || plan.id === current_plan) {
-            return null // Current plan or no current plan
-        }
-        
-        const currentPrice = parseFloat(currentPlanData.monthly_price || 0)
-        const planPrice = parseFloat(plan.monthly_price || 0)
-        
-        if (planPrice > currentPrice) {
-            return 'upgrade'
-        } else if (planPrice < currentPrice) {
-            return 'downgrade'
-        }
-        
-        return 'switch' // Same price, different plan
-    }
-    
-    const getButtonText = (plan) => {
-        if (plan.id === current_plan) {
-            return 'Current Plan'
-        }
-        
-        const action = getPlanAction(plan)
-        if (action === 'upgrade') {
-            return 'Upgrade'
-        } else if (action === 'downgrade') {
-            return 'Downgrade'
-        } else if (action === 'switch') {
-            return 'Switch Plan'
-        }
-        
-        // New subscription
-        return subscription ? 'Switch to Plan' : 'Buy this plan'
-    }
-
-    const handleCancel = () => {
-        if (confirm('Are you sure you want to cancel your subscription? You will lose access to premium features at the end of your billing period.')) {
-            setProcessingPlanId('cancel')
-            router.post('/app/billing/cancel', {}, {
-                onFinish: () => {
-                    setProcessingPlanId(null)
-                }
-            })
-        }
-    }
-
-    const handleResume = () => {
-        setProcessingPlanId('resume')
-        router.post('/app/billing/resume', {}, {
-            onFinish: () => {
-                setProcessingPlanId(null)
-            }
+            onFinish: () => setProcessingPlanId(null),
+            onError: () => setProcessingPlanId(null),
         })
     }
 
-    const handleAddStorageAddon = async (packageId) => {
-        if (!packageId || storageAddonSubmitting) return
-        setStorageAddonError(null)
-        setStorageAddonSubmitting(true)
+    const handleAddonAction = async (url, body, method = 'post') => {
+        setAddonError(null)
+        setAddonSubmitting(body?.package_id || body?.pack_id || url)
         try {
-            const response = await window.axios.post('/app/billing/storage-addon', { package_id: packageId }, {
-                headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
-            })
-            if (response?.data?.storage) {
-                router.reload()
+            if (method === 'delete') {
+                await window.axios.delete(url, { headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' } })
+            } else {
+                await window.axios.post(url, body, { headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' } })
             }
-        } catch (err) {
-            setStorageAddonError(err.response?.data?.message ?? 'Failed to add storage. Please try again.')
-        } finally {
-            setStorageAddonSubmitting(false)
-        }
-    }
-
-    const handleRemoveStorageAddon = async () => {
-        if (storageAddonSubmitting) return
-        if (!confirm('Remove the storage add-on? Your storage limit will decrease at the end of the billing period.')) return
-        setStorageAddonError(null)
-        setStorageAddonSubmitting(true)
-        try {
-            await window.axios.delete('/app/billing/storage-addon', {
-                headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
-            })
             router.reload()
         } catch (err) {
-            setStorageAddonError(err.response?.data?.message ?? 'Failed to remove storage add-on. Please try again.')
+            setAddonError(err.response?.data?.message ?? 'Something went wrong. Please try again.')
         } finally {
-            setStorageAddonSubmitting(false)
+            setAddonSubmitting(null)
         }
     }
 
-    const formatLimit = (limit) => {
-        if (limit === Number.MAX_SAFE_INTEGER || limit === 2147483647 || limit === 999999 || limit === 0) {
-            return 'Unlimited'
-        }
-        if (limit === -1) {
-            return 'Disabled'
-        }
-        return limit
+    const getPlanAction = (plan) => {
+        if (!currentPlanData || plan.id === current_plan) return null
+        const cur = parseFloat(currentPlanData.monthly_price || 0)
+        const target = parseFloat(plan.monthly_price || 0)
+        return target > cur ? 'upgrade' : target < cur ? 'downgrade' : 'switch'
+    }
+
+    const getButtonLabel = (plan) => {
+        if (plan.id === current_plan) return 'Current Plan'
+        const action = getPlanAction(plan)
+        if (action === 'upgrade') return 'Upgrade'
+        if (action === 'downgrade') return 'Downgrade'
+        return subscription ? 'Switch Plan' : 'Get Started'
     }
 
     const formatStorage = (mb) => {
-        if (mb >= 1024 * 1024) {
-            return `${(mb / 1024 / 1024).toFixed(0)} TB`
-        }
-        if (mb >= 1024) {
-            return `${(mb / 1024).toFixed(1)} GB`
-        }
+        if (mb >= 1024 * 1024) return `${(mb / 1024 / 1024).toFixed(0)} TB`
+        if (mb >= 1024) return `${(mb / 1024).toFixed(1)} GB`
         return `${mb} MB`
     }
 
-    const formatUsage = (current, max) => {
-        if (max === Number.MAX_SAFE_INTEGER || max === 2147483647 || max === 999999 || max === 0) {
-            return `${current} of Unlimited`
-        }
-        if (max === -1) {
-            return `${current} (Disabled)`
-        }
-        return `${current} of ${max}`
-    }
-
-    const getUsagePercentage = (current, max) => {
-        if (max === Number.MAX_SAFE_INTEGER || max === 2147483647 || max === 999999 || max === 0 || max === -1) {
-            return 0
-        }
-        return Math.min((current / max) * 100, 100)
-    }
-
-    const currentPlanData = plans?.find((p) => p.id === current_plan)
-    const sitePrimaryColor = site_primary_color || '#6366f1'
-
-    // Feature list for each plan
-    const getPlanFeatures = (plan) => {
-        const features = []
-        
-        // Always include basic features
-        features.push('Custom domains')
-        features.push('Edge content delivery')
-        features.push('Advanced analytics')
-        
-        // Add download-related features
-        if (plan.download_features) {
-            if (plan.download_features.share_downloads_with_permissions) {
-                features.push('Share downloads with custom permissions')
-            }
-            if (plan.download_features.custom_download_permissions) {
-                features.push('Custom download link permissions')
-            }
-        }
-        // Phase D3: Download creation UX — plan features/limits
-        if (plan.download_management) {
-            const dm = plan.download_management
-            if (dm.rename) features.push('Rename downloads')
-            if (dm.non_expiring) features.push('Non-expiring downloads')
-            if (dm.restrict_access_brand) features.push('Restrict access to brand members')
-            if (dm.restrict_access_company) features.push('Restrict access to company members')
-            if (dm.restrict_access_users) features.push('Restrict access to specific users')
-            if (dm.extend_expiration) features.push(`Extend expiration (up to ${dm.max_expiration_days || 30} days)`)
-            if (dm.revoke) features.push('Revoke download links')
-            if (dm.regenerate) features.push('Regenerate download links')
-        }
-        
-        // Add plan-specific features
-        if (plan.id === 'starter' || plan.id === 'pro' || plan.id === 'premium' || plan.id === 'enterprise') {
-            features.push('Quarterly workshops')
-        }
-        
-        if (plan.id === 'pro' || plan.id === 'premium' || plan.id === 'enterprise') {
-            features.push('Single sign-on (SSO)')
-            features.push('Priority phone support')
-        }
-        
-        if (plan.id === 'premium' || plan.id === 'enterprise') {
-            features.push('Custom integrations')
-            if (plan.id === 'enterprise') {
-                features.push('Dedicated account manager')
-                features.push('Dedicated infrastructure')
-            }
-        }
-        
-        // Add role access feature
-        if (plan.features && plan.features.includes('access_to_more_roles')) {
-            features.push('Access to more roles and permissions')
-        }
-        
-        return features
-    }
+    const isPaid = (planId) => ['starter', 'pro', 'business', 'premium'].includes(planId)
+    const canBuyAddons = isPaid(current_plan) && subscription?.status === 'active'
 
     return (
-        <div className="min-h-full bg-white">
-            <AppHead title="Billing" />
+        <div className="min-h-full bg-gray-50">
+            <AppHead title="Plans & Billing" />
             <AppNav brand={auth.activeBrand} tenant={tenant} />
-            <main className="relative isolate">
-                {/* Gradient Background (like homepage) */}
-                <div
-                    className="absolute inset-x-0 -top-40 -z-10 transform-gpu overflow-hidden blur-3xl sm:-top-80 pointer-events-none"
-                    aria-hidden="true"
-                >
-                    <div
-                        className="relative left-[calc(50%-11rem)] aspect-[1155/678] w-[36.125rem] -translate-x-1/2 rotate-[30deg] bg-gradient-to-tr from-[#ff80b5] to-[#9089fc] opacity-30 sm:left-[calc(50%-30rem)] sm:w-[72.1875rem]"
-                        style={{
-                            clipPath:
-                                'polygon(74.1% 44.1%, 100% 61.6%, 97.5% 26.9%, 85.5% 0.1%, 80.7% 2%, 72.5% 32.5%, 60.2% 62.4%, 52.4% 68.1%, 47.5% 58.3%, 45.2% 34.5%, 27.5% 76.7%, 0.1% 64.9%, 17.9% 100%, 27.5% 76.7%, 76.1% 97.7%, 74.1% 44.1%)',
-                        }}
-                    />
-                </div>
-                <div
-                    className="absolute inset-x-0 top-[calc(100%-13rem)] -z-10 transform-gpu overflow-hidden blur-3xl sm:top-[calc(100%-30rem)] pointer-events-none"
-                    aria-hidden="true"
-                >
-                    <div
-                        className="relative left-[calc(50%+3rem)] aspect-[1155/678] w-[36.125rem] -translate-x-1/2 bg-gradient-to-tr from-[#ff80b5] to-[#9089fc] opacity-30 sm:left-[calc(50%+36rem)] sm:w-[72.1875rem]"
-                        style={{
-                            clipPath:
-                                'polygon(74.1% 44.1%, 100% 61.6%, 97.5% 26.9%, 85.5% 0.1%, 80.7% 2%, 72.5% 32.5%, 60.2% 62.4%, 52.4% 68.1%, 47.5% 58.3%, 45.2% 34.5%, 27.5% 76.7%, 0.1% 64.9%, 17.9% 100%, 27.5% 76.7%, 76.1% 97.7%, 74.1% 44.1%)',
-                        }}
-                    />
-                </div>
 
-                <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-16">
-                    {/* Header */}
-                    <div className="text-center mb-12">
-                        <h1 className="text-4xl font-bold tracking-tight text-gray-900 sm:text-5xl">
-                            Pricing that grows with you
-                        </h1>
-                        <p className="mt-4 text-lg text-gray-600">
-                            Choose an affordable plan that's packed with the best features for engaging your audience, creating customer loyalty, and driving sales.
-                        </p>
+            <main className="pb-20">
+                {/* Incomplete payment banner */}
+                {(subscription?.has_incomplete_payment || subscription?.status === 'Incomplete') && (
+                    <div className="bg-red-600 text-white">
+                        <div className="mx-auto max-w-7xl px-4 py-3 sm:px-6 lg:px-8">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                                <p className="text-sm font-medium">Your payment is incomplete. Please update your payment method to continue service.</p>
+                                <div className="flex gap-2">
+                                    {subscription.payment_url && (
+                                        <a href={subscription.payment_url} className="rounded bg-white px-3 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-50">Complete Payment</a>
+                                    )}
+                                    <a href="/app/billing/portal" className="rounded bg-red-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-400">Update Card</a>
+                                </div>
+                            </div>
+                        </div>
                     </div>
+                )}
 
-                    {/* Incomplete Payment Error - Prominent at top */}
-                    {(subscription?.has_incomplete_payment || subscription?.status === 'Incomplete') && (
-                        <div className="mb-6 rounded-md bg-red-50 p-4 border-2 border-red-200">
-                            <div className="flex">
-                                <div className="flex-shrink-0">
-                                    <svg className="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
-                                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.28 7.22a.75.75 0 00-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 101.06 1.06L10 11.06l1.72 1.72a.75.75 0 101.06-1.06L11.06 10l1.72-1.72a.75.75 0 00-1.06-1.06L10 8.94 8.28 7.22z" clipRule="evenodd" />
-                                    </svg>
-                                </div>
-                                <div className="ml-3 flex-1">
-                                    <h3 className="text-sm font-semibold text-red-800">
-                                        Payment Required - Action Needed
-                                    </h3>
-                                    <div className="mt-2 text-sm text-red-700">
-                                        <p className="font-medium">Your subscription payment is incomplete. Please complete your payment to continue service.</p>
-                                        <div className="mt-4 flex flex-wrap gap-3">
-                                            {subscription.payment_url ? (
-                                                <a
-                                                    href={subscription.payment_url}
-                                                    className="inline-flex items-center rounded-md bg-red-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-red-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600"
-                                                >
-                                                    Complete Payment Now
-                                                    <svg className="ml-2 h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
-                                                        <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 18.75a60.07 60.07 0 0115.797 2.101c.727.198 1.453-.342 1.453-1.096V18.75M3.75 4.5v.75A.75.75 0 013 6h-.75m0 0v-.375c0-.621.504-1.125 1.125-1.125H20.25M2.25 6v9m18-10.5v.75c0 .414.336.75.75.75h.75m-1.5-1.5h.375c.621 0 1.125.504 1.125 1.125v9.75c0 .621-.504 1.125-1.125 1.125h-.375m1.5-1.5H21a.75.75 0 00-.75.75v.75m0 0H3.75m0 0h-.375a1.125 1.125 0 01-1.125-1.125V15m1.5 1.5v-.75A.75.75 0 003 15h-.75M15 10.5a3 3 0 11-6 0 3 3 0 016 0zm3 0h.008v.008H18V10.5zm-12 0h.008v.008H6V10.5z" />
-                                                    </svg>
-                                                </a>
-                                            ) : null}
-                                            <button
-                                                onClick={() => window.location.href = '/app/billing/portal'}
-                                                className="inline-flex items-center rounded-md bg-white px-4 py-2 text-sm font-semibold text-red-700 shadow-sm ring-1 ring-inset ring-red-300 hover:bg-red-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600"
-                                            >
-                                                Update Payment Method
-                                                <svg className="ml-2 h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
-                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
-                                                </svg>
-                                            </button>
-                                        </div>
-                                    </div>
-                                </div>
+                {/* Header */}
+                <div className="bg-white border-b border-gray-200">
+                    <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-10">
+                        <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
+                            <div>
+                                <h1 className="text-3xl font-bold text-gray-900">Choose your plan</h1>
+                                <p className="mt-2 text-gray-500">Simple pricing. No hidden fees. Upgrade, downgrade, or cancel anytime.</p>
                             </div>
+                            {currentPlanData && (
+                                <div className="flex items-center gap-4">
+                                    <span className="inline-flex items-center gap-1.5 rounded-full bg-indigo-50 px-3 py-1 text-sm font-medium text-indigo-700">
+                                        <span className="h-1.5 w-1.5 rounded-full bg-indigo-500" />
+                                        {currentPlanData.name} plan
+                                    </span>
+                                    <Link href="/app/billing/overview" className="text-sm font-medium text-indigo-600 hover:text-indigo-500">
+                                        Billing & invoices &rarr;
+                                    </Link>
+                                </div>
+                            )}
                         </div>
-                    )}
+                    </div>
+                </div>
 
-                    {/* Current Plan Usage Card */}
-                    {currentPlanData && (
-                        <div className="mb-12 bg-white rounded-lg border border-gray-200 shadow-sm p-6">
-                            <h2 className="text-xl font-semibold text-gray-900 mb-4">Current Plan: {currentPlanData.name}</h2>
-                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 xl:grid-cols-8 gap-4">
-                                <div>
-                                    <div className="flex justify-between text-sm mb-1">
-                                        <span className="text-gray-600">Brands</span>
-                                        <span className="text-gray-900 font-medium">
-                                            {formatUsage(current_usage?.brands || 0, current_plan_limits?.max_brands || 0)}
-                                        </span>
-                                    </div>
-                                    <div className="w-full bg-gray-200 rounded-full h-2">
-                                        <div
-                                            className="h-2 rounded-full transition-all"
-                                            style={{
-                                                width: `${getUsagePercentage(current_usage?.brands || 0, current_plan_limits?.max_brands || 0)}%`,
-                                                backgroundColor: sitePrimaryColor,
-                                            }}
-                                        />
-                                    </div>
-                                </div>
-                                <div>
-                                    <div className="flex justify-between text-sm mb-1">
-                                        <span className="text-gray-600">Users</span>
-                                        <span className="text-gray-900 font-medium">
-                                            {formatUsage(current_usage?.users || 0, current_plan_limits?.max_users || 0)}
-                                        </span>
-                                    </div>
-                                    <div className="w-full bg-gray-200 rounded-full h-2">
-                                        <div
-                                            className="h-2 rounded-full transition-all"
-                                            style={{
-                                                width: `${getUsagePercentage(current_usage?.users || 0, current_plan_limits?.max_users || 0)}%`,
-                                                backgroundColor: sitePrimaryColor,
-                                            }}
-                                        />
-                                    </div>
-                                </div>
-                                <div>
-                                    <div className="flex justify-between text-sm mb-1">
-                                        <span className="text-gray-600">Categories</span>
-                                        <span className="text-gray-900 font-medium">
-                                            {formatUsage(current_usage?.categories || 0, current_plan_limits?.max_categories || 0)}
-                                        </span>
-                                    </div>
-                                    <div className="w-full bg-gray-200 rounded-full h-2">
-                                        <div
-                                            className="h-2 rounded-full transition-all"
-                                            style={{
-                                                width: `${getUsagePercentage(current_usage?.categories || 0, current_plan_limits?.max_categories || 0)}%`,
-                                                backgroundColor: sitePrimaryColor,
-                                            }}
-                                        />
-                                    </div>
-                                </div>
-                                <div>
-                                    <div className="flex justify-between text-sm mb-1">
-                                        <span className="text-gray-600">Storage</span>
-                                        <span className="text-gray-900 font-medium">
-                                            {storage_info
-                                                ? `${formatStorage(storage_info.current_usage_mb)} / ${formatStorage(storage_info.max_storage_mb)}`
-                                                : `${formatStorage(current_usage?.storage_mb || 0)} / ${formatStorage(current_plan_limits?.max_storage_mb || 0)}`}
-                                        </span>
-                                    </div>
-                                    <div className="w-full bg-gray-200 rounded-full h-2">
-                                        <div
-                                            className="h-2 rounded-full transition-all"
-                                            style={{
-                                                width: `${storage_info
-                                                    ? Math.min(storage_info.usage_percentage || 0, 100)
-                                                    : getUsagePercentage(current_usage?.storage_mb || 0, current_plan_limits?.max_storage_mb || 0)}%`,
-                                                backgroundColor: sitePrimaryColor,
-                                            }}
-                                        />
-                                    </div>
-                                </div>
-                                <div>
-                                    <div className="flex justify-between text-sm mb-1">
-                                        <span className="text-gray-600">Download Links</span>
-                                        <span className="text-gray-900 font-medium">
-                                            {formatUsage(current_usage?.download_links || 0, current_plan_limits?.max_downloads_per_month || 0)}
-                                        </span>
-                                    </div>
-                                    <div className="w-full bg-gray-200 rounded-full h-2">
-                                        <div
-                                            className="h-2 rounded-full transition-all"
-                                            style={{
-                                                width: `${getUsagePercentage(current_usage?.download_links || 0, current_plan_limits?.max_downloads_per_month || 0)}%`,
-                                                backgroundColor: sitePrimaryColor,
-                                            }}
-                                        />
-                                    </div>
-                                </div>
-                                <div>
-                                    <div className="flex justify-between text-sm mb-1">
-                                        <span className="text-gray-600">AI Tagging</span>
-                                        <span className="text-gray-900 font-medium">
-                                            {formatUsage(current_usage?.ai_tagging || 0, current_plan_limits?.max_ai_tagging_per_month || 0)}
-                                        </span>
-                                    </div>
-                                    <div className="w-full bg-gray-200 rounded-full h-2">
-                                        <div
-                                            className="h-2 rounded-full transition-all"
-                                            style={{
-                                                width: `${getUsagePercentage(current_usage?.ai_tagging || 0, current_plan_limits?.max_ai_tagging_per_month || 0)}%`,
-                                                backgroundColor: sitePrimaryColor,
-                                            }}
-                                        />
-                                    </div>
-                                </div>
-                                <div>
-                                    <div className="flex justify-between text-sm mb-1">
-                                        <span className="text-gray-600">AI Suggestions</span>
-                                        <span className="text-gray-900 font-medium">
-                                            {formatUsage(current_usage?.ai_suggestions || 0, current_plan_limits?.max_ai_suggestions_per_month || 0)}
-                                        </span>
-                                    </div>
-                                    <div className="w-full bg-gray-200 rounded-full h-2">
-                                        <div
-                                            className="h-2 rounded-full transition-all"
-                                            style={{
-                                                width: `${getUsagePercentage(current_usage?.ai_suggestions || 0, current_plan_limits?.max_ai_suggestions_per_month || 0)}%`,
-                                                backgroundColor: sitePrimaryColor,
-                                            }}
-                                        />
-                                    </div>
-                                </div>
-                                <div>
-                                    <div className="flex justify-between text-sm mb-1">
-                                        <span className="text-gray-600">Generative AI (images)</span>
-                                        <span className="text-gray-900 font-medium">
-                                            {formatUsage(
-                                                current_usage?.ai_generative_editor_images || 0,
-                                                current_plan_limits?.max_editor_generative_images_per_month === -1
-                                                    ? 0
-                                                    : current_plan_limits?.max_editor_generative_images_per_month || 0
-                                            )}
-                                        </span>
-                                    </div>
-                                    <div className="w-full bg-gray-200 rounded-full h-2">
-                                        <div
-                                            className="h-2 rounded-full transition-all"
-                                            style={{
-                                                width: `${getUsagePercentage(
-                                                    current_usage?.ai_generative_editor_images || 0,
-                                                    current_plan_limits?.max_editor_generative_images_per_month === -1
-                                                        ? 0
-                                                        : current_plan_limits?.max_editor_generative_images_per_month || 0
-                                                )}%`,
-                                                backgroundColor: sitePrimaryColor,
-                                            }}
-                                        />
-                                    </div>
-                                </div>
-                            </div>
+                {errors?.subscription && (
+                    <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 mt-4">
+                        <div className="rounded-md bg-yellow-50 p-4 border border-yellow-200">
+                            <p className="text-sm text-yellow-800">{errors.subscription}</p>
                         </div>
-                    )}
+                    </div>
+                )}
 
-                    {/* Error Messages */}
-                    {errors?.subscription && (
-                        <div className="mb-6 rounded-md bg-yellow-50 p-4 border border-yellow-200">
-                            <div className="flex">
-                                <div className="flex-shrink-0">
-                                    <svg className="h-5 w-5 text-yellow-400" viewBox="0 0 20 20" fill="currentColor">
-                                        <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
-                                    </svg>
-                                </div>
-                                <div className="ml-3 flex-1">
-                                    <h3 className="text-sm font-medium text-yellow-800">
-                                        Payment Required
-                                    </h3>
-                                    <div className="mt-2 text-sm text-yellow-700">
-                                        <p>{errors.subscription}</p>
-                                        {errors.payment_url && (
-                                            <div className="mt-3">
-                                                <a
-                                                    href={errors.payment_url}
-                                                    className="inline-flex items-center rounded-md bg-yellow-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-yellow-500"
-                                                >
-                                                    Complete Payment
-                                                    <svg className="ml-2 h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
-                                                        <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
-                                                    </svg>
-                                                </a>
-                                            </div>
-                                        )}
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    )}
+                {/* Plan Cards */}
+                <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 mt-8">
+                    <div className="grid grid-cols-1 gap-6 lg:grid-cols-4">
+                        {visiblePlans.map((plan) => {
+                            const isCurrent = plan.id === current_plan
+                            const isPopular = plan.id === 'pro'
+                            const highlights = PLAN_HIGHLIGHTS[plan.id] || []
+                            const keyLimits = PLAN_KEY_LIMITS[plan.id] || {}
 
-                    {/* Plans Grid */}
-                    <div className="grid grid-cols-1 gap-8 lg:grid-cols-4">
-                        {plans?.map((plan) => {
-                            const isCurrent = plan.is_current
-                            const features = getPlanFeatures(plan)
-                            
                             return (
                                 <div
                                     key={plan.id}
-                                    className={`relative rounded-lg border ${
-                                        isCurrent
-                                            ? 'border-gray-300 bg-white ring-2 shadow-lg'
-                                            : 'border-gray-200 bg-white shadow-sm'
+                                    className={`relative flex flex-col rounded-xl border bg-white ${
+                                        isPopular ? 'border-indigo-500 ring-2 ring-indigo-500 shadow-lg' :
+                                        isCurrent ? 'border-indigo-300 shadow-md' :
+                                        'border-gray-200 shadow-sm'
                                     }`}
-                                    style={isCurrent ? { ringColor: sitePrimaryColor } : {}}
                                 >
-                                    {isCurrent && (
-                                        <div className="absolute -top-3 left-1/2 -translate-x-1/2">
-                                            <span
-                                                className="rounded-full px-3 py-1 text-xs font-medium text-white"
-                                                style={{ backgroundColor: sitePrimaryColor }}
-                                            >
-                                                Current Plan
+                                    {isPopular && (
+                                        <div className="absolute -top-3 left-0 right-0 flex justify-center">
+                                            <span className="rounded-full bg-indigo-600 px-3 py-1 text-xs font-semibold text-white">
+                                                Most popular
                                             </span>
                                         </div>
                                     )}
-                                    
-                                    <div className="p-6">
-                                        <h3 className="text-xl font-semibold text-gray-900 mb-2">{plan.name}</h3>
-                                        
+
+                                    <div className="p-6 flex-1 flex flex-col">
+                                        {/* Plan name & price */}
                                         <div className="mb-4">
-                                            {plan.requires_contact ? (
-                                                <>
-                                                    <span className="text-3xl font-bold text-gray-900">Custom</span>
-                                                    <p className="text-sm text-gray-500 mt-1">Contact sales for pricing</p>
-                                                </>
-                                            ) : plan.monthly_price ? (
-                                                <>
-                                                    <span className="text-3xl font-bold text-gray-900">${plan.monthly_price}</span>
-                                                    <span className="text-gray-500 ml-2">USD</span>
-                                                    <p className="text-sm text-gray-500 mt-1">Billed monthly</p>
-                                                </>
-                                            ) : (
-                                                <>
-                                                    <span className="text-3xl font-bold text-gray-900">Free</span>
-                                                    <p className="text-sm text-gray-500 mt-1">No credit card required</p>
-                                                </>
-                                            )}
+                                            <div className="flex items-center justify-between">
+                                                <h3 className="text-lg font-semibold text-gray-900">{plan.name}</h3>
+                                                {isCurrent && (
+                                                    <span className="text-xs font-medium text-indigo-600 bg-indigo-50 rounded-full px-2 py-0.5">You</span>
+                                                )}
+                                            </div>
+                                            <div className="mt-3">
+                                                {plan.monthly_price ? (
+                                                    <div className="flex items-baseline">
+                                                        <span className="text-4xl font-bold text-gray-900">${parseFloat(plan.monthly_price).toFixed(0)}</span>
+                                                        <span className="ml-1 text-sm text-gray-500">/month</span>
+                                                    </div>
+                                                ) : (
+                                                    <div className="text-4xl font-bold text-gray-900">Free</div>
+                                                )}
+                                            </div>
+                                            <p className="mt-2 text-sm text-gray-500 leading-snug">{PLAN_DESCRIPTIONS[plan.id]}</p>
                                         </div>
 
-                                        {/* Limits Summary */}
-                                        <div className="mb-6 space-y-2 text-sm text-gray-600">
-                                            <div className="flex justify-between">
-                                                <span>Brands:</span>
-                                                <span className="font-medium text-gray-900">{formatLimit(plan.limits.max_brands)}</span>
+                                        {/* Key limits row */}
+                                        <div className="grid grid-cols-3 gap-2 rounded-lg bg-gray-50 p-3 mb-5 text-center">
+                                            <div>
+                                                <div className="text-sm font-semibold text-gray-900">{keyLimits.brands}</div>
+                                                <div className="text-xs text-gray-500">{keyLimits.brands === '1' ? 'Brand' : 'Brands'}</div>
                                             </div>
-                                            <div className="flex justify-between">
-                                                <span>Users:</span>
-                                                <span className="font-medium text-gray-900">{formatLimit(plan.limits.max_users)}</span>
+                                            <div>
+                                                <div className="text-sm font-semibold text-gray-900">{keyLimits.users}</div>
+                                                <div className="text-xs text-gray-500">Users</div>
                                             </div>
-                                            <div className="flex justify-between">
-                                                <span>Categories:</span>
-                                                <span className="font-medium text-gray-900">{formatLimit(plan.limits.max_categories)}</span>
+                                            <div>
+                                                <div className="text-sm font-semibold text-gray-900">{keyLimits.upload}</div>
+                                                <div className="text-xs text-gray-500">Upload</div>
                                             </div>
-                                            <div className="flex justify-between">
-                                                <span>Storage:</span>
-                                                <span className="font-medium text-gray-900">
-                                                    {(plan.id === 'enterprise' || plan.id === 'premium') ? (
-                                                        <span>
-                                                            {formatStorage(plan.limits.max_storage_mb)}
-                                                            {(plan.id === 'enterprise') && (
-                                                                <span className="block text-xs text-gray-500 font-normal">Dedicated infrastructure available</span>
-                                                            )}
-                                                        </span>
+                                        </div>
+
+                                        {/* Feature highlights */}
+                                        <ul className="space-y-2.5 mb-6 flex-1">
+                                            {highlights.map((item, i) => (
+                                                <li key={i} className="flex items-start gap-2">
+                                                    {item.included ? (
+                                                        <svg className="h-4 w-4 mt-0.5 flex-shrink-0 text-indigo-500" fill="currentColor" viewBox="0 0 20 20">
+                                                            <path fillRule="evenodd" d="M16.704 4.153a.75.75 0 01.143 1.052l-8 10.5a.75.75 0 01-1.127.075l-4.5-4.5a.75.75 0 011.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 011.05-.143z" clipRule="evenodd" />
+                                                        </svg>
                                                     ) : (
-                                                        formatStorage(plan.limits.max_storage_mb)
+                                                        <svg className="h-4 w-4 mt-0.5 flex-shrink-0 text-gray-300" fill="currentColor" viewBox="0 0 20 20">
+                                                            <path fillRule="evenodd" d="M4 10a.75.75 0 01.75-.75h10.5a.75.75 0 010 1.5H4.75A.75.75 0 014 10z" clipRule="evenodd" />
+                                                        </svg>
                                                     )}
-                                                </span>
-                                            </div>
-                                            <div className="flex justify-between">
-                                                <span>Download Links:</span>
-                                                <span className="font-medium text-gray-900">
-                                                    {plan.download_features?.download_links_limited === false 
-                                                        ? 'Unlimited' 
-                                                        : formatLimit(plan.limits.max_downloads_per_month)}
-                                                </span>
-                                            </div>
-                                            <div className="flex justify-between">
-                                                <span>Tags per Asset:</span>
-                                                <span className="font-medium text-gray-900">
-                                                    {formatLimit(plan.limits.max_tags_per_asset)}
-                                                </span>
-                                            </div>
-                                            <div className="flex justify-between">
-                                                <span>AI Tagging:</span>
-                                                <span className="font-medium text-gray-900">
-                                                    {formatLimit(plan.limits.max_ai_tagging_per_month)}
-                                                </span>
-                                            </div>
-                                            <div className="flex justify-between">
-                                                <span>AI Suggestions:</span>
-                                                <span className="font-medium text-gray-900">
-                                                    {formatLimit(plan.limits.max_ai_suggestions_per_month)}
-                                                </span>
-                                            </div>
-                                            <div className="flex justify-between">
-                                                <span>Generative AI (images):</span>
-                                                <span className="font-medium text-gray-900">
-                                                    {formatLimit(
-                                                        plan.limits.max_editor_generative_images_per_month === -1
-                                                            ? 0
-                                                            : plan.limits.max_editor_generative_images_per_month
-                                                    )}
-                                                </span>
-                                            </div>
-                                            {plan.limits.max_custom_metadata_fields !== undefined && (
-                                                <div className="flex justify-between">
-                                                    <span>Custom Metadata Fields:</span>
-                                                    <span className="font-medium text-gray-900">
-                                                        {formatLimit(plan.limits.max_custom_metadata_fields)}
+                                                    <span className={`text-sm ${item.included ? 'text-gray-700' : 'text-gray-400'}`}>
+                                                        {item.text}
+                                                        {item.addon && <span className="ml-1 text-xs text-indigo-500">(add-on)</span>}
                                                     </span>
-                                                </div>
-                                            )}
-                                        </div>
-
-                                        {/* Features List */}
-                                        <ul className="mb-6 space-y-3">
-                                            {features.map((feature, index) => (
-                                                <li key={index} className="flex items-start">
-                                                    <svg
-                                                        className="h-5 w-5 text-green-500 mr-2 flex-shrink-0 mt-0.5"
-                                                        viewBox="0 0 20 20"
-                                                        fill="currentColor"
-                                                    >
-                                                        <path
-                                                            fillRule="evenodd"
-                                                            d="M16.704 4.153a.75.75 0 01.143 1.052l-8 10.5a.75.75 0 01-1.127.075l-4.5-4.5a.75.75 0 011.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 011.05-.143z"
-                                                            clipRule="evenodd"
-                                                        />
-                                                    </svg>
-                                                    <span className="text-sm text-gray-600">{feature}</span>
                                                 </li>
                                             ))}
                                         </ul>
 
-                                        {/* Action Button */}
-                                        <div className="mt-6">
+                                        {/* CTA */}
+                                        <div className="mt-auto">
                                             {isCurrent ? (
-                                                <button
-                                                    type="button"
-                                                    disabled
-                                                    className="w-full rounded-md bg-gray-100 px-3 py-2 text-sm font-semibold text-gray-400 cursor-not-allowed"
-                                                >
+                                                <button disabled className="w-full rounded-lg border border-gray-200 bg-gray-50 py-2.5 text-sm font-semibold text-gray-400 cursor-default">
                                                     Current Plan
                                                 </button>
                                             ) : plan.id === 'free' ? (
-                                                <button
-                                                    type="button"
-                                                    disabled
-                                                    className="w-full rounded-md bg-gray-100 px-3 py-2 text-sm font-semibold text-gray-400 cursor-not-allowed"
-                                                >
-                                                    Free Plan
+                                                <button disabled className="w-full rounded-lg border border-gray-200 bg-gray-50 py-2.5 text-sm font-semibold text-gray-400 cursor-default">
+                                                    Free Forever
                                                 </button>
                                             ) : plan.requires_contact ? (
                                                 <Link
                                                     href={route('contact', { plan: plan.id })}
-                                                    className="flex w-full justify-center rounded-md px-3 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:opacity-90"
-                                                    style={{ backgroundColor: sitePrimaryColor }}
+                                                    className="flex w-full justify-center rounded-lg bg-gray-900 py-2.5 text-sm font-semibold text-white hover:bg-gray-800 transition"
                                                 >
                                                     Contact Sales
                                                 </Link>
                                             ) : subscription?.has_incomplete_payment ? (
-                                                <button
-                                                    type="button"
-                                                    disabled
-                                                    className="w-full rounded-md bg-gray-100 px-3 py-2 text-sm font-semibold text-gray-400 cursor-not-allowed"
-                                                    title="Complete your payment before changing plans"
-                                                >
+                                                <button disabled className="w-full rounded-lg bg-gray-100 py-2.5 text-sm font-semibold text-gray-400 cursor-not-allowed">
                                                     Payment Required
                                                 </button>
                                             ) : (
                                                 <button
-                                                    type="button"
                                                     onClick={() => {
-                                                        if (!plan.stripe_price_id || plan.stripe_price_id === 'price_free') {
-                                                            alert('This plan is not available for purchase. Please contact support.')
-                                                            return
-                                                        }
-                                                        if (subscription) {
-                                                            handleUpdateSubscription(plan.stripe_price_id, plan.id)
-                                                        } else {
-                                                            handleSubscribe(plan.stripe_price_id, plan.id)
-                                                        }
+                                                        if (!plan.stripe_price_id || plan.stripe_price_id === 'price_free') return
+                                                        subscription ? handleUpdateSubscription(plan.stripe_price_id, plan.id) : handleSubscribe(plan.stripe_price_id, plan.id)
                                                     }}
-                                                    disabled={processingPlanId !== null || !plan.stripe_price_id || plan.stripe_price_id === 'price_free' || subscription?.has_incomplete_payment}
-                                                    className="w-full rounded-md px-3 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
-                                                    style={{ backgroundColor: sitePrimaryColor }}
+                                                    disabled={processingPlanId !== null || !plan.stripe_price_id || plan.stripe_price_id === 'price_free'}
+                                                    className={`w-full rounded-lg py-2.5 text-sm font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed ${
+                                                        isPopular
+                                                            ? 'bg-indigo-600 text-white hover:bg-indigo-700'
+                                                            : 'bg-gray-900 text-white hover:bg-gray-800'
+                                                    }`}
                                                 >
-                                                    {processingPlanId === plan.id ? 'Processing...' : getButtonText(plan)}
+                                                    {processingPlanId === plan.id ? 'Processing...' : getButtonLabel(plan)}
                                                 </button>
                                             )}
                                         </div>
@@ -731,105 +327,218 @@ export default function BillingIndex({ tenant, current_plan, plans, subscription
                         })}
                     </div>
 
-                    {/* Add Storage Section - for paid plans */}
-                    {['starter', 'pro', 'premium', 'enterprise'].includes(current_plan) && (
-                        <div className="mt-10 rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
-                            <h3 className="text-lg font-semibold text-gray-900 mb-2">Additional Storage</h3>
-                            <p className="text-sm text-gray-600 mb-4">
-                                Add extra storage to your plan. Storage is prorated and billed monthly.
-                            </p>
+                    {/* Enterprise callout */}
+                    <div className="mt-6 rounded-xl border border-gray-200 bg-white p-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                        <div>
+                            <h3 className="text-base font-semibold text-gray-900">Enterprise</h3>
+                            <p className="text-sm text-gray-500">Dedicated infrastructure, custom integrations, agency templates, and volume pricing. Let's talk.</p>
+                        </div>
+                        <Link
+                            href={route('contact', { plan: 'enterprise' })}
+                            className="inline-flex items-center justify-center rounded-lg border border-gray-300 bg-white px-5 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 transition whitespace-nowrap"
+                        >
+                            Contact Sales
+                        </Link>
+                    </div>
+                </div>
 
-                            {storage_info && (
-                                <div className="mb-4 rounded-md bg-gray-50 p-3 text-sm">
-                                    <div className="flex items-center justify-between text-gray-700">
-                                        <span>
-                                            Using <strong>{formatStorage(storage_info.current_usage_mb)}</strong> of{' '}
-                                            <strong>{formatStorage(storage_info.max_storage_mb)}</strong>
-                                            {storage_info.has_storage_addon && (
-                                                <span className="ml-2 text-gray-500">
-                                                    (+{formatStorage(storage_info.addon_storage_mb)} add-on)
-                                                </span>
-                                            )}
-                                        </span>
+                {/* Add-ons Section */}
+                {canBuyAddons && (
+                    <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 mt-12">
+                        <div className="mb-6">
+                            <h2 className="text-xl font-bold text-gray-900">Add-ons</h2>
+                            <p className="text-sm text-gray-500 mt-1">Boost your plan with extra storage, AI credits, or the Creator Module. Billed monthly, prorated.</p>
+                        </div>
+
+                        {addonError && (
+                            <div className="mb-4 rounded-md bg-red-50 border border-red-200 p-3 text-sm text-red-700">
+                                {addonError}
+                            </div>
+                        )}
+
+                        <div className="grid gap-6 md:grid-cols-3">
+                            {/* Storage Add-ons */}
+                            <div className="rounded-xl border border-gray-200 bg-white p-5">
+                                <div className="flex items-center gap-2 mb-3">
+                                    <div className="rounded-lg bg-blue-50 p-2">
+                                        <svg className="h-5 w-5 text-blue-600" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
+                                            <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 6.375c0 2.278-3.694 4.125-8.25 4.125S3.75 8.653 3.75 6.375m16.5 0c0-2.278-3.694-4.125-8.25-4.125S3.75 4.097 3.75 6.375m16.5 0v11.25c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125V6.375m16.5 0v3.75m-16.5-3.75v3.75m16.5 0v3.75C20.25 16.153 16.556 18 12 18s-8.25-1.847-8.25-4.125v-3.75m16.5 0c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125" />
+                                        </svg>
                                     </div>
-                                    <div className="mt-2 w-full bg-gray-200 rounded-full h-2">
-                                        <div
-                                            className="h-2 rounded-full transition-all"
-                                            style={{
-                                                width: `${Math.min(storage_info.usage_percentage || 0, 100)}%`,
-                                                backgroundColor: sitePrimaryColor,
-                                            }}
-                                        />
+                                    <h3 className="text-sm font-semibold text-gray-900">Storage</h3>
+                                </div>
+
+                                {storage_info && (
+                                    <div className="mb-3 text-xs text-gray-500">
+                                        Using {formatStorage(storage_info.current_usage_mb)} of {formatStorage(storage_info.max_storage_mb)}
+                                        {storage_info.has_storage_addon && <span> (+{formatStorage(storage_info.addon_storage_mb)})</span>}
                                     </div>
-                                </div>
-                            )}
+                                )}
 
-                            {storageAddonError && (
-                                <div className="mb-4 rounded-md bg-red-50 p-3 text-sm text-red-700">
-                                    {storageAddonError}
-                                </div>
-                            )}
-
-                            {subscription?.status !== 'active' ? (
-                                <p className="text-sm text-gray-600">
-                                    Add storage requires an active subscription. Subscribe to a plan above to add storage.
-                                </p>
-                            ) : storage_addon_packages?.length > 0 ? (
-                                <div className="space-y-2">
-                                    {storage_info?.has_storage_addon ? (
-                                        <div className="flex items-center justify-between rounded-md border border-gray-200 bg-gray-50 px-4 py-3">
-                                            <span className="text-sm text-gray-700">
-                                                You have a storage add-on. To change it, remove the current add-on first.
-                                            </span>
+                                {storage_info?.has_storage_addon ? (
+                                    <div className="space-y-2">
+                                        <p className="text-xs text-gray-500">You have a storage add-on active. Remove it to switch.</p>
+                                        <button
+                                            onClick={() => handleAddonAction('/app/billing/storage-addon', null, 'delete')}
+                                            disabled={addonSubmitting !== null}
+                                            className="w-full rounded-lg border border-gray-200 py-2 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+                                        >
+                                            {addonSubmitting === '/app/billing/storage-addon' ? 'Removing...' : 'Remove add-on'}
+                                        </button>
+                                    </div>
+                                ) : (
+                                    <div className="space-y-2">
+                                        {(storage_addon_packages || []).filter(p => (available_addons?.storage || []).includes(p.id)).map(pkg => (
                                             <button
-                                                type="button"
-                                                onClick={handleRemoveStorageAddon}
-                                                disabled={storageAddonSubmitting}
-                                                className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                key={pkg.id}
+                                                onClick={() => handleAddonAction('/app/billing/storage-addon', { package_id: pkg.id })}
+                                                disabled={addonSubmitting !== null}
+                                                className="w-full flex items-center justify-between rounded-lg border border-gray-200 px-3 py-2 hover:border-indigo-300 hover:bg-indigo-50/50 transition disabled:opacity-50"
                                             >
-                                                {storageAddonSubmitting ? 'Removing...' : 'Remove add-on'}
+                                                <span className="text-sm font-medium text-gray-900">+{pkg.label}</span>
+                                                <span className="text-sm font-semibold text-indigo-600">${Number(pkg.monthly_price).toFixed(0)}/mo</span>
                                             </button>
-                                        </div>
-                                    ) : (
-                                        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-                                            {storage_addon_packages.map((pkg) => (
-                                                <button
-                                                    key={pkg.id}
-                                                    type="button"
-                                                    onClick={() => handleAddStorageAddon(pkg.id)}
-                                                    disabled={storageAddonSubmitting}
-                                                    className="flex flex-col items-center justify-center rounded-md border border-gray-300 bg-white px-4 py-3 text-center shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
-                                                >
-                                                    <span className="text-sm font-medium text-gray-900">{pkg.label}</span>
-                                                    <span className="mt-1 text-sm font-semibold" style={{ color: sitePrimaryColor }}>
-                                                        ${Number(pkg.monthly_price).toFixed(2)}/mo
-                                                    </span>
-                                                    <span className="mt-1 text-xs text-gray-500">
-                                                        Add storage
-                                                    </span>
-                                                </button>
-                                            ))}
-                                        </div>
+                                        ))}
+                                        {(storage_addon_packages || []).filter(p => (available_addons?.storage || []).includes(p.id)).length === 0 && (
+                                            <p className="text-xs text-gray-400">Upgrade your plan to unlock storage add-ons.</p>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* AI Credit Add-ons */}
+                            <div className="rounded-xl border border-gray-200 bg-white p-5">
+                                <div className="flex items-center gap-2 mb-3">
+                                    <div className="rounded-lg bg-purple-50 p-2">
+                                        <svg className="h-5 w-5 text-purple-600" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
+                                            <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.455 2.456L21.75 6l-1.036.259a3.375 3.375 0 00-2.455 2.456zM16.894 20.567L16.5 21.75l-.394-1.183a2.25 2.25 0 00-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 001.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 001.423 1.423l1.183.394-1.183.394a2.25 2.25 0 00-1.423 1.423z" />
+                                        </svg>
+                                    </div>
+                                    <h3 className="text-sm font-semibold text-gray-900">AI Credits</h3>
+                                </div>
+
+                                {current_usage?.ai_credits && (
+                                    <div className="mb-3 text-xs text-gray-500">
+                                        {current_usage.ai_credits.is_unlimited
+                                            ? `${current_usage.ai_credits.credits_used || 0} credits used (unlimited)`
+                                            : `${current_usage.ai_credits.credits_used || 0} / ${current_usage.ai_credits.credits_cap || 0} credits used`
+                                        }
+                                    </div>
+                                )}
+
+                                <div className="space-y-2">
+                                    {(ai_credits_addon_packages || []).filter(p => (available_addons?.ai_credits || []).includes(p.id)).map(pkg => (
+                                        <button
+                                            key={pkg.id}
+                                            onClick={() => handleAddonAction('/app/billing/ai-credits-addon', { package_id: pkg.id })}
+                                            disabled={addonSubmitting !== null}
+                                            className="w-full flex items-center justify-between rounded-lg border border-gray-200 px-3 py-2 hover:border-purple-300 hover:bg-purple-50/50 transition disabled:opacity-50"
+                                        >
+                                            <span className="text-sm font-medium text-gray-900">+{pkg.credits.toLocaleString()} credits</span>
+                                            <span className="text-sm font-semibold text-purple-600">${pkg.monthly_price}/mo</span>
+                                        </button>
+                                    ))}
+                                    {(ai_credits_addon_packages || []).filter(p => (available_addons?.ai_credits || []).includes(p.id)).length === 0 && (
+                                        <p className="text-xs text-gray-400">Upgrade your plan to unlock AI credit packs.</p>
                                     )}
                                 </div>
-                            ) : (
-                                <p className="text-sm text-gray-500">
-                                    Storage add-ons are not configured. Add <code className="rounded bg-gray-100 px-1 py-0.5 text-xs">STRIPE_PRICE_STORAGE_50GB</code>, etc. to your .env and create matching products in Stripe.
-                                </p>
-                            )}
-                        </div>
-                    )}
+                            </div>
 
-                    {/* Billing Overview & Invoices Links */}
-                    <div className="mt-8 flex items-center justify-center gap-6">
-                        <Link
-                            href="/app/billing/overview"
-                            className="text-sm font-medium text-gray-600 hover:text-gray-900"
-                        >
-                            View billing overview →
-                        </Link>
-                        
+                            {/* Creator Module */}
+                            <div className="rounded-xl border border-gray-200 bg-white p-5">
+                                <div className="flex items-center gap-2 mb-3">
+                                    <div className="rounded-lg bg-amber-50 p-2">
+                                        <svg className="h-5 w-5 text-amber-600" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
+                                            <path strokeLinecap="round" strokeLinejoin="round" d="M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z" />
+                                        </svg>
+                                    </div>
+                                    <h3 className="text-sm font-semibold text-gray-900">Creator Module</h3>
+                                </div>
+
+                                <p className="text-xs text-gray-500 mb-3">
+                                    Give freelancers and external creators scoped upload access with their own portal. Track performance and manage seats.
+                                </p>
+
+                                {available_addons?.creator_module ? (
+                                    <div className="space-y-2">
+                                        <button
+                                            onClick={() => handleAddonAction('/app/billing/creator-module', {})}
+                                            disabled={addonSubmitting !== null}
+                                            className="w-full flex items-center justify-between rounded-lg border border-gray-200 px-3 py-2 hover:border-amber-300 hover:bg-amber-50/50 transition disabled:opacity-50"
+                                        >
+                                            <span className="text-sm font-medium text-gray-900">Add Creator Module</span>
+                                            <span className="text-sm font-semibold text-amber-600">${creator_addon_config?.base?.monthly_price || 99}/mo</span>
+                                        </button>
+                                        <p className="text-xs text-gray-400">Includes {creator_addon_config?.base?.included_seats || 25} creator seats</p>
+                                    </div>
+                                ) : current_plan === 'business' || current_plan === 'premium' || current_plan === 'enterprise' ? (
+                                    <div className="rounded-lg bg-green-50 border border-green-200 px-3 py-2">
+                                        <p className="text-xs font-medium text-green-700">Included in your plan</p>
+                                    </div>
+                                ) : (
+                                    <p className="text-xs text-gray-400">Available on the Pro plan as an add-on, or included with Business.</p>
+                                )}
+                            </div>
+                        </div>
                     </div>
+                )}
+
+                {/* Agency Partner CTA */}
+                <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 mt-12">
+                    <div className="rounded-xl bg-gradient-to-br from-gray-900 to-gray-800 p-8 sm:p-10">
+                        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
+                            <div className="max-w-xl">
+                                <div className="inline-flex items-center gap-1.5 rounded-full bg-amber-400/10 px-3 py-1 text-xs font-semibold text-amber-400 mb-3">
+                                    <svg className="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 20 20">
+                                        <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+                                    </svg>
+                                    Agency Partner Program
+                                </div>
+                                <h2 className="text-2xl font-bold text-white">Run an agency or studio?</h2>
+                                <p className="mt-2 text-gray-400 text-sm leading-relaxed">
+                                    Our Agency Program gives you dedicated tools for multi-brand management, client incubation, ownership transfers, and referral tracking. Set up client workspaces, manage handoffs, and unlock partner tiers as your portfolio grows.
+                                </p>
+                                <ul className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1.5">
+                                    {[
+                                        'Client workspace incubation',
+                                        'Seamless ownership transfers',
+                                        'Referral attribution & tracking',
+                                        'Tiered partner rewards (Silver / Gold / Platinum)',
+                                        'Agency dashboard & analytics',
+                                        'Scoped brand-level access',
+                                    ].map((item) => (
+                                        <li key={item} className="flex items-center gap-2 text-sm text-gray-300">
+                                            <svg className="h-4 w-4 text-amber-400 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                                                <path fillRule="evenodd" d="M16.704 4.153a.75.75 0 01.143 1.052l-8 10.5a.75.75 0 01-1.127.075l-4.5-4.5a.75.75 0 011.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 011.05-.143z" clipRule="evenodd" />
+                                            </svg>
+                                            {item}
+                                        </li>
+                                    ))}
+                                </ul>
+                            </div>
+                            <div className="flex flex-col items-start lg:items-center gap-3">
+                                <Link
+                                    href="/agency"
+                                    className="inline-flex items-center justify-center rounded-lg bg-amber-500 px-6 py-3 text-sm font-semibold text-gray-900 hover:bg-amber-400 transition whitespace-nowrap"
+                                >
+                                    Learn about the Agency Program
+                                </Link>
+                                <Link
+                                    href="/contact?plan=agency"
+                                    className="text-sm font-medium text-gray-400 hover:text-white transition"
+                                >
+                                    Or talk to our partnerships team &rarr;
+                                </Link>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Footer link */}
+                <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 mt-8 text-center">
+                    <Link href="/app/billing/overview" className="text-sm font-medium text-gray-500 hover:text-gray-700">
+                        View billing overview, invoices & usage details &rarr;
+                    </Link>
                 </div>
             </main>
             <AppFooter />

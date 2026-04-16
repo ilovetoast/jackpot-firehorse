@@ -11,108 +11,64 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 /**
- * AI Usage Service
+ * AI Usage Service — Unified Credit Pool (Option A)
  *
- * Tracks AI usage by feature (tagging, suggestions) and enforces monthly caps.
- * Prevents runaway AI costs by implementing hard stops when caps are exceeded.
+ * Per-feature rows are preserved in ai_usage for analytics breakdowns.
+ * Enforcement uses a single weighted credit budget:
+ *   effective_cap = plan max_ai_credits_per_month + tenant.ai_credits_addon
+ *   used_credits  = SUM(feature_calls * credit_weight) across all features this month
  *
- * Features:
- * - Per-tenant monthly usage tracking
- * - Feature-specific tracking (tagging, suggestions)
- * - Hard stop when cap exceeded
- * - Monthly reset (based on calendar month)
+ * Credit weights are defined in config/ai_credits.php.
  */
 class AiUsageService
 {
     /**
-     * Track an AI call for a feature.
+     * Track an AI call for a feature and enforce the shared credit budget.
      *
-     * Hard stop: If cap would be exceeded, throws exception instead of tracking.
-     * This prevents runaway usage even if multiple requests check simultaneously.
+     * @param  string  $feature  Feature key (e.g. 'tagging', 'suggestions', 'generative_editor_images')
+     * @param  int  $callCount  Number of calls to track
      *
-     * @param  string  $feature  Feature name ('tagging', 'suggestions')
-     * @param  int  $callCount  Number of calls (default: 1)
-     *
-     * @throws PlanLimitExceededException If cap would be exceeded
+     * @throws PlanLimitExceededException
      */
     public function trackUsage(Tenant $tenant, string $feature, int $callCount = 1): void
     {
         $today = now()->toDateString();
 
-        // Use transaction to prevent race conditions and enforce hard stop
         DB::transaction(function () use ($tenant, $feature, $callCount, $today) {
-            // Get current month usage (within transaction for accuracy)
-            $monthStart = now()->startOfMonth()->toDateString();
-            $monthEnd = now()->endOfMonth()->toDateString();
+            $creditWeight = $this->getCreditWeight($feature);
+            $creditsRequired = $callCount * $creditWeight;
 
-            $currentUsage = (int) DB::table('ai_usage')
-                ->where('tenant_id', $tenant->id)
-                ->where('feature', $feature)
-                ->whereBetween('usage_date', [$monthStart, $monthEnd])
-                ->sum('call_count');
+            $cap = $this->getEffectiveAiCredits($tenant);
 
-            // Check cap before tracking (hard stop)
-            $cap = $this->getMonthlyCap($tenant, $feature);
-            if ($cap > 0 && ($currentUsage + $callCount) > $cap) {
-                throw new PlanLimitExceededException(
-                    "ai_{$feature}",
-                    $currentUsage,
-                    $cap,
-                    "Monthly AI {$feature} cap exceeded. Current: {$currentUsage}, Cap: {$cap}. Usage resets at the start of next month."
-                );
+            // 0 = unlimited (enterprise)
+            if ($cap > 0) {
+                $currentCredits = $this->getCreditUsageThisMonth($tenant);
+                if (($currentCredits + $creditsRequired) > $cap) {
+                    throw new PlanLimitExceededException(
+                        'ai_credits',
+                        $currentCredits,
+                        $cap,
+                        "Monthly AI credit budget exceeded. Used: {$currentCredits}, Cap: {$cap}, Requested: {$creditsRequired} ({$feature}). Usage resets at the start of next month."
+                    );
+                }
             }
 
-            // Use insertOrUpdate pattern for MySQL compatibility
-            $existing = DB::table('ai_usage')
-                ->where('tenant_id', $tenant->id)
-                ->where('feature', $feature)
-                ->where('usage_date', $today)
-                ->lockForUpdate()
-                ->first();
-
-            if ($existing) {
-                // Increment existing count
-                DB::table('ai_usage')
-                    ->where('id', $existing->id)
-                    ->update([
-                        'call_count' => DB::raw("call_count + {$callCount}"),
-                        'updated_at' => now(),
-                    ]);
-            } else {
-                // Create new record
-                DB::table('ai_usage')->insert([
-                    'tenant_id' => $tenant->id,
-                    'feature' => $feature,
-                    'usage_date' => $today,
-                    'call_count' => $callCount,
-                    'created_at' => now(),
-                    'updated_at' => now(),
-                ]);
-            }
+            $this->upsertUsageRow($tenant, $feature, $callCount, $today);
         });
 
         Log::debug('[AiUsageService] Tracked AI usage', [
             'tenant_id' => $tenant->id,
             'feature' => $feature,
             'call_count' => $callCount,
+            'credit_weight' => $this->getCreditWeight($feature),
             'date' => $today,
         ]);
     }
 
     /**
-     * Track AI usage with cost attribution.
+     * Track AI usage with cost attribution (extended analytics).
      *
-     * Extends trackUsage() to also track actual costs, tokens, and model used.
-     * This is used for AI metadata generation where we have detailed cost information.
-     *
-     * @param  string  $feature  Feature name ('tagging', 'suggestions')
-     * @param  int  $callCount  Number of calls (default: 1)
-     * @param  float  $costUsd  Actual cost in USD
-     * @param  int|null  $tokensIn  Input tokens used
-     * @param  int|null  $tokensOut  Output tokens used
-     * @param  string|null  $model  Model name used
-     *
-     * @throws PlanLimitExceededException If cap would be exceeded
+     * @throws PlanLimitExceededException
      */
     public function trackUsageWithCost(
         Tenant $tenant,
@@ -125,30 +81,24 @@ class AiUsageService
     ): void {
         $today = now()->toDateString();
 
-        // Use transaction to prevent race conditions and enforce hard stop
         DB::transaction(function () use ($tenant, $feature, $callCount, $costUsd, $tokensIn, $tokensOut, $model, $today) {
-            // Get current month usage (within transaction for accuracy)
-            $monthStart = now()->startOfMonth()->toDateString();
-            $monthEnd = now()->endOfMonth()->toDateString();
+            $creditWeight = $this->getCreditWeight($feature);
+            $creditsRequired = $callCount * $creditWeight;
 
-            $currentUsage = (int) DB::table('ai_usage')
-                ->where('tenant_id', $tenant->id)
-                ->where('feature', $feature)
-                ->whereBetween('usage_date', [$monthStart, $monthEnd])
-                ->sum('call_count');
+            $cap = $this->getEffectiveAiCredits($tenant);
 
-            // Check cap before tracking (hard stop)
-            $cap = $this->getMonthlyCap($tenant, $feature);
-            if ($cap > 0 && ($currentUsage + $callCount) > $cap) {
-                throw new PlanLimitExceededException(
-                    "ai_{$feature}",
-                    $currentUsage,
-                    $cap,
-                    "Monthly AI {$feature} cap exceeded. Current: {$currentUsage}, Cap: {$cap}. Usage resets at the start of next month."
-                );
+            if ($cap > 0) {
+                $currentCredits = $this->getCreditUsageThisMonth($tenant);
+                if (($currentCredits + $creditsRequired) > $cap) {
+                    throw new PlanLimitExceededException(
+                        'ai_credits',
+                        $currentCredits,
+                        $cap,
+                        "Monthly AI credit budget exceeded. Used: {$currentCredits}, Cap: {$cap}, Requested: {$creditsRequired} ({$feature}). Usage resets at the start of next month."
+                    );
+                }
             }
 
-            // Use insertOrUpdate pattern for MySQL compatibility
             $existing = DB::table('ai_usage')
                 ->where('tenant_id', $tenant->id)
                 ->where('feature', $feature)
@@ -157,19 +107,17 @@ class AiUsageService
                 ->first();
 
             if ($existing) {
-                // Increment existing count and add cost
                 DB::table('ai_usage')
                     ->where('id', $existing->id)
                     ->update([
                         'call_count' => DB::raw("call_count + {$callCount}"),
-                        'cost_usd' => DB::raw("COALESCE(cost_usd, 0) + {$costUsd}"),
+                        'cost_usd' => DB::raw('COALESCE(cost_usd, 0) + '.$costUsd),
                         'tokens_in' => DB::raw('COALESCE(tokens_in, 0) + '.($tokensIn ?? 0)),
                         'tokens_out' => DB::raw('COALESCE(tokens_out, 0) + '.($tokensOut ?? 0)),
-                        'model' => $model ?? $existing->model, // Update model if provided
+                        'model' => $model ?? $existing->model,
                         'updated_at' => now(),
                     ]);
             } else {
-                // Create new record with cost tracking
                 DB::table('ai_usage')->insert([
                     'tenant_id' => $tenant->id,
                     'feature' => $feature,
@@ -190,18 +138,139 @@ class AiUsageService
             'feature' => $feature,
             'call_count' => $callCount,
             'cost_usd' => $costUsd,
-            'tokens_in' => $tokensIn,
-            'tokens_out' => $tokensOut,
-            'model' => $model,
             'date' => $today,
         ]);
     }
 
+    // -------------------------------------------------------------------------
+    // Credit pool — the core of the unified budget
+    // -------------------------------------------------------------------------
+
     /**
-     * Get current month's usage for a tenant and feature.
+     * Total weighted credit usage this calendar month across all features.
+     */
+    public function getCreditUsageThisMonth(Tenant $tenant): int
+    {
+        $monthStart = now()->startOfMonth()->toDateString();
+        $monthEnd = now()->endOfMonth()->toDateString();
+
+        $rows = DB::table('ai_usage')
+            ->where('tenant_id', $tenant->id)
+            ->whereBetween('usage_date', [$monthStart, $monthEnd])
+            ->select('feature', DB::raw('SUM(call_count) as total_calls'))
+            ->groupBy('feature')
+            ->get();
+
+        $total = 0;
+        foreach ($rows as $row) {
+            $weight = $this->getCreditWeight($row->feature);
+            $total += (int) $row->total_calls * $weight;
+        }
+
+        return $total;
+    }
+
+    /**
+     * Total weighted credit usage for a specific month.
+     */
+    public function getCreditUsageForPeriod(Tenant $tenant, int $year, int $month): int
+    {
+        $start = Carbon::createFromDate($year, $month, 1)->startOfMonth()->toDateString();
+        $end = Carbon::createFromDate($year, $month, 1)->endOfMonth()->toDateString();
+
+        $rows = DB::table('ai_usage')
+            ->where('tenant_id', $tenant->id)
+            ->whereBetween('usage_date', [$start, $end])
+            ->select('feature', DB::raw('SUM(call_count) as total_calls'))
+            ->groupBy('feature')
+            ->get();
+
+        $total = 0;
+        foreach ($rows as $row) {
+            $weight = $this->getCreditWeight($row->feature);
+            $total += (int) $row->total_calls * $weight;
+        }
+
+        return $total;
+    }
+
+    /**
+     * Effective AI credit cap = plan base + purchased add-on.
+     * Returns 0 for unlimited (enterprise).
+     */
+    public function getEffectiveAiCredits(Tenant $tenant): int
+    {
+        $planService = app(PlanService::class);
+        $limits = $planService->getPlanLimits($tenant);
+        $baseCap = (int) ($limits['max_ai_credits_per_month'] ?? 0);
+
+        if ($baseCap === 0) {
+            return 0; // unlimited
+        }
+
+        $addon = (int) ($tenant->ai_credits_addon ?? 0);
+
+        return $baseCap + $addon;
+    }
+
+    /**
+     * Credit weight for a feature from config/ai_credits.php.
+     * Returns 1 as a safe default for unknown features.
+     */
+    public function getCreditWeight(string $feature): int
+    {
+        return (int) (config("ai_credits.weights.{$feature}") ?? 1);
+    }
+
+    /**
+     * Compute video insights credit cost using per-minute tiered pricing.
      *
-     * @param  string  $feature  Feature name ('tagging', 'suggestions')
-     * @return int Total calls this month
+     * Formula: base_credits + max(0, ceil(duration_minutes) - 1) * per_additional_minute
+     */
+    public function getVideoInsightsCreditCost(float $billableMinutes): int
+    {
+        $base = (int) config('ai_credits.video_insights.base_credits', 5);
+        $perMin = (int) config('ai_credits.video_insights.per_additional_minute', 3);
+
+        $ceiledMinutes = (int) ceil(max(0.0, $billableMinutes));
+        if ($ceiledMinutes < 1) {
+            $ceiledMinutes = 1;
+        }
+
+        return $base + max(0, $ceiledMinutes - 1) * $perMin;
+    }
+
+    /**
+     * Which warning threshold (80/90/100) is the tenant at, or null if below all.
+     */
+    public function getCreditWarningLevel(Tenant $tenant): ?int
+    {
+        $cap = $this->getEffectiveAiCredits($tenant);
+        if ($cap <= 0) {
+            return null; // unlimited
+        }
+
+        $used = $this->getCreditUsageThisMonth($tenant);
+        $percentage = ($used / $cap) * 100;
+
+        $thresholds = config('ai_credits.warning_thresholds', [80, 90, 100]);
+        rsort($thresholds);
+
+        foreach ($thresholds as $threshold) {
+            if ($percentage >= $threshold) {
+                return $threshold;
+            }
+        }
+
+        return null;
+    }
+
+    // -------------------------------------------------------------------------
+    // Compatibility layer — existing callers use these
+    // -------------------------------------------------------------------------
+
+    /**
+     * Get current month's raw call count for a feature (for analytics display).
      */
     public function getMonthlyUsage(Tenant $tenant, string $feature): int
     {
@@ -216,151 +285,136 @@ class AiUsageService
     }
 
     /**
-     * Get monthly cap for a tenant and feature.
-     *
-     * @param  string  $feature  Feature name ('tagging', 'suggestions')
-     * @return int Monthly cap (0 = unlimited, -1 = disabled, positive number = cap)
+     * @deprecated Use getEffectiveAiCredits() for the unified cap.
+     * Kept for backward compatibility; returns the unified credit cap.
      */
     public function getMonthlyCap(Tenant $tenant, string $feature): int
     {
-        $planService = app(PlanService::class);
-        $limits = $planService->getPlanLimits($tenant);
-
-        if ($feature === 'generative_editor_images') {
-            $raw = $limits['max_editor_generative_images_per_month'] ?? 0;
-            // Plan uses -1 for unlimited (enterprise); AiUsageService uses 0 = unlimited.
-            if ((int) $raw === -1) {
-                return 0;
-            }
-
-            return (int) $raw;
-        }
-
-        // Get feature-specific cap from plan limits
-        $capKey = "max_ai_{$feature}_per_month";
-        $cap = $limits[$capKey] ?? 0;
-
-        // 0 = unlimited, -1 = disabled, positive number = cap
-        return (int) $cap;
+        return $this->getEffectiveAiCredits($tenant);
     }
 
     /**
-     * Check if tenant can use AI feature (within cap).
-     *
-     * @param  string  $feature  Feature name ('tagging', 'suggestions')
-     * @return bool True if within cap, false if exceeded
+     * Check if tenant can afford credits for a feature call.
      */
-    public function canUseFeature(Tenant $tenant, string $feature): bool
+    public function canUseFeature(Tenant $tenant, string $feature, int $requestedCalls = 1): bool
     {
-        $cap = $this->getMonthlyCap($tenant, $feature);
-
-        // -1 = disabled
-        if ($cap === -1) {
-            return false;
+        $cap = $this->getEffectiveAiCredits($tenant);
+        if ($cap <= 0) {
+            return true; // unlimited
         }
 
-        // 0 = unlimited
-        if ($cap === 0) {
-            return true;
-        }
+        $weight = $this->getCreditWeight($feature);
+        $creditsNeeded = $requestedCalls * $weight;
+        $used = $this->getCreditUsageThisMonth($tenant);
 
-        // Check current usage
-        $usage = $this->getMonthlyUsage($tenant, $feature);
-
-        return $usage < $cap;
+        return ($used + $creditsNeeded) <= $cap;
     }
 
     /**
-     * Check if tenant can use AI feature and throw exception if exceeded.
+     * Pre-flight check without tracking. Throws if over budget.
      *
-     * @param  string  $feature  Feature name ('tagging', 'suggestions')
-     * @param  int  $requestedCalls  Number of calls requested (default: 1)
-     *
-     * @throws PlanLimitExceededException If cap exceeded
+     * @throws PlanLimitExceededException
      */
     public function checkUsage(Tenant $tenant, string $feature, int $requestedCalls = 1): void
     {
-        $cap = $this->getMonthlyCap($tenant, $feature);
-
-        // -1 = disabled
-        if ($cap === -1) {
-            throw new PlanLimitExceededException(
-                $feature,
-                0,
-                0,
-                "AI {$feature} is disabled for your plan."
-            );
+        $cap = $this->getEffectiveAiCredits($tenant);
+        if ($cap <= 0) {
+            return; // unlimited
         }
 
-        // 0 = unlimited
-        if ($cap === 0) {
-            return;
-        }
+        $weight = $this->getCreditWeight($feature);
+        $creditsNeeded = $requestedCalls * $weight;
+        $currentCredits = $this->getCreditUsageThisMonth($tenant);
 
-        // Check current usage
-        $currentUsage = $this->getMonthlyUsage($tenant, $feature);
-        $projectedUsage = $currentUsage + $requestedCalls;
-
-        if ($projectedUsage > $cap) {
+        if (($currentCredits + $creditsNeeded) > $cap) {
             throw new PlanLimitExceededException(
-                "ai_{$feature}",
-                $currentUsage,
+                'ai_credits',
+                $currentCredits,
                 $cap,
-                "Monthly AI {$feature} cap exceeded. Current: {$currentUsage}, Cap: {$cap}. Usage resets at the start of next month."
+                "Monthly AI credit budget exceeded. Used: {$currentCredits}, Cap: {$cap}, Requested: {$creditsNeeded} ({$feature}). Usage resets at the start of next month."
             );
         }
     }
 
     /**
-     * Get usage status for a tenant (all features).
-     *
-     * @return array Status for each feature: ['feature' => ['usage' => int, 'cap' => int, 'remaining' => int, 'percentage' => float]]
+     * Unified usage status: per-feature breakdown + credit totals.
      */
     public function getUsageStatus(Tenant $tenant): array
     {
-        $features = ['tagging', 'suggestions', 'brand_research', 'insights', 'generative_editor_images', 'video_insights'];
-        $status = [];
+        $features = ['tagging', 'suggestions', 'brand_research', 'insights', 'generative_editor_images', 'generative_editor_edits', 'video_insights', 'pdf_extraction', 'presentation_preview'];
+        $perFeature = [];
+        $totalCreditsUsed = 0;
 
         foreach ($features as $feature) {
-            $usage = $this->getMonthlyUsage($tenant, $feature);
-            $cap = $this->getMonthlyCap($tenant, $feature);
+            $calls = $this->getMonthlyUsage($tenant, $feature);
+            $weight = $this->getCreditWeight($feature);
+            $credits = $calls * $weight;
+            $totalCreditsUsed += $credits;
 
-            $remaining = $cap > 0 ? max(0, $cap - $usage) : null;
-            $percentage = $cap > 0 ? min(100, ($usage / $cap) * 100) : 0;
-
-            $status[$feature] = [
-                'usage' => $usage,
-                'cap' => $cap,
-                'remaining' => $remaining,
-                'percentage' => round($percentage, 2),
-                'is_unlimited' => $cap === 0,
-                'is_disabled' => $cap === -1,
-                'is_exceeded' => $cap > 0 && $usage >= $cap,
+            $perFeature[$feature] = [
+                'calls' => $calls,
+                'credit_weight' => $weight,
+                'credits_used' => $credits,
             ];
         }
 
-        return $status;
+        $cap = $this->getEffectiveAiCredits($tenant);
+        $remaining = $cap > 0 ? max(0, $cap - $totalCreditsUsed) : null;
+        $percentage = $cap > 0 ? min(100, ($totalCreditsUsed / $cap) * 100) : 0;
+
+        return [
+            'credits_used' => $totalCreditsUsed,
+            'credits_cap' => $cap,
+            'credits_remaining' => $remaining,
+            'credits_percentage' => round($percentage, 2),
+            'is_unlimited' => $cap === 0,
+            'is_exceeded' => $cap > 0 && $totalCreditsUsed >= $cap,
+            'warning_level' => $this->getCreditWarningLevel($tenant),
+            'per_feature' => $perFeature,
+        ];
     }
 
     /**
-     * Get usage breakdown by date for current month.
-     *
-     * @param  string  $feature  Feature name ('tagging', 'suggestions')
-     * @return array Array of ['date' => string, 'calls' => int]
+     * Usage status for a specific month (historical).
      */
-    public function getUsageBreakdown(Tenant $tenant, string $feature): array
+    public function getUsageStatusForPeriod(Tenant $tenant, int $year, int $month): array
     {
-        return $this->getUsageBreakdownForPeriod($tenant, $feature, (int) now()->format('Y'), (int) now()->format('n'));
+        $features = ['tagging', 'suggestions', 'brand_research', 'insights', 'generative_editor_images', 'generative_editor_edits', 'video_insights', 'pdf_extraction', 'presentation_preview'];
+        $perFeature = [];
+        $totalCreditsUsed = 0;
+
+        foreach ($features as $feature) {
+            $calls = $this->getMonthlyUsageForPeriod($tenant, $feature, $year, $month);
+            $weight = $this->getCreditWeight($feature);
+            $credits = $calls * $weight;
+            $totalCreditsUsed += $credits;
+
+            $perFeature[$feature] = [
+                'calls' => $calls,
+                'credit_weight' => $weight,
+                'credits_used' => $credits,
+            ];
+        }
+
+        $cap = $this->getEffectiveAiCredits($tenant);
+        $remaining = $cap > 0 ? max(0, $cap - $totalCreditsUsed) : null;
+        $percentage = $cap > 0 ? min(100, ($totalCreditsUsed / $cap) * 100) : 0;
+
+        return [
+            'credits_used' => $totalCreditsUsed,
+            'credits_cap' => $cap,
+            'credits_remaining' => $remaining,
+            'credits_percentage' => round($percentage, 2),
+            'is_unlimited' => $cap === 0,
+            'is_exceeded' => $cap > 0 && $totalCreditsUsed >= $cap,
+            'per_feature' => $perFeature,
+        ];
     }
 
-    /**
-     * Get usage for a specific month (for historical paging).
-     *
-     * @param  string  $feature  Feature name ('tagging', 'suggestions')
-     * @param  int  $year  Year (e.g. 2026)
-     * @param  int  $month  Month 1-12
-     * @return int Total calls in that month
-     */
+    // -------------------------------------------------------------------------
+    // Per-feature helpers (analytics / breakdown)
+    // -------------------------------------------------------------------------
+
     public function getMonthlyUsageForPeriod(Tenant $tenant, string $feature, int $year, int $month): int
     {
         $start = Carbon::createFromDate($year, $month, 1)->startOfMonth()->toDateString();
@@ -373,48 +427,11 @@ class AiUsageService
             ->sum('call_count');
     }
 
-    /**
-     * Get usage status for a specific month (for historical paging).
-     * Uses current plan caps for display; usage is for the requested period.
-     *
-     * @param  int  $year  Year (e.g. 2026)
-     * @param  int  $month  Month 1-12
-     * @return array Same shape as getUsageStatus()
-     */
-    public function getUsageStatusForPeriod(Tenant $tenant, int $year, int $month): array
+    public function getUsageBreakdown(Tenant $tenant, string $feature): array
     {
-        $features = ['tagging', 'suggestions', 'brand_research', 'insights', 'generative_editor_images', 'video_insights'];
-        $status = [];
-
-        foreach ($features as $feature) {
-            $usage = $this->getMonthlyUsageForPeriod($tenant, $feature, $year, $month);
-            $cap = $this->getMonthlyCap($tenant, $feature);
-
-            $remaining = $cap > 0 ? max(0, $cap - $usage) : null;
-            $percentage = $cap > 0 ? min(100, ($usage / $cap) * 100) : 0;
-
-            $status[$feature] = [
-                'usage' => $usage,
-                'cap' => $cap,
-                'remaining' => $remaining,
-                'percentage' => round($percentage, 2),
-                'is_unlimited' => $cap === 0,
-                'is_disabled' => $cap === -1,
-                'is_exceeded' => $cap > 0 && $usage >= $cap,
-            ];
-        }
-
-        return $status;
+        return $this->getUsageBreakdownForPeriod($tenant, $feature, (int) now()->format('Y'), (int) now()->format('n'));
     }
 
-    /**
-     * Get usage breakdown by date for a specific month.
-     *
-     * @param  string  $feature  Feature name ('tagging', 'suggestions')
-     * @param  int  $year  Year (e.g. 2026)
-     * @param  int  $month  Month 1-12
-     * @return array Array of ['date' => string, 'calls' => int]
-     */
     public function getUsageBreakdownForPeriod(Tenant $tenant, string $feature, int $year, int $month): array
     {
         $start = Carbon::createFromDate($year, $month, 1)->startOfMonth()->toDateString();
@@ -427,26 +444,77 @@ class AiUsageService
             ->orderBy('usage_date')
             ->get(['usage_date', 'call_count']);
 
-        return $usage->map(function ($row) {
-            return [
-                'date' => $row->usage_date,
-                'calls' => (int) $row->call_count,
-            ];
-        })->toArray();
+        return $usage->map(fn ($row) => [
+            'date' => $row->usage_date,
+            'calls' => (int) $row->call_count,
+        ])->toArray();
+    }
+
+    // -------------------------------------------------------------------------
+    // Video AI minutes (kept for backward compat with GenerateVideoInsightsJob)
+    // -------------------------------------------------------------------------
+
+    public function getVideoAiMinutesCap(Tenant $tenant): int
+    {
+        // Video minutes are now governed by the unified credit pool.
+        // This returns 0 (unlimited) to disable the old per-minute hard cap;
+        // credit enforcement happens in trackUsage/checkUsage instead.
+        return 0;
+    }
+
+    public function getVideoAiMinutesUsedThisMonth(Tenant $tenant): float
+    {
+        $start = now()->startOfMonth();
+        $end = now()->endOfMonth();
+
+        $rows = AIAgentRun::query()
+            ->where('tenant_id', $tenant->id)
+            ->where('task_type', AITaskType::VIDEO_INSIGHTS)
+            ->where('status', 'success')
+            ->whereBetween('started_at', [$start, $end])
+            ->get(['metadata']);
+
+        $sum = 0.0;
+        foreach ($rows as $row) {
+            $meta = $row->metadata ?? [];
+            $sum += (float) ($meta['billable_minutes'] ?? 0);
+        }
+
+        return round($sum, 4);
     }
 
     /**
-     * Enhanced preview runs ({@see AITaskType::THUMBNAIL_ENHANCEMENT}) for dashboards — current calendar month, finished only.
-     *
-     * @return array{
-     *     count: int,
-     *     success_count: int,
-     *     failed_count: int,
-     *     skipped_count: int,
-     *     success_rate: float|null,
-     *     avg_duration_ms: float|null,
-     *     p95_duration_ms: float|null
-     * }
+     * @deprecated Video minutes are now enforced via the unified credit pool.
+     * Kept as a no-op so existing callers don't break; they should migrate
+     * to checkUsage($tenant, 'video_insights', ...) with credit-based tracking.
+     */
+    public function checkVideoAiMinuteBudget(Tenant $tenant, float $additionalBillableMinutes): void
+    {
+        // Credit-based enforcement: convert minutes to credits, then check pool.
+        $creditsNeeded = $this->getVideoInsightsCreditCost($additionalBillableMinutes);
+        $cap = $this->getEffectiveAiCredits($tenant);
+
+        if ($cap <= 0) {
+            return; // unlimited
+        }
+
+        $currentCredits = $this->getCreditUsageThisMonth($tenant);
+        if (($currentCredits + $creditsNeeded) > $cap) {
+            throw new PlanLimitExceededException(
+                'ai_credits',
+                $currentCredits,
+                $cap,
+                "Monthly AI credit budget exceeded for video insights. Usage resets at the start of next month."
+            );
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Thumbnail enhancement metrics (unchanged — analytics only)
+    // -------------------------------------------------------------------------
+
+    /**
+     * @return array{count: int, success_count: int, failed_count: int, skipped_count: int, success_rate: float|null, avg_duration_ms: float|null, p95_duration_ms: float|null}
      */
     public function getThumbnailEnhancementMetrics(Tenant $tenant): array
     {
@@ -510,12 +578,6 @@ class AiUsageService
         ];
     }
 
-    /**
-     * Adds {@see getThumbnailEnhancementMetrics()} to tenant AI usage payloads (dashboard / insights).
-     *
-     * @param  array<string, mixed>|null  $aiUsageData
-     * @return array<string, mixed>|null
-     */
     public function augmentAiUsageDashboardPayload(?array $aiUsageData, Tenant $tenant): ?array
     {
         if ($aiUsageData === null) {
@@ -534,71 +596,45 @@ class AiUsageService
         ];
 
         $videoAgg = app(AssetAiCostService::class)->getTenantVideoAiAggregate($tenant->id);
-        $minuteCap = $this->getVideoAiMinutesCap($tenant);
         $aiUsageData['video_ai'] = [
             'video_ai_cost_total' => $videoAgg['cost_usd'],
             'video_ai_jobs_count' => (int) $videoAgg['jobs_count'],
             'video_ai_minutes_used' => $videoAgg['minutes_billed'],
-            'video_ai_minutes_cap' => $minuteCap,
+            'video_ai_minutes_cap' => 0,
         ];
 
         return $aiUsageData;
     }
 
-    /**
-     * Billable video minutes cap for the tenant plan (0 = unlimited).
-     */
-    public function getVideoAiMinutesCap(Tenant $tenant): int
+    // -------------------------------------------------------------------------
+    // Internal helpers
+    // -------------------------------------------------------------------------
+
+    private function upsertUsageRow(Tenant $tenant, string $feature, int $callCount, string $today): void
     {
-        $limits = app(PlanService::class)->getPlanLimits($tenant);
-
-        return (int) ($limits['max_video_ai_minutes_per_month'] ?? 0);
-    }
-
-    /**
-     * Sum of billable minutes from successful video insight runs this calendar month.
-     */
-    public function getVideoAiMinutesUsedThisMonth(Tenant $tenant): float
-    {
-        $start = now()->startOfMonth();
-        $end = now()->endOfMonth();
-
-        $rows = AIAgentRun::query()
+        $existing = DB::table('ai_usage')
             ->where('tenant_id', $tenant->id)
-            ->where('task_type', AITaskType::VIDEO_INSIGHTS)
-            ->where('status', 'success')
-            ->whereBetween('started_at', [$start, $end])
-            ->get(['metadata']);
+            ->where('feature', $feature)
+            ->where('usage_date', $today)
+            ->lockForUpdate()
+            ->first();
 
-        $sum = 0.0;
-        foreach ($rows as $row) {
-            $meta = $row->metadata ?? [];
-            $sum += (float) ($meta['billable_minutes'] ?? 0);
+        if ($existing) {
+            DB::table('ai_usage')
+                ->where('id', $existing->id)
+                ->update([
+                    'call_count' => DB::raw("call_count + {$callCount}"),
+                    'updated_at' => now(),
+                ]);
+        } else {
+            DB::table('ai_usage')->insert([
+                'tenant_id' => $tenant->id,
+                'feature' => $feature,
+                'usage_date' => $today,
+                'call_count' => $callCount,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
         }
-
-        return round($sum, 4);
-    }
-
-    /**
-     * @throws PlanLimitExceededException
-     */
-    public function checkVideoAiMinuteBudget(Tenant $tenant, float $additionalBillableMinutes): void
-    {
-        $cap = $this->getVideoAiMinutesCap($tenant);
-        if ($cap <= 0) {
-            return;
-        }
-
-        $used = $this->getVideoAiMinutesUsedThisMonth($tenant);
-        if ($used + $additionalBillableMinutes <= $cap) {
-            return;
-        }
-
-        throw new PlanLimitExceededException(
-            'video_ai_minutes',
-            (int) floor($used),
-            $cap,
-            'Monthly video AI minutes cap exceeded. Usage resets at the start of next month.'
-        );
     }
 }

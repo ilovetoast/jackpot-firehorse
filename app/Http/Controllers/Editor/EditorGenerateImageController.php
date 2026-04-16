@@ -53,21 +53,9 @@ class EditorGenerateImageController extends Controller
 
         $slug = $this->planService->getCurrentPlan($tenant);
         $planName = (string) (config("plans.{$slug}.name") ?? $slug);
-        $limits = config("plans.{$slug}.limits", []);
-        $rawMax = $limits['max_editor_generative_images_per_month'] ?? null;
 
-        $used = $this->aiUsageService->getMonthlyUsage($tenant, 'generative_editor_images');
+        $cap = $this->aiUsageService->getEffectiveAiCredits($tenant);
 
-        if ($rawMax === -1 || $slug === 'enterprise') {
-            return response()->json([
-                'remaining' => -1,
-                'limit' => -1,
-                'plan' => $slug,
-                'plan_name' => $planName,
-            ]);
-        }
-
-        $cap = $this->aiUsageService->getMonthlyCap($tenant, 'generative_editor_images');
         if ($cap === 0) {
             return response()->json([
                 'remaining' => -1,
@@ -77,6 +65,7 @@ class EditorGenerateImageController extends Controller
             ]);
         }
 
+        $used = $this->aiUsageService->getCreditUsageThisMonth($tenant);
         $remaining = max(0, $cap - $used);
 
         return response()->json([

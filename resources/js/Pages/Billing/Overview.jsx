@@ -4,7 +4,7 @@ import AppNav from '../../Components/AppNav'
 import AppHead from '../../Components/AppHead'
 import AppFooter from '../../Components/AppFooter'
 
-export default function BillingOverview({ tenant, current_plan, subscription, payment_method, recent_invoices, has_stripe_id, on_demand_usage, monthly_average, currency, storage_info, storage_addon_packages }) {
+export default function BillingOverview({ tenant, current_plan, subscription, payment_method, recent_invoices, has_stripe_id, on_demand_usage, monthly_average, currency, storage_info, storage_addon_packages, ai_credits, credit_weights, ai_credits_addon_packages, creator_addon_config, available_addons }) {
     const { auth } = usePage().props
     const [storageAddonSubmitting, setStorageAddonSubmitting] = useState(false)
     const [storageAddonError, setStorageAddonError] = useState(null)
@@ -278,6 +278,93 @@ export default function BillingOverview({ tenant, current_plan, subscription, pa
                                             Manage plan →
                                         </Link>
                                     </p>
+                                )}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* AI Credits Usage */}
+                    {ai_credits && (
+                        <div className="mb-6 overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
+                            <div className="px-6 py-5 border-b border-gray-200">
+                                <div className="flex items-center justify-between">
+                                    <div>
+                                        <h2 className="text-lg font-semibold text-gray-900">AI Credits</h2>
+                                        <p className="mt-1 text-sm text-gray-500">Unified credit pool across all AI features this month</p>
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="px-6 py-5">
+                                <div className="mb-4">
+                                    <div className="flex justify-between text-sm mb-2">
+                                        <span className="text-gray-600">
+                                            {ai_credits.credits_used?.toLocaleString() || 0} / {ai_credits.is_unlimited ? 'Unlimited' : (ai_credits.credits_cap?.toLocaleString() || 0)} credits used
+                                        </span>
+                                        {!ai_credits.is_unlimited && (
+                                            <span className="font-medium text-gray-900">
+                                                {ai_credits.credits_remaining?.toLocaleString() || 0} remaining
+                                            </span>
+                                        )}
+                                    </div>
+                                    {!ai_credits.is_unlimited && (
+                                        <div className="w-full bg-gray-200 rounded-full h-3">
+                                            <div
+                                                className={`h-3 rounded-full transition-all ${
+                                                    (ai_credits.warning_level || 0) >= 100 ? 'bg-red-500' :
+                                                    (ai_credits.warning_level || 0) >= 90 ? 'bg-orange-500' :
+                                                    (ai_credits.warning_level || 0) >= 80 ? 'bg-yellow-500' :
+                                                    'bg-indigo-600'
+                                                }`}
+                                                style={{ width: `${Math.min(100, ai_credits.credits_percentage || 0)}%` }}
+                                            />
+                                        </div>
+                                    )}
+                                    {ai_credits.warning_level >= 80 && (
+                                        <div className={`mt-3 rounded-md p-3 text-sm ${
+                                            ai_credits.warning_level >= 100 ? 'bg-red-50 text-red-700 border border-red-200' :
+                                            ai_credits.warning_level >= 90 ? 'bg-orange-50 text-orange-700 border border-orange-200' :
+                                            'bg-yellow-50 text-yellow-700 border border-yellow-200'
+                                        }`}>
+                                            {ai_credits.warning_level >= 100
+                                                ? 'AI credit budget exhausted. Premium AI actions are paused until next month. Purchase a credit add-on to continue.'
+                                                : `${ai_credits.warning_level}% of your AI credits have been used this month.`
+                                            }
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* Per-feature breakdown */}
+                                {ai_credits.per_feature && Object.keys(ai_credits.per_feature).length > 0 && (
+                                    <div className="mt-4 border-t border-gray-100 pt-4">
+                                        <h4 className="text-sm font-medium text-gray-700 mb-3">Usage Breakdown</h4>
+                                        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                                            {Object.entries(ai_credits.per_feature).map(([feature, data]) => (
+                                                data.calls > 0 && (
+                                                    <div key={feature} className="text-sm bg-gray-50 rounded-md p-2">
+                                                        <div className="text-gray-500 capitalize">{feature.replace(/_/g, ' ')}</div>
+                                                        <div className="font-medium text-gray-900">
+                                                            {data.calls} calls = {data.credits_used} credits
+                                                        </div>
+                                                    </div>
+                                                )
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Common action costs */}
+                                {credit_weights && Object.keys(credit_weights).length > 0 && (
+                                    <div className="mt-4 border-t border-gray-100 pt-4">
+                                        <h4 className="text-sm font-medium text-gray-700 mb-2">Credit Costs per Action</h4>
+                                        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs text-gray-500">
+                                            {Object.entries(credit_weights).map(([action, cost]) => (
+                                                <div key={action} className="flex justify-between bg-gray-50 rounded px-2 py-1">
+                                                    <span className="capitalize">{action.replace(/_/g, ' ')}</span>
+                                                    <span className="font-medium text-gray-700">{cost}</span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
                                 )}
                             </div>
                         </div>

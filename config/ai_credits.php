@@ -1,0 +1,101 @@
+<?php
+
+return [
+    /*
+    |--------------------------------------------------------------------------
+    | AI Credit Weights
+    |--------------------------------------------------------------------------
+    |
+    | Each AI operation consumes credits from a shared monthly pool.
+    | Weights are the number of credits consumed per operation call.
+    |
+    | AiUsageService still writes per-feature rows to ai_usage (for analytics)
+    | but enforces a single weighted credit budget.
+    |
+    | v1 weights — instrument actual blended cost per operation for 30-60 days,
+    | then rebalance. Do not treat these as sacred.
+    |
+    */
+
+    'weights' => [
+        'tagging' => 1,
+        'suggestions' => 1,
+        'insights' => 1,
+        'brand_research' => 25,
+        'pdf_extraction' => 5,
+        'presentation_preview' => 10,
+        'generative_editor_edits' => 15,
+        'generative_editor_images' => 20,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Video AI Credit Pricing (per-minute tiered)
+    |--------------------------------------------------------------------------
+    |
+    | Formula: credits = base_credits + max(0, ceil(duration_minutes) - 1) * per_additional_minute
+    |
+    | The first minute (or fraction) always costs base_credits.
+    | Each additional ceil'd minute costs per_additional_minute.
+    |
+    | Examples:
+    |   30s clip  (0.5 min)  -> ceil(0.5)=1  -> 5 + (1-1)*3 = 5 credits
+    |   61s clip  (1.02 min) -> ceil(1.02)=2  -> 5 + (2-1)*3 = 8 credits
+    |   3m video  (3.0 min)  -> ceil(3.0)=3   -> 5 + (3-1)*3 = 11 credits
+    |   10m video (10.0 min) -> ceil(10.0)=10  -> 5 + (10-1)*3 = 32 credits
+    |
+    */
+
+    'video_insights' => [
+        'base_credits' => 5,
+        'per_additional_minute' => 3,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | AI Credit Add-on Packs
+    |--------------------------------------------------------------------------
+    |
+    | Recurring monthly Stripe subscription items that add credits on top of
+    | the plan base. Only one credit add-on active at a time per tenant.
+    | available_plans controls which plan tiers can purchase each pack.
+    |
+    */
+
+    'addons' => [
+        [
+            'id' => 'credits_500',
+            'credits' => 500,
+            'stripe_price_id' => env('STRIPE_PRICE_CREDITS_500'),
+            'monthly_price' => 29,
+            'available_plans' => ['starter', 'pro', 'business'],
+        ],
+        [
+            'id' => 'credits_2000',
+            'credits' => 2000,
+            'stripe_price_id' => env('STRIPE_PRICE_CREDITS_2000'),
+            'monthly_price' => 89,
+            'available_plans' => ['pro', 'business'],
+        ],
+        [
+            'id' => 'credits_10000',
+            'credits' => 10000,
+            'stripe_price_id' => env('STRIPE_PRICE_CREDITS_10000'),
+            'monthly_price' => 349,
+            'available_plans' => ['business'],
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Warning Thresholds (percentage of credits used)
+    |--------------------------------------------------------------------------
+    |
+    | 80 — in-app warning banner
+    | 90 — stronger warning + email to tenant admins
+    | 100 — premium AI actions paused, one-click top-up CTA
+    |
+    */
+
+    'warning_thresholds' => [80, 90, 100],
+];
