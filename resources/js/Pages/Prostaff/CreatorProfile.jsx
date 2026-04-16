@@ -317,7 +317,7 @@ export default function CreatorProfile({
         <div className="relative min-h-[100dvh] overflow-x-hidden bg-[#0B0B0D] pb-28 sm:pb-16">
             <AppHead title={`${creator.name} — Creators`} />
 
-            <div className="absolute left-0 right-0 top-0 z-50 overflow-visible">
+            <div className="absolute left-0 right-0 top-0 z-[40] overflow-visible">
                 <AppNav brand={activeBrand} tenant={tenant} variant="transparent" />
             </div>
 

@@ -133,7 +133,7 @@ export default function CreateCollectionModal({ open, onClose, onCreated }) {
 
     if (!open) return null
 
-    /** Portal + z above AppNav (z-[140]) and AssetDrawer (z-[200]) so backdrop covers full viewport. */
+    /** Portal + z above AppNav (z-[40]) and AssetDrawer so backdrop covers full viewport. */
     const dialog = (
         <div className="fixed inset-0 z-[220] isolate overflow-y-auto" aria-labelledby="modal-title" role="dialog" aria-modal="true">
             <div className="flex min-h-full items-end justify-center p-4 text-center sm:items-center sm:p-0">

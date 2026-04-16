@@ -1,0 +1,24 @@
+---
+description: Z-index layering convention for consistent stacking across the app
+globs: "**/*.jsx"
+alwaysApply: false
+---
+
+# Z-Index Layering Scale
+
+Fixed scale — use these layers, never invent new arbitrary values.
+
+| Layer | z-value | Usage |
+|-------|---------|-------|
+| Content | `z-10` | Elevated page content (sticky headers within a section) |
+| Nav | `z-[40]` | AppNav, agency strip (`z-[41]`), mobile bottom nav |
+| Overlay | `z-50` | Standard modals, drawers, popovers, confirmation dialogs |
+| Stacked | `z-[60]` | Modal-on-modal (e.g. confirm inside a drawer) |
+| Lightbox | `z-[100]` | Fullscreen media viewers and their sub-modals |
+
+## Rules
+
+- **Nav must never block overlays.** The nav sits at `z-[40]`; any `z-50` modal naturally covers it.
+- **Never use `z-[140]`+** for navigation. That was the old convention and caused every popup to need inflation.
+- Pages that wrap `<AppNav variant="transparent">` in an absolute container should use `z-[40]` on that wrapper.
+- If a new overlay needs to stack above another overlay, go one tier up (e.g. `z-[60]`), don't jump to `z-[200]`.

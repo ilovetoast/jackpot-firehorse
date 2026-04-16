@@ -179,7 +179,7 @@ export default function AssetDetailDrawer({ asset, onClose }) {
                 aria-hidden="true"
             />
 
-            {/* Drawer panel - slides in from right (z above AppNav agency strip z-[60] and main nav z-50) */}
+            {/* Drawer panel - slides in from right (z above AppNav z-[40]) */}
             <div
                 ref={drawerRef}
                 className={`fixed inset-y-0 right-0 z-[80] w-full max-w-md bg-white shadow-xl transform transition-transform duration-300 ease-in-out overflow-y-auto ${

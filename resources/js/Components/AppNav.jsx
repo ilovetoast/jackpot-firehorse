@@ -848,7 +848,7 @@ export default function AppNav({
               Do not use this wrapper to inject non-agency top rows — basic companies must see a single nav stack.
             */}
             <div
-                className={variant === 'transparent' ? 'relative z-[140] flex flex-col overflow-visible' : undefined}
+                className={variant === 'transparent' ? 'relative z-[40] flex flex-col overflow-visible' : undefined}
                 onMouseEnter={variant === 'transparent' ? () => setNavHovered(true) : undefined}
                 onMouseLeave={variant === 'transparent' ? () => setNavHovered(false) : undefined}
             >
@@ -867,7 +867,7 @@ export default function AppNav({
             */}
             {agencyStripVisible && (
                 <div
-                    className={`relative z-[150] flex items-center transition-colors duration-300 ${
+                    className={`relative z-[41] flex items-center transition-colors duration-300 ${
                         isCinematicNav ? 'text-white/90' : 'text-slate-800'
                     }`}
                     style={{
@@ -947,7 +947,7 @@ export default function AppNav({
             )}
 
             <nav
-                className={`relative z-[140] overflow-visible app-nav ${isExternalCollectionChrome ? 'is-collection-only' : ''} ${variant === 'transparent' ? '' : 'shadow-sm'}`}
+                className={`relative z-[40] overflow-visible app-nav ${isExternalCollectionChrome ? 'is-collection-only' : ''} ${variant === 'transparent' ? '' : 'shadow-sm'}`}
                 style={{
                     ...(isCinematicNav && cinematicNavSurfaceStyle ? cinematicNavSurfaceStyle : { backgroundColor: navColor, transition: cinematicSurfaceTransition }),
                     ...(isExternalCollectionChrome ? { '--collection-only-user': '1' } : {}),
@@ -1444,7 +1444,10 @@ export default function AppNav({
                 </>
             )}
 
-            {/* Mobile PWA bottom app navigation */}
+            </nav>
+            </div>
+
+            {/* Mobile PWA bottom app navigation — rendered outside <nav> to avoid backdrop-filter containing block */}
             {isAppPage && !isExternalCollectionChrome && !isAdminPage && !hideWorkspaceAppNav && (() => {
                 const isOnOverview = currentUrl === '/app/overview' || currentUrl.startsWith('/app/overview')
                 const isOnCreators =
@@ -1455,7 +1458,7 @@ export default function AppNav({
                     currentUrl.startsWith('/app/manage') ||
                     Boolean(isOnCreators)
                 return (
-                    <div className={`fixed inset-x-0 bottom-0 z-[95] sm:hidden safe-area-pb ${
+                    <div className={`fixed inset-x-0 bottom-0 z-[40] sm:hidden safe-area-pb ${
                         isDarkNav
                             ? 'border-t border-white/10 bg-[#0B0B0D]/90 backdrop-blur'
                             : 'border-t border-gray-200 bg-white/95 backdrop-blur'
@@ -1485,8 +1488,6 @@ export default function AppNav({
                     </div>
                 )
             })()}
-            </nav>
-            </div>
         </div>
     )
 }

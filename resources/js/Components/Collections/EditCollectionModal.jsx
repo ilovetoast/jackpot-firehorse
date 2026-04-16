@@ -413,7 +413,7 @@ export default function EditCollectionModal({
 
     if (!open) return null
 
-    /** Portal + z above AppNav (z-[140]) and AssetDrawer (z-[200]) so backdrop covers full viewport. */
+    /** Portal + z above AppNav (z-[40]) and AssetDrawer so backdrop covers full viewport. */
     const dialog = (
         <div
             className="fixed inset-0 z-[220] isolate overflow-y-auto"
