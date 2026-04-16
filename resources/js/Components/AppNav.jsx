@@ -681,7 +681,6 @@ export default function AppNav({
         {
             href: '/app/overview',
             label: 'Overview',
-            shortLabel: 'Overview',
             icon: HomeIcon,
             isActive: (url) => {
                 if (url === '/app/overview' || url.startsWith('/app/overview')) return true
@@ -691,10 +690,9 @@ export default function AppNav({
                 return false
             },
         },
-        { href: '/app/assets', label: 'Assets', shortLabel: 'Assets', icon: PhotoIcon, isActive: (url) => url.startsWith('/app/assets') && !url.startsWith('/app/executions') },
-        { href: '/app/executions', label: DELIVERABLES_PAGE_LABEL, shortLabel: 'Exec', icon: Squares2X2Icon, isActive: (url) => url.startsWith('/app/executions') },
-        { href: '/app/generative', label: 'Generate', shortLabel: 'Gen', icon: SparklesIcon, isActive: (url) => url.startsWith('/app/generative') },
-        { href: '/app/collections', label: 'Collections', shortLabel: 'Coll', icon: FolderIcon, isActive: (url) => url.startsWith('/app/collections') },
+        { href: '/app/assets', label: 'Assets', icon: PhotoIcon, isActive: (url) => url.startsWith('/app/assets') && !url.startsWith('/app/executions') },
+        { href: '/app/executions', label: 'Executions', icon: Squares2X2Icon, isActive: (url) => url.startsWith('/app/executions') },
+        { href: '/app/collections', label: 'Collections', icon: FolderIcon, isActive: (url) => url.startsWith('/app/collections') },
     ]
 
     /**
@@ -1462,8 +1460,8 @@ export default function AppNav({
                             ? 'border-t border-white/10 bg-[#0B0B0D]/90 backdrop-blur'
                             : 'border-t border-gray-200 bg-white/95 backdrop-blur'
                     }`}>
-                        <nav className="grid grid-cols-5 gap-0 min-w-0 px-1 py-2.5" aria-label="App navigation">
-                            {mobileAppNavItems.map(({ href, label, shortLabel, icon: Icon, isActive }) => {
+                        <nav className="grid grid-cols-4 gap-0 min-w-0 px-1 py-2.5" aria-label="App navigation">
+                            {mobileAppNavItems.map(({ href, label, icon: Icon, isActive }) => {
                                 const active = isActive(currentUrl)
                                 return (
                                     <Link
@@ -1479,7 +1477,7 @@ export default function AppNav({
                                         style={active && !isDarkNav ? { color: activeBrand?.primary_color || '#4338ca' } : undefined}
                                     >
                                         <Icon className="h-5 w-5 flex-shrink-0" aria-hidden="true" />
-                                        <span className="leading-none truncate w-full text-center">{shortLabel}</span>
+                                        <span className="leading-none truncate w-full text-center">{label}</span>
                                     </Link>
                                 )
                             })}

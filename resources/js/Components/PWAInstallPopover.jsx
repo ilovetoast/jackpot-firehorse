@@ -98,7 +98,7 @@ export default function PWAInstallPopover({ auth }) {
 
     return (
         <div
-            className="fixed inset-0 z-[100] flex items-start justify-center pt-4 px-4 sm:pt-6 sm:px-6"
+            className="fixed inset-0 z-[200] flex items-start justify-center pt-4 px-4 sm:pt-6 sm:px-6"
             role="dialog"
             aria-modal="true"
             aria-labelledby="pwa-install-title"

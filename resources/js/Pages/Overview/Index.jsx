@@ -476,11 +476,12 @@ export default function Overview() {
                             >
                             <motion.div
                                 ref={overviewContentRef}
-                                className={`flex w-full min-w-0 max-w-full flex-col justify-start space-y-3 pb-28 ${mobileTopPaddingClass} sm:space-y-5 sm:pb-24 lg:mx-0 lg:max-w-[50%] lg:space-y-5 lg:pb-16 lg:min-h-0`}
+                                className={`flex w-full min-w-0 max-w-full flex-col pb-28 min-h-full ${mobileTopPaddingClass} sm:pb-24 lg:mx-0 lg:max-w-[50%] lg:pb-16 lg:min-h-0`}
                                 initial={{ opacity: 0, y: 10 }}
                                 animate={{ opacity: 1, y: 0 }}
                                 transition={{ duration: 0.4 }}
                             >
+                            <div className="space-y-3 sm:space-y-5 lg:space-y-5">
                                 <div className="animate-fadeInUp space-y-2 sm:space-y-3">
                                     <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
                                         <div className="min-w-0">
@@ -711,13 +712,17 @@ export default function Overview() {
                                     />
                                 )}
 
-                                <PrimaryActions
-                                    permissions={permissions}
-                                    brand={activeBrand}
-                                    brandColor={brandColor}
-                                    iconAccentColor={overviewIconColor}
-                                    authUserId={authFromPage?.user?.id ?? null}
-                                />
+                            </div>
+
+                                <div className="mt-auto pt-3 sm:pt-5 lg:mt-0">
+                                    <PrimaryActions
+                                        permissions={permissions}
+                                        brand={activeBrand}
+                                        brandColor={brandColor}
+                                        iconAccentColor={overviewIconColor}
+                                        authUserId={authFromPage?.user?.id ?? null}
+                                    />
+                                </div>
                             </motion.div>
                             </div>
 
