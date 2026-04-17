@@ -423,7 +423,7 @@ export function defaultCompositionName(doc: DocumentModel): string {
 }
 
 /** Same-origin URL for streaming original bytes (works in <img> after SW bypass for this path). */
-function editorBridgeFileUrlForAssetId(assetId: string): string {
+export function editorBridgeFileUrlForAssetId(assetId: string): string {
     const path = `/app/api/assets/${encodeURIComponent(assetId)}/file`
     if (typeof window !== 'undefined' && window.location?.origin) {
         return `${window.location.origin}${path}`

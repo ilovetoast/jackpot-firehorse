@@ -3,6 +3,7 @@
 namespace App\Providers;
 
 use App\Http\Middleware\EnsureIncubationWorkspaceNotLocked;
+use App\Http\Middleware\EnsureOnboardingComplete;
 use App\Support\SentryTracesSampler;
 use App\Contracts\ImageEmbeddingServiceInterface;
 use App\Events\AssetPendingApproval;
@@ -45,9 +46,13 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        // Cached routes (route:cache) or rolling deploys may still reference this middleware by string.
-        // Without an alias, the container treats "incubation.not_locked" as a class name and throws.
+        // Cached routes (route:cache) or rolling deploys may still reference these middleware by string.
+        // Without a container alias, the router's fallback path treats the string as a class name and
+        // Container::build throws "Target class [...] does not exist". The $middleware->alias() map in
+        // bootstrap/app.php handles the normal path; these are belt-and-suspenders for rolling deploys
+        // and stale OPcache where that map hasn't reloaded yet.
         $this->app->alias(EnsureIncubationWorkspaceNotLocked::class, 'incubation.not_locked');
+        $this->app->alias(EnsureOnboardingComplete::class, 'ensure.onboarding');
 
         $this->app->singleton(AIProviderInterface::class, function ($app) {
             $defaultProviderName = config('ai.default_provider', 'openai');

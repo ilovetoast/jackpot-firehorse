@@ -231,8 +231,15 @@ class EditorAssetBridgeController extends Controller
             return $this->streamS3KeyToResponse($asset, $path, 'private, max-age=3600');
         }
 
+        // No rasterized thumbnail exists: fall back to streaming the original bytes when the browser
+        // can render them directly in <img>. This covers common-case PNG/JPEG/WebP uploads whose
+        // thumbnail job hasn't run yet, AND SVGs (always renderable inline) even if the DB row has
+        // a funky mime_type (application/octet-stream, null, etc.).
         $mime = strtolower((string) ($asset->mime_type ?? ''));
-        if (str_starts_with($mime, 'image/') && $asset->storage_root_path && $asset->storageBucket) {
+        $ext = strtolower(pathinfo((string) ($asset->original_filename ?? ''), PATHINFO_EXTENSION));
+        $isSvg = $mime === 'image/svg+xml' || $ext === 'svg';
+        $canStreamOriginal = str_starts_with($mime, 'image/') || $isSvg;
+        if ($canStreamOriginal && $asset->storage_root_path && $asset->storageBucket) {
             return $this->streamS3KeyToResponse($asset, $asset->storage_root_path, 'private, max-age=300');
         }
 
@@ -270,7 +277,12 @@ class EditorAssetBridgeController extends Controller
             ->normalIntakeOnly()
             ->excludeBuilderStaged()
             ->where(function ($q) {
-                $q->where('mime_type', 'like', 'image/%');
+                // SVG logos are often ingested with a non-image mime (application/octet-stream,
+                // application/svg+xml, or null). Match by mime OR by .svg filename so they don't
+                // silently disappear from the editor's asset picker.
+                $q->where('mime_type', 'like', 'image/%')
+                    ->orWhere('mime_type', 'image/svg+xml')
+                    ->orWhere('original_filename', 'like', '%.svg');
             });
 
         $categoryFilterId = $request->query('category_id');

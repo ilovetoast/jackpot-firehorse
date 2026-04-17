@@ -55,6 +55,29 @@ async function pollForBrandIntelligence(assetId, { signal } = {}) {
 }
 
 /**
+ * Short "time ago" for scored_at timestamps. Falls back to a readable date if old.
+ * @param {string|null|undefined} iso
+ */
+function formatScoredAgo(iso) {
+    if (!iso) return null
+    const then = new Date(iso)
+    if (Number.isNaN(then.getTime())) return null
+    const diffMs = Date.now() - then.getTime()
+    const diffMin = Math.round(diffMs / 60000)
+    if (diffMin < 1) return 'just now'
+    if (diffMin < 60) return `${diffMin}m ago`
+    const diffH = Math.round(diffMin / 60)
+    if (diffH < 24) return `${diffH}h ago`
+    const diffD = Math.round(diffH / 24)
+    if (diffD < 14) return `${diffD}d ago`
+    try {
+        return then.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
+    } catch {
+        return then.toISOString().slice(0, 10)
+    }
+}
+
+/**
  * Preserve last BI payload in memory while the server row is cleared for a deep re-scan (avoid empty drawer flash).
  * @param {object|null|undefined} src
  */
@@ -86,6 +109,7 @@ export default function AssetBrandIntelligenceBlock({
 
     const [localBi, setLocalBi] = useState(null)
     const [rescoreLoading, setRescoreLoading] = useState(false)
+    const [rescoreMode, setRescoreMode] = useState(null)
     const [pollTimedOut, setPollTimedOut] = useState(false)
     const [feedbackSent, setFeedbackSent] = useState(false)
     const [feedbackLoading, setFeedbackLoading] = useState(false)
@@ -376,6 +400,7 @@ export default function AssetBrandIntelligenceBlock({
 
         flushSync(() => {
             setRescoreLoading(true)
+            setRescoreMode(null)
             setPollTimedOut(false)
         })
         try {
@@ -393,6 +418,13 @@ export default function AssetBrandIntelligenceBlock({
                 return
             }
 
+            try {
+                const body = await res.clone().json()
+                if (body?.mode) setRescoreMode(body.mode)
+            } catch {
+                // Response body already consumed or not JSON; ignore.
+            }
+
             const payload = await pollForBrandIntelligence(asset.id, { signal: controller.signal })
             if (controller.signal.aborted) {
                 return
@@ -408,6 +440,7 @@ export default function AssetBrandIntelligenceBlock({
         } finally {
             if (!controller.signal.aborted) {
                 setRescoreLoading(false)
+                setRescoreMode(null)
             }
         }
     }
@@ -552,7 +585,11 @@ export default function AssetBrandIntelligenceBlock({
             )}
             {rescoreLoading ? (
                 <p className="text-lg font-semibold text-slate-700" role="status" aria-live="polite">
-                    Analyzing brand alignment…
+                    {rescoreMode === 'pdf_render_then_score'
+                        ? 'Rendering PDF pages, then running deep brand scan…'
+                        : rescoreMode === 'full_pipeline'
+                            ? 'Re-running full analysis pipeline…'
+                            : 'Analyzing brand alignment…'}
                 </p>
             ) : (
                 <div className="mt-2">
@@ -649,13 +686,31 @@ export default function AssetBrandIntelligenceBlock({
                     Run deep PDF scan
                 </button>
             )}
+            {!rescoreLoading && !deepScanLoading && bi && (() => {
+                const scoredAgo = formatScoredAgo(bi?.scored_at)
+                const engine = bi?.engine_version
+                const scanMode = bi?.pdf_scan_mode
+                const categoryName = asset?.category?.name
+                const parts = []
+                if (scoredAgo) parts.push(`Scored ${scoredAgo}`)
+                if (categoryName) parts.push(categoryName)
+                if (isPdfAsset && scanMode) parts.push(`${scanMode === 'deep' ? 'Deep' : 'Standard'} PDF scan`)
+                if (engine) parts.push(`engine ${engine}`)
+                if (parts.length === 0) return null
+                return (
+                    <p className="mt-3 text-[11px] text-slate-500">
+                        {parts.join(' · ')}
+                    </p>
+                )
+            })()}
             {canRequestEbi && !rescoreLoading && !deepScanLoading && (
                 <button
                     type="button"
                     onClick={handleRescore}
                     disabled={rescoreLoading || deepScanLoading}
-                    className="mt-3 text-xs font-medium hover:opacity-90 disabled:opacity-50"
+                    className="mt-2 text-xs font-medium hover:opacity-90 disabled:opacity-50"
                     style={{ color: brandColor }}
+                    title={isPdfAsset && deepScanEligible ? 'Runs a deep multi-page PDF scan against your current category' : 'Runs all available checks against your current category'}
                 >
                     Re-score
                 </button>

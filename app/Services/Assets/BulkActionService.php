@@ -22,6 +22,7 @@ use App\Services\ActivityRecorder;
 use App\Services\AiTagPolicyService;
 use App\Services\AiUsageService;
 use App\Services\AssetVariantPathResolver;
+use App\Services\BrandIntelligence\BrandIntelligenceScheduleService;
 use App\Services\BulkMetadataService;
 use App\Services\FileTypeService;
 use App\Support\AssetVariant;
@@ -1140,6 +1141,8 @@ class BulkActionService
         $skipped = 0;
         $errors = [];
 
+        $scheduler = app(BrandIntelligenceScheduleService::class);
+
         foreach ($assets as $asset) {
             if (! Gate::forUser($user)->allows('view', $asset)) {
                 $skipped++;
@@ -1147,6 +1150,12 @@ class BulkActionService
                 continue;
             }
             try {
+                $previousCategory = $asset->resolveCategoryForTenant();
+                $previousType = $asset->type;
+                $previousEbiEnabled = $previousCategory instanceof \App\Models\Category
+                    ? $previousCategory->isEbiEnabled()
+                    : false;
+
                 $metadata = $asset->metadata ?? [];
                 $metadata['category_id'] = $category->id;
                 $asset->metadata = $metadata;
@@ -1154,6 +1163,30 @@ class BulkActionService
                 $asset->intake_state = 'normal';
                 $asset->builder_staged = false; // Clear builder_staged when classifying
                 $asset->save();
+
+                // Brand Intelligence: existing scores are asset-wide, not category-aware.
+                // When the classification moves the asset into a meaningfully different context,
+                // purge the cached score so the drawer reflects the new context instead of stale data.
+                $typeChanged = $previousType !== $category->asset_type;
+                $categoryChanged = $previousCategory?->id !== $category->id;
+                $destinationEbiEnabled = $category->isEbiEnabled();
+                $shouldInvalidate = $destinationEbiEnabled && (
+                    $typeChanged
+                    || ($categoryChanged && ! $previousEbiEnabled)
+                    || ($categoryChanged && $previousEbiEnabled)
+                );
+
+                if ($shouldInvalidate) {
+                    try {
+                        $scheduler->purgeAssetScoresAndDispatch($asset->fresh());
+                    } catch (\Throwable $e) {
+                        Log::warning('[BulkActionService] EBI score invalidation failed after reclassification', [
+                            'asset_id' => $asset->id,
+                            'error' => $e->getMessage(),
+                        ]);
+                    }
+                }
+
                 $processed++;
             } catch (\Throwable $e) {
                 Log::warning('[BulkActionService] Assign category failed', ['asset_id' => $asset->id, 'error' => $e->getMessage()]);

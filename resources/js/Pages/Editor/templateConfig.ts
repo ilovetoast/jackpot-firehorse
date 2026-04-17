@@ -61,7 +61,16 @@ const TEXT_BOOST: LayerBlueprint = {
     heightRatio: 0.35,
     xRatio: 0,
     yRatio: 0.65,
-    defaults: { fillKind: 'gradient', color: '#00000000', gradientTo: '#000000cc', gradientAngleDeg: 0 },
+    // Transparent → dark: keeps text readable over photography. The renderer requires
+    // `gradientStartColor` / `gradientEndColor`; plain `gradientTo` is ignored.
+    // angle 0 = gradient rises toward the top, so the dark side hugs the bottom (where the copy sits).
+    defaults: {
+        fillKind: 'gradient',
+        color: '#000000cc',
+        gradientStartColor: 'transparent',
+        gradientEndColor: '#000000cc',
+        gradientAngleDeg: 0,
+    },
 }
 
 const HEADLINE: LayerBlueprint = {
@@ -381,13 +390,13 @@ export const LAYOUT_STYLES: LayoutStyle[] = [
         buildLayers: (isVertical, isBanner) => {
             if (isVertical) return [
                 BG_LAYER,
-                { ...TEXT_BOOST, heightRatio: 0.2, yRatio: 0.8, defaults: { ...TEXT_BOOST.defaults, gradientTo: '#000000aa' } },
+                { ...TEXT_BOOST, heightRatio: 0.2, yRatio: 0.8, defaults: { ...TEXT_BOOST.defaults, gradientEndColor: '#000000aa' } },
                 { ...HEADLINE, yRatio: 0.84, widthRatio: 0.9, xRatio: 0.05, heightRatio: 0.08, defaults: { ...HEADLINE.defaults, fontSize: 36 } },
                 { ...LOGO, xRatio: 0.425, yRatio: 0.03, widthRatio: 0.15, heightRatio: 0.05 },
             ]
             return [
                 BG_LAYER,
-                { ...TEXT_BOOST, heightRatio: 0.25, yRatio: 0.75, defaults: { ...TEXT_BOOST.defaults, gradientTo: '#000000aa' } },
+                { ...TEXT_BOOST, heightRatio: 0.25, yRatio: 0.75, defaults: { ...TEXT_BOOST.defaults, gradientEndColor: '#000000aa' } },
                 { ...HEADLINE, yRatio: 0.78, widthRatio: 0.8, xRatio: 0.1, heightRatio: 0.1, defaults: { ...HEADLINE.defaults, fontSize: 40 } },
                 LOGO,
             ]
@@ -470,16 +479,29 @@ export function blueprintToLayers(
                     },
                 }
 
-            case 'fill':
+            case 'fill': {
+                const fillKind = (bp.defaults?.fillKind as 'solid' | 'gradient') ?? 'solid'
+                const color = (bp.defaults?.color as string) ?? brandPrimaryColor ?? '#6366f1'
+                // Support both the new (`gradientStartColor` / `gradientEndColor`) and legacy
+                // (`gradientTo`) blueprint shapes so older layout styles keep rendering correctly.
+                const legacyEnd = (bp.defaults?.gradientTo as string | undefined)
+                const gradientStartColor = fillKind === 'gradient'
+                    ? ((bp.defaults?.gradientStartColor as string | undefined) ?? 'transparent')
+                    : undefined
+                const gradientEndColor = fillKind === 'gradient'
+                    ? ((bp.defaults?.gradientEndColor as string | undefined) ?? legacyEnd ?? color)
+                    : undefined
                 return {
                     ...base,
                     type: 'fill' as const,
-                    fillKind: (bp.defaults?.fillKind as 'solid' | 'gradient') ?? 'solid',
-                    color: (bp.defaults?.color as string) ?? brandPrimaryColor ?? '#6366f1',
-                    gradientTo: (bp.defaults?.gradientTo as string) ?? undefined,
+                    fillKind,
+                    color,
+                    gradientStartColor,
+                    gradientEndColor,
                     gradientAngleDeg: (bp.defaults?.gradientAngleDeg as number) ?? 180,
                     borderRadius: (bp.defaults?.borderRadius as number) ?? undefined,
                 }
+            }
 
             case 'generative_image':
                 return {

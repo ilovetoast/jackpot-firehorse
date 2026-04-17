@@ -879,6 +879,14 @@ class Asset extends Model
 
         $bj = $row->breakdown_json ?? [];
 
+        $scoredAt = $row->updated_at ?? $row->created_at ?? null;
+        $pdfScanMode = null;
+        if (is_array($bj['debug'] ?? null)) {
+            $pdfScanMode = $bj['debug']['pdf_scan_mode_effective']
+                ?? $bj['debug']['pdf_scan_mode_requested']
+                ?? null;
+        }
+
         $payload = [
             'level' => $row->level,
             'confidence' => $row->confidence,
@@ -887,6 +895,10 @@ class Asset extends Model
             'signal_count' => $bj['signal_count'] ?? null,
             'signal_breakdown' => $bj['signal_breakdown'] ?? null,
             'reference_tier_usage' => $bj['reference_tier_usage'] ?? null,
+            'scored_at' => $scoredAt?->toIso8601String(),
+            'engine_version' => $row->engine_version,
+            'pdf_scan_mode' => is_string($pdfScanMode) ? $pdfScanMode : null,
+            'ai_used' => (bool) ($row->ai_used ?? false),
             'debug' => $this->hydrateBrandIntelligenceDebug(
                 is_array($bj['debug'] ?? null) ? $bj['debug'] : null,
                 $referenceAssetsById

@@ -84,6 +84,7 @@ import {
     parseDocumentFromApi,
     PLACEHOLDER_IMAGE_SRC,
     resolvedFillGradientStops,
+    editorBridgeFileUrlForAssetId,
 } from './documentModel'
 import FillGradientStopField from './FillGradientStopField'
 import { TEMPLATE_CATEGORIES, allFormats, blueprintToLayers, buildLayersForStyle, LAYOUT_STYLES, type TemplateFormat, type TemplateCategory, type LayoutStyleId } from './templateConfig'
@@ -195,6 +196,33 @@ function readStoredPropertiesPanelWidth(): number {
 const GENERATE_DEBOUNCE_MS = 400
 const COPY_ASSIST_DEBOUNCE_MS = 400
 const TEXT_INPUT_DEBOUNCE_MS = 140
+/**
+ * Rough luminance of a CSS hex color (`#rgb`, `#rrggbb`, or `#rrggbbaa`).
+ * Returns a 0–1 value; white ≈ 1, black ≈ 0. Non-hex inputs return 0.5 (treat as mid-tone).
+ * Used to decide whether a text-boost gradient needs to be forced dark to keep colored copy readable.
+ */
+function roughHexLuminance(hex: string | undefined | null): number {
+    if (typeof hex !== 'string') return 0.5
+    const trimmed = hex.trim()
+    if (!trimmed.startsWith('#')) return 0.5
+    const digits = trimmed.slice(1)
+    let r = 0, g = 0, b = 0
+    if (digits.length === 3) {
+        r = parseInt(digits[0] + digits[0], 16)
+        g = parseInt(digits[1] + digits[1], 16)
+        b = parseInt(digits[2] + digits[2], 16)
+    } else if (digits.length === 6 || digits.length === 8) {
+        r = parseInt(digits.slice(0, 2), 16)
+        g = parseInt(digits.slice(2, 4), 16)
+        b = parseInt(digits.slice(4, 6), 16)
+    } else {
+        return 0.5
+    }
+    if (Number.isNaN(r) || Number.isNaN(g) || Number.isNaN(b)) return 0.5
+    // Rec. 601 luma approximation — fine for contrast heuristics; we don't need WCAG precision here.
+    return (0.299 * r + 0.587 * g + 0.114 * b) / 255
+}
+
 /** Short relative-time label (e.g. "just now", "2m ago"). Used for the save-status indicator. */
 function formatSavedAgo(savedAt: number, now: number): string {
     const elapsedSec = Math.max(0, Math.floor((now - savedAt) / 1000))
@@ -948,6 +976,14 @@ export default function AssetEditor() {
     const [lastSavedSerialized, setLastSavedSerialized] = useState(() =>
         JSON.stringify(initialDocumentRef.current!)
     )
+    /**
+     * Name that was last persisted to the server. Paired with `lastSavedSerialized` so renaming the
+     * composition (without touching the canvas) still flips `dirty`, triggers autosave, and lights up
+     * the "Unsaved" indicator — otherwise rename-only edits would silently never be saved.
+     */
+    const [lastSavedName, setLastSavedName] = useState<string>(() =>
+        defaultCompositionName(createInitialDocument())
+    )
     const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
     const [saveError, setSaveError] = useState<string | null>(null)
     /** Wall-clock of the last successful save of any kind; used for "Saved Xs ago" indicator. */
@@ -1230,8 +1266,10 @@ export default function AssetEditor() {
     }, [pickerCategories, pickerScope])
 
     const dirty = useMemo(
-        () => JSON.stringify(document) !== lastSavedSerialized,
-        [document, lastSavedSerialized]
+        () =>
+            JSON.stringify(document) !== lastSavedSerialized
+            || compositionName.trim() !== lastSavedName.trim(),
+        [document, lastSavedSerialized, compositionName, lastSavedName]
     )
 
     /** True when there is something worth warning about before navigate / reset (not a fresh empty canvas). */
@@ -1383,6 +1421,7 @@ export default function AssetEditor() {
                 flushSync(() => {
                     setCompositionId(c.id)
                     setCompositionName(c.name)
+                    setLastSavedName(c.name ?? '')
                     setDocument(doc)
                     setLastSavedSerialized(JSON.stringify(doc))
                     setSelectedLayerId(null)
@@ -1454,6 +1493,7 @@ export default function AssetEditor() {
                     }
 
                     setLastSavedSerialized(serialized)
+                    setLastSavedName(name)
                     setLastSavedAt(Date.now())
                     setSaveState('saved')
                 } catch (e) {
@@ -1919,7 +1959,9 @@ export default function AssetEditor() {
                 const c = await postComposition(nameToSave, docSnapshot, { thumbnailPngBase64: thumb })
                 const doc = parseDocumentFromApi(c.document)
                 setCompositionId(c.id)
-                setCompositionName(c.name?.trim() ? c.name : UNTITLED_DRAFT_NAME)
+                const resolvedName = c.name?.trim() ? c.name : UNTITLED_DRAFT_NAME
+                setCompositionName(resolvedName)
+                setLastSavedName(resolvedName)
                 setDocument(doc)
                 const serialized = JSON.stringify(doc)
                 setLastSavedSerialized(serialized)
@@ -1935,6 +1977,7 @@ export default function AssetEditor() {
                 })
                 const serialized = JSON.stringify(documentRef.current)
                 setLastSavedSerialized(serialized)
+                setLastSavedName(nameToSave)
                 lastAutosaveSnapshotSerializedRef.current = serialized
             }
             // Manual save resets the autosave-snapshot clock: no point creating an
@@ -1998,6 +2041,7 @@ export default function AssetEditor() {
                 const d = parseDocumentFromApi(c.document)
                 setCompositionId(c.id)
                 setCompositionName(c.name)
+                setLastSavedName(c.name ?? '')
                 setDocument(d)
                 setLastSavedSerialized(JSON.stringify(d))
                 replaceUrlCompositionParam(c.id)
@@ -2019,6 +2063,7 @@ export default function AssetEditor() {
             const d = parseDocumentFromApi(c.document)
             setCompositionId(c.id)
             setCompositionName(c.name)
+            setLastSavedName(c.name ?? '')
             setDocument(d)
             setLastSavedSerialized(JSON.stringify(d))
             replaceUrlCompositionParam(c.id)
@@ -2146,9 +2191,11 @@ export default function AssetEditor() {
             if (!ok) return
         }
         const fresh = createInitialDocument()
+        const freshName = defaultCompositionName(fresh)
         flushSync(() => {
             setCompositionId(null)
-            setCompositionName(defaultCompositionName(fresh))
+            setCompositionName(freshName)
+            setLastSavedName(freshName)
             setDocument(fresh)
             setLastSavedSerialized(JSON.stringify(fresh))
             setSelectedLayerId(null)
@@ -3475,7 +3522,7 @@ export default function AssetEditor() {
                     const bgAssignment = assignments.find(a => a.role === 'background')
                     if (bgAssignment?.source === 'use_asset' && bgAssignment.asset_id) {
                         genLayer.type = 'image'
-                        genLayer.src = `/app/api/assets/${bgAssignment.asset_id}/thumbnail?style=large`
+                        genLayer.src = editorBridgeFileUrlForAssetId(bgAssignment.asset_id)
                         genLayer.assetId = bgAssignment.asset_id
                         genLayer.objectFit = 'cover'
                         genLayer.opacity = 1
@@ -3506,10 +3553,52 @@ export default function AssetEditor() {
                                 fillLayer.gradientEndColor = ctaBg
                             }
                         }
-                    } else if (ai.overlay_color) {
-                        if (fillLayer.gradientTo) {
-                            fillLayer.gradientTo = ai.overlay_color
+                    } else if (fillName.includes('boost') || fillName.includes('overlay')) {
+                        // Text-boost gradient: keeps headline/subheadline readable over background imagery.
+                        // Rules:
+                        //  - Always ensure the gradient has a transparent start + a visible end, otherwise
+                        //    legacy renderer collapses to invisible.
+                        //  - Honor AI's overlay_color suggestion, BUT if the headline or subheadline is colored
+                        //    (i.e. brand primary, not white/black), the overlay MUST be dark enough to contrast
+                        //    with vivid text. A pale overlay behind brand-orange/red/etc. reads as a wash.
+                        const headlineLum = roughHexLuminance(palette.headline_color)
+                        const subLum = roughHexLuminance(palette.subheadline_color)
+                        const headlineIsColored =
+                            typeof palette.headline_color === 'string'
+                            && palette.headline_color.length > 0
+                            && headlineLum > 0.15
+                            && headlineLum < 0.95
+                        const subIsColored =
+                            typeof palette.subheadline_color === 'string'
+                            && palette.subheadline_color.length > 0
+                            && subLum > 0.15
+                            && subLum < 0.95
+                        const textIsColored = headlineIsColored || subIsColored
+
+                        const aiOverlay = typeof ai.overlay_color === 'string' && ai.overlay_color.trim()
+                            ? ai.overlay_color.trim()
+                            : null
+                        const aiOverlayLum = aiOverlay ? roughHexLuminance(aiOverlay) : null
+
+                        let endColor: string
+                        if (textIsColored) {
+                            // Colored headline/subhead on top: force a dark overlay for contrast,
+                            // regardless of what the AI suggested.
+                            endColor = '#000000cc'
+                        } else if (aiOverlay && aiOverlayLum !== null) {
+                            // White/black text: trust AI's overlay suggestion.
+                            endColor = aiOverlay
+                        } else {
+                            // No AI overlay and neutral text: fall back to a dark overlay (safer default).
+                            endColor = fillLayer.gradientEndColor || '#000000cc'
                         }
+
+                        fillLayer.fillKind = 'gradient'
+                        fillLayer.gradientStartColor = fillLayer.gradientStartColor ?? 'transparent'
+                        fillLayer.gradientEndColor = endColor
+                        // Keep the solid-toggle fallback color aligned with the gradient end,
+                        // so toggling fillKind in the UI doesn't surprise the user.
+                        fillLayer.color = endColor
                     }
                 }
 
@@ -3520,9 +3609,11 @@ export default function AssetEditor() {
                     const heroMatch = assignments.find(a => a.role === 'hero_image')
                     const logoMatch = assignments.find(a => a.role === 'logo')
 
-                    // Use /thumbnail endpoint: gives rasterized WebP for SVGs (reliable display),
-                    // falls back to the original file for other formats.
-                    const assetUrl = (id: string) => `/app/api/assets/${id}/thumbnail?style=large`
+                    // Use /file endpoint (streams original bytes). Browsers render SVG natively in <img>
+                    // and the backend rasterizes TIFF/HEIC to a thumbnail. The /thumbnail endpoint 404s
+                    // whenever a rasterized WebP isn't in metadata (fresh uploads, SVGs with a non-image/* MIME),
+                    // which silently breaks AI-assigned logos and hero images on the canvas.
+                    const assetUrl = (id: string) => editorBridgeFileUrlForAssetId(id)
 
                     if (roleName.includes('product') || roleName.includes('hero')) {
                         if (heroMatch?.asset_id) {
@@ -4378,6 +4469,7 @@ export default function AssetEditor() {
                                                                             flushSync(() => {
                                                                                 setCompositionId(null)
                                                                                 setCompositionName(fmt.name)
+                                                                                setLastSavedName(fmt.name)
                                                                                 setDocument(fresh)
                                                                                 setLastSavedSerialized(JSON.stringify(fresh))
                                                                                 setSelectedLayerId(null)
@@ -8130,6 +8222,15 @@ export default function AssetEditor() {
                                                     alt=""
                                                     className="h-full w-full object-cover"
                                                     loading="lazy"
+                                                    onError={(e) => {
+                                                        // SVG logos and freshly uploaded assets often 404 on /thumbnail before
+                                                        // the rasterized WebP lands; swap to the /file endpoint which streams
+                                                        // original bytes (SVG renders natively in <img>).
+                                                        const img = e.currentTarget
+                                                        if (a.file_url && img.src !== a.file_url) {
+                                                            img.src = a.file_url
+                                                        }
+                                                    }}
                                                 />
                                             </div>
                                             <span className="truncate px-1 py-1 text-[10px] text-gray-700 dark:text-gray-300">
@@ -8186,9 +8287,11 @@ export default function AssetEditor() {
                         created_at: new Date().toISOString(),
                         updated_at: new Date().toISOString(),
                     }
+                    const resolvedName = name || fmt.name
                     flushSync(() => {
                         setCompositionId(null)
-                        setCompositionName(name || fmt.name)
+                        setCompositionName(resolvedName)
+                        setLastSavedName(resolvedName)
                         setDocument(fresh)
                         setLastSavedSerialized(JSON.stringify(fresh))
                         setSelectedLayerId(null)

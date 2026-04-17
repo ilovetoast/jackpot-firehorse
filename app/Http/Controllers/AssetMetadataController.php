@@ -16,6 +16,7 @@ use App\Enums\ThumbnailStatus;
 use App\Enums\TicketCategory;
 use App\Enums\TicketStatus;
 use App\Enums\TicketType;
+use App\Jobs\FullPdfExtractionJob;
 use App\Jobs\GenerateAssetEmbeddingJob;
 use App\Jobs\GenerateThumbnailsJob;
 use App\Jobs\PopulateAutomaticMetadataJob;
@@ -23,6 +24,7 @@ use App\Jobs\ProcessAssetJob;
 use App\Jobs\PromoteAssetJob;
 use App\Enums\PdfBrandIntelligenceScanMode;
 use App\Jobs\ScoreAssetBrandIntelligenceJob;
+use App\Services\BrandIntelligence\VisualEvaluationSourceResolver;
 use App\Models\ActivityEvent;
 use App\Models\Asset;
 use App\Models\AssetEmbedding;
@@ -1145,7 +1147,16 @@ class AssetMetadataController extends Controller
     }
 
     /**
-     * Manually trigger brand compliance rescore for an asset.
+     * Manually trigger a full brand compliance rescore for an asset.
+     *
+     * Runs the strongest evaluation available:
+     *  - Deletes cached asset-level scores (idempotent rows).
+     *  - forceRun = true bypasses category EBI gating so the user gets a result regardless of category state.
+     *  - For PDFs with multiple rendered pages, auto-selects Deep scan mode.
+     *  - For PDFs with no rendered rasters yet, chains {@see FullPdfExtractionJob} first so the scoring pass has
+     *    something to look at (renders all pages up to the platform limit), then runs Deep.
+     *  - For images missing an embedding, kicks the full pipeline so style comparison works after rescoring.
+     *
      * POST /assets/{asset}/rescore
      */
     public function rescore(Asset $asset): JsonResponse
@@ -1163,30 +1174,88 @@ class AssetMetadataController extends Controller
             return $blocked;
         }
 
+        $fresh = Asset::query()
+            ->whereKey($asset->id)
+            ->with(['category'])
+            ->firstOrFail();
+
         // Clear idempotent rows so re-score always runs; forceRun bypasses category ebi_enabled for manual runs.
-        BrandIntelligenceScore::where('asset_id', $asset->id)
-            ->where('brand_id', $asset->brand_id)
+        BrandIntelligenceScore::where('asset_id', $fresh->id)
+            ->where('brand_id', $fresh->brand_id)
             ->whereNull('execution_id')
             ->delete();
 
         try {
             ActivityRecorder::logAsset(
-                $asset,
+                $fresh,
                 EventType::ASSET_BRAND_COMPLIANCE_REQUESTED,
                 [],
                 Auth::user()
             );
         } catch (\Exception $e) {
             Log::error('Failed to log brand compliance requested event', [
-                'asset_id' => $asset->id,
+                'asset_id' => $fresh->id,
                 'error' => $e->getMessage(),
             ]);
         }
 
-        // Re-score stays on standard PDF scan mode (single page) by design — predictable cost; deep scan is explicit only.
-        ScoreAssetBrandIntelligenceJob::dispatch($asset->id, true);
+        $mime = strtolower((string) ($fresh->mime_type ?? ''));
+        $isPdf = $mime === 'application/pdf';
+        $resolver = app(VisualEvaluationSourceResolver::class);
+        $eligibility = PdfBrandIntelligenceScanGates::deepScanEligibility($fresh, $resolver);
+        $rasterCount = (int) ($eligibility['raster_page_count'] ?? 0);
 
-        return response()->json(['status' => 'queued']);
+        $pdfNeedsRender = $isPdf && $rasterCount === 0;
+
+        $isImage = \App\Services\ImageEmbeddingService::isImageMimeType($fresh->mime_type, $fresh->original_filename);
+        $hasEmbedding = AssetEmbedding::where('asset_id', $fresh->id)->exists();
+        $imageNeedsPipeline = $isImage && ! $hasEmbedding;
+
+        // Deep scan mode whenever PDF with multi-page rasters is available, or will be after extraction.
+        $scanMode = $isPdf ? PdfBrandIntelligenceScanMode::Deep : PdfBrandIntelligenceScanMode::Standard;
+
+        $mode = 'score_only';
+
+        if ($pdfNeedsRender) {
+            // Chain: render every page (FullPdfExtractionJob) → score with Deep mode using the freshly-rendered rasters.
+            // ScoreAssetBrandIntelligenceJob is idempotent-by-engine-version but we just deleted the row, so it will run.
+            Bus::chain([
+                new FullPdfExtractionJob($fresh->id),
+                new ScoreAssetBrandIntelligenceJob($fresh->id, true, PdfBrandIntelligenceScanMode::Deep->value),
+            ])->dispatch();
+            $mode = 'pdf_render_then_score';
+        } elseif ($imageNeedsPipeline) {
+            // Image missing its embedding — run the full processing pipeline which ends with EBI scoring.
+            // We don't force scan mode here because image rescoring doesn't use PDF scan modes.
+            ProcessAssetJob::dispatch($fresh->id)->onQueue(config('queue.images_queue', 'images'));
+            $mode = 'full_pipeline';
+        } else {
+            ScoreAssetBrandIntelligenceJob::dispatch($fresh->id, true, $scanMode->value);
+        }
+
+        Log::info('[EBI] rescore_dispatched', [
+            'asset_id' => $fresh->id,
+            'tenant_id' => $fresh->tenant_id,
+            'brand_id' => $fresh->brand_id,
+            'mode' => $mode,
+            'pdf_scan_mode_requested' => $scanMode->value,
+            'raster_page_count' => $rasterCount,
+            'has_embedding' => $hasEmbedding,
+            'category_id' => $fresh->category?->id,
+            'category_ebi_enabled' => $fresh->category?->isEbiEnabled() ?? false,
+        ]);
+
+        return response()->json([
+            'status' => 'queued',
+            'mode' => $mode,
+            'pdf_scan_mode' => $scanMode->value,
+            'pdf_brand_intelligence' => $eligibility,
+            'category' => $fresh->category ? [
+                'id' => $fresh->category->id,
+                'name' => $fresh->category->name,
+                'ebi_enabled' => $fresh->category->isEbiEnabled(),
+            ] : null,
+        ]);
     }
 
     /**

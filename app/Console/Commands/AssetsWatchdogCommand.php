@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Enums\ThumbnailStatus;
 use App\Models\Asset;
 use App\Models\SupportTicket;
 use App\Services\Reliability\ReliabilityEngine;
@@ -11,7 +12,11 @@ use Illuminate\Console\Command;
  * Asset Processing Watchdog.
  *
  * Detects assets stuck in uploading or generating_thumbnails for > 10 minutes.
- * Records system incidents. Does NOT mutate assets automatically.
+ * Also detects failed thumbnails that still have retry budget remaining and
+ * failed-but-still-PROCESSING thumbnails that died past the worker timeout.
+ * Records system incidents so the auto-recover loop (ThumbnailRetryStrategy /
+ * JobRetryStrategy) can dispatch fresh jobs. Does NOT mutate assets itself
+ * except via {@see AssetStateReconciliationService} during reconcile.
  */
 class AssetsWatchdogCommand extends Command
 {
@@ -27,6 +32,39 @@ class AssetsWatchdogCommand extends Command
             ->whereIn('analysis_status', ['uploading', 'generating_thumbnails'])
             ->where('updated_at', '<', $cutoff)
             ->get();
+
+        // Thumbnails that failed but still have retry budget — the auto-recover loop will
+        // keep trying (ThumbnailRetryStrategy allows up to MAX_RETRIES per incident), but
+        // no incident exists today for this state, so the loop never engages. Emit one.
+        $maxRetries = (int) config('assets.thumbnail.max_retries', 3);
+        $thumbnailRetryCooldown = now()->subMinutes(5);
+        $failedWithRetriesLeft = Asset::whereNull('deleted_at')
+            ->where('thumbnail_status', ThumbnailStatus::FAILED)
+            ->where('thumbnail_retry_count', '<', $maxRetries)
+            ->where('updated_at', '<', $thumbnailRetryCooldown)
+            ->get();
+
+        // Thumbnails that have been in PROCESSING longer than the worker would ever run.
+        // ThumbnailTimeoutGuard is the canonical fixer; calling it here removes the
+        // dependency on a separately-scheduled `thumbnails:repair-stuck` run.
+        $processingStale = Asset::whereNull('deleted_at')
+            ->where('thumbnail_status', ThumbnailStatus::PROCESSING)
+            ->where(function ($q) {
+                $q->where('thumbnail_started_at', '<', now()->subMinutes(20))
+                    ->orWhere(function ($q2) {
+                        $q2->whereNull('thumbnail_started_at')
+                            ->where('updated_at', '<', now()->subMinutes(20));
+                    });
+            })
+            ->get();
+
+        foreach ($processingStale as $asset) {
+            try {
+                app(\App\Services\ThumbnailTimeoutGuard::class)->checkAndRepair($asset->fresh());
+            } catch (\Throwable $e) {
+                $this->warn("ThumbnailTimeoutGuard failed for asset {$asset->id}: {$e->getMessage()}");
+            }
+        }
 
         $recorded = 0;
 

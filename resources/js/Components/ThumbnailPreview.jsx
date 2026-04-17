@@ -112,26 +112,29 @@ export default function ThumbnailPreview({
         ? (asset?.thumbnail_url_large ?? asset?.final_thumbnail_url)
         : asset?.final_thumbnail_url
 
-    // SVG fallback: when no thumbnails exist, use the original SVG file (renders natively)
+    // SVG fallback: when no rasterized WebP thumbnail exists, use the original SVG file
+    // (vectors render natively in <img>). Prefer the crisp vector over LQIP blobs — for SVG
+    // an LQIP is usually an inferior preview and, worse, often 404s before the thumbnail job finishes.
     const lqipUrl = lqipPreviewUrlForAsset(asset)
 
-    const svgOriginalFallback = isSvg && !effectiveFinalUrl && !lqipUrl
+    const svgOriginalFallback = isSvg && !effectiveFinalUrl
         ? (asset?.original || null)
         : null
 
-    // Lock the URL on first render for grid, but allow updates for drawer
+    // Lock the URL on first render for grid, but allow updates for drawer.
+    // Priority for SVG: final > SVG original > LQIP. For everything else: final > LQIP.
     const [lockedUrl, setLockedUrl] = useState(() => {
-        // Determine initial URL: final > LQIP (images only) > SVG original > null
         const initialFinal = effectiveFinalUrl
         const initialPreview = lqipUrl
-        return initialFinal || initialPreview || svgOriginalFallback || null
+        if (initialFinal) return initialFinal
+        if (svgOriginalFallback) return svgOriginalFallback
+        return initialPreview || null
     })
-    
-    // Also lock the type (final vs preview) at mount time
+
     const [lockedType, setLockedType] = useState(() => {
         if (asset?.final_thumbnail_url) return 'final'
-        if (lqipUrl) return 'preview'
         if (svgOriginalFallback) return 'final'
+        if (lqipUrl) return 'preview'
         return null
     })
     
@@ -375,6 +378,16 @@ export default function ThumbnailPreview({
     const handleImageError = () => {
         if (activeThumbnailUrl) {
             failedThumbnailUrls.add(activeThumbnailUrl)
+        }
+        // Recovery path: an SVG whose rasterized thumbnail 404s should fall back to the original
+        // SVG bytes. Without this, the tile goes to the "unavailable" state even though the vector
+        // is perfectly renderable in <img>.
+        if (isSvg && asset?.original && lockedUrl !== asset.original) {
+            setLockedUrl(asset.original)
+            setLockedType('final')
+            setImageLoaded(false)
+            setImageError(false)
+            return
         }
         if (isPreview) {
             setImageLoaded(false)
