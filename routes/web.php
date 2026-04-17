@@ -162,6 +162,9 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
     Route::post('/companies/reset-session', [\App\Http\Controllers\CompanyController::class, 'resetSession'])->name('companies.reset-session');
     Route::post('/companies/{tenant}/switch', [\App\Http\Controllers\CompanyController::class, 'switch'])->name('companies.switch');
 
+    // Onboarding: verify email gate (no tenant required — user may not have context yet)
+    Route::get('/verify-email', [\App\Http\Controllers\OnboardingController::class, 'verifyEmailGate'])->name('onboarding.verify-email');
+
     // Error pages
     // No companies error - doesn't require tenant (user has no companies)
     Route::get('/errors/no-companies', [\App\Http\Controllers\ErrorController::class, 'noCompanies'])->name('errors.no-companies');
@@ -534,10 +537,30 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
     // Payment confirmation route for incomplete payments (Cashier-style)
     Route::get('/subscription/payment/{payment}', [\App\Http\Controllers\BillingController::class, 'payment'])->name('subscription.payment');
 
+    // Onboarding flow (tenant-scoped, exempt from onboarding redirect)
+    Route::middleware(['tenant'])->group(function () {
+        Route::get('/onboarding', [\App\Http\Controllers\OnboardingController::class, 'show'])->name('onboarding.show');
+        Route::post('/onboarding/brand-shell', [\App\Http\Controllers\OnboardingController::class, 'saveBrandShell'])->name('onboarding.brand-shell');
+        Route::post('/onboarding/starter-assets', [\App\Http\Controllers\OnboardingController::class, 'saveStarterAssets'])->name('onboarding.starter-assets');
+        Route::post('/onboarding/enrichment', [\App\Http\Controllers\OnboardingController::class, 'saveEnrichment'])->name('onboarding.enrichment');
+        Route::post('/onboarding/activate', [\App\Http\Controllers\OnboardingController::class, 'activate'])->name('onboarding.activate');
+        Route::post('/onboarding/complete', [\App\Http\Controllers\OnboardingController::class, 'complete'])->name('onboarding.complete');
+        Route::post('/onboarding/dismiss', [\App\Http\Controllers\OnboardingController::class, 'dismiss'])->name('onboarding.dismiss');
+        Route::post('/onboarding/dismiss-card', [\App\Http\Controllers\OnboardingController::class, 'dismissCard'])->name('onboarding.dismiss-card');
+        Route::post('/onboarding/upload-logo', [\App\Http\Controllers\OnboardingController::class, 'uploadLogo'])->name('onboarding.upload-logo');
+        Route::post('/onboarding/fetch-logo', [\App\Http\Controllers\OnboardingController::class, 'fetchLogoFromUrl'])->name('onboarding.fetch-logo');
+        Route::post('/onboarding/confirm-fetched-logo', [\App\Http\Controllers\OnboardingController::class, 'confirmFetchedLogo'])->name('onboarding.confirm-fetched-logo');
+        Route::get('/onboarding/status', [\App\Http\Controllers\OnboardingController::class, 'status'])->name('onboarding.status');
+        Route::post('/onboarding/upload-assets', [\App\Http\Controllers\OnboardingController::class, 'uploadStarterAssets'])->name('onboarding.upload-assets');
+        Route::post('/onboarding/upload-guideline', [\App\Http\Controllers\OnboardingController::class, 'uploadGuideline'])->name('onboarding.upload-guideline');
+        Route::post('/onboarding/category-preferences', [\App\Http\Controllers\OnboardingController::class, 'saveCategoryPreferences'])->name('onboarding.category-preferences');
+        Route::post('/onboarding/reset', [\App\Http\Controllers\OnboardingController::class, 'resetOnboarding'])->name('onboarding.reset');
+    });
+
     // C12: RestrictCollectionOnlyUser gates collection-only users from dashboard/assets/collections/etc.
     Route::middleware(['tenant', \App\Http\Middleware\RestrictCollectionOnlyUser::class])->group(function () {
-        // Routes that require user to be within plan limit
-        Route::middleware('ensure.user.within.plan.limit')->group(function () {
+        // Routes that require user to be within plan limit + onboarding completion
+        Route::middleware(['ensure.user.within.plan.limit', 'ensure.onboarding'])->group(function () {
             Route::get('/overview', [\App\Http\Controllers\DashboardController::class, 'index'])->name('overview');
             Route::get('/overview/creator-progress', [\App\Http\Controllers\Prostaff\ProstaffDashboardController::class, 'creatorSelfProgress'])->name('overview.creator-progress');
             Route::get('/overview/insights', [\App\Http\Controllers\DashboardController::class, 'insightsJson'])->name('overview.insights');
@@ -642,6 +665,8 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
                 Route::post('/api/edit-image', [\App\Http\Controllers\Editor\EditorEditImageController::class, 'edit'])->name('api.editor.edit-image');
                 Route::get('/api/editor/brand-context', [\App\Http\Controllers\Editor\EditorBrandContextController::class, 'show'])->name('api.editor.brand-context');
                 Route::post('/api/generate-copy', [\App\Http\Controllers\Editor\EditorGenerateCopyController::class, 'store'])->name('api.editor.generate-copy');
+                Route::post('/api/generate-layout', [\App\Http\Controllers\Editor\EditorGenerateLayoutController::class, 'generate'])->name('api.editor.generate-layout');
+                Route::get('/api/editor/ai-credit-status', [\App\Http\Controllers\Editor\EditorGenerateLayoutController::class, 'creditStatus'])->name('api.editor.ai-credit-status');
 
                 // Compositions + version history
                 Route::get('/api/compositions/thumbnail/{asset}', [\App\Http\Controllers\Editor\EditorCompositionController::class, 'thumbnailAsset'])
@@ -865,6 +890,7 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
             Route::get('/brands/{brand}/research', [\App\Http\Controllers\BrandResearchController::class, 'show'])->name('brands.research.show');
             Route::post('/brands/{brand}/research/analyze', [\App\Http\Controllers\BrandResearchController::class, 'triggerAnalysis'])->name('brands.research.analyze');
             Route::post('/brands/{brand}/research/rerun', [\App\Http\Controllers\BrandResearchController::class, 'rerun'])->name('brands.research.rerun');
+            Route::post('/brands/{brand}/research/link-pdf', [\App\Http\Controllers\BrandResearchController::class, 'linkPdf'])->name('brands.research.link-pdf');
             Route::post('/brands/{brand}/research/advance-to-review', [\App\Http\Controllers\BrandResearchController::class, 'advanceToReview'])->name('brands.research.advance-to-review');
 
             // Brand Review (AI output validation)

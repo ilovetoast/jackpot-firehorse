@@ -73,7 +73,7 @@ final class ColorEvaluator implements DimensionEvaluatorInterface
 
             $score = 0.85;
             $confidence = 0.80;
-            if ($meanDeltaE !== null && $meanDeltaE <= 18.0) {
+            if ($meanDeltaE !== null && $meanDeltaE <= 20.0) {
                 $score = 0.95;
                 $confidence = 0.90;
             }
@@ -110,20 +110,35 @@ final class ColorEvaluator implements DimensionEvaluatorInterface
             );
         }
 
+        if ($meanDeltaE !== null && $meanDeltaE <= 52.0) {
+            $evidence[] = EvidenceItem::hard(
+                EvidenceSource::PALETTE_EXTRACTION,
+                'Extracted colors partially match brand palette' . $deltaLabel,
+            );
+
+            $score = $meanDeltaE <= 45.0 ? 0.55 : 0.40;
+            return new DimensionResult(
+                dimension: AlignmentDimension::COLOR,
+                status: DimensionStatus::PARTIAL,
+                score: $score,
+                confidence: 0.70,
+                primaryEvidenceSource: EvidenceSource::PALETTE_EXTRACTION,
+                evidence: $evidence,
+                blockers: ['Colors are close but not a strong palette match — verify intentional use'],
+                evaluable: true,
+                statusReason: 'Colors partially match brand palette' . $deltaLabel,
+            );
+        }
+
         $evidence[] = EvidenceItem::hard(
             EvidenceSource::PALETTE_EXTRACTION,
             'Extracted colors diverge from brand palette' . $deltaLabel,
         );
 
-        $score = 0.25;
-        if ($meanDeltaE !== null && $meanDeltaE <= 42.0) {
-            $score = 0.4;
-        }
-
         return new DimensionResult(
             dimension: AlignmentDimension::COLOR,
-            status: $score >= 0.35 ? DimensionStatus::WEAK : DimensionStatus::FAIL,
-            score: $score,
+            status: DimensionStatus::FAIL,
+            score: 0.15,
             confidence: 0.70,
             primaryEvidenceSource: EvidenceSource::PALETTE_EXTRACTION,
             evidence: $evidence,

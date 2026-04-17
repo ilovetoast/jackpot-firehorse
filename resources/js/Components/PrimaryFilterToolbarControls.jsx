@@ -3,7 +3,7 @@
  * segmented toggles when option count is small, Collections-style native select when larger.
  */
 import { useId } from 'react'
-import { getContrastTextColor, hexToRgba } from '../utils/colorUtils'
+import { getContrastTextColor, hexToRgba, ensureAccentContrastOnWhite } from '../utils/colorUtils'
 
 /** Max number of distinct option values to show as segmented buttons (excluding "Any"). */
 export const PRIMARY_FILTER_SEGMENT_MAX = 6
@@ -36,9 +36,15 @@ function valuesMatchOption(optionValue, current) {
  */
 export function SegmentedPrimaryFilter({ label, accentColor, options, value, onChange, anyLabel = 'Any' }) {
     const accent = normalizeHex(accentColor)
-    const onAccent = getContrastTextColor(accent)
-    const mutedRing = hexToRgba(accent, 0.35)
+    const safeAccent = ensureAccentContrastOnWhite(accent)
+    const mutedRing = hexToRgba(safeAccent, 0.35)
     const isAny = value === null || value === undefined || value === ''
+
+    const activeStyle = {
+        backgroundColor: '#fff',
+        color: safeAccent,
+        boxShadow: `0 0 0 1.5px ${mutedRing}, 0 1px 2px ${hexToRgba('#000000', 0.05)}`,
+    }
 
     return (
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
@@ -46,7 +52,7 @@ export function SegmentedPrimaryFilter({ label, accentColor, options, value, onC
                 <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">{label}</span>
             ) : null}
             <div
-                style={{ ['--pf-accent']: accent }}
+                style={{ ['--pf-accent']: safeAccent }}
                 className="inline-flex flex-wrap items-center gap-0.5 rounded-lg border border-slate-200 bg-slate-100/90 p-0.5 shadow-inner"
                 role="group"
                 aria-label={label || 'Filter options'}
@@ -55,15 +61,7 @@ export function SegmentedPrimaryFilter({ label, accentColor, options, value, onC
                     type="button"
                     aria-pressed={isAny}
                     onClick={() => onChange(null)}
-                    style={
-                        isAny
-                            ? {
-                                  backgroundColor: accent,
-                                  color: onAccent,
-                                  boxShadow: `0 1px 2px ${hexToRgba('#000000', 0.06)}`,
-                              }
-                            : undefined
-                    }
+                    style={isAny ? activeStyle : undefined}
                     className={`rounded-md px-2.5 py-1 text-xs font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--pf-accent)] focus-visible:ring-offset-2 ${
                         isAny ? 'font-semibold' : 'text-slate-600 hover:bg-white/80 hover:text-slate-800'
                     }`}
@@ -78,17 +76,9 @@ export function SegmentedPrimaryFilter({ label, accentColor, options, value, onC
                             type="button"
                             aria-pressed={active}
                             onClick={() => onChange(opt.value)}
-                            style={
-                                active
-                                    ? {
-                                          backgroundColor: '#fff',
-                                          color: accent,
-                                          boxShadow: `0 0 0 1px ${mutedRing}`,
-                                      }
-                                    : undefined
-                            }
+                            style={active ? activeStyle : undefined}
                             className={`rounded-md px-2.5 py-1 text-xs font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--pf-accent)] focus-visible:ring-offset-2 ${
-                                active ? 'font-medium' : 'text-slate-600 hover:bg-white/80 hover:text-slate-800'
+                                active ? 'font-semibold' : 'text-slate-600 hover:bg-white/80 hover:text-slate-800'
                             }`}
                         >
                             {opt.label}

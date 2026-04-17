@@ -130,6 +130,7 @@ class EditorCompositionController extends Controller
             'id' => (string) $v->id,
             'composition_id' => (string) $v->composition_id,
             'label' => $v->label,
+            'kind' => $v->kind ?? CompositionVersion::KIND_MANUAL,
             'thumbnail_url' => $this->resolveThumbnailUrl($v->thumbnail_asset_id),
             'created_at' => $v->created_at?->toIso8601String() ?? '',
         ];
@@ -142,9 +143,17 @@ class EditorCompositionController extends Controller
             'composition_id' => (string) $v->composition_id,
             'document' => $v->document_json ?? [],
             'label' => $v->label,
+            'kind' => $v->kind ?? CompositionVersion::KIND_MANUAL,
             'thumbnail_url' => $this->resolveThumbnailUrl($v->thumbnail_asset_id),
             'created_at' => $v->created_at?->toIso8601String() ?? '',
         ];
+    }
+
+    private function normalizeKind(?string $kind): string
+    {
+        return $kind === CompositionVersion::KIND_AUTOSAVE
+            ? CompositionVersion::KIND_AUTOSAVE
+            : CompositionVersion::KIND_MANUAL;
     }
 
     private function decodeThumbnailPayload(?string $base64): ?string
@@ -211,20 +220,41 @@ class EditorCompositionController extends Controller
     }
 
     /**
-     * Keep only the newest N versions per composition to bound JSON + PNG storage.
-     * Deletes oldest rows first (by id) and soft-deletes version thumbnail assets.
+     * Max retained versions per composition, split by kind.
+     * Manual versions are user checkpoints (kept generously); autosaves are a small rolling window.
      */
-    private function pruneOldVersions(Composition $composition, int $maxVersions = 50): void
+    private const MAX_MANUAL_VERSIONS = 50;
+
+    private const MAX_AUTOSAVE_VERSIONS = 10;
+
+    /**
+     * Prune old versions, split by kind:
+     *  - manual: keep newest {@see self::MAX_MANUAL_VERSIONS}
+     *  - autosave: keep newest {@see self::MAX_AUTOSAVE_VERSIONS}
+     *
+     * Rolling autosave window prevents hobby edits from burying real checkpoints.
+     */
+    private function pruneOldVersions(Composition $composition): void
+    {
+        $this->pruneVersionsOfKind($composition, CompositionVersion::KIND_MANUAL, self::MAX_MANUAL_VERSIONS);
+        $this->pruneVersionsOfKind($composition, CompositionVersion::KIND_AUTOSAVE, self::MAX_AUTOSAVE_VERSIONS);
+    }
+
+    private function pruneVersionsOfKind(Composition $composition, string $kind, int $max): void
     {
         $compositionId = $composition->id;
-        $count = CompositionVersion::query()->where('composition_id', $compositionId)->count();
-        if ($count <= $maxVersions) {
+        $count = CompositionVersion::query()
+            ->where('composition_id', $compositionId)
+            ->where('kind', $kind)
+            ->count();
+        if ($count <= $max) {
             return;
         }
 
-        $deleteCount = $count - $maxVersions;
+        $deleteCount = $count - $max;
         $toDelete = CompositionVersion::query()
             ->where('composition_id', $compositionId)
+            ->where('kind', $kind)
             ->orderBy('id')
             ->limit($deleteCount)
             ->get();
@@ -306,6 +336,7 @@ class EditorCompositionController extends Controller
                 'composition_id' => $c->id,
                 'document_json' => $validated['document'],
                 'label' => null,
+                'kind' => CompositionVersion::KIND_MANUAL,
                 'created_at' => now(),
             ]);
 
@@ -343,15 +374,17 @@ class EditorCompositionController extends Controller
             'name' => 'sometimes|string|max:255',
             'document' => 'required|array',
             'version_label' => 'nullable|string|max:255',
+            'version_kind' => 'nullable|string|in:manual,autosave',
             'thumbnail_png_base64' => 'nullable|string|max:6000000',
         ]);
 
         $createVersion = $request->boolean('create_version', true);
+        $versionKind = $this->normalizeKind($validated['version_kind'] ?? null);
         $thumbBinary = $this->decodeThumbnailPayload($validated['thumbnail_png_base64'] ?? null);
 
         $oldDocument = is_array($composition->document_json) ? $composition->document_json : [];
 
-        DB::transaction(function () use ($composition, $validated, $createVersion, $thumbBinary, $user) {
+        DB::transaction(function () use ($composition, $validated, $createVersion, $versionKind, $thumbBinary, $user) {
             if (isset($validated['name'])) {
                 $composition->name = $validated['name'];
             }
@@ -370,6 +403,7 @@ class EditorCompositionController extends Controller
                     'composition_id' => $composition->id,
                     'document_json' => $validated['document'],
                     'label' => $validated['version_label'] ?? null,
+                    'kind' => $versionKind,
                     'created_at' => now(),
                 ]);
 
@@ -445,14 +479,16 @@ class EditorCompositionController extends Controller
         $validated = $request->validate([
             'document' => 'required|array',
             'label' => 'nullable|string|max:255',
+            'kind' => 'nullable|string|in:manual,autosave',
             'thumbnail_png_base64' => 'nullable|string|max:6000000',
         ]);
 
         $thumbBinary = $this->decodeThumbnailPayload($validated['thumbnail_png_base64'] ?? null);
+        $versionKind = $this->normalizeKind($validated['kind'] ?? null);
 
         $oldDocument = is_array($composition->document_json) ? $composition->document_json : [];
 
-        DB::transaction(function () use ($composition, $validated, $thumbBinary, $user) {
+        DB::transaction(function () use ($composition, $validated, $versionKind, $thumbBinary, $user) {
             $composition->document_json = $validated['document'];
 
             if ($thumbBinary !== null) {
@@ -465,6 +501,7 @@ class EditorCompositionController extends Controller
                 'composition_id' => $composition->id,
                 'document_json' => $validated['document'],
                 'label' => $validated['label'] ?? null,
+                'kind' => $versionKind,
                 'created_at' => now(),
             ]);
 
@@ -552,6 +589,7 @@ class EditorCompositionController extends Controller
                 'composition_id' => $c->id,
                 'document_json' => $doc,
                 'label' => 'Duplicated',
+                'kind' => CompositionVersion::KIND_MANUAL,
                 'created_at' => now(),
             ]);
 

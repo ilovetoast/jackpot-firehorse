@@ -858,7 +858,7 @@ function VisualReferenceCategoryPicker({ brandId, referenceCategories, onChange,
 }
 
 export default function BrandsEdit({ brand, brand_users, brand_roles, available_users, pending_invitations, tenant_settings, current_plan, model_payload, brand_model, active_version, all_versions = [], research_insights, compliance_aggregate, top_executions, bottom_executions, portal_settings, portal_features, portal_url, creator_module = {}, can_remove_user_from_company = false }) {
-    const { auth, headlineAppearanceCatalog = [] } = usePage().props
+    const { auth, headlineAppearanceCatalog = [], onboarding_status: onboardingStatus } = usePage().props
     const effectivePermissions = Array.isArray(auth?.effective_permissions) ? auth.effective_permissions : []
     const isFreePlan = current_plan === 'free'
     const can = (p) => effectivePermissions.includes(p)
@@ -896,13 +896,13 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
         name: brand.name,
         slug: brand.slug,
         logo_id: brand.logo_id ?? null,
-        logo_preview: brand.logo_thumbnail_url || brand.logo_path || '',
+        logo_preview: brand.logo_thumbnail_url || brand.logo_original_url || brand.logo_path || '',
         clear_logo: false,
         logo_dark_id: brand.logo_dark_id ?? null,
-        logo_dark_preview: brand.logo_dark_thumbnail_url || brand.logo_dark_path || '',
+        logo_dark_preview: brand.logo_dark_thumbnail_url || brand.logo_dark_original_url || brand.logo_dark_path || '',
         clear_logo_dark: false,
         logo_horizontal_id: brand.logo_horizontal_id ?? null,
-        logo_horizontal_preview: brand.logo_horizontal_thumbnail_url || brand.logo_horizontal_path || '',
+        logo_horizontal_preview: brand.logo_horizontal_thumbnail_url || brand.logo_horizontal_original_url || brand.logo_horizontal_path || '',
         clear_logo_horizontal: false,
         icon_bg_color: brand.icon_bg_color || brand.primary_color || '#6366f1',
         icon_style: brand.icon_style || 'subtle',
@@ -928,7 +928,8 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
             asset_grid_style: brand.settings?.asset_grid_style || 'clean', // clean | impact
             nav_display_mode: brand.settings?.nav_display_mode || 'logo', // logo | text
             /** solid = nav_color swatches; cinematic = Overview-style gradient on DAM sidebars */
-            workspace_sidebar_style: brand.settings?.workspace_sidebar_style || 'solid', // solid | cinematic
+            workspace_sidebar_style: brand.settings?.workspace_sidebar_style || 'solid',
+            cinematic_accent_color_role: brand.settings?.cinematic_accent_color_role || 'auto', // solid | cinematic
         },
         // D10: Brand-level download landing branding (logo from assets, color from palette, no raw URL/hex)
         download_landing_settings: {
@@ -1911,6 +1912,15 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                         <p className="text-xs text-amber-700">No primary logo uploaded. <button type="button" onClick={() => { setActiveTab('identity'); updateTabInUrl('identity') }} className="text-amber-800 font-medium underline underline-offset-2">Upload in Identity</button></p>
                                     </div>
                                 )}
+                                {(data.logo_preview || brand.logo_path) && !data.logo_dark_preview && !brand.logo_dark_path && (
+                                    <div className="mt-4 rounded-lg border border-blue-200 bg-blue-50 p-3 flex items-start gap-2">
+                                        <svg className="w-4 h-4 text-blue-500 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" /></svg>
+                                        <p className="text-xs text-blue-700">
+                                            No dark-background logo set. If your primary logo is light-colored, it may be invisible on white pages.
+                                            Upload a version for dark backgrounds under <button type="button" onClick={() => { setActiveTab('identity'); updateTabInUrl('identity'); setTimeout(() => document.getElementById('logo-dark-section')?.scrollIntoView({ behavior: 'smooth' }), 200) }} className="text-blue-800 font-medium underline underline-offset-2">Identity &rarr; Logo (Dark Background)</button>.
+                                        </p>
+                                    </div>
+                                )}
                             </div>
                         </div>
 
@@ -2406,6 +2416,59 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                         {/* Center: Main content */}
                         <div className="flex-1 min-w-0 space-y-8">
 
+                    {/* Resume onboarding — shown when setup was never completed */}
+                    {onboardingStatus && !onboardingStatus.is_completed && !onboardingStatus.is_activated && (
+                        <div className="rounded-xl bg-indigo-50 ring-1 ring-indigo-100/60 overflow-hidden">
+                            <div className="px-5 py-4 sm:px-6 flex items-center justify-between gap-4">
+                                <div className="min-w-0">
+                                    <p className="text-sm font-semibold text-indigo-900">
+                                        Brand setup isn't finished yet
+                                    </p>
+                                    <p className="mt-0.5 text-xs text-indigo-700/70 leading-relaxed">
+                                        The guided setup helps configure your workspace faster. You can resume where you left off.
+                                    </p>
+                                </div>
+                                <Link
+                                    href="/app/onboarding"
+                                    className="shrink-0 inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-500 transition-colors"
+                                >
+                                    Resume setup
+                                    <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3" /></svg>
+                                </Link>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Re-run guided setup — for users who already finished */}
+                    {onboardingStatus && (onboardingStatus.is_completed || onboardingStatus.is_activated) && (
+                        <div className="flex items-center justify-end">
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    if (confirm("This will reset and re-run the guided setup walkthrough. Your existing brand settings won't be lost.")) {
+                                        fetch('/app/onboarding/reset', {
+                                            method: 'POST',
+                                            credentials: 'same-origin',
+                                            headers: {
+                                                'Content-Type': 'application/json',
+                                                Accept: 'application/json',
+                                                'X-Requested-With': 'XMLHttpRequest',
+                                                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || '',
+                                            },
+                                            body: JSON.stringify({}),
+                                        }).then(res => {
+                                            if (res.ok) router.visit('/app/onboarding')
+                                        })
+                                    }
+                                }}
+                                className="inline-flex items-center gap-1.5 text-xs text-gray-400 hover:text-indigo-600 transition-colors"
+                            >
+                                <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182" /></svg>
+                                Re-run guided setup
+                            </button>
+                        </div>
+                    )}
+
                     {/* Section 1: Brand Identity */}
                     <div id="basic-information" className="scroll-mt-8">
                         <div className="rounded-xl bg-white shadow-sm ring-1 ring-gray-200/30 overflow-hidden">
@@ -2509,7 +2572,7 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                                 <div className="rounded-lg border border-gray-200 bg-white p-2">
                                                     <AssetImagePickerField
                                                         value={{
-                                                            preview_url: data.logo_preview ?? (data.logo_id && data.logo_id === brand.logo_id ? (brand.logo_thumbnail_url ?? brand.logo_path) : null),
+                                                            preview_url: data.logo_preview ?? (data.logo_id && data.logo_id === brand.logo_id ? (brand.logo_thumbnail_url ?? brand.logo_original_url ?? brand.logo_path) : null),
                                                             asset_id: data.logo_id ?? null,
                                                         }}
                                                         onChange={(v) => {
@@ -2551,12 +2614,12 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                             </div>
                                             {/* Logo (Dark) */}
                                             <div>
-                                                <label className="block text-sm font-medium text-gray-900 mb-1">Logo (Dark Background)</label>
+                                                <label id="logo-dark-section" className="block text-sm font-medium text-gray-900 mb-1">Logo (Dark Background)</label>
                                                 <p className="text-xs text-gray-500 mb-2">Optional. Used on dark backgrounds like the brand overview hero.</p>
                                                 <div className="rounded-lg border border-gray-700 bg-gray-900 p-2">
                                                     <AssetImagePickerField
                                                         value={{
-                                                            preview_url: data.logo_dark_preview ?? (data.logo_dark_id && data.logo_dark_id === brand.logo_dark_id ? (brand.logo_dark_thumbnail_url ?? brand.logo_dark_path) : null),
+                                                            preview_url: data.logo_dark_preview ?? (data.logo_dark_id && data.logo_dark_id === brand.logo_dark_id ? (brand.logo_dark_thumbnail_url ?? brand.logo_dark_original_url ?? brand.logo_dark_path) : null),
                                                             asset_id: data.logo_dark_id ?? null,
                                                         }}
                                                         onChange={(v) => {
@@ -2602,7 +2665,7 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                                 <div className="rounded-lg border border-gray-200 bg-white p-2">
                                                     <AssetImagePickerField
                                                         value={{
-                                                            preview_url: data.logo_horizontal_preview ?? (data.logo_horizontal_id && data.logo_horizontal_id === brand.logo_horizontal_id ? (brand.logo_horizontal_thumbnail_url ?? brand.logo_horizontal_path) : null),
+                                                            preview_url: data.logo_horizontal_preview ?? (data.logo_horizontal_id && data.logo_horizontal_id === brand.logo_horizontal_id ? (brand.logo_horizontal_thumbnail_url ?? brand.logo_horizontal_original_url ?? brand.logo_horizontal_path) : null),
                                                             asset_id: data.logo_horizontal_id ?? null,
                                                         }}
                                                         onChange={(v) => {
@@ -2703,8 +2766,7 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                         </div>
 
                                         <div>
-                                            <div className="block text-sm font-medium leading-6 text-gray-900">Accent Color</div>
-                                            <p className="mt-1 text-xs text-gray-500">Optional.</p>
+                                            <div className="block text-sm font-medium leading-6 text-gray-900">Accent Color <span className="font-normal text-xs text-gray-400 ml-1">Optional</span></div>
                                             <div className="mt-2 rounded-md border border-gray-200 bg-gray-50/80 px-3 py-2">
                                                 <ColorPickerControl
                                                     label="Accent"
@@ -3206,6 +3268,58 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                                 <span className="mt-1 text-xs text-gray-500">{opt.desc}</span>
                                             </button>
                                         ))}
+                                    </div>
+                                </div>
+
+                                <div className="mb-10 max-w-2xl">
+                                    <h4 className="text-sm font-medium text-gray-900 mb-1">Cinematic accent color</h4>
+                                    <p className="text-sm text-gray-500 mb-4">
+                                        The accent color used for buttons, icons, and highlights on the Overview and other dark cinematic screens.
+                                        Auto picks the most visible brand color automatically.
+                                    </p>
+                                    <div className="flex flex-wrap gap-2">
+                                        {[
+                                            { value: 'auto', label: 'Auto', desc: 'Best for dark backgrounds' },
+                                            { value: 'primary', label: 'Primary', color: data.primary_color },
+                                            { value: 'secondary', label: 'Secondary', color: data.secondary_color },
+                                            { value: 'accent', label: 'Accent', color: data.accent_color },
+                                        ].map((opt) => {
+                                            const isActive = (data.settings?.cinematic_accent_color_role || 'auto') === opt.value
+                                            const isDisabled = opt.value !== 'auto' && !opt.color
+                                            return (
+                                                <button
+                                                    key={opt.value}
+                                                    type="button"
+                                                    disabled={isDisabled}
+                                                    onClick={() => {
+                                                        const newSettings = {
+                                                            ...data.settings,
+                                                            cinematic_accent_color_role: opt.value,
+                                                        }
+                                                        setData('settings', newSettings)
+                                                        autoSaveBrandField({ settings: newSettings })
+                                                    }}
+                                                    className={`flex items-center gap-2 rounded-lg border-2 px-3 py-2.5 text-left transition-all ${
+                                                        isActive
+                                                            ? 'border-indigo-600 ring-2 ring-indigo-600 bg-indigo-50/30'
+                                                            : isDisabled
+                                                                ? 'border-gray-100 opacity-40 cursor-not-allowed'
+                                                                : 'border-gray-200 hover:border-gray-300'
+                                                    }`}
+                                                >
+                                                    {opt.color && (
+                                                        <div
+                                                            className="h-5 w-5 rounded-full border border-gray-200 shrink-0"
+                                                            style={{ backgroundColor: opt.color }}
+                                                        />
+                                                    )}
+                                                    <div>
+                                                        <span className="text-sm font-medium text-gray-900">{opt.label}</span>
+                                                        {opt.desc && <span className="block text-[11px] text-gray-400">{opt.desc}</span>}
+                                                    </div>
+                                                </button>
+                                            )
+                                        })}
                                     </div>
                                 </div>
 

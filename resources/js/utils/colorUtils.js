@@ -309,6 +309,31 @@ export function getContrastRatio(foregroundHex, backgroundHex) {
 /** Product default accent (Tailwind `indigo-600`) when tenant colors are unusable on white. */
 export const SITE_DEFAULT_ACCENT_HEX = '#4f46e5'
 
+/**
+ * Return a version of accentHex that meets WCAG AA contrast (4.5:1) against white.
+ * Progressively darkens the color; falls back to slate-700 if the hue is too washed-out.
+ * Use for accent-colored text or borders on white surfaces.
+ *
+ * @param {string|null|undefined} accentHex
+ * @param {number} [minRatio=4.5]
+ * @returns {string} #RRGGBB safe for use on white
+ */
+export function ensureAccentContrastOnWhite(accentHex, minRatio = 4.5) {
+    const bg = '#ffffff'
+    const base = accentHex && String(accentHex).trim()
+        ? normalizeHexColor(accentHex)
+        : SITE_DEFAULT_ACCENT_HEX
+
+    if (getContrastRatio(base, bg) >= minRatio) return base
+
+    let candidate = base
+    for (let i = 0; i < 10; i++) {
+        candidate = normalizeHexColor(darkenColor(candidate, 18))
+        if (getContrastRatio(candidate, bg) >= minRatio) return candidate
+    }
+    return '#334155' // slate-700 — always safe on white
+}
+
 const SPINNER_ON_WHITE_BG = '#ffffff'
 
 /**
@@ -335,6 +360,40 @@ export function workspaceOverviewBackdropCss(primaryHex, secondaryHex, accentHex
     const a1 = useStrongerAlpha ? '40' : '33'
     const a2 = useStrongerAlpha ? '36' : '33'
     return `radial-gradient(circle at 20% 20%, #${p6}${a1}, transparent), radial-gradient(circle at 80% 80%, #${s6}${a2}, transparent), #0B0B0D`
+}
+
+/**
+ * Resolve the cinematic accent color for dark cinematic layouts (overview, onboarding, etc.)
+ * based on the brand's `settings.cinematic_accent_color_role` preference.
+ *
+ * "auto" (default) picks the most visible of primary → secondary → accent via ensureDarkModeContrast.
+ * Explicit roles ("primary", "secondary", "accent") use that color, still guaranteeing dark-mode contrast.
+ *
+ * @param {Object} brand
+ * @param {string} [fallback='#6366f1']
+ * @returns {string} #RRGGBB safe for dark backgrounds
+ */
+export function resolveCinematicAccentColor(brand, fallback = '#6366f1') {
+    if (!brand) return fallback
+
+    const settings = brand.settings && typeof brand.settings === 'object' ? brand.settings : {}
+    const role = settings.cinematic_accent_color_role || 'auto'
+
+    const p = brand.primary_color || null
+    const s = brand.secondary_color || null
+    const a = brand.accent_color || null
+
+    if (role === 'primary' && p) return ensureDarkModeContrast(p, fallback, 3)
+    if (role === 'secondary' && s) return ensureDarkModeContrast(s, fallback, 3)
+    if (role === 'accent' && a) return ensureDarkModeContrast(a, fallback, 3)
+
+    // auto: try primary first, then secondary, then accent
+    for (const c of [p, s, a]) {
+        if (!c) continue
+        const safe = ensureDarkModeContrast(c, null, 3)
+        if (safe) return safe
+    }
+    return fallback
 }
 
 /**
@@ -415,4 +474,40 @@ export function resolveOverviewIconColor(primaryHex, options = {}) {
         }
     }
     return fallback
+}
+
+/**
+ * Ensure a brand color has sufficient visibility on the dark app shell (#0B0B0D).
+ * For dark brand colors (black, near-black), progressively lightens saturated colors
+ * or falls back to the Jackpot accent for achromatic near-blacks.
+ *
+ * Use this for UI chrome (progress bars, buttons, links, icons) on the dark theme
+ * where the brand primary may be black or very dark.
+ *
+ * @param {string|null|undefined} hexColor
+ * @param {string} [fallback='#6366f1']
+ * @param {number} [minRatio=3]
+ * @returns {string} #RRGGBB safe for dark backgrounds
+ */
+export function ensureDarkModeContrast(hexColor, fallback = '#6366f1', minRatio = 3) {
+    const SITE_FALLBACK = '#6366f1'
+    const surface = '#0B0B0D'
+
+    const resolve = (hex) => {
+        if (!hex || typeof hex !== 'string' || !hex.trim()) return null
+        const color = normalizeHexColor(hex)
+        if (getContrastRatio(color, surface) >= minRatio) return color
+
+        const sat = hexSaturation(color)
+        if (sat < 0.15) return null
+
+        let candidate = color
+        for (let i = 0; i < 8; i++) {
+            candidate = normalizeHexColor(lightenColor(candidate, 28))
+            if (getContrastRatio(candidate, surface) >= minRatio) return candidate
+        }
+        return null
+    }
+
+    return resolve(hexColor) || resolve(fallback) || normalizeHexColor(SITE_FALLBACK)
 }

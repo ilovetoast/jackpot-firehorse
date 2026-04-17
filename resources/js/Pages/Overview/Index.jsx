@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { usePage, router } from '@inertiajs/react'
 import { motion } from 'framer-motion'
 import { SparklesIcon, EnvelopeIcon, CheckCircleIcon } from '@heroicons/react/24/outline'
+import OnboardingCard from '../../Components/Onboarding/OnboardingCard'
 import AppHead from '../../Components/AppHead'
 import DashboardLinksRow from '../../Components/DashboardLinksRow'
 import AppNav from '../../Components/AppNav'
@@ -17,7 +18,7 @@ import { SkeletonMetricPills, SkeletonPlanBadge } from '../../Components/Overvie
 import CreatorProgressCard from '../../Components/prostaff/CreatorProgressCard'
 import OverviewCreatorInsights from '../../Components/prostaff/OverviewCreatorInsights'
 import { summarizeMomentum } from '../../utils/summarizeMomentum'
-import { resolveOverviewIconColor, workspaceOverviewBackdropCss } from '../../utils/colorUtils'
+import { resolveOverviewIconColor, workspaceOverviewBackdropCss, resolveCinematicAccentColor } from '../../utils/colorUtils'
 
 function formatStorage(mb) {
     if (!mb || mb === 0) return '0 MB'
@@ -93,6 +94,8 @@ export default function Overview() {
     const canUploadAssets = page.props.can_upload_assets !== false
     const emailVerified = Boolean(authFromPage?.user?.email_verified_at)
     const showVerifyTask = !canUploadAssets && !emailVerified
+    const onboardingStatus = page.props.onboarding_status
+    const [onboardingChecklist, setOnboardingChecklist] = useState(null)
     const [resendingVerification, setResendingVerification] = useState(false)
     const [verificationSent, setVerificationSent] = useState(false)
 
@@ -148,6 +151,12 @@ export default function Overview() {
                 accent: activeBrand?.accent_color || null,
             }),
         [brandColor, theme.colors?.secondary, activeBrand?.secondary_color, activeBrand?.accent_color]
+    )
+
+    // UI accent for chrome on the dark cinematic shell — respects workspace setting
+    const cinematicAccent = useMemo(
+        () => resolveCinematicAccentColor(activeBrand, brandColor),
+        [activeBrand, brandColor]
     )
 
     const managedAgencyClients = authFromPage?.managed_agency_clients ?? []
@@ -211,6 +220,28 @@ export default function Overview() {
         if (collectionsCount > 0) metrics.push({ label: 'collections', value: collectionsCount.toLocaleString() })
         if (aiReviews > 0) metrics.push({ label: 'AI reviews', value: aiReviews.toLocaleString() })
     }
+
+    const enrichmentStatus = onboardingStatus?.enrichment_processing_status
+    const hasActiveProcessing = enrichmentStatus === 'queued' || enrichmentStatus === 'processing'
+    const hasEnrichmentNotice = hasActiveProcessing || enrichmentStatus === 'failed'
+    const isCardHidden = onboardingStatus?.is_card_dismissed && !hasActiveProcessing
+    const shouldFetchChecklist = brandId != null && onboardingStatus
+        && !isCardHidden
+        && (!onboardingStatus.is_completed || hasEnrichmentNotice)
+
+    useEffect(() => {
+        if (!shouldFetchChecklist) {
+            setOnboardingChecklist(null)
+            return
+        }
+        fetch('/app/onboarding/status', {
+            credentials: 'same-origin',
+            headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+        })
+            .then(r => r.ok ? r.json() : null)
+            .then(data => { if (data?.checklist) setOnboardingChecklist(data.checklist) })
+            .catch(() => {})
+    }, [shouldFetchChecklist, brandId])
 
     useEffect(() => {
         if (brandId === undefined || brandId === null) {
@@ -603,6 +634,17 @@ export default function Overview() {
                                             </div>
                                         </div>
                                     </motion.div>
+                                )}
+
+                                {onboardingStatus && onboardingChecklist && (
+                                    <div className="mt-3 sm:mt-4">
+                                        <OnboardingCard
+                                            progress={onboardingStatus}
+                                            checklist={onboardingChecklist}
+                                            brandColor={brandColor}
+                                            brand={activeBrand}
+                                        />
+                                    </div>
                                 )}
 
                                 {brandId != null ? (

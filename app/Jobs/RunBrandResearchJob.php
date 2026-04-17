@@ -11,6 +11,7 @@ use App\Services\BrandDNA\BrandCoherenceScoringService;
 use App\Services\BrandDNA\BrandSnapshotSuggestionService;
 use App\Services\BrandDNA\BrandVersionService;
 use App\Services\BrandDNA\BrandWebsiteCrawlerService;
+use App\Services\OnboardingService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -47,6 +48,8 @@ class RunBrandResearchJob implements ShouldQueue
         if (! $draft || ($draft->brandModel?->brand_id ?? null) !== $brand->id) {
             return;
         }
+
+        OnboardingService::transitionEnrichmentStatus($brand, 'processing', 'Researching your brand');
 
         $snapshot = BrandPipelineSnapshot::create([
             'brand_pipeline_run_id' => null,
@@ -193,5 +196,17 @@ class RunBrandResearchJob implements ShouldQueue
         $top = array_slice(array_keys(array_filter($scores, fn ($s) => $s > 0)), 0, 3);
 
         return $top ?: ['Creator', 'Everyman', 'Sage'];
+    }
+
+    public function failed(?\Throwable $exception): void
+    {
+        $brand = Brand::find($this->brandId);
+        if ($brand) {
+            OnboardingService::transitionEnrichmentStatus(
+                $brand,
+                'failed',
+                'We hit a problem researching your brand'
+            );
+        }
     }
 }

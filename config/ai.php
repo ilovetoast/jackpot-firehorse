@@ -649,6 +649,14 @@ PROMPT
             'allowed_actions' => ['read', 'generate_image'],
             'permissions' => [],
         ],
+        'editor_layout_generator' => [
+            'name' => 'Editor Layout Generator',
+            'description' => 'AI creative director: selects optimal template format, layout style, and asset placements from scored brand assets, brand DNA, and user intent. Returns structured layer assignments with color palette and post-generation suggestions.',
+            'scope' => 'tenant',
+            'default_model' => 'gpt-4o-mini',
+            'allowed_actions' => ['read'],
+            'permissions' => [],
+        ],
         'presentation_preview' => [
             'name' => 'Presentation preview',
             'description' => 'AI context-aware presentation still from pipeline thumbnail (drawer / deliverables)',

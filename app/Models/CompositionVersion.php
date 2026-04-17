@@ -7,14 +7,23 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class CompositionVersion extends Model
 {
+    public const KIND_MANUAL = 'manual';
+
+    public const KIND_AUTOSAVE = 'autosave';
+
     public $timestamps = false;
 
     protected $fillable = [
         'composition_id',
         'document_json',
         'label',
+        'kind',
         'thumbnail_asset_id',
         'created_at',
+    ];
+
+    protected $attributes = [
+        'kind' => self::KIND_MANUAL,
     ];
 
     protected function casts(): array

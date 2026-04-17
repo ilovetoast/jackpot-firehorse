@@ -706,11 +706,70 @@ class BrandWebsiteCrawlerService
             $push(trim($apple->item(0)->value ?? ''), 55, 'apple_touch');
         }
 
+        // 6b. msapplication-TileImage (Windows tile — often a clean square mark)
+        $msApp = $xpath->query('//meta[@name="msapplication-TileImage"]/@content');
+        if ($msApp->length > 0) {
+            $push(trim($msApp->item(0)->value ?? ''), 52, 'msapplication_tile');
+        }
+
+        // 6c. PWA manifest icons — high-res, transparent-background marks
+        $manifestLink = $xpath->query('//link[@rel="manifest"]/@href');
+        if ($manifestLink->length > 0) {
+            $manifestHref = trim($manifestLink->item(0)->value ?? '');
+            if ($manifestHref !== '') {
+                try {
+                    $manifestUrl = $this->resolveUrl($manifestHref, $baseUrl);
+                    $mRes = Http::timeout(5)->withHeaders([
+                        'User-Agent' => 'Mozilla/5.0 (compatible; Jackpot/1.0)',
+                    ])->get($manifestUrl);
+                    if ($mRes->successful()) {
+                        $manifest = $mRes->json();
+                        foreach ($manifest['icons'] ?? [] as $icon) {
+                            $src = $icon['src'] ?? '';
+                            if ($src !== '') {
+                                $sizes = $icon['sizes'] ?? '';
+                                $score = 58;
+                                if (preg_match('/(\d+)x(\d+)/', $sizes, $sm) && (int) $sm[1] >= 192) {
+                                    $score = 65;
+                                }
+                                if (! empty($icon['purpose']) && str_contains((string) $icon['purpose'], 'maskable')) {
+                                    $score -= 5;
+                                }
+                                $push($src, $score, 'pwa_manifest');
+                            }
+                        }
+                    }
+                } catch (\Throwable) {
+                    // Non-critical — skip if manifest is unreachable
+                }
+            }
+        }
+
         // 7. OG / Twitter images (low — frequently social cards, not wordmarks)
         foreach (['//meta[@property="og:image"]/@content', '//meta[@property="og:image:secure_url"]/@content', '//meta[@name="twitter:image"]/@content'] as $mq) {
             $meta = $xpath->query($mq);
             if ($meta->length > 0) {
                 $push(trim($meta->item(0)->value ?? ''), 35, 'og_twitter');
+            }
+        }
+
+        // 7b. Common well-known logo paths as last-resort probes
+        if (count($scored) < 3) {
+            foreach (['/logo.svg', '/logo.png', '/images/logo.svg', '/images/logo.png'] as $probe) {
+                try {
+                    $probeUrl = rtrim($baseUrl, '/') . $probe;
+                    $probeRes = Http::timeout(4)->withHeaders([
+                        'User-Agent' => 'Mozilla/5.0 (compatible; Jackpot/1.0)',
+                    ])->head($probeUrl);
+                    if ($probeRes->successful()) {
+                        $ct = $probeRes->header('Content-Type') ?? '';
+                        if (str_contains($ct, 'image') || str_contains($ct, 'svg')) {
+                            $push($probeUrl, 45, 'wellknown_probe');
+                        }
+                    }
+                } catch (\Throwable) {
+                    // Best-effort probing
+                }
             }
         }
 

@@ -6,6 +6,8 @@
 import { useState, useEffect } from 'react'
 import { Link, router } from '@inertiajs/react'
 import { motion } from 'framer-motion'
+import SlotReelLoader from '../SlotReelLoader'
+import PoweredByJackpot from '../PoweredByJackpot'
 
 const STAGE_TO_MESSAGES = {
     text_extraction: ['Uploading and preparing your PDF'],
@@ -147,6 +149,18 @@ export default function ProcessingProgressPanel({
                             Back to Background
                         </button>
                     )}
+                </div>
+            )}
+
+            {/* Jackpot slot reel processing animation */}
+            {!hasFailed && !researchFinalized && (
+                <div className="flex justify-center mb-6">
+                    <SlotReelLoader size="md" label={messages[activityIndex]} />
+                </div>
+            )}
+            {researchFinalized && !hasFailed && (
+                <div className="flex justify-center mb-6">
+                    <SlotReelLoader landed size="md" />
                 </div>
             )}
 
@@ -423,6 +437,10 @@ export default function ProcessingProgressPanel({
                     </span>
                 </div>
             )}
+
+            <div className="mt-6 pt-4 border-t border-white/5 flex justify-center">
+                <PoweredByJackpot variant="inline" className="opacity-50" />
+            </div>
         </div>
     )
 }

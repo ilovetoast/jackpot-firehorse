@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { Link } from '@inertiajs/react'
+import { Link, usePage } from '@inertiajs/react'
 import InsightsLayout from '../../layouts/InsightsLayout'
 import { isUnlimitedCount, isUnlimitedStorageMB } from '../../utils/planLimitDisplay'
 import {
@@ -9,6 +9,7 @@ import {
 } from '../../utils/aiCreditsUsageDisplay'
 import PendingAiSuggestionsModal from '../../Components/PendingAiSuggestionsModal'
 import CreatorInsights from '../../Components/insights/CreatorInsights'
+import useLogoWhiteBgPreview from '../../utils/useLogoWhiteBgPreview'
 import {
     FolderIcon,
     ServerIcon,
@@ -18,6 +19,7 @@ import {
     SparklesIcon,
     ChartBarIcon,
     ExclamationTriangleIcon,
+    EyeIcon,
     ShieldCheckIcon,
     ArrowRightIcon,
     DocumentTextIcon,
@@ -193,6 +195,13 @@ export default function AnalyticsOverview({
     const rights_risk = lazyMeta?.rights_risk ?? {}
     const lowestCoverage = coverage?.lowest_coverage_fields?.slice(0, 5) ?? []
 
+    const { auth } = usePage().props
+    const activeBrand = auth?.activeBrand
+    const logoSrc = activeBrand?.logo_path || null
+    const logoDarkSrc = activeBrand?.logo_dark_path || null
+    const { showRiskBanner: logoWhiteRisk, loadingAnalysis: logoAnalysisLoading } = useLogoWhiteBgPreview(logoSrc, logoDarkSrc)
+    const brandSettingsUrl = brand_guidelines?.brand_settings_url || (activeBrand?.id ? `/app/brands/${activeBrand.id}/edit` : null)
+
     const g = brand_guidelines || {}
     const dnaReady = Boolean(g.dna_ready)
     const hasPublished = Boolean(g.has_published_guidelines)
@@ -312,6 +321,61 @@ export default function AnalyticsOverview({
                         </div>
                     </div>
                 </section>
+
+                {/* Logo white-on-white insight */}
+                {logoWhiteRisk && !logoAnalysisLoading && (
+                    <section
+                        className="rounded-xl border border-amber-200 bg-amber-50/90 p-4 sm:p-5"
+                        aria-labelledby="insights-logo-contrast-heading"
+                    >
+                        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                            <div className="flex gap-3 min-w-0">
+                                <div className="flex-shrink-0 rounded-lg bg-amber-100 p-2.5">
+                                    <EyeIcon className="h-6 w-6 text-amber-800" aria-hidden />
+                                </div>
+                                <div className="min-w-0">
+                                    <h2
+                                        id="insights-logo-contrast-heading"
+                                        className="text-base font-semibold text-gray-900"
+                                    >
+                                        Your logo may not work well on white backgrounds
+                                    </h2>
+                                    <p className="mt-1.5 text-sm text-gray-700 leading-relaxed">
+                                        We analyzed your primary logo and found it's mostly{' '}
+                                        <span className="font-medium">white, very light, or transparent</span> — it
+                                        can disappear or look washed out on light backgrounds throughout the app and
+                                        in shared links. Upload a{' '}
+                                        <span className="font-medium">dark version</span> of your logo in Brand
+                                        Settings so Jackpot can use the right variant automatically.
+                                    </p>
+                                    {logoSrc && (
+                                        <div className="mt-3 flex items-center gap-3">
+                                            <div className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white p-2">
+                                                <img
+                                                    src={logoSrc}
+                                                    alt="Current logo on white"
+                                                    className="h-8 max-w-[120px] object-contain"
+                                                />
+                                            </div>
+                                            <span className="text-xs text-amber-800">Low contrast on white</span>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                            {brandSettingsUrl && (
+                                <div className="flex flex-shrink-0">
+                                    <Link
+                                        href={brandSettingsUrl}
+                                        className="inline-flex justify-center items-center gap-2 rounded-lg bg-white px-4 py-2.5 text-sm font-semibold text-amber-900 ring-1 ring-inset ring-amber-300 shadow-sm hover:bg-amber-50"
+                                    >
+                                        Brand Settings
+                                        <ArrowRightIcon className="h-4 w-4" aria-hidden />
+                                    </Link>
+                                </div>
+                            )}
+                        </div>
+                    </section>
+                )}
 
                 {/* Top metric cards */}
                 <section>

@@ -35,9 +35,15 @@ import PendingMetadataTile from '../Components/PendingMetadataTile'
 import PendingAssetTile from '../Components/PendingAssetTile'
 import RecentlyViewedCarousel from '../Components/RecentlyViewedCarousel'
 import AssetStatsCarousel from '../Components/AssetStatsCarousel'
+import useLogoWhiteBgPreview from '../utils/useLogoWhiteBgPreview'
 
 export default function Dashboard({ auth, tenant, brand, plan_limits, plan, stats = null, most_viewed_assets = [], most_downloaded_assets = [], most_trending_assets = [], ai_usage = null, recent_activity = null, pending_ai_suggestions = null, unpublished_assets_count = 0, pending_metadata_approvals_count = 0, pending_assets_count = 0, contributor_pending_count = 0, contributor_rejected_count = 0, widget_visibility = {} }) {
     const { auth: authFromPage } = usePage().props
+    const activeBrand = authFromPage?.activeBrand || auth?.activeBrand
+    const logoSrc = activeBrand?.logo_path || null
+    const logoDarkSrc = activeBrand?.logo_dark_path || null
+    const { showRiskBanner: logoWhiteRisk, loadingAnalysis: logoAnalysisLoading } = useLogoWhiteBgPreview(logoSrc, logoDarkSrc)
+    const brandSettingsUrl = activeBrand?.id ? `/app/brands/${activeBrand.id}/edit` : null
 
     // Default stats if not provided
     const defaultStats = {
@@ -558,6 +564,32 @@ export default function Dashboard({ auth, tenant, brand, plan_limits, plan, stat
                         </div>
                     )}
                 </div>
+
+                {/* Logo white-on-white insight */}
+                {logoWhiteRisk && !logoAnalysisLoading && brandSettingsUrl && (
+                    <div className="mt-5 overflow-hidden rounded-lg bg-white px-4 py-5 shadow sm:p-6 border border-amber-200">
+                        <div className="flex items-start gap-4">
+                            <div className="flex-shrink-0 rounded-lg bg-amber-100 p-2">
+                                <EyeIcon className="h-5 w-5 text-amber-800" aria-hidden="true" />
+                            </div>
+                            <div className="min-w-0 flex-1">
+                                <h3 className="text-sm font-semibold text-gray-900">
+                                    Your logo may not work well on white backgrounds
+                                </h3>
+                                <p className="mt-1 text-sm text-gray-600">
+                                    Your primary logo appears mostly white or transparent. Upload a dark version in Brand Settings so it displays correctly on light backgrounds.
+                                </p>
+                                <Link
+                                    href={brandSettingsUrl}
+                                    className="mt-3 inline-flex items-center gap-1.5 text-sm font-semibold text-amber-900 hover:text-amber-700"
+                                >
+                                    Open Brand Settings
+                                    <span aria-hidden>&rarr;</span>
+                                </Link>
+                            </div>
+                        </div>
+                    </div>
+                )}
 
                 {/* Combined Most Viewed / Most Downloaded with Tabs */}
                 {(showMostViewed || showMostDownloaded || showMostTrending) && (

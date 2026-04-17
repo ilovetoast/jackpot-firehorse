@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { Link, router, usePage } from '@inertiajs/react'
 import { DELIVERABLES_PAGE_LABEL } from '../utils/uiLabels'
-import { resolveOverviewIconColor } from '../utils/colorUtils'
+import { resolveOverviewIconColor, getContrastRatio, darkenColor, normalizeHexColor } from '../utils/colorUtils'
 import { showWorkspaceSwitchingOverlay } from '../utils/workspaceSwitchOverlay'
 import AppBrandLogo from './AppBrandLogo'
 import JackpotLogo from './JackpotLogo'
@@ -469,11 +469,23 @@ export default function AppNav({
             creatorsPathActive
 
         const inactiveNavColor = textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)'
-        const accent = activeBrand?.primary_color || '#6366f1'
-        /** Same treatment as Overview primary-action cards — brand tint that reads on dark surfaces. */
+        const rawBrandColor = activeBrand?.primary_color || '#6366f1'
+
+        const accent = (() => {
+            if (variant === 'transparent') return rawBrandColor
+            const c = normalizeHexColor(rawBrandColor)
+            if (getContrastRatio(c, '#ffffff') >= 3) return c
+            let darkened = c
+            for (let i = 0; i < 6; i++) {
+                darkened = darkenColor(darkened, 18)
+                if (getContrastRatio(darkened, '#ffffff') >= 3) return darkened
+            }
+            return '#6366f1'
+        })()
+
         const creatorsNavIconColor =
             variant === 'transparent'
-                ? resolveOverviewIconColor(accent, { surface: '#0f1115' })
+                ? resolveOverviewIconColor(rawBrandColor, { surface: '#0f1115' })
                 : accent
         const linkStyle = {
             color: overviewGroupActive ? textColor : inactiveNavColor,
@@ -548,6 +560,26 @@ export default function AppNav({
                         }
                         style={{ '--overview-dd-accent': accent }}
                     >
+                        {showCreatorsNav ? (
+                            <Link
+                                href={route('brands.creators', { brand: activeBrand.id })}
+                                className={`${subLinkBase} ${creatorsPathActive ? subLinkActive : subLinkInactive}`}
+                                style={creatorsPathActive ? { borderLeftColor: accent } : undefined}
+                            >
+                                <span className="inline-flex items-center gap-2">
+                                    <UserGroupIcon
+                                        className="h-4 w-4 shrink-0"
+                                        style={{ color: creatorsNavIconColor, opacity: creatorsPathActive ? 1 : 0.7 }}
+                                        aria-hidden="true"
+                                    />
+                                    <span
+                                        style={creatorsPathActive ? { color: accent } : undefined}
+                                    >
+                                        Creators
+                                    </span>
+                                </span>
+                            </Link>
+                        ) : null}
                         <Link
                             href="/app/overview"
                             className={`${subLinkBase} ${tasksPathActive ? subLinkActive : subLinkInactive}`}
@@ -584,40 +616,6 @@ export default function AppNav({
                                             {creatorHomeAttentionCount > 99 ? '99+' : creatorHomeAttentionCount}
                                         </span>
                                     ) : null}
-                                </span>
-                            </Link>
-                        ) : null}
-                        {showCreatorsNav ? (
-                            <Link
-                                href={route('brands.creators', { brand: activeBrand.id })}
-                                className={`${subLinkBase} ${creatorsPathActive ? subLinkActive : subLinkInactive}`}
-                                style={creatorsPathActive ? { borderLeftColor: accent } : undefined}
-                            >
-                                <span className="inline-flex min-w-0 items-center gap-2.5">
-                                    <span
-                                        className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg"
-                                        style={{
-                                            backgroundColor: rgbaFromHex(
-                                                accent,
-                                                variant === 'transparent' ? 0.38 : 0.14
-                                            ),
-                                            boxShadow: `inset 0 0 0 1px ${rgbaFromHex(accent, variant === 'transparent' ? 0.55 : 0.22)}`,
-                                        }}
-                                    >
-                                        <UserGroupIcon
-                                            className="h-4 w-4 shrink-0"
-                                            style={{ color: creatorsNavIconColor }}
-                                            aria-hidden="true"
-                                        />
-                                    </span>
-                                    <span
-                                        className={`truncate font-semibold tracking-tight ${
-                                            variant === 'transparent' ? 'text-white' : ''
-                                        }`}
-                                        style={variant === 'transparent' ? undefined : { color: accent }}
-                                    >
-                                        Creators
-                                    </span>
                                 </span>
                             </Link>
                         ) : null}
@@ -1148,7 +1146,7 @@ export default function AppNav({
                                                     aria-disabled="true"
                                                 >
                                                     <SparklesIcon className="h-4 w-4 shrink-0" aria-hidden="true" />
-                                                    <span className="relative">Generative<sup className="absolute -top-2 -right-[1.6rem] text-[8px] font-bold tracking-wide uppercase" style={{ color: activeBrand?.primary_color || '#6366f1' }}>beta</sup></span>
+                                                    Generative<sup className="ml-0.5 text-[7px] font-bold tracking-wide uppercase leading-none align-super" style={{ color: activeBrand?.primary_color || '#6366f1' }}>beta</sup>
                                                 </span>
                                                 )}
                                             </div>
@@ -1221,7 +1219,7 @@ export default function AppNav({
                                     }}
                                 >
                                     <SparklesIcon className="h-4 w-4 shrink-0" />
-                                    <span className="relative">Generative<sup className="absolute -top-2 -right-[1.6rem] text-[8px] font-bold tracking-wide uppercase" style={{ color: activeBrand?.primary_color || '#6366f1' }}>beta</sup></span>
+                                    Generative<sup className="ml-0.5 text-[7px] font-bold tracking-wide uppercase leading-none align-super" style={{ color: activeBrand?.primary_color || '#6366f1' }}>beta</sup>
                                 </Link>
                                 )}
                                 </div>
@@ -1289,7 +1287,7 @@ export default function AppNav({
                                     }}
                                 >
                                     <SparklesIcon className="h-4 w-4 shrink-0" />
-                                    <span className="relative">Generative<sup className="absolute -top-2 -right-[1.6rem] text-[8px] font-bold tracking-wide uppercase" style={{ color: activeBrand?.primary_color || '#6366f1' }}>beta</sup></span>
+                                    Generative<sup className="ml-0.5 text-[7px] font-bold tracking-wide uppercase leading-none align-super" style={{ color: activeBrand?.primary_color || '#6366f1' }}>beta</sup>
                                 </Link>
                                 )}
                                 </div>
@@ -1444,7 +1442,7 @@ export default function AppNav({
                                     title="Not available for your access — use Collections and Downloads for shared content"
                                     aria-disabled="true"
                                 >
-                                    <span className="relative">Generative<sup className="absolute -top-2 -right-[1.6rem] text-[8px] font-bold tracking-wide uppercase" style={{ color: activeBrand?.primary_color || '#6366f1' }}>beta</sup></span>
+                                    Generative<sup className="ml-0.5 text-[7px] font-bold tracking-wide uppercase leading-none align-super" style={{ color: activeBrand?.primary_color || '#6366f1' }}>beta</sup>
                                 </div>
                                 )}
                             </div>

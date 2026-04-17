@@ -362,8 +362,7 @@ export default function AssetImagePicker({
     }
     if (!isMulti && selectedAssetId) {
       const asset = assets.find((a) => a.id === selectedAssetId)
-      const isSvgAsset = asset?.mime_type === 'image/svg+xml' || asset?.original_filename?.toLowerCase().endsWith('.svg')
-      const thumb = asset?.thumbnail_url ?? asset?.final_thumbnail_url ?? asset?.preview_thumbnail_url ?? (isSvgAsset ? asset?.original : null)
+      const thumb = asset?.thumbnail_url ?? asset?.final_thumbnail_url ?? asset?.preview_thumbnail_url ?? asset?.original ?? null
       if (getAssetDownloadUrl) {
         try {
           const url = getAssetDownloadUrl(selectedAssetId)

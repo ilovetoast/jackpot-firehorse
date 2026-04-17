@@ -366,38 +366,8 @@ export default function CollectionOnlyView({
                     </div>
                 </div>
 
+                {/* Asset Drawer — single instance, portals to document.body */}
                 {activeAssetId && (
-                    <div className="hidden md:block">
-                        <AssetDrawer
-                            key={activeAssetId}
-                            asset={activeAsset}
-                            externalCollectionGuest
-                            onClose={() => {
-                                setActiveAssetId(null)
-                                setOpenDrawerWithZoom(false)
-                            }}
-                            assets={safeAssetsList}
-                            currentAssetIndex={activeAsset ? safeAssetsList.findIndex((a) => a?.id === activeAsset?.id) : -1}
-                            onAssetUpdate={handleLifecycleUpdate}
-                            selectionAssetType="asset"
-                            initialZoomOpen={openDrawerWithZoom}
-                            onInitialZoomConsumed={handleInitialZoomConsumed}
-                            collectionContext={{ show: false }}
-                        />
-                    </div>
-                )}
-            </div>
-
-            {activeAssetId && (
-                <div className="fixed inset-0 z-[150] md:hidden">
-                    <div
-                        className="absolute inset-0 bg-black/50"
-                        onClick={() => {
-                            setActiveAssetId(null)
-                            setOpenDrawerWithZoom(false)
-                        }}
-                        aria-hidden="true"
-                    />
                     <AssetDrawer
                         key={activeAssetId}
                         asset={activeAsset}
@@ -409,12 +379,13 @@ export default function CollectionOnlyView({
                         assets={safeAssetsList}
                         currentAssetIndex={activeAsset ? safeAssetsList.findIndex((a) => a?.id === activeAsset?.id) : -1}
                         onAssetUpdate={handleLifecycleUpdate}
+                        selectionAssetType="asset"
                         initialZoomOpen={openDrawerWithZoom}
                         onInitialZoomConsumed={handleInitialZoomConsumed}
                         collectionContext={{ show: false }}
                     />
-                </div>
-            )}
+                )}
+            </div>
 
             <SelectionActionBar
                 currentPageIds={safeAssetsList.map((a) => a.id)}

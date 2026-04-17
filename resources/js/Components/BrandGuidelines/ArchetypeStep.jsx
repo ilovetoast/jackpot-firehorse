@@ -420,7 +420,7 @@ function ArchetypeWheel({
 
     return (
         <div className="space-y-3">
-            <div className="relative max-w-[min(100%,min(94vw,720px))] mx-auto px-1">
+            <div className="relative max-w-[min(100%,min(94vw,520px))] mx-auto px-1">
                 <div
                     className="pointer-events-none absolute inset-[-8%] rounded-full opacity-40 blur-3xl"
                     style={{
@@ -788,61 +788,80 @@ function ArchetypeGrid({ selected, onSelect, maxSelections = 1, recommendedId = 
                 </div>
             </div>
 
-            {!useClassicGrid && (
-                <p className="text-center text-[11px] text-white/30 max-w-md mx-auto leading-snug">
-                    Hover a segment to preview · click to select (click again to clear). The wheel center follows your pointer.
-                </p>
-            )}
-
-            {/* Wheel: preview on hover above; classic grid: selected hero only */}
+            {/* Wheel: two-column layout on large screens; classic grid: single column below */}
             {!useClassicGrid ? (
-                <div className="max-w-lg mx-auto min-h-[200px] flex flex-col justify-center">
-                    <AnimatePresence mode="wait">
-                        {wheelHoverArchetype ? (
-                            <motion.div
-                                key={`preview-${wheelHoverArchetype.id}`}
-                                initial={{ opacity: 0, y: 6 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                exit={{ opacity: 0, y: 6 }}
-                                transition={{ duration: 0.2 }}
-                                className="rounded-2xl border border-white/[0.1] bg-gradient-to-b from-white/[0.07] to-white/[0.02] px-5 py-4 text-center shadow-[0_16px_40px_-18px_rgba(0,0,0,0.55)]"
-                            >
-                                <p className="text-[10px] font-medium uppercase tracking-[0.2em] text-white/35 mb-2">Preview</p>
-                                <p className="text-lg font-semibold text-white">{wheelHoverArchetype.id}</p>
-                                <p className="text-sm text-white/55 mt-1.5">{wheelHoverArchetype.desc}</p>
-                                <p className="text-xs text-white/35 mt-2 leading-relaxed">{wheelHoverArchetype.essence}</p>
-                            </motion.div>
-                        ) : primaryArchetype ? (
-                            <motion.div
-                                key={`hero-${primaryArchetype.id}`}
-                                initial={{ opacity: 0, y: -8 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                exit={{ opacity: 0, y: -8 }}
-                                transition={{ type: 'spring', stiffness: 200, damping: 25 }}
-                            >
-                                <p className="text-[10px] font-medium uppercase tracking-widest text-white/25 mb-2 text-center">
-                                    Selected
-                                </p>
-                                <ArchetypeCard
-                                    archetype={primaryArchetype}
-                                    elevated
-                                    selected
-                                    isPrimary
-                                    onClick={() => onSelect(selected.filter((x) => x !== primaryId))}
-                                />
-                                <p className="text-[11px] text-white/25 text-center mt-2">Click to deselect</p>
-                            </motion.div>
-                        ) : (
-                            <motion.p
-                                key="wheel-placeholder"
-                                initial={{ opacity: 0 }}
-                                animate={{ opacity: 1 }}
-                                className="text-center text-sm text-white/28 py-6"
-                            >
-                                Hover the wheel to read each archetype here, then click a segment to choose.
-                            </motion.p>
-                        )}
-                    </AnimatePresence>
+                <div className="grid grid-cols-1 lg:grid-cols-5 gap-6 lg:gap-8 items-start">
+                    {/* Left column — selected / preview card */}
+                    <div className="lg:col-span-2 flex flex-col justify-start lg:pt-8">
+                        <div className="min-h-[160px] lg:min-h-[200px] flex flex-col justify-center">
+                            <AnimatePresence mode="wait">
+                                {wheelHoverArchetype ? (
+                                    <motion.div
+                                        key={`preview-${wheelHoverArchetype.id}`}
+                                        initial={{ opacity: 0, y: 6 }}
+                                        animate={{ opacity: 1, y: 0 }}
+                                        exit={{ opacity: 0, y: 6 }}
+                                        transition={{ duration: 0.2 }}
+                                        className="rounded-2xl border border-white/[0.1] bg-gradient-to-b from-white/[0.07] to-white/[0.02] px-5 py-4 text-center shadow-[0_16px_40px_-18px_rgba(0,0,0,0.55)]"
+                                    >
+                                        <p className="text-[10px] font-medium uppercase tracking-[0.2em] text-white/35 mb-2">Preview</p>
+                                        <p className="text-lg font-semibold text-white">{wheelHoverArchetype.id}</p>
+                                        <p className="text-sm text-white/55 mt-1.5">{wheelHoverArchetype.desc}</p>
+                                        <p className="text-xs text-white/35 mt-2 leading-relaxed">{wheelHoverArchetype.essence}</p>
+                                    </motion.div>
+                                ) : primaryArchetype ? (
+                                    <motion.div
+                                        key={`hero-${primaryArchetype.id}`}
+                                        initial={{ opacity: 0, y: -8 }}
+                                        animate={{ opacity: 1, y: 0 }}
+                                        exit={{ opacity: 0, y: -8 }}
+                                        transition={{ type: 'spring', stiffness: 200, damping: 25 }}
+                                    >
+                                        <p className="text-[10px] font-medium uppercase tracking-widest text-white/25 mb-2 text-center lg:text-left">
+                                            Selected
+                                        </p>
+                                        <ArchetypeCard
+                                            archetype={primaryArchetype}
+                                            elevated
+                                            selected
+                                            isPrimary
+                                            onClick={() => onSelect(selected.filter((x) => x !== primaryId))}
+                                        />
+                                        <p className="text-[11px] text-white/25 text-center lg:text-left mt-2">Click to deselect</p>
+                                    </motion.div>
+                                ) : (
+                                    <motion.p
+                                        key="wheel-placeholder"
+                                        initial={{ opacity: 0 }}
+                                        animate={{ opacity: 1 }}
+                                        className="text-center lg:text-left text-sm text-white/28 py-6"
+                                    >
+                                        Hover the wheel to preview each archetype, then click to choose.
+                                    </motion.p>
+                                )}
+                            </AnimatePresence>
+                        </div>
+                        <p className="hidden lg:block text-[11px] text-white/25 leading-snug mt-2">
+                            Hover a segment to preview · click to select · click again to clear.
+                        </p>
+                    </div>
+
+                    {/* Right column — wheel (constrained to be smaller) */}
+                    <div className="lg:col-span-3">
+                        <p className="lg:hidden text-center text-[11px] text-white/30 mb-3 leading-snug">
+                            Hover a segment to preview · click to select (click again to clear).
+                        </p>
+                        <div className="max-w-[420px] mx-auto lg:max-w-none">
+                            <ArchetypeWheel
+                                selected={selected}
+                                onSelect={onSelect}
+                                maxSelections={maxSelections}
+                                recommendedId={recommendedId}
+                                accentColor={accentColor}
+                                onHoverChange={setWheelHoveredId}
+                            />
+                        </div>
+                    </div>
                 </div>
             ) : (
                 <AnimatePresence>
@@ -871,16 +890,7 @@ function ArchetypeGrid({ selected, onSelect, maxSelections = 1, recommendedId = 
                 </AnimatePresence>
             )}
 
-            {!useClassicGrid ? (
-                <ArchetypeWheel
-                    selected={selected}
-                    onSelect={onSelect}
-                    maxSelections={maxSelections}
-                    recommendedId={recommendedId}
-                    accentColor={accentColor}
-                    onHoverChange={setWheelHoveredId}
-                />
-            ) : (
+            {useClassicGrid && (
                 <>
                     {primaryArchetype && (
                         <div className="flex items-center gap-4 px-4">

@@ -70,28 +70,9 @@ export default function SidebarEditor({ sections = [] }) {
                     )}
                     {ctx.saveError && <span className="text-[10px] text-red-500">{ctx.saveError}</span>}
                 </div>
-                <div className="flex items-center gap-2">
-                    {/* Edit mode toggle */}
-                    <div className="flex items-center bg-gray-100 rounded-md p-0.5">
-                        <button
-                            type="button"
-                            onClick={ctx.switchToLayoutMode}
-                            className={`px-2 py-0.5 text-[10px] font-medium rounded transition-colors ${ctx.editMode === 'layout' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
-                        >
-                            Layout
-                        </button>
-                        <button
-                            type="button"
-                            onClick={ctx.requestContentMode}
-                            className={`px-2 py-0.5 text-[10px] font-medium rounded transition-colors ${ctx.editMode === 'content' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
-                        >
-                            Content
-                        </button>
-                    </div>
-                    <button type="button" onClick={ctx.closeEditor} className="p-1 text-gray-400 hover:text-gray-600 rounded-md hover:bg-gray-100">
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
-                    </button>
-                </div>
+                <button type="button" onClick={ctx.closeEditor} className="p-1 text-gray-400 hover:text-gray-600 rounded-md hover:bg-gray-100" aria-label="Close customizer">
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                </button>
             </div>
 
             {/* Body */}

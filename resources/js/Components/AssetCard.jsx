@@ -829,14 +829,6 @@ export default function AssetCard({
                                 aria-label={asset.health_status === 'critical' ? 'Critical' : 'Warning'}
                             />
                         )}
-                        {showProcessingDot && (
-                            <span
-                                className="inline-block h-2.5 w-2.5 flex-shrink-0 rounded-full bg-violet-500 ring-2 ring-white/80 animate-pulse"
-                                title={processingDotTitle}
-                                role="status"
-                                aria-label={processingDotTitle}
-                            />
-                        )}
                         {showInfo && !isGuidelines && (
                             <span className="inline-flex items-center rounded-md bg-black/60 backdrop-blur-sm px-2 py-1 text-xs font-medium text-white uppercase tracking-wide">
                                 {fileExtension}

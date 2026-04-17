@@ -7,8 +7,11 @@ use App\Models\Tenant;
 use App\Models\User;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use App\Mail\EmailVerification;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rules\Password;
 
@@ -80,6 +83,14 @@ class SignupController extends Controller
         $defaultBrand->users()->syncWithoutDetaching([
             $user->id => ['role' => 'admin'], // Owners have admin role on their default brand
         ]);
+
+        // Send verification email
+        $verifyUrl = URL::temporarySignedRoute(
+            'verification.verify',
+            now()->addMinutes(60),
+            ['id' => $user->getKey(), 'hash' => sha1($user->getEmailForVerification())]
+        );
+        Mail::to($user->email)->send(new EmailVerification($verifyUrl));
 
         // Log the user in
         Auth::login($user);

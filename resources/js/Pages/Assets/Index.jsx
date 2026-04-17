@@ -1450,44 +1450,11 @@ export default function AssetsIndex({
                         </div>
                     </div>
 
-                    {/* Asset Drawer - Desktop (pushes grid) */}
-                    {/* CRITICAL: Drawer identity is based ONLY on activeAssetId */}
-                    {/* Drawer must tolerate temporary undefined asset object during async updates */}
-                    {/* Only render drawer if activeAssetId is set - asset object may be temporarily undefined */}
+                    {/* Asset Drawer — single instance, portals to document.body */}
                     {activeAssetId && (
-                        <div className="hidden md:block">
-                            <AssetDrawer
-                                key={activeAssetId} // Key by ID only - prevents remount on asset object changes
-                                asset={activeAsset} // May be undefined temporarily during async updates
-                                onClose={() => {
-                                    userClosedDrawerRef.current = true
-                                    setActiveAssetId(null)
-                                    setOpenDrawerWithZoom(false)
-                                    setDrawerInitialVideoSeekSeconds(null)
-                                }}
-                                assets={assetsList}
-                                currentAssetIndex={activeAsset ? safeAssetsList.findIndex(a => a?.id === activeAsset?.id) : -1}
-                                onAssetUpdate={handleLifecycleUpdate}
-                                selectionAssetType="asset"
-                                primaryColor={workspaceAccentColor}
-                                initialZoomOpen={openDrawerWithZoom}
-                                initialVideoSeekSeconds={drawerInitialVideoSeekSeconds}
-                                onInitialZoomConsumed={handleInitialZoomConsumed}
-                            />
-                        </div>
-                    )}
-                </div>
-
-                {/* Asset Drawer - Mobile (full-width overlay) */}
-                {/* CRITICAL: Drawer identity is based ONLY on activeAssetId */}
-                {/* Drawer must tolerate temporary undefined asset object during async updates */}
-                {/* Only render drawer if activeAssetId is set - asset object may be temporarily undefined */}
-                {activeAssetId && (
-                    <div className="md:hidden fixed inset-0 z-[150]">
-                        <div className="absolute inset-0 bg-black/50" onClick={() => { userClosedDrawerRef.current = true; setActiveAssetId(null) }} aria-hidden="true" />
                         <AssetDrawer
-                            key={activeAssetId} // Key by ID only - prevents remount on asset object changes
-                            asset={activeAsset} // May be undefined temporarily during async updates
+                            key={activeAssetId}
+                            asset={activeAsset}
                             onClose={() => {
                                 userClosedDrawerRef.current = true
                                 setActiveAssetId(null)
@@ -1497,13 +1464,14 @@ export default function AssetsIndex({
                             assets={assetsList}
                             currentAssetIndex={activeAsset ? safeAssetsList.findIndex(a => a?.id === activeAsset?.id) : -1}
                             onAssetUpdate={handleLifecycleUpdate}
+                            selectionAssetType="asset"
                             primaryColor={workspaceAccentColor}
                             initialZoomOpen={openDrawerWithZoom}
                             initialVideoSeekSeconds={drawerInitialVideoSeekSeconds}
                             onInitialZoomConsumed={handleInitialZoomConsumed}
                         />
-                    </div>
-                )}
+                    )}
+                </div>
             </div>
             
             {/* Phase 2 – Step 7: Bulk Metadata Edit Modal */}

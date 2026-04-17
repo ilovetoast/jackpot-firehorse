@@ -203,12 +203,23 @@ const LOGO_VISUAL_TREATMENTS = {
     },
 }
 
-function SectionLabel({ children, color = '#94a3b8', bold = false, textured = false }) {
+/** Maps the sidebar `section_label_style` global override to a CSS text-transform value. */
+function labelTransform(style) {
+    if (style === 'titlecase' || style === 'normal' || style === 'default') return 'none'
+    if (style === 'lowercase') return 'lowercase'
+    return 'uppercase'
+}
+
+function SectionLabel({ children, color = '#94a3b8', bold = false, textured = false, labelStyle }) {
+    const ctx = useSidebarEditor()
+    const resolvedStyle = labelStyle ?? ctx?.draftOverrides?.global?.section_label_style ?? 'uppercase'
+    const transform = labelTransform(resolvedStyle)
+    const caseClass = transform === 'uppercase' ? 'uppercase' : transform === 'lowercase' ? 'lowercase' : ''
     if (textured) {
         return (
             <div className="flex items-center gap-5 mb-8">
                 <div className="w-12 h-[2px]" style={{ background: `linear-gradient(90deg, ${color}, transparent)` }} />
-                <span className="text-[11px] font-bold uppercase" style={{ color, letterSpacing: '0.35em' }}>{children}</span>
+                <span className={`text-[11px] font-bold ${caseClass}`} style={{ color, letterSpacing: '0.35em', textTransform: transform }}>{children}</span>
             </div>
         )
     }
@@ -216,8 +227,8 @@ function SectionLabel({ children, color = '#94a3b8', bold = false, textured = fa
         return (
             <div className="mb-8">
                 <span
-                    className="inline-block px-4 py-1.5 text-[11px] font-extrabold uppercase tracking-[0.25em] text-white"
-                    style={{ backgroundColor: color }}
+                    className={`inline-block px-4 py-1.5 text-[11px] font-extrabold ${caseClass} tracking-[0.25em] text-white`}
+                    style={{ backgroundColor: color, textTransform: transform }}
                 >
                     {children}
                 </span>
@@ -227,7 +238,7 @@ function SectionLabel({ children, color = '#94a3b8', bold = false, textured = fa
     return (
         <div className="flex items-center gap-4 mb-6">
             <div className="w-8 h-px" style={{ backgroundColor: color }} />
-            <span className="text-xs font-semibold uppercase tracking-[0.2em]" style={{ color }}>{children}</span>
+            <span className={`text-xs font-semibold ${caseClass} tracking-[0.2em]`} style={{ color, textTransform: transform }}>{children}</span>
         </div>
     )
 }
@@ -371,9 +382,17 @@ function BrandGuidelinesIndexInner({ brand, brandModel, modelPayload, logoAssets
     }
 
     const sectionOverrides = sidebarCtx?.draftOverrides?.sections ?? {}
+    const globalOverrides = sidebarCtx?.draftOverrides?.global ?? {}
+    const globalSpacing = globalOverrides.spacing || 'default'
+    const globalCorners = globalOverrides.corner_radius || 'md'
     const isSectionVisible = (id) => sectionOverrides[id]?.visible !== false
     const sectionBgOverride = (id) => sectionOverrides[id]?.background ?? null
     const sectionContentToggle = (id, key, defaultVal = true) => sectionOverrides[id]?.content?.[key] ?? defaultVal
+    const hiddenPaletteColors = useMemo(() => {
+        const raw = sectionOverrides['sec-colors']?.content?.hidden_palette_colors
+        if (!Array.isArray(raw)) return new Set()
+        return new Set(raw.map((h) => String(h).toLowerCase()))
+    }, [sectionOverrides])
 
     /** Stock “textured” style uses visual-reference photos; hide that layer when a custom background is set. */
     const showStyleTextureLayer = (sectionId, texIdx) => {
@@ -393,12 +412,20 @@ function BrandGuidelinesIndexInner({ brand, brandModel, modelPayload, logoAssets
             const url = typeof bg.image_url === 'string' ? bg.image_url.trim() : ''
             if (!url) return defaultBg
             const op = typeof bg.image_opacity === 'number' ? bg.image_opacity : 0.35
-            const darken = Math.min(0.85, Math.max(0, 1 - op))
-            return {
-                backgroundImage: `linear-gradient(rgba(0,0,0,${darken}), rgba(0,0,0,${darken})), url(${JSON.stringify(url)})`,
+            const overlayAlpha = Math.min(0.92, Math.max(0, 1 - op))
+            const tintHex = typeof bg.overlay_color === 'string' && /^#[0-9a-fA-F]{6}$/.test(bg.overlay_color) ? bg.overlay_color : null
+            const overlay = tintHex
+                ? hexToRgba(tintHex, overlayAlpha)
+                : `rgba(0,0,0,${overlayAlpha})`
+            const style = {
+                backgroundImage: `linear-gradient(${overlay}, ${overlay}), url(${JSON.stringify(url)})`,
                 backgroundSize: 'cover',
                 backgroundPosition: 'center',
             }
+            if (bg.blend_mode && bg.blend_mode !== 'normal') {
+                style.backgroundBlendMode = bg.blend_mode
+            }
+            return style
         }
         return defaultBg
     }
@@ -500,8 +527,41 @@ function BrandGuidelinesIndexInner({ brand, brandModel, modelPayload, logoAssets
     }
 
     return (
-        <div className={showCallout ? 'h-screen overflow-hidden flex flex-col bg-[#0B0B0D]' : 'min-h-full bg-white'}>
+        <div
+            className={showCallout ? 'h-screen overflow-hidden flex flex-col bg-[#0B0B0D]' : 'min-h-full bg-white'}
+            data-gl-spacing={globalSpacing}
+            data-gl-corners={globalCorners}
+        >
             <AppHead title={`Brand Guidelines — ${brand.name}`} />
+            {/* Global overrides: spacing scale + corner radius override. Applied via attribute selectors with !important so they beat Tailwind utilities on existing sections. */}
+            <style>{`
+                [data-gl-spacing="compact"] main section { padding-top: 3rem !important; padding-bottom: 3rem !important; }
+                @media (min-width: 768px) { [data-gl-spacing="compact"] main section { padding-top: 3.5rem !important; padding-bottom: 3.5rem !important; } }
+                [data-gl-spacing="generous"] main section { padding-top: 8rem !important; padding-bottom: 8rem !important; }
+                @media (min-width: 768px) { [data-gl-spacing="generous"] main section { padding-top: 10rem !important; padding-bottom: 10rem !important; } }
+
+                [data-gl-corners="none"] main .rounded,
+                [data-gl-corners="none"] main .rounded-sm,
+                [data-gl-corners="none"] main .rounded-md,
+                [data-gl-corners="none"] main .rounded-lg,
+                [data-gl-corners="none"] main .rounded-xl,
+                [data-gl-corners="none"] main .rounded-2xl,
+                [data-gl-corners="none"] main .rounded-t-xl { border-radius: 0 !important; }
+
+                [data-gl-corners="sm"] main .rounded-md,
+                [data-gl-corners="sm"] main .rounded-lg,
+                [data-gl-corners="sm"] main .rounded-xl,
+                [data-gl-corners="sm"] main .rounded-2xl,
+                [data-gl-corners="sm"] main .rounded-t-xl { border-radius: 0.25rem !important; }
+
+                [data-gl-corners="lg"] main .rounded,
+                [data-gl-corners="lg"] main .rounded-sm,
+                [data-gl-corners="lg"] main .rounded-md,
+                [data-gl-corners="lg"] main .rounded-lg { border-radius: 1rem !important; }
+                [data-gl-corners="lg"] main .rounded-xl,
+                [data-gl-corners="lg"] main .rounded-2xl,
+                [data-gl-corners="lg"] main .rounded-t-xl { border-radius: 1.5rem !important; }
+            `}</style>
             {showCallout ? (
                 <div className="absolute top-0 left-0 right-0 z-50">
                     <AppNav brand={auth?.activeBrand} tenant={null} variant="transparent" />
@@ -542,16 +602,6 @@ function BrandGuidelinesIndexInner({ brand, brandModel, modelPayload, logoAssets
                         Customize
                     </button>
                     <SidebarEditor sections={GUIDELINE_SECTIONS} />
-                    <ConfirmDialog
-                        open={sidebarCtx?.showDnaConfirm}
-                        onClose={() => sidebarCtx?.cancelContentMode()}
-                        onConfirm={() => sidebarCtx?.confirmContentMode()}
-                        title="Edit Brand DNA"
-                        message="You're switching to Content Mode. Edits will update core Brand DNA fields, which may affect AI outputs and scoring. Proceed?"
-                        confirmText="Switch to Content Mode"
-                        cancelText="Cancel"
-                        variant="warning"
-                    />
                 </>
             )}
             {showProcessingBanner && (
@@ -1208,11 +1258,17 @@ function BrandGuidelinesIndexInner({ brand, brandModel, modelPayload, logoAssets
                                         </button>
                                     ))}
                                 </div>
-                                {scoringRules.allowed_color_palette.length > 0 && (
+                                {sectionContentToggle('sec-colors', 'show_extended_palette', true) && scoringRules.allowed_color_palette.length > 0 && (() => {
+                                    const visiblePalette = scoringRules.allowed_color_palette.filter((c) => {
+                                        const hex = typeof c === 'string' ? c : c?.hex
+                                        return hex ? !hiddenPaletteColors.has(String(hex).toLowerCase()) : true
+                                    })
+                                    if (visiblePalette.length === 0) return null
+                                    return (
                                     <div className="mt-12">
                                         <p className={`text-sm font-medium uppercase tracking-wider mb-4 ${isTextured ? 'text-white/40' : 'text-gray-500'}`}>Extended Palette</p>
                                         <div className="flex flex-wrap gap-4">
-                                            {scoringRules.allowed_color_palette.map((c, i) => {
+                                            {visiblePalette.map((c, i) => {
                                                 const hex = typeof c === 'string' ? c : c?.hex
                                                 const role = typeof c === 'object' ? c?.role : null
                                                 const isHex = hex && String(hex).startsWith('#')
@@ -1232,7 +1288,8 @@ function BrandGuidelinesIndexInner({ brand, brandModel, modelPayload, logoAssets
                                             })}
                                         </div>
                                     </div>
-                                )}
+                                    )
+                                })()}
                             </div>
                         </section>}
 
@@ -1353,7 +1410,14 @@ function BrandGuidelinesIndexInner({ brand, brandModel, modelPayload, logoAssets
                         )}
 
                         {/* ═══ 9. BRAND IDENTITY / LOGO (Builder Step 6: Standards) ═══ */}
-                        {logoUrl && isSectionVisible('sec-logo') && (
+                        {logoUrl && isSectionVisible('sec-logo') && (() => {
+                            const logoContentOverrides = sectionOverrides['sec-logo']?.content ?? {}
+                            const identityPrimaryBg = logoContentOverrides.primary_bg || primaryColor
+                            const identityReversedBg = logoContentOverrides.reversed_bg || secondaryColor
+                            const identityAccentBg = logoContentOverrides.accent_bg || accentColor
+                            const showSecondaryMarks = logoContentOverrides.show_secondary_marks !== false
+                            const showSmallVariants = logoContentOverrides.show_small_variants !== false
+                            return (
                             <section id="sec-logo" className={`py-28 md:py-36 relative overflow-hidden ${isTextured ? '' : 'bg-white'}`}
                                 style={resolveBgStyle('sec-logo', isTextured ? { background: `linear-gradient(180deg, ${primaryDark} 0%, ${primaryDeep} 100%)` } : {})}
                             >
@@ -1370,7 +1434,7 @@ function BrandGuidelinesIndexInner({ brand, brandModel, modelPayload, logoAssets
                                         <div className="lg:col-span-7">
                                             <div
                                                 className={`relative p-12 md:p-16 flex items-center justify-center min-h-[320px] md:min-h-[400px] ${isTextured ? 'rounded-none border border-white/10' : isBold ? 'rounded-none' : 'rounded-2xl'}`}
-                                                style={{ backgroundColor: primaryColor }}
+                                                style={{ backgroundColor: identityPrimaryBg }}
                                             >
                                                 <img src={logoUrl} alt={`${brand.name} — Primary Brandmark`} className="max-h-32 md:max-h-44 w-auto max-w-[min(100%,26rem)] object-contain object-center drop-shadow-lg" />
                                                 <span className={`absolute bottom-4 left-5 text-[10px] font-semibold uppercase text-white/40 ${isTextured ? 'tracking-[0.2em]' : isBold ? 'tracking-widest font-black' : 'tracking-[0.15em]'}`}>Primary Brandmark</span>
@@ -1386,7 +1450,7 @@ function BrandGuidelinesIndexInner({ brand, brandModel, modelPayload, logoAssets
                                                 />
                                                 <span className={`absolute bottom-3 left-4 text-[10px] font-semibold uppercase ${isTextured ? 'text-white/30 tracking-[0.2em]' : isBold ? 'text-gray-300 tracking-widest' : 'text-gray-300 tracking-[0.15em]'}`}>On Light Background</span>
                                             </div>
-                                            <div className={`relative p-8 flex items-center justify-center ${isTextured ? 'rounded-none border border-white/10' : isBold ? 'rounded-none' : 'rounded-2xl'}`} style={{ backgroundColor: secondaryColor }}>
+                                            <div className={`relative p-8 flex items-center justify-center ${isTextured ? 'rounded-none border border-white/10' : isBold ? 'rounded-none' : 'rounded-2xl'}`} style={{ backgroundColor: identityReversedBg }}>
                                                 <img
                                                     src={logoDarkUrl || logoUrl}
                                                     alt={`${brand.name} — Reversed`}
@@ -1397,8 +1461,9 @@ function BrandGuidelinesIndexInner({ brand, brandModel, modelPayload, logoAssets
                                         </div>
                                     </div>
 
+                                    {showSmallVariants && (
                                     <div className="mt-8 grid grid-cols-2 md:grid-cols-4 gap-6">
-                                        <div className={`relative p-6 flex items-center justify-center min-h-[120px] ${isTextured ? 'rounded-none border border-white/10' : isBold ? 'rounded-none' : 'rounded-xl'}`} style={{ backgroundColor: accentColor }}>
+                                        <div className={`relative p-6 flex items-center justify-center min-h-[120px] ${isTextured ? 'rounded-none border border-white/10' : isBold ? 'rounded-none' : 'rounded-xl'}`} style={{ backgroundColor: identityAccentBg }}>
                                             <img
                                                 src={logoUrl}
                                                 alt={`${brand.name} — On Accent`}
@@ -1415,7 +1480,7 @@ function BrandGuidelinesIndexInner({ brand, brandModel, modelPayload, logoAssets
                                             />
                                             <span className={`absolute bottom-2 left-3 text-[9px] font-semibold uppercase text-white/30 ${isTextured ? 'tracking-[0.15em]' : 'tracking-wider'}`}>On Dark</span>
                                         </div>
-                                        <div className={`relative p-6 flex items-center justify-center min-h-[120px] ${isTextured ? 'rounded-none border border-white/10' : isBold ? 'rounded-none' : 'rounded-xl'}`} style={{ backgroundColor: primaryColor, opacity: 0.7 }}>
+                                        <div className={`relative p-6 flex items-center justify-center min-h-[120px] ${isTextured ? 'rounded-none border border-white/10' : isBold ? 'rounded-none' : 'rounded-xl'}`} style={{ backgroundColor: identityPrimaryBg, opacity: 0.7 }}>
                                             <img src={logoUrl} alt={`${brand.name} — Reduced`} className="max-h-12 w-auto object-contain" />
                                             <span className={`absolute bottom-2 left-3 text-[9px] font-semibold uppercase text-white/30 ${isTextured ? 'tracking-[0.15em]' : 'tracking-wider'}`}>Reduced Opacity</span>
                                         </div>
@@ -1424,8 +1489,9 @@ function BrandGuidelinesIndexInner({ brand, brandModel, modelPayload, logoAssets
                                             <span className={`absolute bottom-2 left-3 text-[9px] font-semibold uppercase ${isTextured ? 'text-white/30 tracking-[0.15em]' : 'text-gray-300 tracking-wider'}`}>Minimum Size</span>
                                         </div>
                                     </div>
+                                    )}
 
-                                    {logoAssets.filter(a => a.role === 'secondary').length > 0 && (
+                                    {showSecondaryMarks && logoAssets.filter(a => a.role === 'secondary').length > 0 && (
                                         <div className="mt-20">
                                             <div className="flex items-center gap-4 mb-8">
                                                 <div className="w-8 h-px bg-gray-300" />
@@ -1443,11 +1509,13 @@ function BrandGuidelinesIndexInner({ brand, brandModel, modelPayload, logoAssets
                                     )}
                                 </div>
                             </section>
-                        )}
+                            )
+                        })()}
 
                         {/* ═══ 10. LOGO STANDARDS (Builder Step 6: Standards) ═══ */}
                         {hasLogoGuidelines && isSectionVisible('sec-logo-standards') && (() => {
-                            const showVisual = visual.show_logo_visual_treatment && logoUrl
+                            const allowVisualTreatments = sectionContentToggle('sec-logo-standards', 'show_visual_treatments', true)
+                            const showVisual = allowVisualTreatments && visual.show_logo_visual_treatment && logoUrl
                             const brandColors = { primary: primaryColor, secondary: secondaryColor }
                             const isTransparent = logoIsTransparent
                             const guidelineLabels = {
@@ -1538,7 +1606,7 @@ function BrandGuidelinesIndexInner({ brand, brandModel, modelPayload, logoAssets
                                         </div>
                                     )}
 
-                                    {doEntries.length > 0 && (
+                                    {sectionContentToggle('sec-logo-standards', 'show_best_practices', true) && doEntries.length > 0 && (
                                         <div className="mb-8">
                                             <div className="flex items-center gap-3 mb-4">
                                                 <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-emerald-400/70">Best Practices</span>
@@ -1550,7 +1618,7 @@ function BrandGuidelinesIndexInner({ brand, brandModel, modelPayload, logoAssets
                                         </div>
                                     )}
 
-                                    {dontEntries.length > 0 && (
+                                    {sectionContentToggle('sec-logo-standards', 'show_avoid_section', true) && dontEntries.length > 0 && (
                                         <div>
                                             <div className="flex items-center gap-3 mb-4">
                                                 <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-red-400/70">Avoid</span>

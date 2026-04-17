@@ -317,6 +317,15 @@ class AiUsageService
      */
     public function checkUsage(Tenant $tenant, string $feature, int $requestedCalls = 1): void
     {
+        if (($tenant->settings['ai_enabled'] ?? true) === false) {
+            throw new PlanLimitExceededException(
+                'ai_disabled',
+                0,
+                0,
+                'AI features have been disabled for this workspace by an administrator.'
+            );
+        }
+
         $cap = $this->getEffectiveAiCredits($tenant);
         if ($cap <= 0) {
             return; // unlimited

@@ -2,6 +2,11 @@
 @tailwind components;
 @tailwind utilities;
 
+@layer utilities {
+    .no-scrollbar::-webkit-scrollbar { display: none; }
+    .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+}
+
 /* Proxima Nova — headline / display font
    Place .woff2 files in public/fonts/proxima-nova/ */
 @font-face {

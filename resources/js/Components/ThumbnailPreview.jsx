@@ -131,6 +131,7 @@ export default function ThumbnailPreview({
     const [lockedType, setLockedType] = useState(() => {
         if (asset?.final_thumbnail_url) return 'final'
         if (lqipUrl) return 'preview'
+        if (svgOriginalFallback) return 'final'
         return null
     })
     

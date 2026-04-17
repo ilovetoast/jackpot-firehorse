@@ -63,6 +63,37 @@ class BrandResearchController extends Controller
         ])->values()->all();
 
         $sources = $version->model_payload['sources'] ?? [];
+
+        // Hydrate website URL from onboarding progress or completed snapshots
+        // if the draft sources don't have it yet (e.g. old onboarding flow)
+        if (empty(trim((string) ($sources['website_url'] ?? '')))) {
+            $fallbackUrl = null;
+
+            $onboarding = $brand->onboardingProgress;
+            if ($onboarding && ! empty(trim((string) ($onboarding->website_url ?? '')))) {
+                $fallbackUrl = trim($onboarding->website_url);
+            }
+
+            if (! $fallbackUrl) {
+                $completedSnap = BrandPipelineSnapshot::where('brand_id', $brand->id)
+                    ->where('brand_model_version_id', $version->id)
+                    ->where('status', 'completed')
+                    ->whereNotNull('source_url')
+                    ->latest()
+                    ->first();
+                if ($completedSnap && ! empty(trim($completedSnap->source_url))) {
+                    $fallbackUrl = trim($completedSnap->source_url);
+                }
+            }
+
+            if ($fallbackUrl) {
+                $sources['website_url'] = $fallbackUrl;
+                $payload = $version->model_payload ?? [];
+                $payload['sources'] = array_merge($payload['sources'] ?? [], ['website_url' => $fallbackUrl]);
+                $version->update(['model_payload' => $payload]);
+            }
+        }
+
         $hasWebsiteUrl = ! empty(trim((string) ($sources['website_url'] ?? '')));
         $hasSocialUrls = ! empty(array_filter($sources['social_urls'] ?? [], fn ($u) => is_string($u) && trim($u) !== ''));
         $brandMaterialCount = count($brandMaterials);
@@ -117,6 +148,7 @@ class BrandResearchController extends Controller
                     'size_bytes' => $guidelinesPdfAsset->size_bytes,
                     'thumbnail_url' => $guidelinesPdfAsset->deliveryUrl(AssetVariant::THUMB_SMALL, DeliveryContext::AUTHENTICATED) ?: null,
                 ] : null,
+                'pdf_expected_but_missing' => ! $guidelinesPdfAsset && ($brand->onboardingProgress?->guideline_uploaded ?? false),
                 'website_url' => $sources['website_url'] ?? '',
                 'social_urls' => $sources['social_urls'] ?? [],
                 'materials' => $brandMaterials,
@@ -368,6 +400,38 @@ class BrandResearchController extends Controller
     }
 
     /**
+     * POST /brands/{brand}/research/link-pdf
+     * Immediately links an uploaded PDF asset to the working draft so it persists
+     * across page reloads (before the user clicks Analyze).
+     */
+    public function linkPdf(Request $request, Brand $brand): JsonResponse
+    {
+        $this->authorize('update', $brand);
+        $tenant = app('tenant');
+        if ($brand->tenant_id !== $tenant->id) {
+            abort(403, 'Brand does not belong to this tenant.');
+        }
+
+        $validated = $request->validate([
+            'pdf_asset_id' => 'required|string|exists:assets,id',
+        ]);
+
+        $version = $this->versionService->getWorkingVersion($brand);
+
+        \App\Models\BrandModelVersionAsset::where('brand_model_version_id', $version->id)
+            ->where('builder_context', 'guidelines_pdf')
+            ->delete();
+
+        \App\Models\BrandModelVersionAsset::create([
+            'brand_model_version_id' => $version->id,
+            'asset_id' => $validated['pdf_asset_id'],
+            'builder_context' => 'guidelines_pdf',
+        ]);
+
+        return response()->json(['linked' => true]);
+    }
+
+    /**
      * POST /brands/{brand}/research/advance-to-review
      * User explicitly advances from research to review stage.
      *
@@ -398,6 +462,10 @@ class BrandResearchController extends Controller
             if ($this->hasActiveResearchPipeline($version)) {
                 return response()->json(['error' => 'Research is still running. Wait for it to finish or retry.'], 422);
             }
+
+            $progress = $version->builder_progress ?? [];
+            $progress['research_reviewed_at'] = now()->toIso8601String();
+            $version->update(['builder_progress' => $progress]);
 
             $this->versionService->advanceToReview($version);
             $version->refresh();
@@ -430,6 +498,11 @@ class BrandResearchController extends Controller
 
             $this->versionService->markResearchComplete($version);
         }
+
+        // Record that the user reviewed research results before advancing
+        $progress = $version->builder_progress ?? [];
+        $progress['research_reviewed_at'] = now()->toIso8601String();
+        $version->update(['builder_progress' => $progress]);
 
         $this->versionService->advanceToReview($version);
 

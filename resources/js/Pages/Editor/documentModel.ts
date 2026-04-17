@@ -295,6 +295,8 @@ export type FillLayer = BaseLayer & {
     gradientEndColor?: string
     /** CSS linear-gradient angle in degrees (0 = to top, 90 = to right, 180 = to bottom). */
     gradientAngleDeg?: number
+    /** Optional border-radius in px. Used for pill/rounded-button CTA backgrounds. */
+    borderRadius?: number
 }
 
 export type GenerativeImageLayer = BaseLayer & {

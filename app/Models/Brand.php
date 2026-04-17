@@ -267,6 +267,14 @@ class Brand extends Model
     }
 
     /**
+     * Get the onboarding progress for this brand (one per brand).
+     */
+    public function onboardingProgress(): HasOne
+    {
+        return $this->hasOne(BrandOnboardingProgress::class);
+    }
+
+    /**
      * Get the Brand DNA / Brand Guidelines model (one per brand).
      */
     public function brandModel(): HasOne

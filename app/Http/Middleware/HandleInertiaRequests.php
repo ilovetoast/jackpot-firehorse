@@ -415,6 +415,7 @@ class HandleInertiaRequests extends Middleware
             'creator_module_status' => app(CreatorModuleStatusService::class)->sharedPayload($tenant),
             'ai_credit_warning_level' => $tenant ? app(\App\Services\AiUsageService::class)->getCreditWarningLevel($tenant) : null,
             'can_upload_assets' => $tenant ? app(\App\Services\FeatureGate::class)->canUploadAssets($tenant) : true,
+            'onboarding_status' => $activeBrand ? app(\App\Services\OnboardingService::class)->getStatusPayload($activeBrand) : null,
             'signup_enabled' => ! app()->environment('staging'),
             'performance_client_metrics_enabled' => config('performance.client_metrics_enabled', false),
             // DAM file registry → uploader accept + thumbnail UI (single source: config/file_types.php via FileTypeService)
@@ -529,6 +530,9 @@ class HandleInertiaRequests extends Middleware
                         'secondary_color' => $activeBrand->secondary_color,
                         'icon_style' => $activeBrand->icon_style ?? 'subtle',
                         'accent_color' => $activeBrand->accent_color,
+                        'primary_color_user_defined' => (bool) $activeBrand->primary_color_user_defined,
+                        'secondary_color_user_defined' => (bool) $activeBrand->secondary_color_user_defined,
+                        'accent_color_user_defined' => (bool) $activeBrand->accent_color_user_defined,
                         'nav_color' => $activeBrand->nav_color,
                         'workspace_button_style' => $activeBrand->workspace_button_style ?? $activeBrand->settings['button_style'] ?? 'primary',
                         'logo_filter' => $activeBrand->logo_filter ?? 'none',
@@ -577,6 +581,9 @@ class HandleInertiaRequests extends Middleware
                     'show_creator_home_nav' => $showCreatorHomeNav,
                     'generative_enabled' => $tenant
                         && ($tenant->settings['generative_enabled'] ?? true),
+                    'ai_enabled' => $tenant
+                        ? ($tenant->settings['ai_enabled'] ?? true)
+                        : true,
                 ],
                 // Phase AF-5: Approval feature flags (plan-gated)
                 'approval_features' => $tenant ? (function () use ($tenant) {

@@ -250,31 +250,45 @@ export default function BuilderAssetSelectorModal({
                                     </div>
                                 ) : assets.length > 0 ? (
                                     <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3">
-                                        {assets.map((asset) => (
-                                            <button
-                                                key={asset.id}
-                                                type="button"
-                                                onClick={() => handleSelect(asset)}
-                                                className="group rounded-xl border-2 border-white/10 hover:border-indigo-500/60 overflow-hidden transition-all focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white/5 hover:bg-white/10"
-                                            >
-                                                <div className="aspect-square bg-[#12111a] flex items-center justify-center overflow-hidden">
-                                                    {(asset.thumbnail_url || asset.signed_url || asset.final_thumbnail_url || asset.preview_thumbnail_url) ? (
-                                                        <img
-                                                            src={asset.thumbnail_url || asset.final_thumbnail_url || asset.preview_thumbnail_url || asset.signed_url}
-                                                            alt=""
-                                                            className="w-full h-full object-contain p-2 group-hover:scale-105 transition-transform"
-                                                        />
-                                                    ) : (
-                                                        <PhotoIcon className="w-10 h-10 text-white/20" />
-                                                    )}
-                                                </div>
-                                                <div className="px-2 py-2">
-                                                    <p className="text-xs text-white/60 truncate group-hover:text-white/80" title={asset.original_filename || asset.title}>
-                                                        {asset.original_filename || asset.title || 'Asset'}
-                                                    </p>
-                                                </div>
-                                            </button>
-                                        ))}
+                                        {assets.map((asset) => {
+                                            const thumbSrc = asset.thumbnail_url || asset.final_thumbnail_url || asset.preview_thumbnail_url || asset.original || asset.signed_url
+                                            const fallbackSrc = asset.original || asset.signed_url
+                                            return (
+                                                <button
+                                                    key={asset.id}
+                                                    type="button"
+                                                    onClick={() => handleSelect(asset)}
+                                                    className="group rounded-xl border-2 border-white/10 hover:border-indigo-500/60 overflow-hidden transition-all focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white/5 hover:bg-white/10"
+                                                >
+                                                    <div className="aspect-square bg-[#12111a] flex items-center justify-center overflow-hidden">
+                                                        {thumbSrc ? (
+                                                            <img
+                                                                src={thumbSrc}
+                                                                alt=""
+                                                                className="w-full h-full object-contain p-2 group-hover:scale-105 transition-transform"
+                                                                onError={(e) => {
+                                                                    if (fallbackSrc && e.target.src !== fallbackSrc) {
+                                                                        e.target.src = fallbackSrc
+                                                                    } else {
+                                                                        e.target.style.display = 'none'
+                                                                        if (e.target.parentElement) {
+                                                                            e.target.parentElement.innerHTML = '<svg class="w-10 h-10 text-white/20" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M3.75 21h16.5A2.25 2.25 0 0022.5 18.75V5.25A2.25 2.25 0 0020.25 3H3.75A2.25 2.25 0 001.5 5.25v13.5A2.25 2.25 0 003.75 21z" /></svg>'
+                                                                        }
+                                                                    }
+                                                                }}
+                                                            />
+                                                        ) : (
+                                                            <PhotoIcon className="w-10 h-10 text-white/20" />
+                                                        )}
+                                                    </div>
+                                                    <div className="px-2 py-2">
+                                                        <p className="text-xs text-white/60 truncate group-hover:text-white/80" title={asset.original_filename || asset.title}>
+                                                            {asset.original_filename || asset.title || 'Asset'}
+                                                        </p>
+                                                    </div>
+                                                </button>
+                                            )
+                                        })}
                                     </div>
                                 ) : (
                                     <div className="flex flex-col items-center justify-center py-16 gap-4">

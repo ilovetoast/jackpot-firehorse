@@ -9,10 +9,13 @@ export type CompositionDto = {
     updated_at: string
 }
 
+export type CompositionVersionKind = 'manual' | 'autosave'
+
 export type CompositionVersionMeta = {
     id: string
     composition_id: string
     label: string | null
+    kind?: CompositionVersionKind
     created_at: string
     thumbnail_url?: string | null
 }
@@ -67,8 +70,14 @@ export async function putComposition(
     opts?: {
         name?: string
         versionLabel?: string | null
-        /** When false, only updates document (and optional thumbnail); no new version row (autosave). */
+        /** When false, only updates document (and optional thumbnail); no new version row (streaming autosave). */
         createVersion?: boolean
+        /**
+         * When createVersion is true, kind determines whether the new row counts as a manual checkpoint
+         * (kept up to 50) or a rolling autosave snapshot (kept up to 10, older ones auto-pruned).
+         * Defaults to 'manual' server-side.
+         */
+        versionKind?: CompositionVersionKind
         thumbnailPngBase64?: string | null
     }
 ): Promise<CompositionDto> {
@@ -80,6 +89,7 @@ export async function putComposition(
             name: opts?.name,
             document,
             version_label: opts?.versionLabel ?? null,
+            version_kind: opts?.versionKind ?? undefined,
             create_version: opts?.createVersion ?? true,
             thumbnail_png_base64: opts?.thumbnailPngBase64 ?? undefined,
         }),
@@ -193,7 +203,8 @@ export async function postCompositionVersion(
     compositionId: string,
     document: DocumentModel,
     label?: string | null,
-    thumbnailPngBase64?: string | null
+    thumbnailPngBase64?: string | null,
+    kind?: CompositionVersionKind
 ): Promise<{ composition: CompositionDto; version: CompositionVersionDto | null }> {
     const res = await fetch(`/app/api/compositions/${encodeURIComponent(compositionId)}/versions`, {
         method: 'POST',
@@ -202,6 +213,7 @@ export async function postCompositionVersion(
         body: JSON.stringify({
             document,
             label: label ?? null,
+            kind: kind ?? undefined,
             thumbnail_png_base64: thumbnailPngBase64 ?? undefined,
         }),
     })

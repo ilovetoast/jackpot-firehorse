@@ -17,6 +17,7 @@ import { useState, useRef, useEffect, useLayoutEffect, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { usePage } from '@inertiajs/react'
 import { BarsArrowUpIcon, BarsArrowDownIcon } from '@heroicons/react/24/outline'
+import { ensureAccentContrastOnWhite } from '../utils/colorUtils'
 
 const MENU_WIDTH_PX = 224 // matches w-56
 const MENU_VIEWPORT_PAD = 8
@@ -49,7 +50,8 @@ export default function SortDropdown({
     variant = 'icon',
 }) {
     const { auth } = usePage().props
-    const accent = primaryColor || auth?.activeBrand?.primary_color || '#6366f1'
+    const rawAccent = primaryColor || auth?.activeBrand?.primary_color || '#6366f1'
+    const accent = ensureAccentContrastOnWhite(rawAccent)
     const [isOpen, setIsOpen] = useState(false)
     const [menuPos, setMenuPos] = useState({ top: 0, left: 0 })
     const containerRef = useRef(null)

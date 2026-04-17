@@ -160,6 +160,8 @@ class BrandVersionService
             'research_status' => BrandModelVersion::RESEARCH_COMPLETE,
             'research_completed_at' => now(),
         ]);
+
+        $this->syncOnboardingEnrichment($version, 'complete', 'Research complete');
     }
 
     public function markResearchFailed(BrandModelVersion $version): void
@@ -167,6 +169,28 @@ class BrandVersionService
         $version->update([
             'research_status' => BrandModelVersion::RESEARCH_FAILED,
         ]);
+
+        $this->syncOnboardingEnrichment($version, 'failed', 'Processing encountered an issue');
+    }
+
+    /**
+     * Update onboarding enrichment status when brand research transitions.
+     * Safe to call even when no onboarding progress exists.
+     */
+    private function syncOnboardingEnrichment(BrandModelVersion $version, string $status, ?string $detail = null): void
+    {
+        try {
+            $brand = $version->brandModel?->brand;
+            if ($brand) {
+                \App\Services\OnboardingService::transitionEnrichmentStatus($brand, $status, $detail);
+            }
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('[BrandVersionService] Onboarding enrichment sync failed', [
+                'version_id' => $version->id,
+                'status' => $status,
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 
     public function advanceToReview(BrandModelVersion $version): void

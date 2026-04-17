@@ -812,77 +812,41 @@ export default function CollectionsIndex({
 
                     {/* Download bucket bar is mounted at app level (DownloadBucketBarGlobal) so it doesn't flash on collection change */}
 
-                    {/* Asset Drawer - Desktop */}
+                    {/* Asset Drawer — single instance, portals to document.body */}
                     {activeAssetId && (
-                        <div className="hidden md:block">
-                            <AssetDrawer
-                                key={activeAssetId}
-                                asset={activeAsset}
-                                onClose={() => {
-                                    setActiveAssetId(null)
-                                    setOpenDrawerWithZoom(false)
-                                }}
-                                assets={safeAssetsList}
-                                currentAssetIndex={activeAsset ? safeAssetsList.findIndex((a) => a?.id === activeAsset?.id) : -1}
-                                onAssetUpdate={handleLifecycleUpdate}
-                                selectionAssetType="asset"
-                                initialZoomOpen={openDrawerWithZoom}
-                                onInitialZoomConsumed={handleInitialZoomConsumed}
-                                collectionContext={{
-                                    show: true,
-                                    selectedCollectionId,
-                                    canAddToCollection: can_add_to_collection,
-                                    canRemoveFromCollection: can_remove_from_collection,
-                                    canCreateCollection: can_create_collection,
-                                    onOpenCreateCollection: () => setShowCreateModal(true),
-                                    onAssetRemovedFromCollection: (assetId, collectionId) => {
-                                        if (collectionId === selectedCollectionId) {
-                                            setAssetsList((prev) => (prev || []).filter(Boolean).filter((a) => a?.id !== assetId))
-                                            setActiveAssetId(null)
-                                        }
-                                    },
-                                }}
-                            />
-                        </div>
+                        <AssetDrawer
+                            key={activeAssetId}
+                            asset={activeAsset}
+                            onClose={() => {
+                                setActiveAssetId(null)
+                                setOpenDrawerWithZoom(false)
+                            }}
+                            assets={safeAssetsList}
+                            currentAssetIndex={activeAsset ? safeAssetsList.findIndex((a) => a?.id === activeAsset?.id) : -1}
+                            onAssetUpdate={handleLifecycleUpdate}
+                            selectionAssetType="asset"
+                            bucketAssetIds={bucketAssetIds}
+                            onBucketToggle={handleBucketToggle}
+                            initialZoomOpen={openDrawerWithZoom}
+                            onInitialZoomConsumed={handleInitialZoomConsumed}
+                            collectionContext={{
+                                show: true,
+                                selectedCollectionId,
+                                canAddToCollection: can_add_to_collection,
+                                canRemoveFromCollection: can_remove_from_collection,
+                                canCreateCollection: can_create_collection,
+                                onOpenCreateCollection: () => setShowCreateModal(true),
+                                onAssetRemovedFromCollection: (assetId, collectionId) => {
+                                    if (collectionId === selectedCollectionId) {
+                                        setAssetsList((prev) => (prev || []).filter(Boolean).filter((a) => a?.id !== assetId))
+                                        setActiveAssetId(null)
+                                    }
+                                },
+                            }}
+                        />
                     )}
                 </div>
             </div>
-
-            {/* Asset Drawer - Mobile */}
-            {activeAssetId && (
-                <div className="md:hidden fixed inset-0 z-[150]">
-                    <div className="absolute inset-0 bg-black/50" onClick={() => { setActiveAssetId(null); setOpenDrawerWithZoom(false) }} aria-hidden="true" />
-                    <AssetDrawer
-                        key={activeAssetId}
-                        asset={activeAsset}
-                        onClose={() => {
-                            setActiveAssetId(null)
-                            setOpenDrawerWithZoom(false)
-                        }}
-                        assets={safeAssetsList}
-                        currentAssetIndex={activeAsset ? safeAssetsList.findIndex((a) => a?.id === activeAsset?.id) : -1}
-                        onAssetUpdate={handleLifecycleUpdate}
-                        bucketAssetIds={bucketAssetIds}
-                        onBucketToggle={handleBucketToggle}
-                        initialZoomOpen={openDrawerWithZoom}
-                        onInitialZoomConsumed={handleInitialZoomConsumed}
-                        collectionContext={{
-                            show: true,
-                            selectedCollectionId,
-                            canAddToCollection: can_add_to_collection,
-                            canRemoveFromCollection: can_remove_from_collection,
-                            canCreateCollection: can_create_collection,
-                            onOpenCreateCollection: () => setShowCreateModal(true),
-                                    onAssetRemovedFromCollection: (assetId, collectionId) => {
-                                        if (collectionId === selectedCollectionId) {
-                                            setAssetsList((prev) => (prev || []).filter(Boolean).filter((a) => a?.id !== assetId))
-                                            setActiveAssetId(null)
-                                        }
-                                    },
-                                }}
-                    />
-                </div>
-            )}
 
             {/* Phase 4: Unified Selection ActionBar */}
             <SelectionActionBar

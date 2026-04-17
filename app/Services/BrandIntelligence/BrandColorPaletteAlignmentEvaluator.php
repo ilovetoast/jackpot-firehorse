@@ -14,19 +14,19 @@ use Illuminate\Support\Facades\Log;
 final class BrandColorPaletteAlignmentEvaluator
 {
     /** ΔE below this counts as a strong match. */
-    private const DELTA_E_STRONG = 18.0;
+    private const DELTA_E_STRONG = 20.0;
 
     /** ΔE below this counts as a "close enough" match for palette family. */
-    private const DELTA_E_CLOSE = 32.0;
+    private const DELTA_E_CLOSE = 40.0;
 
     /** If average min-ΔE exceeds this, creative is likely off-palette (unless opposite heuristic fires). */
-    private const DELTA_E_AVG_FAIL = 42.0;
+    private const DELTA_E_AVG_FAIL = 52.0;
 
     /** HSL: saturation above this → "chromatic" for opposite-palette check. */
-    private const SATURATION_CHROMATIC = 0.12;
+    private const SATURATION_CHROMATIC = 0.15;
 
-    /** Hue wheel difference (degrees) to treat as opposing chromatic palettes. */
-    private const OPPOSITE_HUE_MIN = 95.0;
+    /** Hue wheel difference (degrees) to treat as opposing chromatic palettes (true opposites are 180°). */
+    private const OPPOSITE_HUE_MIN = 140.0;
 
     /**
      * @return array{

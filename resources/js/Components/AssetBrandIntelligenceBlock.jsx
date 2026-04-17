@@ -219,15 +219,15 @@ export default function AssetBrandIntelligenceBlock({
 
     useEffect(() => {
         if (typeof onActivityBannerChange !== 'function') return
-        if (autoEnsureLoading) {
+        if (autoEnsureLoading && !rawBi) {
             onActivityBannerChange('Running brand analysis…')
-        } else if (deepScanLoading) {
+        } else if (deepScanLoading && !rawBi) {
             onActivityBannerChange('Deep PDF scan in progress…')
         } else {
             onActivityBannerChange(null)
         }
         return () => onActivityBannerChange(null)
-    }, [autoEnsureLoading, deepScanLoading, onActivityBannerChange])
+    }, [autoEnsureLoading, deepScanLoading, rawBi, onActivityBannerChange])
 
     /** When EBI is enabled and analysis is ready but no score exists yet, queue scoring and poll (or show a gate message). */
     useEffect(() => {
@@ -573,6 +573,7 @@ export default function AssetBrandIntelligenceBlock({
                         campaignAlignment={campaignAlignment}
                         campaignAlignmentFetchSettled={campaignAlignmentFetchSettled}
                         collectionId={collectionId}
+                        isRefreshing={autoEnsureLoading || deepScanLoading || rescoreLoading}
                     />
                 </div>
             )}

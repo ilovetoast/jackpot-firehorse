@@ -87,6 +87,43 @@ class BrandDNABuilderController extends Controller
             return redirect()->route('brands.review.show', ['brand' => $brand->id]);
         }
 
+        // Active-processing gate: redirect to Research if any pipeline work is still in-flight.
+        // This catches the case where a user re-runs analysis from the Research page and then
+        // navigates to the Builder before it completes (lifecycle_stage is already 'build').
+        if ($this->hasActiveResearchPipeline($draft)) {
+            return redirect()->route('brands.research.show', ['brand' => $brand->id]);
+        }
+
+        // Unseen-results gate: redirect to Research if the latest completed run finished
+        // AFTER the user last reviewed research results. Forces the user to click through
+        // the Research completion CTA before entering the Builder.
+        // Only applies when research_reviewed_at is already tracked (set by the
+        // advanceToReview flow). Old users without this key skip the gate — they'll
+        // start being protected after their next Research → Review transition.
+        $builderProgress = $draft->builder_progress ?? [];
+        if (array_key_exists('research_reviewed_at', $builderProgress) && ! empty($builderProgress['research_reviewed_at'])) {
+            $latestCompletedRun = BrandPipelineRun::where('brand_model_version_id', $draft->id)
+                ->where('status', BrandPipelineRun::STATUS_COMPLETED)
+                ->latest('completed_at')
+                ->first();
+            $latestCompletedSnap = BrandPipelineSnapshot::where('brand_model_version_id', $draft->id)
+                ->where('status', BrandPipelineSnapshot::STATUS_COMPLETED)
+                ->latest()
+                ->first();
+            $latestFinishedAt = max(
+                $latestCompletedRun?->completed_at?->timestamp ?? 0,
+                $latestCompletedSnap?->updated_at?->timestamp ?? 0
+            );
+            try {
+                $reviewedAt = \Carbon\Carbon::parse($builderProgress['research_reviewed_at'])->timestamp;
+            } catch (\Throwable) {
+                $reviewedAt = 0;
+            }
+            if ($latestFinishedAt > 0 && $latestFinishedAt > $reviewedAt) {
+                return redirect()->route('brands.research.show', ['brand' => $brand->id]);
+            }
+        }
+
         $stepKeys = BrandGuidelinesBuilderSteps::stepKeys();
         $steps = BrandGuidelinesBuilderSteps::steps();
         $currentStep = $request->query('step', BrandGuidelinesBuilderSteps::STEP_ARCHETYPE);
@@ -252,17 +289,20 @@ class BrandDNABuilderController extends Controller
         // Logo: prefer logo_reference attached to this draft, fall back to brand.logo_id
         $logoAsset = $draft->assetsForContext('logo_reference')->first();
         $logoThumbnailUrl = null;
+        $logoPreviewUrl = null;
         $logoAssetId = null;
         $logoOriginalFilename = null;
         if ($logoAsset) {
             $logoAssetId = $logoAsset->id;
             $logoThumbnailUrl = $logoAsset->deliveryUrl(AssetVariant::THUMB_MEDIUM, DeliveryContext::AUTHENTICATED) ?: null;
+            $logoPreviewUrl = $logoAsset->deliveryUrl(AssetVariant::ORIGINAL, DeliveryContext::AUTHENTICATED) ?: null;
             $logoOriginalFilename = $logoAsset->original_filename;
         } elseif ($brand->logo_id) {
             $brandLogoAsset = Asset::withoutTrashed()->find($brand->logo_id);
             if ($brandLogoAsset) {
                 $logoAssetId = $brandLogoAsset->id;
                 $logoThumbnailUrl = $brandLogoAsset->deliveryUrl(AssetVariant::THUMB_MEDIUM, DeliveryContext::AUTHENTICATED) ?: null;
+                $logoPreviewUrl = $brandLogoAsset->deliveryUrl(AssetVariant::ORIGINAL, DeliveryContext::AUTHENTICATED) ?: null;
                 $logoOriginalFilename = $brandLogoAsset->original_filename;
             }
         }
@@ -298,6 +338,7 @@ class BrandDNABuilderController extends Controller
             'logoAsset' => $logoAssetId ? [
                 'id' => $logoAssetId,
                 'thumbnail_url' => $logoThumbnailUrl,
+                'preview_url' => $logoPreviewUrl,
                 'original_filename' => $logoOriginalFilename,
                 'thumbnail_status' => ($logoAsset ?? $brandLogoAsset ?? null)?->thumbnail_status ?? 'pending',
             ] : null,
@@ -2119,6 +2160,24 @@ PROMPT;
         ]);
 
         return response()->json(['retried' => true, 'strategy' => 'full_restart']);
+    }
+
+    protected function hasActiveResearchPipeline(BrandModelVersion $version): bool
+    {
+        if ($version->research_status === BrandModelVersion::RESEARCH_RUNNING) {
+            return true;
+        }
+
+        $activeRun = BrandPipelineRun::where('brand_model_version_id', $version->id)
+            ->whereIn('status', [BrandPipelineRun::STATUS_PENDING, BrandPipelineRun::STATUS_PROCESSING])
+            ->exists();
+        if ($activeRun) {
+            return true;
+        }
+
+        return BrandPipelineSnapshot::where('brand_model_version_id', $version->id)
+            ->whereIn('status', [BrandPipelineSnapshot::STATUS_PENDING, BrandPipelineSnapshot::STATUS_RUNNING])
+            ->exists();
     }
 
     protected function ensureTextExtractionStarted(Asset $asset): void

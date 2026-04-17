@@ -206,7 +206,7 @@ const BULK_ACTION_GROUPS = [
     },
     {
         label: 'Classification',
-        sectionDescription: 'Assign category (library, execution, or generative) and move to main grid.',
+        sectionDescription: 'Assign category (library or execution) and move to main grid.',
         actions: [
             { id: 'ASSIGN_CATEGORY', label: 'Assign Category', helper: 'Set category, asset type, and move to main grid', icon: DocumentCheckIcon },
         ],
@@ -254,7 +254,6 @@ const ASSIGN_CATEGORY_ACTION = 'ASSIGN_CATEGORY'
 const BULK_ASSET_TYPE_OPTIONS = [
     { value: 'asset', label: 'Library' },
     { value: 'deliverable', label: 'Execution' },
-    { value: 'ai_generated', label: 'Generative' },
 ]
 
 /**
@@ -433,7 +432,7 @@ export default function BulkActionsModal({
     canForceDelete = false,
     /** Staged intake: categories for Assign Category bulk action */
     categories = [],
-    /** Optional: { asset: [...], deliverable: [...], ai_generated: [...] } from Assets grid — enables Library / Execution / Generative */
+    /** Optional: { asset: [...], deliverable: [...], ai_generated: [...] } from Assets grid — enables Library / Execution category assignment */
     bulkCategoriesByAssetType = null,
 }) {
     const { auth } = usePage().props

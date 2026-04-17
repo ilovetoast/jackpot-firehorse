@@ -69,6 +69,8 @@ export function SidebarEditorProvider({ children, modelPayload, brand, canCustom
         showDnaConfirm,
         canCustomize,
         backgroundImagePresets,
+        brandId: brand?.id,
+        brand,
         ...overridesApi,
     }
 

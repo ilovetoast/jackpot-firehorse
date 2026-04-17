@@ -92,6 +92,9 @@ class AITaskType
     /** Asset editor — AI edit of an existing image layer (counts toward same plan quota as generative) */
     public const EDITOR_EDIT_IMAGE = 'editor_edit_image';
 
+    /** Asset editor — AI-generated layout recommendation (template + layer structure from user prompt) */
+    public const EDITOR_LAYOUT_GENERATION = 'editor_layout_generation';
+
     /**
      * Get all task types as an array.
      *
@@ -125,6 +128,7 @@ class AITaskType
             self::EDITOR_COPY_ASSIST,
             self::EDITOR_GENERATIVE_IMAGE,
             self::EDITOR_EDIT_IMAGE,
+            self::EDITOR_LAYOUT_GENERATION,
             self::THUMBNAIL_ENHANCEMENT,
             self::THUMBNAIL_PRESENTATION_PREVIEW,
         ];

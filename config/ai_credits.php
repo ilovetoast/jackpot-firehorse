@@ -27,6 +27,7 @@ return [
         'presentation_preview' => 10,
         'generative_editor_edits' => 15,
         'generative_editor_images' => 20,
+        'generative_editor_layout' => 8,
         /*
          * Intentionally no weight for `thumbnail_enhancement` (Studio View enhanced mode):
          * GenerateEnhancedPreviewJob composites locally via TemplateRenderer + GD/ImageMagick — no LLM/provider API.

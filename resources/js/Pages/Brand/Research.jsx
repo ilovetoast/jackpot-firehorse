@@ -13,6 +13,8 @@ import ConfirmDialog from '../../Components/ConfirmDialog'
 import { normalizeWebsiteUrl } from '../../utils/websiteUrl'
 import axios from 'axios'
 import { ChevronDownIcon, ChevronRightIcon } from '@heroicons/react/24/outline'
+import SlotReelLoader from '../../Components/SlotReelLoader'
+import PoweredByJackpot from '../../Components/PoweredByJackpot'
 
 function StatusBadge({ status, elapsed }) {
     const colors = {
@@ -409,6 +411,13 @@ export default function Research({
             if (assetId) {
                 setPdfAsset({ id: assetId, filename: file.name, size_bytes: file.size })
                 setInputsDirty(true)
+
+                // Immediately link the PDF to the version so it persists across page reloads
+                axios.post(route('brands.research.link-pdf', { brand: brand.id }), {
+                    pdf_asset_id: assetId,
+                }).catch((linkErr) => {
+                    console.warn('[Research] PDF link-to-version failed (non-blocking):', linkErr)
+                })
             }
         } catch (err) {
             const errData = err?.response?.data
@@ -525,39 +534,13 @@ export default function Research({
         if (!hasResearchInputs) return
 
         setPendingAdvanceAfterRun(true)
-        if (isFinalized && inputsChangedAfterAnalysis) {
-            setAnalyzing(true)
-            setPipelineLive(null)
-            setHealth({ state: 'processing', error: null, can_retry: false })
-            setPolledStatus((prev) => ({
-                ...prev,
-                pdf_complete: false,
-                snapshot_ready: false,
-                suggestions_ready: false,
-                research_finalized: false,
-            }))
-            try {
-                await axios.post(route('brands.research.rerun', { brand: brand.id }))
-                setPolling(true)
-            } catch (err) {
-                console.error('Re-run failed', err)
-                setHealth({ state: 'failed', error: err?.response?.data?.message || 'Re-run request failed.', can_retry: true })
-                setPendingAdvanceAfterRun(false)
-            } finally {
-                setAnalyzing(false)
-            }
-            return
-        }
+        // Always use the analyze endpoint (not rerun) so new PDF/URL inputs are linked
         await handleAnalyze()
-        // handleAnalyze clears analyzing; on axios failure it sets health — pending cleared by stuck/failed effect
     }, [
         canContinue,
         isStuckOrFailed,
         brandResearchGate?.allowed,
         hasResearchInputs,
-        isFinalized,
-        inputsChangedAfterAnalysis,
-        brand.id,
         handleAdvanceToReview,
         handleAnalyze,
     ])
@@ -628,14 +611,17 @@ export default function Research({
                 <div className="max-w-5xl mx-auto px-6 pt-10 pb-32">
                     {/* Header */}
                     <div className="mb-10">
-                        <div className="flex items-center gap-3 mb-2">
-                            <span className="text-white/40 text-sm">v{version.version_number}</span>
-                            <StatusBadge status={isStuckOrFailed ? health.state : (isFinalized ? 'complete' : version.research_status)} />
-                            {health.elapsed_seconds != null && health.state !== 'idle' && health.state !== 'completed' && (
-                                <span className="text-white/30 text-xs">
-                                    {formatElapsed(health.elapsed_seconds)} elapsed
-                                </span>
-                            )}
+                        <div className="flex items-center justify-between mb-4">
+                            <div className="flex items-center gap-3">
+                                <span className="text-white/40 text-sm">v{version.version_number}</span>
+                                <StatusBadge status={isStuckOrFailed ? health.state : (isFinalized ? 'complete' : version.research_status)} />
+                                {health.elapsed_seconds != null && health.state !== 'idle' && health.state !== 'completed' && (
+                                    <span className="text-white/30 text-xs">
+                                        {formatElapsed(health.elapsed_seconds)} elapsed
+                                    </span>
+                                )}
+                            </div>
+                            <PoweredByJackpot variant="badge" />
                         </div>
                         <h1 className="text-3xl font-bold text-white tracking-tight">
                             Brand Research
@@ -746,6 +732,22 @@ export default function Research({
                                                     {pdfDragOver ? 'Drop PDF here' : 'Drag & drop PDF or click to upload'}
                                                 </p>
                                                 <p className="text-xs text-white/20">or <button type="button" onClick={(e) => { e.stopPropagation(); setShowPdfModal(true) }} className="text-indigo-400/70 hover:text-indigo-400 underline underline-offset-2">browse library</button></p>
+                                            </div>
+                                        </div>
+                                    )}
+                                    {!pdfAsset && inputs.pdf_expected_but_missing && (
+                                        <div className="mt-2 flex items-start gap-2 rounded-lg bg-amber-500/10 border border-amber-500/20 px-3 py-2.5">
+                                            <svg className="w-4 h-4 text-amber-400 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4.5c-.77-.833-2.694-.833-3.464 0L3.34 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                                            </svg>
+                                            <div className="flex-1 min-w-0">
+                                                <p className="text-sm text-amber-200">A brand guidelines PDF was uploaded during setup but could not be linked to this draft.</p>
+                                                <p className="text-xs text-amber-200/60 mt-1">
+                                                    Upload it again above or{' '}
+                                                    <button type="button" onClick={(e) => { e.stopPropagation(); setShowPdfModal(true) }} className="text-amber-300 underline underline-offset-2 hover:text-amber-200">
+                                                        select it from your library
+                                                    </button>.
+                                                </p>
                                             </div>
                                         </div>
                                     )}
@@ -1073,28 +1075,40 @@ export default function Research({
                                     </div>
                                 )}
 
-                                {/* Real progress bar only when actively processing */}
+                                {/* Slot-reel processing animation + progress bar */}
                                 {isProcessing && !isStuckOrFailed && (
-                                    <div className="pt-2">
-                                        <div className="h-1 w-full bg-white/10 rounded-full overflow-hidden">
-                                            <motion.div
-                                                className="h-full rounded-full"
-                                                style={{ backgroundColor: primaryColor }}
-                                                initial={{ width: '5%' }}
-                                                animate={{
-                                                    width: (() => {
-                                                        const p = pipelineLive?.processing_progress?.overall_percent
-                                                        if (typeof p === 'number' && !Number.isNaN(p)) {
-                                                            return `${Math.min(100, Math.max(3, p))}%`
-                                                        }
-                                                        return effectiveStatus.suggestions_ready ? '100%'
-                                                            : effectiveStatus.snapshot_ready ? '75%'
-                                                            : effectiveStatus.pdf_complete ? '40%'
-                                                            : '15%'
-                                                    })(),
-                                                }}
-                                                transition={{ duration: 0.8, ease: 'easeOut' }}
-                                            />
+                                    <div className="pt-4 flex flex-col items-center gap-4">
+                                        <SlotReelLoader
+                                            size="sm"
+                                            label={(() => {
+                                                const phase = formatEnrichmentPhase(pipelineLive)
+                                                if (phase) return phase
+                                                if (effectiveStatus.pdf_complete && !effectiveStatus.snapshot_ready) return 'Building snapshot…'
+                                                if (!effectiveStatus.pdf_complete && pipelineLive?.pdf) return 'Extracting PDF…'
+                                                return 'Analyzing your brand…'
+                                            })()}
+                                        />
+                                        <div className="w-full max-w-xs">
+                                            <div className="h-1 w-full bg-white/10 rounded-full overflow-hidden">
+                                                <motion.div
+                                                    className="h-full rounded-full"
+                                                    style={{ backgroundColor: primaryColor }}
+                                                    initial={{ width: '5%' }}
+                                                    animate={{
+                                                        width: (() => {
+                                                            const p = pipelineLive?.processing_progress?.overall_percent
+                                                            if (typeof p === 'number' && !Number.isNaN(p)) {
+                                                                return `${Math.min(100, Math.max(3, p))}%`
+                                                            }
+                                                            return effectiveStatus.suggestions_ready ? '100%'
+                                                                : effectiveStatus.snapshot_ready ? '75%'
+                                                                : effectiveStatus.pdf_complete ? '40%'
+                                                                : '15%'
+                                                        })(),
+                                                    }}
+                                                    transition={{ duration: 0.8, ease: 'easeOut' }}
+                                                />
+                                            </div>
                                         </div>
                                     </div>
                                 )}
@@ -1198,6 +1212,55 @@ export default function Research({
                                 </p>
                             </SectionCard>
                         )}
+
+                        {/* Big CTA when research finishes — Jackpot celebration */}
+                        <AnimatePresence>
+                            {canContinue && !pendingAdvanceAfterRun && (
+                                <motion.div
+                                    initial={{ opacity: 0, y: 20, scale: 0.97 }}
+                                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                                    exit={{ opacity: 0, y: -10 }}
+                                    transition={{ duration: 0.5, ease: 'easeOut' }}
+                                >
+                                    <div
+                                        className="rounded-2xl border p-8 text-center overflow-hidden relative"
+                                        style={{
+                                            borderColor: `${primaryColor}30`,
+                                            background: `linear-gradient(135deg, ${primaryColor}12, ${primaryColor}06, rgba(12,12,14,0.8))`,
+                                        }}
+                                    >
+                                        <div className="flex justify-center mb-5">
+                                            <SlotReelLoader landed size="md" />
+                                        </div>
+                                        <h3 className="text-xl font-semibold text-white/90 mb-2">
+                                            Research complete
+                                        </h3>
+                                        <p className="text-sm text-white/45 max-w-md mx-auto mb-6 leading-relaxed">
+                                            {hasExtractedData
+                                                ? 'Your brand data has been analyzed and is ready to review. Continue to see AI-generated suggestions and start building your guidelines.'
+                                                : 'Analysis finished — continue to the next step to start building your guidelines manually.'}
+                                        </p>
+                                        <button
+                                            type="button"
+                                            onClick={handleAdvanceToReview}
+                                            className="inline-flex items-center gap-2 px-8 py-3.5 rounded-xl text-base font-semibold text-white transition-all duration-300 hover:brightness-110 hover:scale-[1.02] active:scale-[0.98]"
+                                            style={{
+                                                background: `linear-gradient(135deg, ${primaryColor}, ${primaryColor}cc)`,
+                                                boxShadow: `0 6px 24px ${primaryColor}35, 0 2px 8px ${primaryColor}20`,
+                                            }}
+                                        >
+                                            Continue to Review
+                                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                                                <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
+                                            </svg>
+                                        </button>
+                                        <div className="mt-5">
+                                            <PoweredByJackpot variant="inline" className="justify-center opacity-60" />
+                                        </div>
+                                    </div>
+                                </motion.div>
+                            )}
+                        </AnimatePresence>
 
                         {/* Warning: only when inputs changed AFTER a previous successful analysis */}
                         {inputsChangedAfterAnalysis && !isProcessing && (
@@ -1440,6 +1503,9 @@ export default function Research({
                     setPdfAsset({ id: asset.id, filename: asset.original_filename, size_bytes: asset.size_bytes })
                     setShowPdfModal(false)
                     setInputsDirty(true)
+                    axios.post(route('brands.research.link-pdf', { brand: brand.id }), {
+                        pdf_asset_id: asset.id,
+                    }).catch((err) => console.warn('[Research] PDF link-to-version failed:', err))
                 }}
             />
         </>

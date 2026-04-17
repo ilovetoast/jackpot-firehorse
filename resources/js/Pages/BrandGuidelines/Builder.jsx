@@ -37,6 +37,8 @@ import { generateWhiteVariant, generatePrimaryColorWashVariant, detectLogoComple
 import ImageCropModal from '../../Components/ImageCropModal'
 
 import { ARCHETYPES, ARCHETYPE_RECOMMENDED_TRAITS } from '../../constants/brandOptions'
+import PoweredByJackpot from '../../Components/PoweredByJackpot'
+import SlotReelLoader from '../../Components/SlotReelLoader'
 
 // Unwrap AI-wrapped field: { value, source, confidence } -> value
 function unwrapValue(field) {
@@ -887,6 +889,9 @@ function ProcessingView({ pdfExtractionPolling, ingestionProcessing, ingestionRe
                 </div>
             ) : (
                 <>
+                    <div className="flex justify-center mb-6">
+                        <SlotReelLoader size="md" label="Analyzing your brand…" />
+                    </div>
                     <p className="text-white/60 text-sm mb-2">
                         We&apos;re extracting data from your uploads to fill and suggest content for the next steps.
                     </p>
@@ -3287,6 +3292,21 @@ export default function BrandGuidelinesBuilder({
     const hasProcessing = pdfExtractionPolling || ingestionProcessing || ingestionPolling || effectiveCrawlerRunning
     const isProcessing = hasProcessing
 
+    // Active-processing safety net: if polling reveals a pipeline is running while the user
+    // is on a normal builder step (not processing/research-summary), redirect to Research.
+    // The backend's redirect guard handles the initial page load; this covers the edge case
+    // where processing is detected AFTER mount (e.g. another tab kicked off analysis).
+    useEffect(() => {
+        const builderDataSteps = ['archetype', 'purpose_promise', 'expression', 'positioning', 'standards']
+        const polledOverall = polledResearch?.overall_status
+        if (
+            builderDataSteps.includes(currentStep) &&
+            polledOverall === 'processing'
+        ) {
+            router.visit(route('brands.research.show', { brand: brand.id }))
+        }
+    }, [currentStep, polledResearch?.overall_status, brand.id])
+
     // When on processing step: only redirect when research is finalized AND (for PDF) all pages processed.
     // Uses effectiveResearchFinalizedForGate, NOT overall_status — backend can return completed too early.
     useEffect(() => {
@@ -3396,6 +3416,9 @@ export default function BrandGuidelinesBuilder({
 
             <div className="relative z-10 flex-1 flex flex-col min-h-0">
                 <header className="flex-shrink-0 px-4 sm:px-8 pt-6 pb-4">
+                    <div className="flex items-center justify-center mb-3">
+                        <PoweredByJackpot variant="inline" />
+                    </div>
                     <div className="flex items-center justify-between gap-4">
                         <Link
                             href={route('brands.guidelines.index', { brand: brand.id })}

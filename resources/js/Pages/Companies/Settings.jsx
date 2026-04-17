@@ -64,6 +64,8 @@ export default function CompanySettings({
     const [deleteCompanyError, setDeleteCompanyError] = useState(null)
     const [generativeSaving, setGenerativeSaving] = useState(false)
     const [generativeSaved, setGenerativeSaved] = useState(false)
+    const [aiEnabledSaving, setAiEnabledSaving] = useState(false)
+    const [aiEnabledSaved, setAiEnabledSaved] = useState(false)
 
     const csrf = () => document.querySelector('meta[name="csrf-token"]')?.content || ''
 
@@ -208,6 +210,7 @@ export default function CompanySettings({
             download_name_template: tenant.settings?.download_name_template ?? '', // Download default name template
             require_landing_page: tenant.settings?.require_landing_page ?? false,
             generative_enabled: tenant.settings?.generative_enabled ?? true,
+            ai_enabled: tenant.settings?.ai_enabled ?? true,
         },
     })
 
@@ -1466,6 +1469,88 @@ export default function CompanySettings({
                             </div>
                         )}
                     </div>
+
+                    {/* AI Features Toggle */}
+                    {canManageAiSettings && (
+                        <div id="ai-features-settings" className="mb-12 scroll-mt-8">
+                            <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
+                                <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+                                    <div className="lg:col-span-1 px-6 py-6 border-b lg:border-b-0 lg:border-r border-gray-200">
+                                        <h2 className="text-lg font-semibold text-gray-900">AI Features</h2>
+                                        <p className="mt-1 text-sm text-gray-500">
+                                            Master switch for all AI-powered features across your workspace. When disabled, AI image generation, copy assist, layout generation, and all other AI operations are turned off for every user. Existing content is preserved.
+                                        </p>
+                                    </div>
+                                    <div className="lg:col-span-2 px-6 py-6">
+                                        <div className="flex items-center justify-between">
+                                            <div className="flex-1">
+                                                <label htmlFor="ai_enabled" className="block text-sm font-medium leading-6 text-gray-900">
+                                                    Enable AI features
+                                                </label>
+                                                <p className="mt-1 text-sm text-gray-500">
+                                                    Controls AI image generation, copy assist, layout generation, smart tagging, and all other AI-powered operations. Disabling this prevents any AI API calls and credit usage for this workspace.
+                                                </p>
+                                            </div>
+                                            <div className="ml-4 flex items-center gap-2">
+                                                {aiEnabledSaving && (
+                                                    <span className="text-xs text-gray-400">Saving…</span>
+                                                )}
+                                                {aiEnabledSaved && !aiEnabledSaving && (
+                                                    <span className="text-xs text-green-600 transition-opacity duration-300">Saved</span>
+                                                )}
+                                                <button
+                                                    type="button"
+                                                    disabled={aiEnabledSaving}
+                                                    onClick={() => {
+                                                        const nextVal = !data.settings?.ai_enabled
+                                                        const nextSettings = { ...data.settings, ai_enabled: nextVal }
+                                                        setData('settings', nextSettings)
+                                                        setAiEnabledSaving(true)
+                                                        setAiEnabledSaved(false)
+                                                        router.put('/app/companies/settings', {
+                                                            name: data.name,
+                                                            slug: data.slug,
+                                                            timezone: data.timezone,
+                                                            settings: nextSettings,
+                                                        }, {
+                                                            preserveScroll: true,
+                                                            onSuccess: () => {
+                                                                setAiEnabledSaving(false)
+                                                                setAiEnabledSaved(true)
+                                                                setTimeout(() => setAiEnabledSaved(false), 2500)
+                                                            },
+                                                            onError: () => {
+                                                                setAiEnabledSaving(false)
+                                                                setData('settings', { ...nextSettings, ai_enabled: !nextVal })
+                                                            },
+                                                        })
+                                                    }}
+                                                    className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:ring-offset-2 disabled:opacity-50 ${
+                                                        data.settings?.ai_enabled !== false ? 'bg-indigo-600' : 'bg-gray-200'
+                                                    }`}
+                                                    role="switch"
+                                                    aria-checked={data.settings?.ai_enabled !== false}
+                                                >
+                                                    <span
+                                                        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                                                            data.settings?.ai_enabled !== false ? 'translate-x-5' : 'translate-x-0'
+                                                        }`}
+                                                    />
+                                                </button>
+                                            </div>
+                                        </div>
+                                        {data.settings?.ai_enabled === false && (
+                                            <div className="mt-4 rounded-md bg-amber-50 p-3">
+                                                <p className="text-sm text-amber-800">
+                                                    <strong>AI features are disabled.</strong> No AI API calls will be made and no credits will be consumed. AI-powered buttons and features will appear disabled for all users in this workspace. Existing AI-generated content is not affected.
+                                                </p>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
 
                     {/* Generative Settings */}
                     {canManageGenerative && (

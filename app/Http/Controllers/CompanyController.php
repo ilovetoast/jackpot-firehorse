@@ -493,6 +493,7 @@ class CompanyController extends Controller
             ],
             'settings.require_landing_page' => 'nullable|boolean',
             'settings.generative_enabled' => 'nullable|boolean',
+            'settings.ai_enabled' => 'nullable|boolean',
         ]);
 
         // Phase M-2: Handle settings separately
@@ -528,6 +529,12 @@ class CompanyController extends Controller
                 abort(403, 'You do not have permission to manage generative settings.');
             }
             $mergedSettings['generative_enabled'] = (bool) $settings['generative_enabled'];
+        }
+        if (array_key_exists('ai_enabled', $settings)) {
+            if (! $user->hasPermissionForTenant($tenant, 'company_settings.manage_ai_settings')) {
+                abort(403, 'You do not have permission to manage AI settings.');
+            }
+            $mergedSettings['ai_enabled'] = (bool) $settings['ai_enabled'];
         }
 
         $tenant->update($validated);

@@ -67,13 +67,13 @@ export default function FillGradientStopField({
                                         title={`${lbl} brand color`}
                                         className={`h-7 w-7 rounded border-2 shadow-sm ${
                                             active
-                                                ? 'border-indigo-600 ring-2 ring-indigo-300 dark:border-indigo-400 dark:ring-indigo-700'
-                                                : 'border-gray-300 dark:border-gray-600'
+                                                ? 'border-indigo-400 ring-2 ring-indigo-700'
+                                                : 'border-gray-700'
                                         }`}
                                         style={{ backgroundColor: c }}
                                         onClick={() => onChange(c)}
                                     />
-                                    <span className="max-w-[4.5rem] truncate text-center text-[9px] font-medium text-gray-600 dark:text-gray-400">
+                                    <span className="max-w-[4.5rem] truncate text-center text-[9px] font-medium text-gray-400">
                                         {lbl}
                                     </span>
                                 </div>
@@ -90,8 +90,8 @@ export default function FillGradientStopField({
                         disabled={disabled}
                         className={`rounded border px-2 py-1 text-[10px] font-medium ${
                             isTransparentCss(v)
-                                ? 'border-indigo-600 bg-indigo-50 text-indigo-900 dark:border-indigo-400 dark:bg-indigo-950/50 dark:text-indigo-100'
-                                : 'border-gray-300 text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-800'
+                                ? 'border-indigo-400 bg-indigo-950/50 text-indigo-100'
+                                : 'border-gray-700 text-gray-200 hover:bg-gray-800'
                         }`}
                         onClick={() => onChange('transparent')}
                     >
@@ -107,8 +107,8 @@ export default function FillGradientStopField({
                             disabled={disabled}
                             className={`h-7 w-7 rounded border-2 shadow-sm ${
                                 active
-                                    ? 'border-indigo-600 ring-2 ring-indigo-300 dark:border-indigo-400 dark:ring-indigo-700'
-                                    : 'border-gray-300 dark:border-gray-600'
+                                    ? 'border-indigo-400 ring-2 ring-indigo-700'
+                                    : 'border-gray-700'
                             }`}
                             style={{ backgroundColor: c }}
                             aria-label={c === '#ffffff' ? 'White' : 'Black'}
@@ -119,7 +119,7 @@ export default function FillGradientStopField({
             </div>
             <div className="flex gap-2">
                 <div
-                    className="relative h-9 w-12 shrink-0 overflow-hidden rounded border border-gray-300 dark:border-gray-600"
+                    className="relative h-9 w-12 shrink-0 overflow-hidden rounded border border-gray-700"
                     style={
                         isTransparentCss(v)
                             ? {
@@ -145,7 +145,7 @@ export default function FillGradientStopField({
                     value={value}
                     disabled={disabled}
                     onChange={(e) => onChange(e.target.value)}
-                    className="min-w-0 flex-1 rounded border border-gray-300 px-2 py-1 font-mono text-[11px] dark:border-gray-600 dark:bg-gray-800"
+                    className="min-w-0 flex-1 rounded border border-gray-700 bg-gray-800 px-2 py-1 font-mono text-[11px] text-gray-200"
                     placeholder={allowTransparent ? 'transparent or #RRGGBB' : '#RRGGBB'}
                 />
             </div>

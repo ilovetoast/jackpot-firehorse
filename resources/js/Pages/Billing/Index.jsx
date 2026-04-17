@@ -159,6 +159,12 @@ export default function BillingIndex({ tenant, current_plan, plans, subscription
         return subscription ? 'Switch Plan' : 'Get Started'
     }
 
+    const currentPlanIdx = PLAN_ORDER.indexOf(current_plan)
+    const shouldShowPopular = (planId) => {
+        if (planId !== 'pro') return false
+        return currentPlanIdx < PLAN_ORDER.indexOf('pro')
+    }
+
     const formatStorage = (mb) => {
         if (mb >= 1024 * 1024) return `${(mb / 1024 / 1024).toFixed(0)} TB`
         if (mb >= 1024) return `${(mb / 1024).toFixed(1)} GB`
@@ -227,7 +233,8 @@ export default function BillingIndex({ tenant, current_plan, plans, subscription
                     <div className="grid grid-cols-1 gap-6 lg:grid-cols-4">
                         {visiblePlans.map((plan) => {
                             const isCurrent = plan.id === current_plan
-                            const isPopular = plan.id === 'pro'
+                            const isPopular = shouldShowPopular(plan.id)
+                            const isDowngrade = getPlanAction(plan) === 'downgrade'
                             const highlights = PLAN_HIGHLIGHTS[plan.id] || []
                             const keyLimits = PLAN_KEY_LIMITS[plan.id] || []
 
@@ -235,12 +242,19 @@ export default function BillingIndex({ tenant, current_plan, plans, subscription
                                 <div
                                     key={plan.id}
                                     className={`relative flex flex-col rounded-xl border bg-white ${
-                                        isPopular ? 'border-indigo-500 ring-2 ring-indigo-500 shadow-lg' :
-                                        isCurrent ? 'border-indigo-300 shadow-md' :
+                                        isCurrent ? 'border-indigo-500 ring-2 ring-indigo-500 shadow-lg' :
+                                        isPopular ? 'border-indigo-300 ring-1 ring-indigo-300 shadow-md' :
                                         'border-gray-200 shadow-sm'
                                     }`}
                                 >
-                                    {isPopular && (
+                                    {isCurrent && (
+                                        <div className="absolute -top-3 left-0 right-0 flex justify-center">
+                                            <span className="rounded-full bg-indigo-600 px-3 py-1 text-xs font-semibold text-white">
+                                                Your plan
+                                            </span>
+                                        </div>
+                                    )}
+                                    {isPopular && !isCurrent && (
                                         <div className="absolute -top-3 left-0 right-0 flex justify-center">
                                             <span className="rounded-full bg-indigo-600 px-3 py-1 text-xs font-semibold text-white">
                                                 Most popular
@@ -253,9 +267,6 @@ export default function BillingIndex({ tenant, current_plan, plans, subscription
                                         <div className="mb-4">
                                             <div className="flex items-center justify-between">
                                                 <h3 className="text-lg font-semibold text-gray-900">{plan.name}</h3>
-                                                {isCurrent && (
-                                                    <span className="text-xs font-medium text-indigo-600 bg-indigo-50 rounded-full px-2 py-0.5">You</span>
-                                                )}
                                             </div>
                                             <div className="mt-3">
                                                 {plan.monthly_price ? (
@@ -271,17 +282,12 @@ export default function BillingIndex({ tenant, current_plan, plans, subscription
                                         </div>
 
                                         {/* Key limits row */}
-                                        <div className="flex items-center justify-between rounded-lg bg-gray-50 px-3 py-3 mb-5">
+                                        <div className="grid grid-cols-5 rounded-lg bg-gray-50 py-3 mb-5">
                                             {keyLimits.map((s, i, arr) => (
-                                                <Fragment key={s.label}>
-                                                    <div className="flex-1 text-center">
-                                                        <div className="text-sm font-bold text-gray-900">{s.value}</div>
-                                                        <div className="text-[10px] uppercase tracking-wider text-gray-400 mt-0.5">{s.label}</div>
-                                                    </div>
-                                                    {i < arr.length - 1 && (
-                                                        <div className="h-5 w-px bg-gray-200 shrink-0" />
-                                                    )}
-                                                </Fragment>
+                                                <div key={s.label} className={`flex flex-col items-center justify-center text-center px-1 ${i < arr.length - 1 ? 'border-r border-gray-200' : ''}`}>
+                                                    <div className="text-sm font-bold text-gray-900 leading-tight truncate w-full">{s.value}</div>
+                                                    <div className="text-[10px] uppercase tracking-wider text-gray-400 mt-0.5">{s.label}</div>
+                                                </div>
                                             ))}
                                         </div>
 
@@ -309,10 +315,10 @@ export default function BillingIndex({ tenant, current_plan, plans, subscription
                                         {/* CTA */}
                                         <div className="mt-auto">
                                             {isCurrent ? (
-                                                <button disabled className="w-full rounded-lg border border-gray-200 bg-gray-50 py-2.5 text-sm font-semibold text-gray-400 cursor-default">
+                                                <button disabled className="w-full rounded-lg bg-indigo-600 py-2.5 text-sm font-semibold text-white cursor-default">
                                                     Current Plan
                                                 </button>
-                                            ) : plan.id === 'free' ? (
+                                            ) : plan.id === 'free' && isDowngrade ? (
                                                 <button disabled className="w-full rounded-lg border border-gray-200 bg-gray-50 py-2.5 text-sm font-semibold text-gray-400 cursor-default">
                                                     Free Forever
                                                 </button>
@@ -326,6 +332,17 @@ export default function BillingIndex({ tenant, current_plan, plans, subscription
                                             ) : subscription?.has_incomplete_payment ? (
                                                 <button disabled className="w-full rounded-lg bg-gray-100 py-2.5 text-sm font-semibold text-gray-400 cursor-not-allowed">
                                                     Payment Required
+                                                </button>
+                                            ) : isDowngrade ? (
+                                                <button
+                                                    onClick={() => {
+                                                        if (!plan.stripe_price_id || plan.stripe_price_id === 'price_free') return
+                                                        subscription ? handleUpdateSubscription(plan.stripe_price_id, plan.id) : handleSubscribe(plan.stripe_price_id, plan.id)
+                                                    }}
+                                                    disabled={processingPlanId !== null || !plan.stripe_price_id || plan.stripe_price_id === 'price_free'}
+                                                    className="w-full rounded-lg border border-gray-200 bg-white py-2.5 text-sm font-medium text-gray-500 hover:bg-gray-50 hover:text-gray-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                                                >
+                                                    {processingPlanId === plan.id ? 'Processing...' : 'Switch to this plan'}
                                                 </button>
                                             ) : (
                                                 <button

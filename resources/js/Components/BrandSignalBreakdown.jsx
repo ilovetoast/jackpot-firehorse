@@ -6,6 +6,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from '@inertiajs/react'
 import {
+    ArrowPathIcon,
     CheckCircleIcon,
     ChevronDownIcon,
     ChevronUpIcon,
@@ -278,7 +279,8 @@ const V2_DIMENSION_ICONS = {
     context_fit: Squares2X2Icon,
 }
 
-function v2StatusIcon(status) {
+function v2StatusIcon(status, assetAnalysisStatus) {
+    const processing = assetAnalysisStatus && !['complete', 'scoring'].includes(assetAnalysisStatus)
     switch (status) {
         case 'aligned':
             return <CheckCircleIcon className="h-3.5 w-3.5 text-emerald-600" aria-label="Aligned" />
@@ -288,6 +290,7 @@ function v2StatusIcon(status) {
             return <MinusCircleIcon className="h-3.5 w-3.5 text-slate-400" aria-label="Weak evidence" />
         case 'not_evaluable':
         case 'missing_reference':
+            if (processing) return <ArrowPathIcon className="h-3.5 w-3.5 animate-spin text-slate-400" aria-label="Pending" />
             return <MinusSmallIcon className="h-3.5 w-3.5 text-slate-400" aria-label="Not evaluated" />
         case 'fail':
             return <XCircleIcon className="h-3.5 w-3.5 text-red-500" aria-label="Not aligned" />
@@ -305,8 +308,26 @@ const V2_STATUS_LABELS = {
     fail: 'Not aligned',
 }
 
-function v2StatusLabel(status) {
+function v2StatusLabel(status, dim, assetAnalysisStatus) {
+    if (status === 'not_evaluable' || status === 'missing_reference') {
+        const processing = assetAnalysisStatus && !['complete', 'scoring'].includes(assetAnalysisStatus)
+        if (processing) return 'Pending'
+    }
     return V2_STATUS_LABELS[status] || status
+}
+
+function v2StatusSubtext(status, dim) {
+    if (status === 'not_evaluable') {
+        const reason = dim?.status_reason
+        if (typeof reason === 'string' && reason.length > 0 && reason.length <= 60) return reason
+        return 'Missing data from this asset'
+    }
+    if (status === 'missing_reference') {
+        const reason = dim?.status_reason
+        if (typeof reason === 'string' && reason.length > 0 && reason.length <= 60) return reason
+        return 'Configure in brand guidelines'
+    }
+    return null
 }
 
 /**
@@ -357,7 +378,7 @@ function v2RatingTone(rating) {
     return 'slate'
 }
 
-function V2DimensionChips({ dimensions }) {
+function V2DimensionChips({ dimensions, assetAnalysisStatus }) {
     return (
         <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-slate-600">
             {V2_DIMENSION_ORDER.map((key, idx) => {
@@ -367,7 +388,7 @@ function V2DimensionChips({ dimensions }) {
                     <span key={key} className="inline-flex items-center gap-0.5 whitespace-nowrap">
                         {idx > 0 ? <span className="text-slate-300">|</span> : null}
                         <span className="text-slate-500">{label}</span>
-                        {v2StatusIcon(dim?.status)}
+                        {v2StatusIcon(dim?.status, assetAnalysisStatus)}
                     </span>
                 )
             })}
@@ -375,7 +396,7 @@ function V2DimensionChips({ dimensions }) {
     )
 }
 
-function V2DimensionGrid({ dimensions }) {
+function V2DimensionGrid({ dimensions, assetAnalysisStatus }) {
     return (
         <div className="grid grid-cols-2 gap-x-2 gap-y-1.5">
             {V2_DIMENSION_ORDER.map((key) => {
@@ -384,7 +405,10 @@ function V2DimensionGrid({ dimensions }) {
                 const Icon = V2_DIMENSION_ICONS[key] || Squares2X2Icon
                 const label = V2_DIMENSION_LABELS[key]
                 const hint = v2EvidenceHint(dim)
-                const statusText = v2StatusLabel(dim.status)
+                const statusText = v2StatusLabel(dim.status, dim, assetAnalysisStatus)
+                const subtext = v2StatusSubtext(dim.status, dim)
+                const processing = assetAnalysisStatus && !['complete', 'scoring'].includes(assetAnalysisStatus)
+                const isPending = processing && (dim.status === 'not_evaluable' || dim.status === 'missing_reference')
                 const statusColor =
                     dim.status === 'aligned'
                         ? 'text-emerald-700'
@@ -392,7 +416,9 @@ function V2DimensionGrid({ dimensions }) {
                           ? 'text-red-700'
                           : dim.status === 'partial'
                             ? 'text-amber-700'
-                            : 'text-slate-500'
+                            : isPending
+                              ? 'text-blue-500'
+                              : 'text-slate-500'
                 return (
                     <div
                         key={key}
@@ -405,8 +431,11 @@ function V2DimensionGrid({ dimensions }) {
                             <div className={`mt-0.5 text-[10px] leading-tight ${statusColor}`}>
                                 {statusText}
                             </div>
-                            {hint && (
+                            {hint && !subtext && (
                                 <p className="mt-0.5 line-clamp-2 text-[9px] leading-snug text-slate-500">{hint}</p>
+                            )}
+                            {subtext && (
+                                <p className="mt-0.5 line-clamp-2 text-[9px] leading-snug text-slate-500">{subtext}</p>
                             )}
                             {dim.evaluable && dim.confidence > 0 && (
                                 <p className="mt-0.5 text-[9px] text-slate-400">
@@ -615,10 +644,12 @@ export default function BrandSignalBreakdown({
     campaignAlignment = null,
     campaignAlignmentFetchSettled = true,
     collectionId = null,
+    isRefreshing = false,
 }) {
     const [expanded, setExpanded] = useState(false)
     const [refDetailOpen, setRefDetailOpen] = useState(false)
     const [confSeg, setConfSeg] = useState(0)
+    const assetAnalysisStatus = asset?.analysis_status ?? ''
 
     const normalized = useMemo(() => {
         const flat = data && typeof data === 'object' ? data : null
@@ -745,7 +776,7 @@ export default function BrandSignalBreakdown({
                 className={`overflow-hidden px-2.5 pt-2 pb-1.5 ${creativePanel ? 'max-h-[128px]' : 'max-h-[100px]'}`}
             >
                 <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0 flex-1">
+                        <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2">
                             <h3 className="text-xs font-semibold text-slate-900">
                                 {showCampaignPrimary ? 'Campaign Alignment' : 'Brand Alignment'}
@@ -754,6 +785,12 @@ export default function BrandSignalBreakdown({
                                 count={showCampaignPrimary ? Math.min(4, Math.max(0, campaignRating ?? 0)) : filledDots}
                                 tone={showCampaignPrimary ? v2RatingTone(campaignRating ?? 0) : tone}
                             />
+                            {isRefreshing && (
+                                <span className="inline-flex items-center gap-1 text-[10px] text-slate-400">
+                                    <ArrowPathIcon className="h-3 w-3 animate-spin" aria-hidden />
+                                    Updating…
+                                </span>
+                            )}
                         </div>
                         <CampaignCollectionCallout
                             collectionId={collectionId}
@@ -774,9 +811,9 @@ export default function BrandSignalBreakdown({
                             </div>
                         )}
                         {showCampaignPrimary && campaignDimensions ? (
-                            <V2DimensionChips dimensions={campaignDimensions} />
+                            <V2DimensionChips dimensions={campaignDimensions} assetAnalysisStatus={assetAnalysisStatus} />
                         ) : hasV2 ? (
-                            <V2DimensionChips dimensions={v2Dimensions} />
+                            <V2DimensionChips dimensions={v2Dimensions} assetAnalysisStatus={assetAnalysisStatus} />
                         ) : (
                             <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-slate-600">
                                 {SIGNAL_KEYS.map((key, idx) => {
@@ -882,7 +919,7 @@ export default function BrandSignalBreakdown({
                                         Visual analysis limited for video assets.
                                     </div>
                                 )}
-                                <V2DimensionGrid dimensions={campaignDimensions} />
+                                <V2DimensionGrid dimensions={campaignDimensions} assetAnalysisStatus={assetAnalysisStatus} />
                                 <CampaignMasterSummary interpretation={interpretation} />
                                 {interpretation?.interpretation_text && (
                                     <div className="mt-1.5 rounded border border-slate-100 bg-slate-50/60 px-2 py-1.5 text-[10px] leading-snug text-slate-600">
@@ -906,7 +943,7 @@ export default function BrandSignalBreakdown({
                                         Visual analysis limited for video assets.
                                     </div>
                                 )}
-                                <V2DimensionGrid dimensions={v2Dimensions} />
+                                <V2DimensionGrid dimensions={v2Dimensions} assetAnalysisStatus={assetAnalysisStatus} />
                                 {campaignAlignment && !hasCampaignScore && (
                                     <CampaignCta campaignAlignment={campaignAlignment} collectionId={collectionId} />
                                 )}

@@ -975,59 +975,30 @@ function DeliverablesIndexPage({ categories, total_asset_count = 0, selected_cat
                         </div>
                     </motion.div>
 
-                    {/* Asset Drawer - Desktop (pushes grid) */}
-                    {activeAsset && (
-                        <div className="hidden md:block">
-                            <AssetDrawer
-                                asset={activeAsset}
-                                onClose={() => {
-                                    userClosedDrawerRef.current = true
-                                    setActiveAssetId(null)
-                                    setOpenDrawerWithZoom(false)
-                                }}
-                                assets={safeAssetsList}
-                                currentAssetIndex={activeAsset ? safeAssetsList.findIndex(a => a?.id === activeAsset?.id) : -1}
-                                onAssetUpdate={handleLifecycleUpdate}
-                                bucketAssetIds={bucketAssetIds}
-                                onBucketToggle={handleBucketToggle}
-                                primaryColor={workspaceAccentColor}
-                                selectionAssetType="execution"
-                                initialZoomOpen={openDrawerWithZoom}
-                                onInitialZoomConsumed={handleInitialZoomConsumed}
-                            />
-                        </div>
-                    )}
-
-                    {/* Download bucket bar is mounted at app level (DownloadBucketBarGlobal) so it doesn't flash on category change */}
-                </div>
-
-                {/* Asset Drawer - Mobile (full-width overlay) */}
-                {/* CRITICAL: Drawer identity is based ONLY on activeAssetId */}
-                {/* Drawer must tolerate temporary undefined asset object during async updates */}
-                {/* Only render drawer if activeAssetId is set - asset object may be temporarily undefined */}
-                {activeAssetId && (
-                    <div className="md:hidden fixed inset-0 z-[150]">
-                        <div className="absolute inset-0 bg-black/50" onClick={() => { userClosedDrawerRef.current = true; setActiveAssetId(null); setOpenDrawerWithZoom(false) }} aria-hidden="true" />
+                    {/* Asset Drawer — single instance, portals to document.body */}
+                    {activeAssetId && (
                         <AssetDrawer
-                            key={activeAssetId} // Key by ID only - prevents remount on asset object changes
-                            asset={activeAsset} // May be undefined temporarily during async updates
+                            key={activeAssetId}
+                            asset={activeAsset}
                             onClose={() => {
                                 userClosedDrawerRef.current = true
                                 setActiveAssetId(null)
                                 setOpenDrawerWithZoom(false)
                             }}
-                            assets={assetsList}
+                            assets={safeAssetsList}
                             currentAssetIndex={activeAsset ? safeAssetsList.findIndex(a => a?.id === activeAsset?.id) : -1}
                             onAssetUpdate={handleLifecycleUpdate}
                             bucketAssetIds={bucketAssetIds}
                             onBucketToggle={handleBucketToggle}
-                            initialZoomOpen={openDrawerWithZoom}
-                            onInitialZoomConsumed={handleInitialZoomConsumed}
                             primaryColor={workspaceAccentColor}
                             selectionAssetType="execution"
+                            initialZoomOpen={openDrawerWithZoom}
+                            onInitialZoomConsumed={handleInitialZoomConsumed}
                         />
-                    </div>
-                )}
+                    )}
+
+                    {/* Download bucket bar is mounted at app level (DownloadBucketBarGlobal) so it doesn't flash on category change */}
+                </div>
             </div>
             
             {/* Phase 4: Unified Selection ActionBar */}

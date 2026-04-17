@@ -16,6 +16,7 @@ use App\Services\BrandDNA\ClaudePdfExtractionService;
 use App\Services\BrandDNA\Extraction\BrandMaterialProcessor;
 use App\Services\BrandDNA\Extraction\SectionAwareBrandGuidelinesProcessor;
 use App\Services\BrandDNA\Extraction\WebsiteExtractionProcessor;
+use App\Services\OnboardingService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -72,6 +73,8 @@ class BrandPipelineRunnerJob implements ShouldQueue
             'run_id' => $run->id,
             'extraction_mode' => $run->extraction_mode,
         ]);
+
+        OnboardingService::transitionEnrichmentStatus($brand, 'processing', 'Reading your guidelines');
 
         try {
             if ($run->extraction_mode === BrandPipelineRun::EXTRACTION_MODE_TEXT) {
@@ -340,6 +343,14 @@ class BrandPipelineRunnerJob implements ShouldQueue
             'status' => BrandPipelineRun::STATUS_FAILED,
             'error_message' => $exception?->getMessage() ?? 'Pipeline processing failed',
         ]);
+
+        if ($run->brand) {
+            OnboardingService::transitionEnrichmentStatus(
+                $run->brand,
+                'failed',
+                'We hit a problem processing your materials'
+            );
+        }
 
         Log::channel('pipeline')->error('[BrandPipelineRunnerJob] Job failed permanently', [
             'run_id' => $this->runId,
