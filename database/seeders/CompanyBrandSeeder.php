@@ -88,10 +88,10 @@ class CompanyBrandSeeder extends Seeder
         );
         $initialCompany->update(['name' => 'Velvet Hammer']);
 
-        // Agency: premium plan (feature limits), Platinum tier (highest seeded tier), approved
+        // Agency: business plan (feature limits), Platinum tier (highest seeded tier), approved
         $platinumTier = AgencyTier::where('name', 'Platinum')->first();
         $initialCompany->update([
-            'manual_plan_override' => 'premium',
+            'manual_plan_override' => 'business',
             'is_agency' => true,
             'agency_approved_at' => now(),
             'agency_approved_by' => $initialUser->id,
@@ -201,7 +201,7 @@ class CompanyBrandSeeder extends Seeder
         $companiesData = [
             'St. Croix' => ['brands' => ['St Croix', 'St Croix Fly', 'Seviin'], 'plan' => 'pro'],
             'Augusta' => ['brands' => ['Augusta'], 'plan' => 'starter'],
-            'ACG' => ['brands' => ['Nebo', 'True', 'Thaw'], 'plan' => 'premium'],
+            'ACG' => ['brands' => ['Nebo', 'True', 'Thaw'], 'plan' => 'business'],
             'Victory' => ['brands' => ['Victory'], 'plan' => 'free'],
         ];
 

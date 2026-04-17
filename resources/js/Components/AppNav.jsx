@@ -84,6 +84,7 @@ export default function AppNav({
         collection_only_collections: collectionOnlyCollections = [],
     } = page.props
     const showBrandGuidelinesNav = auth?.permissions?.show_brand_guidelines_nav === true
+    const generativeEnabled = auth?.permissions?.generative_enabled !== false
     const [showPlanAlert, setShowPlanAlert] = useState(false)
     const [collectionsDropdownOpen, setCollectionsDropdownOpen] = useState(false)
     const [mobileNavOpen, setMobileNavOpen] = useState(false)
@@ -1139,6 +1140,7 @@ export default function AppNav({
                                                         {collectionMainNavTabLabel}
                                                     </span>
                                                 )}
+                                                {generativeEnabled && (
                                                 <span
                                                     className={colOnlyDisabledClass}
                                                     style={{ color: colOnlyDisabledColor, borderBottomColor: 'transparent' }}
@@ -1146,8 +1148,9 @@ export default function AppNav({
                                                     aria-disabled="true"
                                                 >
                                                     <SparklesIcon className="h-4 w-4 shrink-0" aria-hidden="true" />
-                                                    Generative
+                                                    <span className="relative">Generative<sup className="absolute -top-2 -right-[1.6rem] text-[8px] font-bold tracking-wide uppercase" style={{ color: activeBrand?.primary_color || '#6366f1' }}>beta</sup></span>
                                                 </span>
+                                                )}
                                             </div>
                                         </>
                                     )
@@ -1204,6 +1207,7 @@ export default function AppNav({
                                     <RectangleGroupIcon className="h-4 w-4 shrink-0" />
                                     Collections
                                 </Link>
+                                {generativeEnabled && (
                                 <Link
                                     href="/app/generative"
                                     className="inline-flex items-center gap-1.5 border-b-2 px-1 py-2 text-sm font-medium border-transparent"
@@ -1217,8 +1221,9 @@ export default function AppNav({
                                     }}
                                 >
                                     <SparklesIcon className="h-4 w-4 shrink-0" />
-                                    Generative
+                                    <span className="relative">Generative<sup className="absolute -top-2 -right-[1.6rem] text-[8px] font-bold tracking-wide uppercase" style={{ color: activeBrand?.primary_color || '#6366f1' }}>beta</sup></span>
                                 </Link>
+                                )}
                                 </div>
                             </div>
                         )) : (
@@ -1270,6 +1275,7 @@ export default function AppNav({
                                     <RectangleGroupIcon className="h-4 w-4 shrink-0" />
                                     Collections
                                 </Link>
+                                {generativeEnabled && (
                                 <Link
                                     href="/app/generative"
                                     className="inline-flex items-center gap-1.5 border-b-2 px-1 py-2 text-sm font-medium border-transparent"
@@ -1283,8 +1289,9 @@ export default function AppNav({
                                     }}
                                 >
                                     <SparklesIcon className="h-4 w-4 shrink-0" />
-                                    Generative
+                                    <span className="relative">Generative<sup className="absolute -top-2 -right-[1.6rem] text-[8px] font-bold tracking-wide uppercase" style={{ color: activeBrand?.primary_color || '#6366f1' }}>beta</sup></span>
                                 </Link>
+                                )}
                                 </div>
                             </div>
                         )}
@@ -1431,13 +1438,15 @@ export default function AppNav({
                                         {collectionMainNavTabLabel}
                                     </div>
                                 )}
+                                {generativeEnabled && (
                                 <div
                                     className="flex items-center px-3 py-3 rounded-lg text-sm font-medium text-gray-400 opacity-40 cursor-not-allowed select-none"
                                     title="Not available for your access — use Collections and Downloads for shared content"
                                     aria-disabled="true"
                                 >
-                                    Generative
+                                    <span className="relative">Generative<sup className="absolute -top-2 -right-[1.6rem] text-[8px] font-bold tracking-wide uppercase" style={{ color: activeBrand?.primary_color || '#6366f1' }}>beta</sup></span>
                                 </div>
+                                )}
                             </div>
                         </nav>
                     </div>

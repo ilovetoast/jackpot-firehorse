@@ -1010,6 +1010,15 @@ export default function AssetEditor() {
     const imageEditAbortByLayerRef = useRef<Record<string, AbortController>>({})
     const [imageEditActionError, setImageEditActionError] = useState<string | null>(null)
     const [viewportScale, setViewportScale] = useState(1)
+    const [userZoom, setUserZoom] = useState<number | null>(null)
+    const [panOffset, setPanOffset] = useState({ x: 0, y: 0 })
+    const isPanningRef = useRef(false)
+    const panStartRef = useRef({ x: 0, y: 0, ox: 0, oy: 0 })
+    const spaceHeldRef = useRef(false)
+    const effectiveScale = userZoom ?? viewportScale
+
+    const [leftPanel, setLeftPanel] = useState<'layers' | 'assets' | 'templates' | 'menu' | null>('layers')
+
     const canvasContainerRef = useRef<HTMLDivElement>(null)
     const stageRef = useRef<HTMLDivElement>(null)
     const dragRef = useRef<DragState | null>(null)
@@ -1447,6 +1456,96 @@ export default function AssetEditor() {
         ro.observe(el)
         return () => ro.disconnect()
     }, [document.width, document.height])
+
+    const fitToView = useCallback(() => {
+        setUserZoom(null)
+        setPanOffset({ x: 0, y: 0 })
+    }, [])
+
+    const zoomToActual = useCallback(() => {
+        setUserZoom(1)
+    }, [])
+
+    const centerCanvas = useCallback(() => {
+        setPanOffset({ x: 0, y: 0 })
+    }, [])
+
+    const zoomTo = useCallback((newScale: number) => {
+        const clamped = Math.max(0.05, Math.min(8, newScale))
+        setUserZoom(clamped)
+    }, [])
+
+    useEffect(() => {
+        const el = canvasContainerRef.current
+        if (!el) return undefined
+        const onWheel = (e: WheelEvent) => {
+            if (isPanningRef.current || spaceHeldRef.current) return
+            if (e.ctrlKey || e.metaKey) {
+                e.preventDefault()
+                const delta = -e.deltaY * 0.002
+                const cur = userZoom ?? viewportScale
+                zoomTo(cur * (1 + delta))
+            }
+        }
+        el.addEventListener('wheel', onWheel, { passive: false })
+        return () => el.removeEventListener('wheel', onWheel)
+    }, [userZoom, viewportScale, zoomTo])
+
+    useEffect(() => {
+        const onKeyDown = (e: KeyboardEvent) => {
+            if (e.code === 'Space' && !e.repeat && !editingTextLayerId) {
+                e.preventDefault()
+                e.stopPropagation()
+                spaceHeldRef.current = true
+                const el = canvasContainerRef.current
+                if (el) el.style.cursor = 'grab'
+            }
+        }
+        const onKeyUp = (e: KeyboardEvent) => {
+            if (e.code === 'Space') {
+                e.preventDefault()
+                e.stopPropagation()
+                spaceHeldRef.current = false
+                isPanningRef.current = false
+                const el = canvasContainerRef.current
+                if (el) el.style.cursor = ''
+            }
+        }
+        window.addEventListener('keydown', onKeyDown)
+        window.addEventListener('keyup', onKeyUp)
+        return () => {
+            window.removeEventListener('keydown', onKeyDown)
+            window.removeEventListener('keyup', onKeyUp)
+        }
+    }, [editingTextLayerId])
+
+    const onCanvasPointerDown = useCallback((e: React.PointerEvent) => {
+        if (spaceHeldRef.current) {
+            e.preventDefault()
+            e.stopPropagation()
+            isPanningRef.current = true
+            panStartRef.current = { x: e.clientX, y: e.clientY, ox: panOffset.x, oy: panOffset.y }
+            const el = canvasContainerRef.current
+            if (el) el.style.cursor = 'grabbing'
+            ;(e.target as HTMLElement).setPointerCapture?.(e.pointerId)
+        }
+    }, [panOffset])
+
+    const onCanvasPointerMove = useCallback((e: React.PointerEvent) => {
+        if (!isPanningRef.current) return
+        const dx = e.clientX - panStartRef.current.x
+        const dy = e.clientY - panStartRef.current.y
+        setPanOffset({ x: panStartRef.current.ox + dx, y: panStartRef.current.oy + dy })
+    }, [])
+
+    const onCanvasPointerUp = useCallback((e: React.PointerEvent) => {
+        if (isPanningRef.current) {
+            isPanningRef.current = false
+            const el = canvasContainerRef.current
+            if (el) el.style.cursor = spaceHeldRef.current ? 'grab' : ''
+            ;(e.target as HTMLElement).releasePointerCapture?.(e.pointerId)
+        }
+    }, [])
 
     /**
      * Map pointer coordinates to document space. Uses the stage’s actual rendered size from
@@ -3653,7 +3752,7 @@ export default function AssetEditor() {
                             </button>
                             <button
                                 type="button"
-                                onClick={startNewComposition}
+                                onClick={() => startNewComposition()}
                                 className="inline-flex items-center rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
                             >
                                 New
@@ -3723,131 +3822,158 @@ export default function AssetEditor() {
             </header>
 
             <div className="flex min-h-0 flex-1">
-                {/* Layer panel */}
-                <aside
-                    className={`flex w-64 shrink-0 flex-col border-r border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900 ${
-                        uiMode === 'preview' ? 'hidden' : ''
-                    }`}
-                >
-                    <div className="border-b border-gray-200 px-3 py-2 dark:border-gray-800">
-                        <h2 className="text-xs font-semibold uppercase tracking-wide text-gray-500">Layers</h2>
-                        <p className="mt-1 text-[10px] leading-snug text-gray-400 dark:text-gray-500">
-                            Top = front. Bottom = back (e.g. layout background). Drag the grip to reorder.
-                        </p>
-                    </div>
-                    <div className="flex-1 overflow-y-auto p-3">
-                        {layersForPanel.length === 0 ? (
-                            <p className="px-2 py-4 text-center text-xs text-gray-500">No layers yet</p>
-                        ) : (
-                            <ul className="space-y-1">
-                                {layersForPanel.map((layer) => {
-                                    const selected = layer.id === selectedLayerId
-                                    return (
-                                        <li
-                                            key={layer.id}
-                                            onDragOver={onLayerPanelDragOver}
-                                            onDrop={(e) => onLayerPanelDrop(e, layer.id)}
-                                            className={`rounded-md ${
-                                                layerDragId === layer.id ? 'opacity-60' : ''
-                                            }`}
-                                        >
-                                            <div
-                                                className={`flex items-center gap-1 rounded-md border px-2 py-1.5 text-left text-xs ${
-                                                    selected
-                                                        ? 'border-indigo-500 bg-indigo-50 dark:border-indigo-400 dark:bg-indigo-950/40'
-                                                        : 'border-transparent bg-gray-50 hover:bg-gray-100 dark:bg-gray-800/80 dark:hover:bg-gray-800'
-                                                }`}
-                                            >
-                                                <button
-                                                    type="button"
-                                                    draggable
-                                                    onDragStart={(e) => {
-                                                        e.stopPropagation()
-                                                        onLayerPanelDragStart(e, layer.id)
-                                                    }}
-                                                    onDragEnd={() => setLayerDragId(null)}
-                                                    className="shrink-0 cursor-grab touch-none text-gray-400 active:cursor-grabbing dark:text-gray-500"
-                                                    title="Drag to reorder"
-                                                    aria-label={`Reorder layer ${layer.name || layer.id}`}
-                                                >
-                                                    <Bars3Icon className="h-4 w-4" aria-hidden />
-                                                </button>
-                                                <button
-                                                    type="button"
-                                                    draggable={false}
-                                                    className="min-w-0 flex-1 truncate text-left font-medium text-gray-900 dark:text-gray-100"
-                                                    onClick={() => {
-                                                        setSelectedLayerId(layer.id)
-                                                        setEditingTextLayerId(null)
-                                                    }}
-                                                >
-                                                    {layer.name ||
-                                                        (layer.type === 'text'
-                                                            ? 'Text'
-                                                            : layer.type === 'generative_image'
-                                                              ? 'AI image'
-                                                              : layer.type === 'fill'
-                                                                ? 'Fill'
-                                                                : 'Image')}
-                                                </button>
-                                                <button
-                                                    type="button"
-                                                    draggable={false}
-                                                    className="rounded p-0.5 text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-700"
-                                                    title={layer.visible ? 'Hide' : 'Show'}
-                                                    onClick={(e) => {
-                                                        e.stopPropagation()
-                                                        updateLayer(layer.id, (l) => ({ ...l, visible: !l.visible }))
-                                                    }}
-                                                >
-                                                    {layer.visible ? (
-                                                        <EyeIcon className="h-4 w-4" />
-                                                    ) : (
-                                                        <EyeSlashIcon className="h-4 w-4 text-gray-400" />
-                                                    )}
-                                                </button>
+                {/* Collapsed icon toolbar + flyout panel */}
+                {uiMode !== 'preview' && (
+                    <div className="flex shrink-0">
+                        {/* Narrow icon bar */}
+                        <div className="flex w-16 shrink-0 flex-col items-center border-r border-gray-700 bg-gray-900">
+                            {/* Cherry logo / menu — pinned to top */}
+                            <div className="flex w-full flex-col items-center gap-1 pt-3 pb-2">
+                                <button type="button" onClick={() => setLeftPanel(leftPanel === 'menu' ? null : 'menu')} className={`flex h-10 w-10 items-center justify-center rounded-lg transition-colors ${leftPanel === 'menu' ? 'bg-gray-700 text-white' : 'text-gray-400 hover:bg-gray-800 hover:text-white'}`} title="Menu">
+                                    <img src="/jp-parts/cherry-slot.svg" alt="Jackpot" className="h-7 w-7" />
+                                </button>
+                            </div>
+
+                            {/* Main tools — vertically centered */}
+                            <div className="flex flex-1 flex-col items-center justify-center gap-2">
+                                <button type="button" onClick={() => setLeftPanel(leftPanel === 'layers' ? null : 'layers')} className={`flex h-14 w-14 flex-col items-center justify-center rounded-xl transition-colors ${leftPanel === 'layers' ? 'bg-gray-700 text-white' : 'text-gray-400 hover:bg-gray-800 hover:text-white'}`} title="Layers">
+                                    <Square2StackIcon className="h-7 w-7" aria-hidden />
+                                    <span className="mt-1 text-[10px] font-medium leading-none">Layers</span>
+                                </button>
+                                <button type="button" onClick={() => setLeftPanel(leftPanel === 'assets' ? null : 'assets')} className={`flex h-14 w-14 flex-col items-center justify-center rounded-xl transition-colors ${leftPanel === 'assets' ? 'bg-gray-700 text-white' : 'text-gray-400 hover:bg-gray-800 hover:text-white'}`} title="Assets">
+                                    <PhotoIcon className="h-7 w-7" aria-hidden />
+                                    <span className="mt-1 text-[10px] font-medium leading-none">Assets</span>
+                                </button>
+                                <button type="button" onClick={() => setLeftPanel(leftPanel === 'templates' ? null : 'templates')} className={`flex h-14 w-14 flex-col items-center justify-center rounded-xl transition-colors ${leftPanel === 'templates' ? 'bg-gray-700 text-white' : 'text-gray-400 hover:bg-gray-800 hover:text-white'}`} title="Templates">
+                                    <Squares2X2Icon className="h-7 w-7" aria-hidden />
+                                    <span className="mt-1 text-[10px] font-medium leading-none">Templates</span>
+                                </button>
+                            </div>
+
+                            {/* Bottom utilities — pinned to bottom */}
+                            <div className="flex w-full flex-col items-center gap-1 pb-3 pt-2">
+                                <button type="button" className="flex h-10 w-10 items-center justify-center rounded-lg text-gray-400 hover:bg-gray-800 hover:text-white transition-colors" title="Keyboard shortcuts">
+                                    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M6.75 7.5l3 2.25-3 2.25m4.5 0h3m-9 8.25h13.5A2.25 2.25 0 0021 18V6a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 6v12a2.25 2.25 0 002.25 2.25z" /></svg>
+                                </button>
+                                <button type="button" className="flex h-10 w-10 items-center justify-center rounded-lg text-gray-400 hover:bg-gray-800 hover:text-white transition-colors" title="Settings">
+                                    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 010 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 010-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                                </button>
+                            </div>
+                        </div>
+                        {/* Flyout panel */}
+                        {leftPanel && (
+                            <div className="flex w-64 shrink-0 flex-col border-r border-gray-700 bg-gray-900">
+                                {leftPanel === 'menu' && (
+                                    <div className="flex flex-1 flex-col">
+                                        <div className="border-b border-gray-700 px-3 py-3"><h2 className="text-xs font-semibold uppercase tracking-wide text-gray-400">Menu</h2></div>
+                                        <div className="flex-1 overflow-y-auto p-2">
+                                            <div className="space-y-0.5">
+                                                <button type="button" onClick={() => { setLeftPanel(null); startNewComposition() }} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-gray-200 hover:bg-gray-800"><span className="text-xs">+</span> New</button>
+                                                <details className="group"><summary className="flex w-full cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-sm text-gray-200 hover:bg-gray-800 list-none">File <svg className="ml-auto h-3.5 w-3.5 text-gray-500 group-open:rotate-90 transition-transform" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" /></svg></summary><div className="ml-4 mt-1 space-y-0.5 border-l border-gray-700 pl-3"><button type="button" onClick={openCompositionPickerAndLoad} className="flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-xs text-gray-300 hover:bg-gray-800">Open existing</button><button type="button" onClick={() => void downloadExport('json')} className="flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-xs text-gray-300 hover:bg-gray-800">Export JSON</button></div></details>
+                                                <details className="group"><summary className="flex w-full cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-sm text-gray-200 hover:bg-gray-800 list-none">Edit <svg className="ml-auto h-3.5 w-3.5 text-gray-500 group-open:rotate-90 transition-transform" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" /></svg></summary><div className="ml-4 mt-1 space-y-0.5 border-l border-gray-700 pl-3"><button type="button" onClick={addTextLayer} className="flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-xs text-gray-300 hover:bg-gray-800">Add text layer</button><button type="button" onClick={addFillLayer} className="flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-xs text-gray-300 hover:bg-gray-800">Add fill layer</button></div></details>
+                                                <button type="button" onClick={openCompositionPickerAndLoad} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-gray-200 hover:bg-gray-800"><Squares2X2Icon className="h-4 w-4 text-gray-400" aria-hidden /> Browse Templates</button>
+                                                <button type="button" className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-gray-200 hover:bg-gray-800"><svg className="h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 11-18 0 9 9 0 0118 0Zm-9 5.25h.008v.008H12v-.008Z" /></svg> Help</button>
                                             </div>
-                                            {selected && (
-                                                <div className="mt-1 flex justify-end gap-1 px-1 pb-1">
-                                                    <button
-                                                        type="button"
-                                                        draggable={false}
-                                                        className="rounded border border-gray-200 bg-white p-1 text-gray-600 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:hover:bg-gray-700"
-                                                        title="Bring forward (one step)"
-                                                        onClick={() => setDocument((d) => moveLayerZOrder(d, layer.id, 'up'))}
-                                                    >
-                                                        <ArrowUpIcon className="h-3.5 w-3.5" />
-                                                    </button>
-                                                    <button
-                                                        type="button"
-                                                        draggable={false}
-                                                        className="rounded border border-gray-200 bg-white p-1 text-gray-600 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:hover:bg-gray-700"
-                                                        title="Send backward (one step)"
-                                                        onClick={() => setDocument((d) => moveLayerZOrder(d, layer.id, 'down'))}
-                                                    >
-                                                        <ArrowDownIcon className="h-3.5 w-3.5" />
-                                                    </button>
-                                                </div>
+                                        </div>
+                                    </div>
+                                )}
+                                {leftPanel === 'layers' && (
+                                    <div className="flex flex-1 flex-col">
+                                        <div className="flex items-center justify-between border-b border-gray-700 px-3 py-2">
+                                            <h2 className="text-xs font-semibold uppercase tracking-wide text-gray-400">Layer Stack</h2>
+                                            <button type="button" onClick={() => setLeftPanel(null)} className="text-gray-500 hover:text-gray-300"><XMarkIcon className="h-4 w-4" /></button>
+                                        </div>
+                                        <div className="flex-1 overflow-y-auto p-2">
+                                            {layersForPanel.length === 0 ? (
+                                                <p className="px-2 py-4 text-center text-xs text-gray-500">No layers yet</p>
+                                            ) : (
+                                                <ul className="space-y-0.5">
+                                                    {layersForPanel.map((layer) => {
+                                                        const selected = layer.id === selectedLayerId
+                                                        const layerIcon = layer.type === 'text' ? 'T' : layer.type === 'image' ? '🖼' : layer.type === 'generative_image' ? '✦' : layer.type === 'fill' ? '◼' : '▣'
+                                                        return (
+                                                            <li key={layer.id} onDragOver={onLayerPanelDragOver} onDrop={(e) => onLayerPanelDrop(e, layer.id)} className={`rounded ${layerDragId === layer.id ? 'opacity-60' : ''}`}>
+                                                                <div className={`flex items-center gap-1.5 rounded px-2 py-1.5 text-xs ${selected ? 'bg-blue-600/30 text-white' : 'text-gray-300 hover:bg-gray-800'}`}>
+                                                                    <button type="button" draggable onDragStart={(e) => { e.stopPropagation(); onLayerPanelDragStart(e, layer.id) }} onDragEnd={() => setLayerDragId(null)} className="shrink-0 cursor-grab text-gray-500 active:cursor-grabbing" title="Drag to reorder"><Bars3Icon className="h-3.5 w-3.5" aria-hidden /></button>
+                                                                    <span className="shrink-0 text-[10px] opacity-60 w-4 text-center">{layerIcon}</span>
+                                                                    <button type="button" draggable={false} className="min-w-0 flex-1 truncate text-left font-medium" onClick={() => { setSelectedLayerId(layer.id); setEditingTextLayerId(null) }}>{layer.name || layer.type}</button>
+                                                                    <button type="button" draggable={false} className="shrink-0 text-gray-500 hover:text-gray-200" title={layer.visible ? 'Hide' : 'Show'} onClick={() => updateLayer(layer.id, (l) => ({ ...l, visible: !l.visible }))}>{layer.visible ? <EyeIcon className="h-3.5 w-3.5" /> : <EyeSlashIcon className="h-3.5 w-3.5 opacity-40" />}</button>
+                                                                </div>
+                                                                {selected && (
+                                                                    <div className="mt-0.5 flex justify-end gap-0.5 px-1 pb-1">
+                                                                        <button type="button" draggable={false} className="rounded p-1 text-gray-400 hover:bg-gray-800 hover:text-gray-200" title="Bring forward" onClick={() => setDocument((d) => moveLayerZOrder(d, layer.id, 'up'))}><ArrowUpIcon className="h-3 w-3" /></button>
+                                                                        <button type="button" draggable={false} className="rounded p-1 text-gray-400 hover:bg-gray-800 hover:text-gray-200" title="Send backward" onClick={() => setDocument((d) => moveLayerZOrder(d, layer.id, 'down'))}><ArrowDownIcon className="h-3 w-3" /></button>
+                                                                    </div>
+                                                                )}
+                                                            </li>
+                                                        )
+                                                    })}
+                                                </ul>
                                             )}
-                                        </li>
-                                    )
-                                })}
-                            </ul>
+                                        </div>
+                                        <div className="flex items-center justify-between border-t border-gray-700 px-2 py-2">
+                                            <button type="button" onClick={addTextLayer} className="rounded p-1.5 text-gray-400 hover:bg-gray-800 hover:text-white" title="Add text layer"><svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg></button>
+                                            <button type="button" onClick={() => selectedLayerId && selectedLayer && setDocument((d) => ({ ...d, layers: [...d.layers, cloneLayer(selectedLayer)] }))} className="rounded p-1.5 text-gray-400 hover:bg-gray-800 hover:text-white" title="Duplicate layer"><DocumentDuplicateIcon className="h-4 w-4" /></button>
+                                            <button type="button" onClick={() => selectedLayer && updateLayer(selectedLayer.id, (l) => ({ ...l, visible: !l.visible }))} className="rounded p-1.5 text-gray-400 hover:bg-gray-800 hover:text-white" title="Toggle visibility"><EyeIcon className="h-4 w-4" /></button>
+                                            <button type="button" onClick={() => selectedLayerId && setDocument((d) => deleteLayerFromDoc(d, selectedLayerId))} className="rounded p-1.5 text-gray-400 hover:bg-gray-800 hover:text-red-400" title="Delete layer"><TrashIcon className="h-4 w-4" /></button>
+                                        </div>
+                                    </div>
+                                )}
+                                {leftPanel === 'assets' && (
+                                    <div className="flex flex-1 flex-col">
+                                        <div className="flex items-center justify-between border-b border-gray-700 px-3 py-2"><h2 className="text-xs font-semibold uppercase tracking-wide text-gray-400">Assets</h2><button type="button" onClick={() => setLeftPanel(null)} className="text-gray-500 hover:text-gray-300"><XMarkIcon className="h-4 w-4" /></button></div>
+                                        <div className="flex flex-1 items-center justify-center p-6 text-center"><div><PhotoIcon className="mx-auto h-10 w-10 text-gray-600" /><p className="mt-2 text-sm text-gray-400">Asset browser</p><p className="mt-1 text-xs text-gray-500">Coming soon — browse and drag assets from your DAM library.</p><button type="button" onClick={() => { setLeftPanel(null); openPickerForAddImage() }} className="mt-4 rounded-md bg-gray-700 px-3 py-1.5 text-xs font-medium text-gray-200 hover:bg-gray-600">Add image from library</button></div></div>
+                                    </div>
+                                )}
+                                {leftPanel === 'templates' && (
+                                    <div className="flex flex-1 flex-col">
+                                        <div className="flex items-center justify-between border-b border-gray-700 px-3 py-2"><h2 className="text-xs font-semibold uppercase tracking-wide text-gray-400">Templates</h2><button type="button" onClick={() => setLeftPanel(null)} className="text-gray-500 hover:text-gray-300"><XMarkIcon className="h-4 w-4" /></button></div>
+                                        <div className="flex flex-1 items-center justify-center p-6 text-center"><div><Squares2X2Icon className="mx-auto h-10 w-10 text-gray-600" /><p className="mt-2 text-sm text-gray-400">Templates</p><p className="mt-1 text-xs text-gray-500">Coming soon — browse pre-built templates and compositions.</p><button type="button" onClick={() => { setLeftPanel(null); openCompositionPickerAndLoad() }} className="mt-4 rounded-md bg-gray-700 px-3 py-1.5 text-xs font-medium text-gray-200 hover:bg-gray-600">Browse saved compositions</button></div></div>
+                                    </div>
+                                )}
+                            </div>
                         )}
                     </div>
-                </aside>
+                )}
 
                 {/* Canvas */}
                 <main
                     ref={canvasContainerRef}
+                    onPointerDown={onCanvasPointerDown}
+                    onPointerMove={onCanvasPointerMove}
+                    onPointerUp={onCanvasPointerUp}
                     className={`relative box-border flex min-w-0 flex-1 items-center justify-center overflow-hidden ${
                         uiMode === 'preview'
                             ? previewFrame === 'social'
                                 ? 'bg-gradient-to-b from-neutral-950 via-neutral-900 to-black p-8 sm:p-8 md:p-12 before:pointer-events-none before:absolute before:inset-0 before:z-[1] before:bg-black/25 before:content-[\'\']'
                                 : 'bg-gradient-to-br from-slate-900 via-slate-800 to-slate-950 p-8 sm:p-10 md:p-14 before:pointer-events-none before:absolute before:inset-0 before:z-[1] before:bg-black/25 before:content-[\'\']'
-                            : 'bg-neutral-200 p-10 dark:bg-neutral-900'
+                            : 'bg-neutral-200 dark:bg-neutral-900'
                     }`}
+                    style={uiMode === 'edit' ? {
+                        backgroundImage: 'radial-gradient(circle, rgba(0,0,0,0.10) 1px, transparent 1px)',
+                        backgroundSize: '24px 24px',
+                        backgroundPosition: `${panOffset.x % 24}px ${panOffset.y % 24}px`,
+                    } : undefined}
                 >
+                    {/* Zoom controls — floating above canvas */}
+                    {uiMode === 'edit' && (
+                        <div className="pointer-events-none absolute inset-x-0 top-0 z-20 flex justify-center pt-2.5">
+                            <div className="pointer-events-auto flex items-center gap-0.5 rounded-md bg-gray-800 px-1.5 py-0.5 text-[11px] font-medium text-gray-100 shadow-md ring-1 ring-gray-700">
+                                <button type="button" onClick={() => zoomTo((userZoom ?? viewportScale) / 1.25)} className="flex h-6 w-6 items-center justify-center rounded hover:bg-gray-700 text-gray-300 hover:text-white" title="Zoom out (Ctrl+scroll)">−</button>
+                                <button type="button" onClick={fitToView} className="min-w-[3rem] rounded px-1.5 py-0.5 text-center tabular-nums hover:bg-gray-700" title="Fit to view">{Math.round(effectiveScale * 100)}%</button>
+                                <button type="button" onClick={() => zoomTo((userZoom ?? viewportScale) * 1.25)} className="flex h-6 w-6 items-center justify-center rounded hover:bg-gray-700 text-gray-300 hover:text-white" title="Zoom in (Ctrl+scroll)">+</button>
+                                <div className="mx-0.5 h-4 w-px bg-gray-600" />
+                                <button type="button" onClick={zoomToActual} className={`flex h-6 items-center justify-center rounded px-1.5 hover:bg-gray-700 hover:text-white ${Math.round(effectiveScale * 100) === 100 ? 'text-blue-400' : 'text-gray-300'}`} title="Actual size (100%)">
+                                    <svg className="mr-0.5 h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M9 9V4.5M9 9H4.5M9 9 3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h4.5M15 15v4.5m0-4.5 5.25 5.25" /></svg>
+                                    <span>1:1</span>
+                                </button>
+                                <button type="button" onClick={centerCanvas} className="flex h-6 w-6 items-center justify-center rounded text-gray-300 hover:bg-gray-700 hover:text-white" title="Center canvas">
+                                    <ViewfinderCircleIcon className="h-3.5 w-3.5" />
+                                </button>
+                            </div>
+                        </div>
+                    )}
+
                     {document.layers.length === 0 && (
                         <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center p-6">
                             <div className="pointer-events-auto max-w-sm rounded-xl border border-gray-200 bg-white/95 p-6 text-center shadow-lg dark:border-gray-600 dark:bg-gray-900/95">
@@ -3902,54 +4028,56 @@ export default function AssetEditor() {
                             </div>
                         </div>
                     )}
+                    {uiMode === 'preview' && previewFrame === 'banner' && (
+                        <div className="absolute z-[3] mb-4 flex h-9 items-center gap-2 rounded-lg border border-neutral-400/40 bg-gradient-to-r from-neutral-200 to-neutral-300 px-3 shadow-inner" style={{ top: 16, left: '50%', transform: 'translateX(-50%)' }}>
+                            <span className="inline-block h-2.5 w-2.5 rounded-full bg-red-400 shadow-sm" />
+                            <span className="inline-block h-2.5 w-2.5 rounded-full bg-amber-400 shadow-sm" />
+                            <span className="inline-block h-2.5 w-2.5 rounded-full bg-emerald-500 shadow-sm" />
+                            <span className="ml-1 text-[11px] font-medium text-neutral-700">Web banner preview</span>
+                        </div>
+                    )}
+                    {/* Artboard positioning wrapper */}
                     <div
-                        className={
-                            uiMode === 'preview' && previewFrame === 'social'
-                                ? 'relative z-[2] rounded-[2.25rem] border-[14px] border-neutral-900 bg-gradient-to-b from-neutral-900 to-black p-3 shadow-[0_25px_80px_-12px_rgba(0,0,0,0.65)] ring-1 ring-white/10'
-                                : uiMode === 'preview' && previewFrame === 'banner'
-                                  ? 'relative z-[2] w-full max-w-5xl rounded-xl border border-neutral-500/80 bg-neutral-100 p-4 shadow-[0_18px_50px_-12px_rgba(0,0,0,0.45)] ring-1 ring-black/10 sm:p-5'
-                                  : 'relative flex min-h-0 min-w-0 shrink items-center justify-center'
+                        className={uiMode === 'preview'
+                            ? (previewFrame === 'social'
+                                ? 'relative z-[2] overflow-hidden rounded-[2.25rem] border-[14px] border-neutral-900 bg-gradient-to-b from-neutral-900 to-black p-3 shadow-[0_25px_80px_-12px_rgba(0,0,0,0.65)] ring-1 ring-white/10'
+                                : 'relative z-[2] overflow-hidden w-full max-w-5xl mx-auto rounded-xl border border-neutral-500/80 bg-neutral-100 p-4 shadow-[0_18px_50px_-12px_rgba(0,0,0,0.45)] ring-1 ring-black/10 sm:p-5')
+                            : 'absolute'
                         }
+                        style={uiMode !== 'preview' ? {
+                            left: '50%',
+                            top: '50%',
+                            width: document.width * effectiveScale,
+                            height: document.height * effectiveScale,
+                            transform: `translate(calc(-50% + ${panOffset.x}px), calc(-50% + ${panOffset.y}px))`,
+                        } : {
+                            width: document.width * effectiveScale,
+                            height: document.height * effectiveScale,
+                        }}
+                        onMouseDown={uiMode === 'edit' ? clearSelection : undefined}
                     >
-                        {uiMode === 'preview' && previewFrame === 'banner' && (
-                            <div className="mb-4 flex h-9 items-center gap-2 rounded-lg border border-neutral-400/40 bg-gradient-to-r from-neutral-200 to-neutral-300 px-3 shadow-inner">
-                                <span className="inline-block h-2.5 w-2.5 rounded-full bg-red-400 shadow-sm" />
-                                <span className="inline-block h-2.5 w-2.5 rounded-full bg-amber-400 shadow-sm" />
-                                <span className="inline-block h-2.5 w-2.5 rounded-full bg-emerald-500 shadow-sm" />
-                                <span className="ml-1 text-[11px] font-medium text-neutral-700">
-                                    Web banner preview
-                                </span>
-                            </div>
+                        {/* Artboard white background shadow — edit mode shows this as artboard boundary */}
+                        {uiMode === 'edit' && (
+                            <div
+                                className="absolute inset-0 shadow-2xl ring-1 ring-black/10 bg-white dark:bg-neutral-800"
+                            />
                         )}
-                        <motion.div
-                            key={`${uiMode}-${previewFrame}`}
-                            initial={
+                        <div
+                            ref={stageRef}
+                            role="presentation"
+                            className={`isolate origin-top-left ${
                                 uiMode === 'preview'
-                                    ? { opacity: 0.88, scale: 0.985 }
-                                    : { opacity: 1, scale: 1 }
-                            }
-                            animate={{ opacity: 1, scale: 1 }}
-                            transition={{ duration: 0.36, ease: [0.22, 1, 0.36, 1] }}
-                            className={`relative z-[2] overflow-hidden shadow-2xl ring-1 ring-black/10 ${
-                                uiMode === 'preview' && previewFrame === 'banner' ? 'mx-auto' : ''
+                                    ? 'absolute left-0 top-0 overflow-hidden bg-white dark:bg-neutral-800'
+                                    : 'relative'
                             }`}
                             style={{
-                                width: document.width * viewportScale,
-                                height: document.height * viewportScale,
+                                width: document.width,
+                                height: document.height,
+                                transform: `scale(${effectiveScale})`,
+                                transformOrigin: 'top left',
+                                ...(uiMode === 'edit' ? { overflow: 'visible' } : {}),
                             }}
                         >
-                            <div
-                                ref={stageRef}
-                                role="presentation"
-                                onMouseDown={clearSelection}
-                                className="absolute left-0 top-0 isolate origin-top-left overflow-hidden bg-white dark:bg-neutral-800"
-                                style={{
-                                    width: document.width,
-                                    height: document.height,
-                                    transform: `scale(${viewportScale})`,
-                                    transformOrigin: 'top left',
-                                }}
-                            >
                             {layersForCanvas.map((layer) => {
                                 if (!layer.visible) {
                                     return null
@@ -4373,8 +4501,19 @@ export default function AssetEditor() {
                                 )
                             })}
                             </div>
-                        </motion.div>
                     </div>
+
+                    {/* Bottom status bar */}
+                    {uiMode === 'edit' && (
+                        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex items-center justify-between px-4 py-2 text-[11px] text-gray-500">
+                            <span className="pointer-events-auto tabular-nums">{document.width} &times; {document.height}</span>
+                            <div className="pointer-events-auto flex items-center gap-3">
+                                <button type="button" onClick={fitToView} className="hover:text-gray-300" title="Reset zoom & pan">
+                                    <ViewfinderCircleIcon className="h-4 w-4" />
+                                </button>
+                            </div>
+                        </div>
+                    )}
                 </main>
 
                 {/* Properties — width is user-resizable (stored in localStorage) */}

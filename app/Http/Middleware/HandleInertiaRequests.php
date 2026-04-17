@@ -575,6 +575,8 @@ class HandleInertiaRequests extends Middleware
                         && app(ResolveCreatorsDashboardAccess::class)->canManage($user, $tenant, $activeBrand),
                     /** Overview dropdown → Creator Home (matches cinematic overview quick links). */
                     'show_creator_home_nav' => $showCreatorHomeNav,
+                    'generative_enabled' => $tenant
+                        && ($tenant->settings['generative_enabled'] ?? true),
                 ],
                 // Phase AF-5: Approval feature flags (plan-gated)
                 'approval_features' => $tenant ? (function () use ($tenant) {

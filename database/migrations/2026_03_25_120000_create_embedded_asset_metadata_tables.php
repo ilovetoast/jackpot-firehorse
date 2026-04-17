@@ -107,9 +107,21 @@ return new class extends Migration
                     if (Schema::hasColumn('assets', 'captured_at')) {
                         return;
                     }
-                    DB::statement(
-                        'ALTER TABLE `assets` ADD COLUMN `captured_at` TIMESTAMP NULL DEFAULT NULL AFTER `expires_at`, ALGORITHM=INPLACE, LOCK=NONE'
-                    );
+                    try {
+                        DB::statement(
+                            'ALTER TABLE `assets` ADD COLUMN `captured_at` TIMESTAMP NULL DEFAULT NULL AFTER `expires_at`, ALGORITHM=INPLACE, LOCK=NONE'
+                        );
+                    } catch (QueryException $e2) {
+                        if ($this->isDeadlockOrSerializationFailure($e2)) {
+                            throw $e2;
+                        }
+                        if (Schema::hasColumn('assets', 'captured_at')) {
+                            return;
+                        }
+                        DB::statement(
+                            'ALTER TABLE `assets` ADD COLUMN `captured_at` TIMESTAMP NULL DEFAULT NULL AFTER `expires_at`, ALGORITHM=COPY'
+                        );
+                    }
                 }
             });
 

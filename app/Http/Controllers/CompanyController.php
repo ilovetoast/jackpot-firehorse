@@ -492,6 +492,7 @@ class CompanyController extends Controller
                 },
             ],
             'settings.require_landing_page' => 'nullable|boolean',
+            'settings.generative_enabled' => 'nullable|boolean',
         ]);
 
         // Phase M-2: Handle settings separately
@@ -521,6 +522,12 @@ class CompanyController extends Controller
             } else {
                 $mergedSettings['require_landing_page'] = false;
             }
+        }
+        if (array_key_exists('generative_enabled', $settings)) {
+            if (! $user->hasPermissionForTenant($tenant, 'company_settings.manage_generative')) {
+                abort(403, 'You do not have permission to manage generative settings.');
+            }
+            $mergedSettings['generative_enabled'] = (bool) $settings['generative_enabled'];
         }
 
         $tenant->update($validated);

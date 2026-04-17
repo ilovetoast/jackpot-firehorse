@@ -45,6 +45,7 @@ export default function CompanySettings({
     const canManageAiSettings = is_current_user_owner || can('company_settings.manage_ai_settings')
     const canViewTagQuality = is_current_user_owner || can('company_settings.view_tag_quality')
     const canManageDownloadPolicy = is_current_user_owner || can('company_settings.manage_download_policy')
+    const canManageGenerative = is_current_user_owner || can('company_settings.manage_generative')
     const canOwnershipTransfer =
         is_current_user_owner || can('company_settings.ownership_transfer')
     const canDeleteCompany = is_current_user_owner || can('company_settings.delete_company')
@@ -61,6 +62,8 @@ export default function CompanySettings({
     const [showDeleteCompanyDialog, setShowDeleteCompanyDialog] = useState(false)
     const [deleteCompanyLoading, setDeleteCompanyLoading] = useState(false)
     const [deleteCompanyError, setDeleteCompanyError] = useState(null)
+    const [generativeSaving, setGenerativeSaving] = useState(false)
+    const [generativeSaved, setGenerativeSaved] = useState(false)
 
     const csrf = () => document.querySelector('meta[name="csrf-token"]')?.content || ''
 
@@ -204,6 +207,7 @@ export default function CompanySettings({
             },
             download_name_template: tenant.settings?.download_name_template ?? '', // Download default name template
             require_landing_page: tenant.settings?.require_landing_page ?? false,
+            generative_enabled: tenant.settings?.generative_enabled ?? true,
         },
     })
 
@@ -460,6 +464,7 @@ export default function CompanySettings({
             label: 'AI',
             items: [
                 { id: 'ai-settings', label: 'AI Settings', canAccess: canManageAiSettings },
+                ...(canManageGenerative ? [{ id: 'generative-settings', label: 'Generative', canAccess: true }] : []),
                 { id: 'tag-quality', label: 'Tag Quality', canAccess: canViewTagQuality },
                 { id: 'ai-usage', label: 'AI Usage', canAccess: canViewAiUsage },
             ],
@@ -1461,6 +1466,88 @@ export default function CompanySettings({
                             </div>
                         )}
                     </div>
+
+                    {/* Generative Settings */}
+                    {canManageGenerative && (
+                        <div id="generative-settings" className="mb-12 scroll-mt-8">
+                            <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
+                                <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+                                    <div className="lg:col-span-1 px-6 py-6 border-b lg:border-b-0 lg:border-r border-gray-200">
+                                        <h2 className="text-lg font-semibold text-gray-900">Generative</h2>
+                                        <p className="mt-1 text-sm text-gray-500">
+                                            Control access to the generative editor for your entire company. When disabled, the Generative tab is hidden for all users across all brands in this workspace.
+                                        </p>
+                                    </div>
+                                    <div className="lg:col-span-2 px-6 py-6">
+                                        <div className="flex items-center justify-between">
+                                            <div className="flex-1">
+                                                <label htmlFor="generative_enabled" className="block text-sm font-medium leading-6 text-gray-900">
+                                                    Enable generative editor
+                                                </label>
+                                                <p className="mt-1 text-sm text-gray-500">
+                                                    When enabled, team members can access the Generative tab to create AI-generated images, copy, and compositions. Turning this off removes the Generative tab from the navigation for everyone in this company.
+                                                </p>
+                                            </div>
+                                            <div className="ml-4 flex items-center gap-2">
+                                                {generativeSaving && (
+                                                    <span className="text-xs text-gray-400">Saving…</span>
+                                                )}
+                                                {generativeSaved && !generativeSaving && (
+                                                    <span className="text-xs text-green-600 transition-opacity duration-300">Saved</span>
+                                                )}
+                                                <button
+                                                    type="button"
+                                                    disabled={generativeSaving}
+                                                    onClick={() => {
+                                                        const nextVal = !data.settings?.generative_enabled
+                                                        const nextSettings = { ...data.settings, generative_enabled: nextVal }
+                                                        setData('settings', nextSettings)
+                                                        setGenerativeSaving(true)
+                                                        setGenerativeSaved(false)
+                                                        router.put('/app/companies/settings', {
+                                                            name: data.name,
+                                                            slug: data.slug,
+                                                            timezone: data.timezone,
+                                                            settings: nextSettings,
+                                                        }, {
+                                                            preserveScroll: true,
+                                                            onSuccess: () => {
+                                                                setGenerativeSaving(false)
+                                                                setGenerativeSaved(true)
+                                                                setTimeout(() => setGenerativeSaved(false), 2500)
+                                                            },
+                                                            onError: () => {
+                                                                setGenerativeSaving(false)
+                                                                setData('settings', { ...nextSettings, generative_enabled: !nextVal })
+                                                            },
+                                                        })
+                                                    }}
+                                                    className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:ring-offset-2 disabled:opacity-50 ${
+                                                        data.settings?.generative_enabled ? 'bg-indigo-600' : 'bg-gray-200'
+                                                    }`}
+                                                    role="switch"
+                                                    aria-checked={data.settings?.generative_enabled}
+                                                >
+                                                    <span
+                                                        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                                                            data.settings?.generative_enabled ? 'translate-x-5' : 'translate-x-0'
+                                                        }`}
+                                                    />
+                                                </button>
+                                            </div>
+                                        </div>
+                                        {!data.settings?.generative_enabled && (
+                                            <div className="mt-4 rounded-md bg-amber-50 p-3">
+                                                <p className="text-sm text-amber-800">
+                                                    The Generative tab is currently hidden for all users in this company. No one can access the generative editor until this is re-enabled.
+                                                </p>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
 
                     {/* Tag Quality */}
                     <div id="tag-quality" className="mb-12 scroll-mt-8">
