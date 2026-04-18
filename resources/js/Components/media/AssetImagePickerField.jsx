@@ -5,7 +5,7 @@
  * Supports in-place re-cropping — cropped images are uploaded as new assets.
  */
 import { useState, useRef, useEffect } from 'react'
-import { PhotoIcon, ScissorsIcon } from '@heroicons/react/24/outline'
+import { PhotoIcon, ScissorsIcon, ExclamationTriangleIcon } from '@heroicons/react/24/outline'
 import AssetImagePicker from './AssetImagePicker'
 import ImageCropModal from '../ImageCropModal'
 import { parseUploadFinalizeResult, uploadPutContentType } from '../../utils/uploadFinalize'
@@ -90,6 +90,7 @@ export default function AssetImagePickerField({
   const [cropOpen, setCropOpen] = useState(false)
   const [imageToCrop, setImageToCrop] = useState(null)
   const [uploading, setUploading] = useState(false)
+  const [previewError, setPreviewError] = useState(false)
   const mountedRef = useRef(true)
   useEffect(() => () => { mountedRef.current = false }, [])
 
@@ -99,6 +100,11 @@ export default function AssetImagePickerField({
       : value?.preview_url ?? null
   const assetId = value?.asset_id ?? null
   const hasValue = !!(previewUrl || assetId || value?.file)
+
+  // Reset the error banner whenever the preview URL changes (new selection / value).
+  useEffect(() => {
+    setPreviewError(false)
+  }, [previewUrl])
 
   const isSvg = typeof previewUrl === 'string' && (() => {
     const lower = previewUrl.toLowerCase()
@@ -201,16 +207,28 @@ export default function AssetImagePickerField({
               )}
             </div>
             <div className="relative">
-              <img
-                src={previewUrl}
-                alt=""
-                className={`max-h-32 w-auto max-w-full border rounded-lg p-3 mx-auto object-contain ${
-                  theme === 'dark' ? 'border-white/10 bg-white/5' : 'border-gray-200 bg-gray-300'
-                }`}
-                onError={(e) => {
-                  e.target.style.display = 'none'
-                }}
-              />
+              {previewError ? (
+                <div
+                  className={`max-h-32 w-full min-h-24 border rounded-lg p-3 mx-auto flex flex-col items-center justify-center gap-1 ${
+                    theme === 'dark'
+                      ? 'border-white/10 bg-white/5 text-white/60'
+                      : 'border-gray-200 bg-gray-100 text-gray-500'
+                  }`}
+                >
+                  <ExclamationTriangleIcon className="w-5 h-5" />
+                  <span className="text-xs font-medium">Preview unavailable</span>
+                  <span className="text-[10px] opacity-80">Click to re-select</span>
+                </div>
+              ) : (
+                <img
+                  src={previewUrl}
+                  alt=""
+                  className={`max-h-32 w-auto max-w-full border rounded-lg p-3 mx-auto object-contain ${
+                    theme === 'dark' ? 'border-white/10 bg-white/5' : 'border-gray-200 bg-gray-300'
+                  }`}
+                  onError={() => setPreviewError(true)}
+                />
+              )}
               {uploading && (
                 <div className="absolute inset-0 flex items-center justify-center rounded-lg bg-white/70">
                   <div className="animate-spin rounded-full h-6 w-6 border-2 border-indigo-600 border-t-transparent" />

@@ -155,6 +155,13 @@ final class PeerCohortContextFitService
      */
     private function collectionPeerIds(Asset $asset, array $excludeIds): array
     {
+        // category_id lives in the JSON metadata column on assets (not a real column),
+        // so we filter it through the driver-aware cast expression defined on the model.
+        $categoryId = (int) $asset->category_id;
+        if ($categoryId <= 0) {
+            return [];
+        }
+
         // Find collection ids this asset belongs to; then other assets in those collections
         // that share brand+category. Keep the query narrow to avoid scanning the whole pivot.
         $collectionIds = DB::table('asset_collections')
@@ -166,11 +173,13 @@ final class PeerCohortContextFitService
             return [];
         }
 
+        $categoryCast = Asset::categoryIdMetadataCastExpression();
+
         return DB::table('asset_collections')
             ->join('assets', 'assets.id', '=', 'asset_collections.asset_id')
             ->whereIn('asset_collections.collection_id', $collectionIds)
             ->where('assets.brand_id', $asset->brand_id)
-            ->where('assets.category_id', $asset->category_id)
+            ->whereRaw("{$categoryCast} = ?", [$categoryId])
             ->whereNotIn('assets.id', $excludeIds)
             ->whereNull('assets.deleted_at')
             ->distinct()
@@ -184,12 +193,19 @@ final class PeerCohortContextFitService
      */
     private function brandCategoryPeerIds(Asset $asset, array $excludeIds): array
     {
+        $categoryId = (int) $asset->category_id;
+        if ($categoryId <= 0) {
+            return [];
+        }
+
+        $categoryCast = Asset::categoryIdMetadataCastExpression();
+
         // Sort by most recently scored first so we get a representative slice of current work,
         // not ancient assets that may predate the current brand identity. Cap to keep the
         // cosine pass fast.
         return DB::table('assets')
             ->where('brand_id', $asset->brand_id)
-            ->where('category_id', $asset->category_id)
+            ->whereRaw("{$categoryCast} = ?", [$categoryId])
             ->whereNotIn('id', $excludeIds)
             ->whereNull('deleted_at')
             ->orderByDesc('updated_at')

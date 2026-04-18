@@ -37,12 +37,89 @@ export function getLuminance(hexColor) {
 export function getWorkspaceButtonColor(brand) {
     if (!brand) return '#6366f1'
     const style = brand.workspace_button_style ?? brand.settings?.button_style ?? 'primary'
+    if (style === 'context') return getContextWorkspaceButtonColors(brand).resting
     if (style === 'primary') return brand.primary_color || '#6366f1'
     if (style === 'secondary') return brand.secondary_color || '#64748b'
     if (style === 'accent') return brand.accent_color || '#6366f1'
     if (style === 'white') return '#ffffff'
     if (style === 'black') return '#000000'
     return brand.accent_color || '#6366f1'
+}
+
+/**
+ * The effective sidebar color a button visually sits next to / against. For solid sidebars this
+ * is simply `nav_color` (or the primary fallback). For cinematic sidebars the *visible* surface
+ * is near-black (#0B0B0D under radial brand glows), so any button painted "on it" should be
+ * judged for contrast against that near-black rather than the brand primary.
+ * @param {Object} brand
+ * @returns {string} #RRGGBB
+ */
+export function resolveSidebarReferenceColor(brand) {
+    const surface = resolveWorkspaceSidebarSurface(brand)
+    return surface.isCinematic ? '#0B0B0D' : normalizeHexColor(surface.sidebarColor)
+}
+
+/**
+ * Context-based button: monochromatic with the sidebar, shaded for adequate visibility.
+ *
+ * The button hue is anchored to the sidebar (solid) or the brand primary (cinematic, since the
+ * near-black backdrop isn't a real "color" for a button to echo). We then step lighter (when
+ * sidebar is dark) or darker (when sidebar is light) in fixed RGB increments — which preserves
+ * hue well for the moderate steps we need — until the button reaches a target WCAG contrast
+ * ratio against the sidebar. Hover goes one additional step in the same direction for depth.
+ *
+ * Why this exists: picking "Primary" for both sidebar and button produces a barely-visible
+ * button today. Context trades the literal "same color" for "same hue, visible step" — which is
+ * what users usually mean when they say "match my brand".
+ *
+ * @param {Object} brand
+ * @returns {{ resting: string, hover: string }}
+ */
+export function getContextWorkspaceButtonColors(brand) {
+    if (!brand) return { resting: '#6366f1', hover: '#4f46e5' }
+    const surface = resolveWorkspaceSidebarSurface(brand)
+    const reference = surface.isCinematic ? '#0B0B0D' : normalizeHexColor(surface.sidebarColor)
+    const anchor = surface.isCinematic
+        ? normalizeHexColor(brand.primary_color || '#6366f1')
+        : normalizeHexColor(surface.sidebarColor)
+
+    const referenceLum = getLuminance(reference)
+    const direction = referenceLum < 0.5 ? 'lighten' : 'darken'
+    const step = (c, amt) => (direction === 'lighten' ? lightenColor(c, amt) : darkenColor(c, amt))
+
+    // 2.4 ≈ comfortably visible separation without looking like a standalone accent.
+    // Anything < ~1.8 reads as "same color". Anything > ~4 competes with the sidebar.
+    const TARGET_RATIO = 2.4
+    const STEP = 14
+    const MAX_ITER = 8
+
+    let candidate = anchor
+    for (let i = 0; i < MAX_ITER; i++) {
+        if (getContrastRatio(candidate, reference) >= TARGET_RATIO) break
+        candidate = normalizeHexColor(step(candidate, STEP))
+    }
+
+    // Hover: one more notch for depth. Don't let it collapse into the reference on over-saturated
+    // or already-extreme inputs (e.g. pure white sidebar → candidate eventually clips to #000).
+    let hover = normalizeHexColor(step(candidate, STEP + 2))
+    if (hover.toLowerCase() === candidate.toLowerCase()) {
+        hover = normalizeHexColor(step(candidate, STEP * 2))
+    }
+
+    return { resting: candidate, hover }
+}
+
+/**
+ * WCAG contrast ratio between the workspace button's resting fill and the sidebar surface.
+ * Used by the Brand settings UI to flag low-contrast button/sidebar combinations and suggest
+ * switching to the Context style. Values < ~1.8 typically read as the same color.
+ *
+ * @param {Object} brand
+ * @returns {number} WCAG ratio (1 = identical, 21 = black on white)
+ */
+export function getWorkspaceButtonSidebarContrast(brand) {
+    const { resting } = getWorkspacePrimaryActionButtonColors(brand)
+    return getContrastRatio(resting, resolveSidebarReferenceColor(brand))
 }
 
 /**
@@ -69,6 +146,13 @@ export function getWorkspaceContextualTone(baseHex) {
  * @returns {{ resting: string, hover: string }}
  */
 export function getWorkspacePrimaryActionButtonColors(brand) {
+    // Context style has its own sidebar-anchored resting/hover pair that already handles
+    // contrast targeting — don't re-darken/lighten it through the generic rules below.
+    const style = brand?.workspace_button_style ?? brand?.settings?.button_style ?? 'primary'
+    if (style === 'context') {
+        return getContextWorkspaceButtonColors(brand)
+    }
+
     const base = getWorkspaceButtonColor(brand)
     const lum = getLuminance(base)
     const sat = hexSaturation(normalizeHexColor(base))

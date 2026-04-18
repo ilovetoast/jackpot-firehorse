@@ -11,6 +11,9 @@ import {
     getContrastTextColor,
     workspaceOverviewBackdropCss,
     getWorkspacePrimaryActionButtonColors,
+    getContextWorkspaceButtonColors,
+    getContrastRatio,
+    resolveSidebarReferenceColor,
 } from '../../utils/colorUtils'
 import { DELIVERABLES_PAGE_LABEL_SINGULAR } from '../../utils/uiLabels'
 import BrandIconUnified from '../../Components/BrandIconUnified'
@@ -3330,51 +3333,137 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                         <p className="text-sm text-gray-500 mb-4">
                                             Color for Add Asset and primary action buttons in the workspace.
                                         </p>
-                                        <div className="grid grid-cols-3 gap-2">
-                                            {['primary', 'secondary', 'accent', 'white', 'black'].map((style) => {
-                                                const hex =
-                                                    style === 'primary'
-                                                        ? data.primary_color || brand.primary_color || '#6366f1'
-                                                        : style === 'secondary'
-                                                          ? data.secondary_color || brand.secondary_color || '#64748b'
-                                                          : style === 'accent'
-                                                            ? data.accent_color ||
-                                                              brand.accent_color ||
-                                                              data.primary_color ||
-                                                              brand.primary_color ||
-                                                              '#6366f1'
-                                                            : style === 'white'
-                                                              ? '#ffffff'
-                                                              : '#000000'
-                                                const pillLabel = style === 'white' ? '#111827' : '#ffffff'
-                                                const pillBorder = style === 'white' ? '1px solid #e5e7eb' : undefined
-                                                return (
-                                                    <button
-                                                        key={style}
-                                                        type="button"
-                                                        onClick={() => {
-                                                            setData('workspace_button_style', style)
-                                                            autoSaveBrandField({ workspace_button_style: style })
-                                                        }}
-                                                        className={`flex flex-col items-center p-3 rounded-lg border-2 transition-all ${
-                                                            (data.workspace_button_style ?? data.settings?.button_style ?? 'primary') === style ? 'border-indigo-600 ring-2 ring-indigo-600' : 'border-gray-200 hover:border-gray-300'
-                                                        }`}
-                                                    >
-                                                        <div
-                                                            className="mb-1.5 flex h-10 w-full items-center justify-center rounded-md text-xs font-medium"
-                                                            style={{
-                                                                backgroundColor: hex,
-                                                                color: pillLabel,
-                                                                border: pillBorder,
-                                                            }}
-                                                        >
-                                                            {style.charAt(0).toUpperCase() + style.slice(1)}
-                                                        </div>
-                                                        <span className="text-xs font-medium text-gray-900">{style.charAt(0).toUpperCase() + style.slice(1)}</span>
-                                                    </button>
+                                        {(() => {
+                                            const currentStyle =
+                                                data.workspace_button_style ?? data.settings?.button_style ?? 'primary'
+                                            const previewBrandForStyle = (style) => ({
+                                                workspace_button_style: style,
+                                                primary_color: data.primary_color || brand.primary_color,
+                                                secondary_color: data.secondary_color || brand.secondary_color,
+                                                accent_color: data.accent_color || brand.accent_color,
+                                                nav_color: data.nav_color || brand.nav_color,
+                                                settings: data.settings,
+                                            })
+                                            const contextPreview = getContextWorkspaceButtonColors(
+                                                previewBrandForStyle('context')
+                                            )
+                                            const sidebarRef = resolveSidebarReferenceColor(
+                                                previewBrandForStyle(currentStyle)
+                                            )
+                                            const { resting: currentBtnResting } =
+                                                getWorkspacePrimaryActionButtonColors(
+                                                    previewBrandForStyle(currentStyle)
                                                 )
-                                            })}
-                                        </div>
+                                            const currentContrast = getContrastRatio(currentBtnResting, sidebarRef)
+                                            // < 1.8 ≈ button visually merges with the sidebar. Flag it.
+                                            const lowContrast = currentStyle !== 'context' && currentContrast < 1.8
+                                            const styleOptions = [
+                                                {
+                                                    id: 'context',
+                                                    label: 'Context',
+                                                    sub: 'Auto-fit to sidebar',
+                                                    swatch: contextPreview.resting,
+                                                    recommended: true,
+                                                },
+                                                {
+                                                    id: 'primary',
+                                                    label: 'Primary',
+                                                    swatch: data.primary_color || brand.primary_color || '#6366f1',
+                                                },
+                                                {
+                                                    id: 'secondary',
+                                                    label: 'Secondary',
+                                                    swatch: data.secondary_color || brand.secondary_color || '#64748b',
+                                                },
+                                                {
+                                                    id: 'accent',
+                                                    label: 'Accent',
+                                                    swatch:
+                                                        data.accent_color ||
+                                                        brand.accent_color ||
+                                                        data.primary_color ||
+                                                        brand.primary_color ||
+                                                        '#6366f1',
+                                                },
+                                                { id: 'white', label: 'White', swatch: '#ffffff' },
+                                                { id: 'black', label: 'Black', swatch: '#000000' },
+                                            ]
+                                            return (
+                                                <>
+                                                    <div className="grid grid-cols-3 gap-2">
+                                                        {styleOptions.map((opt) => {
+                                                            const pillLabel =
+                                                                opt.id === 'white' ? '#111827' : '#ffffff'
+                                                            const pillBorder =
+                                                                opt.id === 'white' ? '1px solid #e5e7eb' : undefined
+                                                            const isActive = currentStyle === opt.id
+                                                            return (
+                                                                <button
+                                                                    key={opt.id}
+                                                                    type="button"
+                                                                    onClick={() => {
+                                                                        setData('workspace_button_style', opt.id)
+                                                                        autoSaveBrandField({
+                                                                            workspace_button_style: opt.id,
+                                                                        })
+                                                                    }}
+                                                                    className={`relative flex flex-col items-center p-3 rounded-lg border-2 transition-all ${
+                                                                        isActive
+                                                                            ? 'border-indigo-600 ring-2 ring-indigo-600'
+                                                                            : 'border-gray-200 hover:border-gray-300'
+                                                                    }`}
+                                                                >
+                                                                    {opt.recommended && (
+                                                                        <span className="absolute -top-1.5 -right-1.5 inline-flex items-center rounded-full bg-indigo-600 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-white shadow-sm">
+                                                                            Rec
+                                                                        </span>
+                                                                    )}
+                                                                    <div
+                                                                        className="mb-1.5 flex h-10 w-full items-center justify-center rounded-md text-xs font-medium"
+                                                                        style={{
+                                                                            backgroundColor: opt.swatch,
+                                                                            color: pillLabel,
+                                                                            border: pillBorder,
+                                                                        }}
+                                                                    >
+                                                                        {opt.label}
+                                                                    </div>
+                                                                    <span className="text-xs font-medium text-gray-900">
+                                                                        {opt.label}
+                                                                    </span>
+                                                                    {opt.sub && (
+                                                                        <span className="text-[10px] text-gray-500 mt-0.5 text-center leading-tight">
+                                                                            {opt.sub}
+                                                                        </span>
+                                                                    )}
+                                                                </button>
+                                                            )
+                                                        })}
+                                                    </div>
+                                                    {lowContrast && (
+                                                        <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                                                            <span className="font-medium">Low contrast:</span>{' '}
+                                                            your button and sidebar colors are very similar, so the
+                                                            button may be hard to see. Try{' '}
+                                                            <button
+                                                                type="button"
+                                                                className="font-medium underline decoration-dotted underline-offset-2 hover:text-amber-950"
+                                                                onClick={() => {
+                                                                    setData('workspace_button_style', 'context')
+                                                                    autoSaveBrandField({
+                                                                        workspace_button_style: 'context',
+                                                                    })
+                                                                }}
+                                                            >
+                                                                Context
+                                                            </button>{' '}
+                                                            for an auto-fit monochromatic button, or pick White / Black
+                                                            for a neutral contrast.
+                                                        </div>
+                                                    )}
+                                                </>
+                                            )
+                                        })()}
                                     </div>
                                     {/* Asset grid styling */}
                                     <div>
@@ -3500,6 +3589,9 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                         primary_color: data.primary_color || brand.primary_color,
                                         secondary_color: data.secondary_color || brand.secondary_color,
                                         accent_color: data.accent_color || brand.accent_color,
+                                        // Needed so Context style resolves against the currently selected solid
+                                        // sidebar color (otherwise it would fall back to primary_color).
+                                        nav_color: data.nav_color || brand.nav_color,
                                         settings: data.settings,
                                     }
                                     const { resting: addAssetPreviewBg } =

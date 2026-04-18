@@ -1099,6 +1099,16 @@ class BrandIntelligenceEngine
             app(\App\Services\BrandIntelligence\PeerCohortContextFitService::class),
         );
 
+        // Pass A: campaign-context overlay. When the asset lives in a collection with a
+        // scorable CollectionCampaignIdentity, blend the campaign DNA (goal, description,
+        // tone, motifs, exemplar refs) into Context Fit. Runs last so it can lift either
+        // a VLM result or a peer-cohort result. No-op when no scorable campaign is in scope.
+        $dimensions = $orchestrator->enrichWithCampaignContext(
+            $asset,
+            $dimensions,
+            $breakdown['creative_signals'] ?? null,
+        );
+
         $deriver = new \App\Services\BrandIntelligence\Dimensions\AlignmentScoreDeriver();
         $derived = $deriver->derive($dimensions, $evalResult['weights']);
 

@@ -24,6 +24,56 @@ import ImageCropModal from '../ImageCropModal'
 import { getInlineImagePickerAccept, syncDamFileTypesFromPage } from '../../utils/damFileTypes'
 import { parseUploadFinalizeResult, uploadPutContentType } from '../../utils/uploadFinalize'
 
+/**
+ * Tile-sized <img> that gracefully falls through a list of candidate URLs on load error.
+ *
+ * The DAM backend returns several shapes for a given asset (thumbnail_url, final_thumbnail_url,
+ * preview_thumbnail_url, original). For SVG logos the rasterized WebP thumbnail occasionally
+ * 404s (Imagick missing, stale path, signed URL expiry) — when it does, we want to fall back
+ * to `original` (the raw SVG), which is what the user really wants to see anyway. If every
+ * candidate fails we show a neutral placeholder rather than the browser's broken-image glyph.
+ */
+function AssetThumbnail({ asset, className = '', alt = '' }) {
+  const isSvgAsset =
+    asset?.mime_type === 'image/svg+xml' ||
+    asset?.original_filename?.toLowerCase().endsWith('.svg')
+
+  // SVG: prefer the original vector (always resolves, renders crisp at any tile size) and only
+  // fall through to raster thumbnails if the original link is missing. Raster: keep the small
+  // thumbnail first for bandwidth, then fall back to original if a rasterizer 404s.
+  const candidates = (
+    isSvgAsset
+      ? [asset?.original, asset?.thumbnail_url, asset?.final_thumbnail_url, asset?.preview_thumbnail_url]
+      : [asset?.thumbnail_url, asset?.final_thumbnail_url, asset?.preview_thumbnail_url, asset?.original]
+  ).filter((u) => typeof u === 'string' && u.length > 0)
+
+  const [idx, setIdx] = useState(0)
+  // Reset the walk when the asset identity changes (re-selection, new browse page).
+  useEffect(() => {
+    setIdx(0)
+  }, [asset?.id])
+
+  const src = candidates[idx]
+  if (!src) {
+    return (
+      <div className={`flex items-center justify-center text-xs text-gray-400 ${className}`}>
+        —
+      </div>
+    )
+  }
+  return (
+    <img
+      src={src}
+      alt={alt}
+      className={className}
+      onError={() => {
+        if (idx < candidates.length - 1) setIdx(idx + 1)
+        else setIdx(candidates.length) // exhausted — render the placeholder branch above
+      }}
+    />
+  )
+}
+
 const CONTEXT_LABELS = {
   logos: 'Logos',
   icons: 'Icons',
@@ -362,7 +412,14 @@ export default function AssetImagePicker({
     }
     if (!isMulti && selectedAssetId) {
       const asset = assets.find((a) => a.id === selectedAssetId)
-      const thumb = asset?.thumbnail_url ?? asset?.final_thumbnail_url ?? asset?.preview_thumbnail_url ?? asset?.original ?? null
+      const isSvgPick =
+        asset?.mime_type === 'image/svg+xml' ||
+        asset?.original_filename?.toLowerCase().endsWith('.svg')
+      // For SVGs, the vector original is the canonical preview — raster thumbnails routinely 404
+      // when Imagick/rsvg isn't available or the generated file was pruned. Prefer original.
+      const thumb = isSvgPick
+        ? (asset?.original ?? asset?.thumbnail_url ?? asset?.final_thumbnail_url ?? asset?.preview_thumbnail_url ?? null)
+        : (asset?.thumbnail_url ?? asset?.final_thumbnail_url ?? asset?.preview_thumbnail_url ?? asset?.original ?? null)
       if (getAssetDownloadUrl) {
         try {
           const url = getAssetDownloadUrl(selectedAssetId)
@@ -577,8 +634,6 @@ export default function AssetImagePicker({
                   ) : (
                     <div className="grid grid-cols-4 sm:grid-cols-5 md:grid-cols-6 gap-3">
                       {assets.map((asset) => {
-                        const isSvgBrowse = asset?.mime_type === 'image/svg+xml' || asset?.original_filename?.toLowerCase().endsWith('.svg')
-                        const thumb = asset.thumbnail_url ?? asset.final_thumbnail_url ?? asset.preview_thumbnail_url ?? (isSvgBrowse ? asset?.original : null)
                         const isSelected = isMulti ? selectedAssetIds.includes(asset.id) : selectedAssetId === asset.id
                         return (
                           <button
@@ -593,13 +648,7 @@ export default function AssetImagePicker({
                             }`}
                           >
                             <div className="aspect-square bg-gray-300">
-                              {thumb ? (
-                                <img src={thumb} alt="" className="w-full h-full object-contain" />
-                              ) : (
-                                <div className="w-full h-full flex items-center justify-center text-xs text-gray-400">
-                                  —
-                                </div>
-                              )}
+                              <AssetThumbnail asset={asset} className="w-full h-full object-contain" />
                             </div>
                             {isSelected && (
                               <div className="absolute inset-0 flex items-center justify-center bg-indigo-600/20 pointer-events-none">

@@ -3,8 +3,38 @@
  * Shows selected assets as thumbnails, opens AssetImagePicker modal to add/change selection.
  */
 import { useState } from 'react'
-import { PhotoIcon, XMarkIcon } from '@heroicons/react/24/outline'
+import { PhotoIcon, XMarkIcon, ExclamationTriangleIcon } from '@heroicons/react/24/outline'
 import AssetImagePicker from './AssetImagePicker'
+
+/**
+ * Tile image with graceful onError — falls back to a neutral placeholder rather than the
+ * browser's broken-image glyph when the preview URL 404s (e.g. stale SVG raster thumbnails).
+ */
+function TileImage({ src }) {
+  const [errored, setErrored] = useState(false)
+  if (!src || errored) {
+    return (
+      <div className="w-full h-full flex flex-col items-center justify-center text-gray-400 gap-0.5">
+        {errored ? (
+          <>
+            <ExclamationTriangleIcon className="w-5 h-5" />
+            <span className="text-[10px]">No preview</span>
+          </>
+        ) : (
+          <PhotoIcon className="w-8 h-8" />
+        )}
+      </div>
+    )
+  }
+  return (
+    <img
+      src={src}
+      alt=""
+      className="w-full h-full object-contain"
+      onError={() => setErrored(true)}
+    />
+  )
+}
 
 export default function AssetImagePickerFieldMulti({
   value = [],
@@ -27,11 +57,21 @@ export default function AssetImagePickerFieldMulti({
 
   const handleSelect = (result) => {
     if (result?.asset_ids && result?.assets) {
-      const next = result.assets.map((a) => ({
-        asset_id: a.id,
-        preview_url: a.thumbnail_url ?? a.final_thumbnail_url ?? a.preview_thumbnail_url ?? null,
-        title: a.title ?? null,
-      }))
+      const next = result.assets.map((a) => {
+        // SVG raster thumbnails can 404 (Imagick missing, stale paths); the vector original
+        // always works and is what the user expects to see for logo-type assets.
+        const isSvg =
+          a?.mime_type === 'image/svg+xml' ||
+          a?.original_filename?.toLowerCase().endsWith('.svg')
+        const preview = isSvg
+          ? (a.original ?? a.thumbnail_url ?? a.final_thumbnail_url ?? a.preview_thumbnail_url ?? null)
+          : (a.thumbnail_url ?? a.final_thumbnail_url ?? a.preview_thumbnail_url ?? a.original ?? null)
+        return {
+          asset_id: a.id,
+          preview_url: preview,
+          title: a.title ?? null,
+        }
+      })
       onChange?.(next)
     }
     setPickerOpen(false)
@@ -61,20 +101,7 @@ export default function AssetImagePickerFieldMulti({
             key={item.asset_id ?? i}
             className="relative group rounded-lg border-2 border-gray-200 overflow-hidden bg-gray-50 aspect-square"
           >
-            {item.preview_url ? (
-              <img
-                src={item.preview_url}
-                alt=""
-                className="w-full h-full object-contain"
-                onError={(e) => {
-                  e.target.style.display = 'none'
-                }}
-              />
-            ) : (
-              <div className="w-full h-full flex items-center justify-center text-gray-400">
-                <PhotoIcon className="w-8 h-8" />
-              </div>
-            )}
+            <TileImage src={item.preview_url} />
             {!disabled && (
               <button
                 type="button"

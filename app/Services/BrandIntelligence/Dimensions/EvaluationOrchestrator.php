@@ -6,6 +6,7 @@ use App\Enums\AlignmentDimension;
 use App\Enums\MediaType;
 use App\Models\Asset;
 use App\Models\Brand;
+use App\Models\CollectionCampaignIdentity;
 use App\Services\BrandIntelligence\AssetContextClassifier;
 use App\Services\BrandIntelligence\BrandColorPaletteAlignmentEvaluator;
 
@@ -97,7 +98,10 @@ final class EvaluationOrchestrator
     public function evaluate(Asset $asset, Brand $brand, ?string $supplementalCreativeOcrText = null, ?array $logoCropVector = null): array
     {
         $contextType = $this->contextClassifier->classify($asset);
-        $context = EvaluationContext::fromAsset($asset, $contextType);
+        $campaignIdentity = $this->resolveLiveCampaignIdentity($asset);
+        $context = $campaignIdentity !== null
+            ? EvaluationContext::fromAssetWithCampaign($asset, $contextType, $campaignIdentity)
+            : EvaluationContext::fromAsset($asset, $contextType);
         if ($supplementalCreativeOcrText !== null && trim($supplementalCreativeOcrText) !== '') {
             $context = EvaluationContext::withSupplementalCreativeOcr($context, $supplementalCreativeOcrText);
         }
@@ -243,6 +247,84 @@ final class EvaluationOrchestrator
         );
 
         return $dimensions;
+    }
+
+    /**
+     * Pass A: campaign-context overlay for Context Fit.
+     *
+     * When the asset belongs to a collection with a scorable {@see CollectionCampaignIdentity},
+     * blend the live campaign DNA (goal, description, tone, required motifs, exemplar refs)
+     * with the VLM/heuristic signals already captured on the base result.
+     *
+     * Runs AFTER {@see self::enrichWithCreativeSignals()} and the peer-cohort fallback so the
+     * campaign overlay can lift a solid VLM classification or rescue an unclassified result
+     * that the peer cohort couldn't evaluate either. It never fires when no collection this
+     * asset belongs to has a scorable campaign identity.
+     *
+     * @param  array<string, DimensionResult>  $dimensions
+     * @param  array<string, mixed>|null  $creativeSignals  breakdown.creative_signals
+     * @return array<string, DimensionResult>
+     */
+    public function enrichWithCampaignContext(
+        Asset $asset,
+        array $dimensions,
+        ?array $creativeSignals,
+    ): array {
+        $contextKey = AlignmentDimension::CONTEXT_FIT->value;
+        if (! isset($dimensions[$contextKey])) {
+            return $dimensions;
+        }
+
+        $campaignIdentity = $this->resolveLiveCampaignIdentity($asset);
+        if ($campaignIdentity === null) {
+            return $dimensions;
+        }
+
+        $dimensions[$contextKey] = $this->contextFitEvaluator->applyCampaignContext(
+            $dimensions[$contextKey],
+            $asset,
+            $campaignIdentity,
+            $creativeSignals,
+        );
+
+        return $dimensions;
+    }
+
+    /**
+     * Resolve the single most-relevant scorable {@see CollectionCampaignIdentity} for an asset.
+     *
+     * Rules:
+     *  - Consider every collection the asset is linked to.
+     *  - Require the collection to have a CollectionCampaignIdentity.
+     *  - Require isScorable() (scoring_enabled AND readiness >= partial). Draft / disabled
+     *    campaigns are ignored completely so they don't leak into brand-level scores.
+     *  - Prefer the identity most recently updated (ties broken by id), mirroring the
+     *    "current, most-recently-edited campaign wins" mental model.
+     */
+    private function resolveLiveCampaignIdentity(Asset $asset): ?CollectionCampaignIdentity
+    {
+        $identities = CollectionCampaignIdentity::query()
+            ->whereHas('collection', function ($query) use ($asset): void {
+                $query->whereHas('assets', function ($inner) use ($asset): void {
+                    $inner->where('assets.id', $asset->id);
+                });
+            })
+            ->where('scoring_enabled', true)
+            ->whereIn('readiness_status', [
+                CollectionCampaignIdentity::READINESS_PARTIAL,
+                CollectionCampaignIdentity::READINESS_READY,
+            ])
+            ->orderByDesc('updated_at')
+            ->orderByDesc('id')
+            ->get();
+
+        foreach ($identities as $identity) {
+            if ($identity->isScorable()) {
+                return $identity;
+            }
+        }
+
+        return null;
     }
 
     /**

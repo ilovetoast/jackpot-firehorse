@@ -56,6 +56,12 @@ enum DimensionReasonCode: string
     case CONTEXT_COHORT_TOO_SMALL = 'context.cohort_too_small';
     case CONTEXT_COHORT_NO_SIGNAL = 'context.cohort_no_signal';
     case CONTEXT_PEER_COHORT_EVALUATED = 'context.peer_cohort_evaluated';
+    // Campaign-context overlay (Pass A): when the asset belongs to a collection with a
+    // scorable CollectionCampaignIdentity, blend the VLM/heuristic context with the
+    // live campaign DNA (goal, description, tone, required motifs, exemplar refs).
+    case CONTEXT_CAMPAIGN_ALIGNED = 'context.campaign_aligned';
+    case CONTEXT_CAMPAIGN_MISALIGNED = 'context.campaign_misaligned';
+    case CONTEXT_CAMPAIGN_NO_VLM = 'context.campaign_no_vlm';
 
     public function dimension(): AlignmentDimension
     {

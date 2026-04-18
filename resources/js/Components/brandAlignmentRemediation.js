@@ -159,6 +159,16 @@ export function remediationForReasonCode(reasonCode, ctx = {}) {
         case 'context.peer_cohort_evaluated':
             return null
 
+        // Pass A — campaign-context overlay. When the asset belongs to a collection with a
+        // scorable CollectionCampaignIdentity, context fit is lifted/penalized based on how
+        // well the VLM read of the asset matches the campaign's goal/description/exemplars.
+        case 'context.campaign_aligned':
+            return null
+        case 'context.campaign_misaligned':
+            return shortBlank('Asset drifts from the active campaign direction')
+        case 'context.campaign_no_vlm':
+            return shortBlank('Campaign context configured but no visual read — try rerun OCR or add a preview')
+
         default:
             return null
     }

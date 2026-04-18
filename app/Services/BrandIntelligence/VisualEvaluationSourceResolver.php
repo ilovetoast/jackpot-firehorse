@@ -81,7 +81,19 @@ final class VisualEvaluationSourceResolver
             ];
         }
 
-        // Video and other non-image roots keep existing BI behavior (no creative vision via preview raster here).
+        if (str_starts_with($mime, 'video/')) {
+            return [
+                'resolved' => true,
+                'source_type' => 'video_preview_image',
+                'origin' => $origin,
+                'storage_path' => $pick,
+                'mime_type' => $this->inferRasterMimeFromPath($pick),
+                'page' => $page,
+                'reason' => 'ok',
+                'root_mime_type' => $mime,
+            ];
+        }
+
         return $this->nonePayload($mime, 'non_image_root_type');
     }
 

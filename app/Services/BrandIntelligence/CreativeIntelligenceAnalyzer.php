@@ -70,16 +70,18 @@ final class CreativeIntelligenceAnalyzer
         }
         $canUseVisionRaster = match ($mediaType) {
             MediaType::IMAGE => true,
-            MediaType::PDF => $this->visualEvaluationSourceResolver->assetHasRenderableRaster($asset),
+            MediaType::PDF, MediaType::VIDEO => $this->visualEvaluationSourceResolver->assetHasRenderableRaster($asset),
             default => (($resolvedVisual['resolved'] ?? false) === true),
         };
 
         if (! $canUseVisionRaster) {
-            $trace['skip_reason'] = $mediaType === MediaType::PDF
-                ? 'pdf_visual_source_missing'
-                : 'not_image';
+            $trace['skip_reason'] = match ($mediaType) {
+                MediaType::PDF => 'pdf_visual_source_missing',
+                MediaType::VIDEO => 'video_preview_missing',
+                default => 'not_image',
+            };
 
-            return $this->emptyPayload($trace);
+            return $this->augmentWithVideoInsights($asset, $this->emptyPayload($trace));
         }
 
         if ($heuristicContext === AssetContextType::LOGO_ONLY) {
@@ -110,7 +112,7 @@ final class CreativeIntelligenceAnalyzer
         ];
 
         if ($mediaType === MediaType::PDF && $selection !== null && count($selection['entries']) > 1) {
-            return $this->analyzePdfMultiPageCreative($asset, $heuristicContext, $prompt, $visionOpts, $trace, $selection);
+            return $this->augmentWithVideoInsights($asset, $this->analyzePdfMultiPageCreative($asset, $heuristicContext, $prompt, $visionOpts, $trace, $selection));
         }
 
         $imageDataUrl = null;
@@ -124,10 +126,9 @@ final class CreativeIntelligenceAnalyzer
             $imageDataUrl = $this->aiMetadataGenerationService->fetchThumbnailForVisionAnalysis($asset);
         }
         if ($imageDataUrl === null || $imageDataUrl === '') {
-            // Resolver already picked a path; missing payload is a fetch/pipeline issue, not "no PDF raster".
             $trace['skip_reason'] = 'no_thumbnail_for_vision';
 
-            return $this->emptyPayload($trace);
+            return $this->augmentWithVideoInsights($asset, $this->emptyPayload($trace));
         }
 
         try {
@@ -139,21 +140,110 @@ final class CreativeIntelligenceAnalyzer
             ]);
             $trace['skip_reason'] = 'ai_error: '.$e->getMessage();
 
-            return $this->emptyPayload($trace);
+            return $this->augmentWithVideoInsights($asset, $this->emptyPayload($trace));
         }
 
         $parsed = $this->parseCreativeJson($response['text'] ?? '');
         if ($parsed === null) {
             $trace['skip_reason'] = 'parse_failed';
 
-            return $this->emptyPayload($trace);
+            return $this->augmentWithVideoInsights($asset, $this->emptyPayload($trace));
         }
 
         if ($mediaType === MediaType::PDF && $selection !== null) {
             $trace['pdf_multi_page'] = $this->buildPdfMultiPageTraceSingleRasterPlan($selection, $trace);
         }
 
-        return $this->finalizeCreativePayload($parsed, $heuristicContext, $trace);
+        return $this->augmentWithVideoInsights($asset, $this->finalizeCreativePayload($parsed, $heuristicContext, $trace));
+    }
+
+    /**
+     * Merge ai_video_insights (summary + scene/activity/setting) into creative_signals so
+     * Context Fit, Visual Style, and Copy/Voice can benefit from multi-frame video analysis
+     * on top of the single-keyframe VLM view. Safe to call for non-videos — no-op if
+     * ai_video_insights is absent. Adds a SignalFamily.TEXT_DERIVED hint so diversity
+     * tracking can tell video-summary-derived signals from pixel VLM signals.
+     *
+     * @param  array<string, mixed>  $payload
+     * @return array<string, mixed>
+     */
+    protected function augmentWithVideoInsights(Asset $asset, array $payload): array
+    {
+        $meta = is_array($asset->metadata ?? null) ? $asset->metadata : [];
+        $insights = $meta['ai_video_insights'] ?? null;
+        if (! is_array($insights)) {
+            return $payload;
+        }
+
+        $scene = is_string($insights['metadata']['scene'] ?? null) ? trim($insights['metadata']['scene']) : '';
+        $activity = is_string($insights['metadata']['activity'] ?? null) ? trim($insights['metadata']['activity']) : '';
+        $setting = is_string($insights['metadata']['setting'] ?? null) ? trim($insights['metadata']['setting']) : '';
+        $summary = is_string($insights['summary'] ?? null) ? trim($insights['summary']) : '';
+        $tags = is_array($insights['tags'] ?? null) ? array_values(array_filter($insights['tags'], 'is_string')) : [];
+        $suggestedCategory = is_string($insights['suggested_category'] ?? null) ? trim($insights['suggested_category']) : '';
+
+        if ($scene === '' && $activity === '' && $setting === '' && $summary === '' && $tags === [] && $suggestedCategory === '') {
+            return $payload;
+        }
+
+        $signals = is_array($payload['creative_signals'] ?? null) ? $payload['creative_signals'] : [];
+
+        $existingStyle = is_array($signals['visual_style'] ?? null) ? $signals['visual_style'] : [];
+        $styleHints = [];
+        foreach ([$activity, $setting, $scene] as $raw) {
+            if ($raw === '') {
+                continue;
+            }
+            $slug = strtolower(preg_replace('/[^a-z0-9]+/i', '-', $raw) ?? '');
+            $slug = trim($slug, '-');
+            if ($slug !== '' && mb_strlen($slug) >= 2) {
+                $styleHints[] = $slug;
+            }
+        }
+        foreach ($tags as $tag) {
+            $slug = strtolower(preg_replace('/[^a-z0-9]+/i', '-', $tag) ?? '');
+            $slug = trim($slug, '-');
+            if ($slug !== '' && mb_strlen($slug) >= 2) {
+                $styleHints[] = $slug;
+            }
+        }
+        $mergedStyle = array_values(array_unique(array_merge($existingStyle, $styleHints)));
+        if (count($mergedStyle) > 15) {
+            $mergedStyle = array_slice($mergedStyle, 0, 15);
+        }
+        if ($mergedStyle !== []) {
+            $signals['visual_style'] = $mergedStyle;
+        }
+
+        if (empty($signals['context_type'])) {
+            $ctx = $setting !== '' ? $setting : ($suggestedCategory !== '' ? $suggestedCategory : $scene);
+            if ($ctx !== '') {
+                $signals['context_type'] = $ctx;
+            }
+        }
+
+        $videoContext = array_filter([
+            'scene' => $scene !== '' ? $scene : null,
+            'activity' => $activity !== '' ? $activity : null,
+            'setting' => $setting !== '' ? $setting : null,
+            'summary' => $summary !== '' ? mb_substr($summary, 0, 2000) : null,
+            'suggested_category' => $suggestedCategory !== '' ? $suggestedCategory : null,
+            'tags' => $tags !== [] ? array_values(array_slice($tags, 0, 25)) : null,
+        ], static fn ($v): bool => $v !== null);
+        if ($videoContext !== []) {
+            $signals['video_context'] = $videoContext;
+        }
+
+        if ($signals !== []) {
+            $payload['creative_signals'] = $signals;
+        }
+
+        $trace = is_array($payload['ebi_ai_trace'] ?? null) ? $payload['ebi_ai_trace'] : [];
+        $trace['video_insights_merged'] = true;
+        $trace['video_insights_fields'] = array_keys($videoContext);
+        $payload['ebi_ai_trace'] = $trace;
+
+        return $payload;
     }
 
     /**

@@ -10,6 +10,8 @@ use App\Enums\EvidenceSource;
 use App\Enums\MediaType;
 use App\Models\Asset;
 use App\Models\Brand;
+use App\Models\CampaignVisualReference;
+use App\Models\CollectionCampaignIdentity;
 use App\Services\BrandIntelligence\PeerCohortContextFitService;
 
 /**
@@ -356,5 +358,420 @@ final class ContextFitEvaluator implements DimensionEvaluatorInterface
         }
 
         return $base;
+    }
+
+    /**
+     * Pass A -- campaign-context overlay.
+     *
+     * When the asset lives in a collection whose {@see CollectionCampaignIdentity} is scorable,
+     * blend the live campaign DNA (goal, description, tone, required motifs, exemplar refs)
+     * with the VLM/heuristic context signals. This is additive on top of
+     * {@see self::applyCreativeSignals()} and {@see self::applyPeerCohortFallback()}.
+     *
+     * Rules:
+     *  - Never downgrades a result to non-evaluable.
+     *  - Score adjustment capped at +0.20 on match, -0.15 on mismatch.
+     *  - Confidence is lifted up to 0.65 when both textual (goal/description) and visual
+     *    (exemplar references) campaign evidence is present. Without VLM signals, score
+     *    moves are half-weighted (read: "we believe the campaign is configured, but we
+     *    can't see the pixels" stays humble).
+     *  - Emits CONFIGURATION_ONLY + VISUAL_SIMILARITY evidence so the SignalFamily
+     *    diversity tracker sees two families, reducing dampening for this dimension.
+     *
+     * @param  array<string, mixed>|null  $creativeSignals  breakdown.creative_signals
+     */
+    public function applyCampaignContext(
+        DimensionResult $base,
+        Asset $asset,
+        CollectionCampaignIdentity $campaignIdentity,
+        ?array $creativeSignals,
+    ): DimensionResult {
+        $payload = is_array($campaignIdentity->identity_payload) ? $campaignIdentity->identity_payload : [];
+
+        $goal = trim((string) ($campaignIdentity->campaign_goal ?? ''));
+        $description = trim((string) ($campaignIdentity->campaign_description ?? ''));
+        $tone = trim((string) (data_get($payload, 'messaging.tone') ?? ''));
+        $styleDescription = trim((string) (data_get($payload, 'visual.style_description') ?? ''));
+        $requiredMotifs = $this->asStringList(data_get($payload, 'rules.required_motifs'));
+        $categoryNotes = trim((string) (data_get($payload, 'rules.category_notes') ?? ''));
+
+        $hasTextualDna = $goal !== ''
+            || $description !== ''
+            || $tone !== ''
+            || $styleDescription !== ''
+            || $categoryNotes !== ''
+            || $requiredMotifs !== [];
+
+        $exemplarCosine = $this->bestExemplarCosine($asset, $campaignIdentity);
+        $hasVisualDna = $exemplarCosine !== null;
+
+        if (! $hasTextualDna && ! $hasVisualDna) {
+            return $base;
+        }
+
+        $vlmContext = $this->pickVlmContextText($creativeSignals);
+
+        $alignmentDelta = 0.0;
+        $matchHits = [];
+        $mismatchHits = [];
+
+        if ($hasTextualDna && $vlmContext !== '') {
+            $campaignKeywords = $this->campaignKeywords(
+                $goal,
+                $description,
+                $tone,
+                $styleDescription,
+                $categoryNotes,
+                $requiredMotifs,
+            );
+
+            foreach ($campaignKeywords as $phrase) {
+                if ($phrase === '') {
+                    continue;
+                }
+                if (mb_stripos($vlmContext, $phrase) !== false) {
+                    $matchHits[] = $phrase;
+                    if (count($matchHits) >= 4) {
+                        break;
+                    }
+                }
+            }
+
+            $mismatchHits = $this->campaignMismatches($payload, $vlmContext);
+        }
+
+        if ($matchHits !== []) {
+            $alignmentDelta += min(0.20, 0.06 * count($matchHits));
+        }
+        if ($mismatchHits !== []) {
+            $alignmentDelta -= min(0.15, 0.06 * count($mismatchHits));
+        }
+
+        if ($hasVisualDna) {
+            // $exemplarCosine lives in [0, 1]. Map [0.5, 0.85] -> [-0.08, +0.12] so a weak
+            // similarity mildly penalizes and a strong one moderately lifts the score. Clamp
+            // so the total exemplar effect fits within the overall per-overlay cap.
+            $exemplarAdj = max(-0.08, min(0.12, (($exemplarCosine - 0.65) / 0.20) * 0.10));
+            $alignmentDelta += $exemplarAdj;
+        }
+
+        if ($vlmContext === '' && $hasTextualDna) {
+            // No VLM to anchor on -- only lift by half to avoid rewarding a configuration
+            // that we cannot visually verify.
+            $alignmentDelta *= 0.5;
+        }
+
+        $alignmentDelta = max(-0.15, min(0.20, $alignmentDelta));
+
+        $evidence = $base->evidence;
+
+        if ($hasTextualDna) {
+            $descriptor = $goal !== '' ? $goal : ($description !== '' ? $description : ($styleDescription !== '' ? $styleDescription : 'campaign DNA'));
+            $evidence[] = EvidenceItem::readiness(
+                EvidenceSource::CONFIGURATION_ONLY,
+                sprintf('Campaign context "%s"', \Illuminate\Support\Str::limit($descriptor, 80)),
+            );
+
+            if ($matchHits !== []) {
+                $evidence[] = EvidenceItem::soft(
+                    EvidenceSource::AI_ANALYSIS,
+                    sprintf(
+                        'Asset description aligns with campaign keywords: %s',
+                        implode(', ', array_slice($matchHits, 0, 3)),
+                    ),
+                );
+            }
+
+            if ($mismatchHits !== []) {
+                $evidence[] = EvidenceItem::soft(
+                    EvidenceSource::AI_ANALYSIS,
+                    sprintf(
+                        'Asset description contradicts campaign direction: %s',
+                        implode(', ', array_slice($mismatchHits, 0, 3)),
+                    ),
+                );
+            }
+        }
+
+        if ($hasVisualDna) {
+            $exemplarStrength = $exemplarCosine >= 0.75
+                ? EvidenceItem::hard(
+                    EvidenceSource::VISUAL_SIMILARITY,
+                    sprintf('Campaign exemplar similarity %.0f%%', $exemplarCosine * 100),
+                )
+                : EvidenceItem::soft(
+                    EvidenceSource::VISUAL_SIMILARITY,
+                    sprintf('Campaign exemplar similarity %.0f%% (below strong-match threshold)', $exemplarCosine * 100),
+                );
+            $evidence[] = $exemplarStrength;
+        }
+
+        $hasMatch = $matchHits !== [] || ($hasVisualDna && $exemplarCosine >= 0.70);
+        $hasMismatch = $mismatchHits !== [] || ($hasVisualDna && $exemplarCosine < 0.45);
+
+        if ($vlmContext === '' && ! $hasVisualDna) {
+            $reasonCode = DimensionReasonCode::CONTEXT_CAMPAIGN_NO_VLM;
+        } elseif ($hasMatch && ! $hasMismatch) {
+            $reasonCode = DimensionReasonCode::CONTEXT_CAMPAIGN_ALIGNED;
+        } elseif ($hasMismatch && ! $hasMatch) {
+            $reasonCode = DimensionReasonCode::CONTEXT_CAMPAIGN_MISALIGNED;
+        } else {
+            // Neutral or mixed overlay -- keep the base reason code so downstream UX doesn't
+            // claim alignment we haven't established.
+            $reasonCode = $base->reasonCode ?? DimensionReasonCode::CONTEXT_EVALUATED;
+        }
+
+        $score = max(0.0, min(1.0, $base->score + $alignmentDelta));
+        $confidenceBoost = 0.0;
+        if ($hasTextualDna && $hasVisualDna) {
+            $confidenceBoost = 0.20;
+        } elseif ($hasTextualDna || $hasVisualDna) {
+            $confidenceBoost = 0.10;
+        }
+        $confidence = max($base->confidence, min(0.65, $base->confidence + $confidenceBoost));
+
+        if (! $base->evaluable && ($hasMatch || $hasVisualDna)) {
+            $status = $score >= 0.6 ? DimensionStatus::PARTIAL : DimensionStatus::WEAK;
+            $evaluable = true;
+        } else {
+            $status = $base->status;
+            $evaluable = $base->evaluable;
+        }
+
+        if ($evaluable && $status === DimensionStatus::NOT_EVALUABLE) {
+            $status = DimensionStatus::WEAK;
+        }
+
+        if ($evaluable && $hasMatch && $score >= 0.65 && $confidence >= 0.5) {
+            $status = DimensionStatus::ALIGNED;
+        }
+
+        $statusReason = match ($reasonCode) {
+            DimensionReasonCode::CONTEXT_CAMPAIGN_ALIGNED => sprintf(
+                'Context fits the active campaign (%s)',
+                \Illuminate\Support\Str::limit($campaignIdentity->campaign_name ?? 'campaign', 40),
+            ),
+            DimensionReasonCode::CONTEXT_CAMPAIGN_MISALIGNED => sprintf(
+                'Context diverges from the active campaign (%s)',
+                \Illuminate\Support\Str::limit($campaignIdentity->campaign_name ?? 'campaign', 40),
+            ),
+            DimensionReasonCode::CONTEXT_CAMPAIGN_NO_VLM => 'Campaign context configured but no VLM read from the asset',
+            default => $base->statusReason,
+        };
+
+        return new DimensionResult(
+            dimension: AlignmentDimension::CONTEXT_FIT,
+            status: $status,
+            score: $score,
+            confidence: $confidence,
+            primaryEvidenceSource: $hasVisualDna
+                ? EvidenceSource::VISUAL_SIMILARITY
+                : ($hasMatch || $hasMismatch ? EvidenceSource::AI_ANALYSIS : $base->primaryEvidenceSource),
+            evidence: $evidence,
+            blockers: $base->blockers,
+            evaluable: $evaluable,
+            statusReason: $statusReason,
+            reasonCode: $reasonCode,
+        );
+    }
+
+    /**
+     * Pull any VLM-derived contextual text from the creative_signals payload so we can
+     * keyword-match against campaign DNA.
+     *
+     * @param  array<string, mixed>|null  $signals
+     */
+    private function pickVlmContextText(?array $signals): string
+    {
+        if ($signals === null) {
+            return '';
+        }
+
+        $parts = [];
+        foreach (['context_type', 'scene_type', 'mood'] as $key) {
+            $val = $signals[$key] ?? null;
+            if (is_string($val) && trim($val) !== '') {
+                $parts[] = mb_strtolower($val);
+            }
+        }
+
+        foreach (['visual_style', 'tags', 'motifs'] as $key) {
+            $val = $signals[$key] ?? null;
+            if (is_array($val)) {
+                foreach ($val as $entry) {
+                    if (is_string($entry) && trim($entry) !== '') {
+                        $parts[] = mb_strtolower($entry);
+                    }
+                }
+            }
+        }
+
+        // Video insights override/extension lives under `video_context.*`; it's already string-y.
+        $videoCtx = $signals['video_context'] ?? null;
+        if (is_array($videoCtx)) {
+            foreach (['summary', 'scene', 'activity', 'setting'] as $k) {
+                $val = $videoCtx[$k] ?? null;
+                if (is_string($val) && trim($val) !== '') {
+                    $parts[] = mb_strtolower($val);
+                }
+            }
+        }
+
+        return trim(implode(' ', $parts));
+    }
+
+    /**
+     * Build a keyword list from campaign DNA for simple substring matching against the VLM text.
+     *
+     * @param  list<string>  $requiredMotifs
+     * @return list<string>
+     */
+    private function campaignKeywords(
+        string $goal,
+        string $description,
+        string $tone,
+        string $styleDescription,
+        string $categoryNotes,
+        array $requiredMotifs,
+    ): array {
+        $keywords = [];
+
+        foreach ([$goal, $description, $styleDescription, $categoryNotes] as $sentence) {
+            if ($sentence === '') {
+                continue;
+            }
+            // Pull distinctive words >= 4 chars so "a", "the" aren't treated as matches.
+            foreach (preg_split('/[\s,;:.\\/\\-]+/u', mb_strtolower($sentence)) ?: [] as $token) {
+                $token = trim($token);
+                if ($token === '' || mb_strlen($token) < 4) {
+                    continue;
+                }
+                if (in_array($token, ['with', 'from', 'that', 'this', 'they', 'them', 'their', 'have', 'about', 'your', 'will'], true)) {
+                    continue;
+                }
+                $keywords[$token] = $token;
+            }
+        }
+
+        if ($tone !== '') {
+            $keywords[mb_strtolower($tone)] = mb_strtolower($tone);
+        }
+
+        foreach ($requiredMotifs as $motif) {
+            $keyword = mb_strtolower(trim($motif));
+            if ($keyword !== '' && mb_strlen($keyword) >= 3) {
+                $keywords[$keyword] = $keyword;
+            }
+        }
+
+        return array_values($keywords);
+    }
+
+    /**
+     * Detect simple contradictions: discouraged phrases in the campaign messaging or
+     * explicitly forbidden motifs landing in the VLM description.
+     *
+     * @param  array<string, mixed>  $payload
+     * @return list<string>
+     */
+    private function campaignMismatches(array $payload, string $vlmContext): array
+    {
+        $discouraged = array_merge(
+            $this->asStringList(data_get($payload, 'messaging.discouraged_phrases')),
+            $this->asStringList(data_get($payload, 'rules.discouraged_phrases')),
+        );
+
+        $hits = [];
+        foreach ($discouraged as $phrase) {
+            $needle = mb_strtolower(trim($phrase));
+            if ($needle !== '' && mb_stripos($vlmContext, $needle) !== false) {
+                $hits[] = $phrase;
+                if (count($hits) >= 3) {
+                    break;
+                }
+            }
+        }
+
+        return $hits;
+    }
+
+    /**
+     * Best cosine between the asset's stored embedding and any campaign exemplar / mood /
+     * motif reference that carries an embedding vector. Strict style and identity refs are
+     * intentionally excluded -- those belong to the Identity / Visual Style pillars.
+     *
+     * Returns null when either side is missing or the dimensions are incompatible.
+     */
+    private function bestExemplarCosine(Asset $asset, CollectionCampaignIdentity $identity): ?float
+    {
+        $exemplars = $identity->campaignVisualReferences()
+            ->whereIn('reference_type', [
+                CampaignVisualReference::TYPE_EXEMPLAR,
+                CampaignVisualReference::TYPE_MOOD,
+                CampaignVisualReference::TYPE_MOTIF,
+            ])
+            ->whereNotNull('embedding_vector')
+            ->get();
+
+        if ($exemplars->isEmpty()) {
+            return null;
+        }
+
+        $assetRow = \App\Models\AssetEmbedding::query()->where('asset_id', $asset->id)->first();
+        $assetVector = ($assetRow && ! empty($assetRow->embedding_vector))
+            ? array_values(array_map('floatval', $assetRow->embedding_vector))
+            : [];
+
+        if ($assetVector === []) {
+            return null;
+        }
+
+        $best = null;
+        foreach ($exemplars as $ref) {
+            $refVec = array_values(array_map('floatval', $ref->embedding_vector ?? []));
+            if ($refVec === [] || count($refVec) !== count($assetVector)) {
+                continue;
+            }
+            $cosine = $this->cosine($assetVector, $refVec);
+            if ($best === null || $cosine > $best) {
+                $best = $cosine;
+            }
+        }
+
+        return $best;
+    }
+
+    private function cosine(array $a, array $b): float
+    {
+        $dot = 0.0;
+        $na = 0.0;
+        $nb = 0.0;
+        foreach ($a as $i => $v) {
+            $w = $b[$i] ?? 0.0;
+            $dot += $v * $w;
+            $na += $v * $v;
+            $nb += $w * $w;
+        }
+        $denom = sqrt($na) * sqrt($nb);
+
+        return $denom < 1e-10 ? 0.0 : $dot / $denom;
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function asStringList(mixed $value): array
+    {
+        if (! is_array($value)) {
+            return [];
+        }
+        $out = [];
+        foreach ($value as $entry) {
+            if (is_string($entry) && trim($entry) !== '') {
+                $out[] = trim($entry);
+            }
+        }
+
+        return $out;
     }
 }

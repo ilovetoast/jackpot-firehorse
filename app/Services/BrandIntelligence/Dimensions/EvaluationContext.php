@@ -97,8 +97,14 @@ final class EvaluationContext
         $available = [];
         $unavailable = [];
 
-        if ($mediaType === MediaType::VIDEO || $mediaType === MediaType::AUDIO) {
+        if ($mediaType === MediaType::AUDIO) {
             $unavailable[] = 'screenshot';
+        } elseif ($mediaType === MediaType::VIDEO) {
+            if ($visualEvaluationRasterResolved) {
+                $available[] = 'screenshot';
+            } else {
+                $unavailable[] = 'screenshot';
+            }
         } elseif ($mediaType === MediaType::PDF) {
             if ($visualEvaluationRasterResolved) {
                 $available[] = 'screenshot';
@@ -111,10 +117,13 @@ final class EvaluationContext
             $unavailable[] = 'screenshot';
         }
 
+        $videoTranscript = (string) data_get($meta, 'ai_video_insights.transcript', '');
+        $hasVideoTranscript = trim($videoTranscript) !== '';
         $hasOcr = ! empty($meta['extracted_text'] ?? null)
             || ! empty($meta['ocr_text'] ?? null)
             || ! empty($meta['vision_ocr'] ?? null)
-            || ! empty($meta['detected_text'] ?? null);
+            || ! empty($meta['detected_text'] ?? null)
+            || $hasVideoTranscript;
         if ($hasOcr) {
             $available[] = 'ocr';
         } else {
@@ -129,8 +138,8 @@ final class EvaluationContext
             $unavailable[] = 'palette';
         }
 
-        if ($mediaType === MediaType::VIDEO || $mediaType === MediaType::AUDIO) {
-            $unavailable[] = 'transcript';
+        if (($mediaType === MediaType::VIDEO || $mediaType === MediaType::AUDIO) && $hasVideoTranscript) {
+            $available[] = 'transcript';
         } else {
             $unavailable[] = 'transcript';
         }

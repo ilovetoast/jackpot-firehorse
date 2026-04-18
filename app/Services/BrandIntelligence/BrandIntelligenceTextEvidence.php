@@ -52,6 +52,11 @@ final class BrandIntelligenceTextEvidence
             }
         }
 
+        $videoTranscript = data_get($meta, 'ai_video_insights.transcript');
+        if (is_string($videoTranscript)) {
+            $remember($videoTranscript);
+        }
+
         $sup = $supplementalCreativeOcr !== null ? trim($supplementalCreativeOcr) : '';
         if ($sup !== '') {
             $acc = mb_strtolower(implode("\n", $segments), 'UTF-8');

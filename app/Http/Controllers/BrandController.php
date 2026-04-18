@@ -667,7 +667,7 @@ class BrandController extends Controller
             'secondary_color' => ['nullable', 'string', 'regex:/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/'],
             'accent_color' => ['nullable', 'string', 'regex:/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/'],
             'nav_color' => ['nullable', 'string', 'regex:/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/'],
-            'workspace_button_style' => 'nullable|string|in:primary,secondary,accent,white,black',
+            'workspace_button_style' => 'nullable|string|in:context,primary,secondary,accent,white,black',
             'logo_filter' => 'nullable|string|in:none,white,black,primary',
             'settings' => 'nullable|array',
             'settings.metadata_approval_enabled' => 'nullable|boolean', // Phase M-2
