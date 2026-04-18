@@ -3,9 +3,11 @@
 namespace App\Services\BrandIntelligence\Dimensions;
 
 use App\Enums\AlignmentDimension;
+use App\Enums\DimensionReasonCode;
 use App\Enums\DimensionStatus;
 use App\Enums\EvidenceSource;
 use App\Enums\EvidenceWeight;
+use App\Enums\SignalFamily;
 
 final class DimensionResult
 {
@@ -20,6 +22,7 @@ final class DimensionResult
     public array $blockers;
     public bool $evaluable;
     public string $statusReason;
+    public ?DimensionReasonCode $reasonCode;
 
     /**
      * @param  list<EvidenceItem>  $evidence
@@ -35,6 +38,7 @@ final class DimensionResult
         array $blockers,
         bool $evaluable,
         string $statusReason,
+        ?DimensionReasonCode $reasonCode = null,
     ) {
         $this->dimension = $dimension;
         $this->status = $status;
@@ -45,6 +49,7 @@ final class DimensionResult
         $this->blockers = $blockers;
         $this->evaluable = $evaluable;
         $this->statusReason = $statusReason;
+        $this->reasonCode = $reasonCode;
     }
 
     public function toArray(): array
@@ -59,7 +64,35 @@ final class DimensionResult
             'blockers' => $this->blockers,
             'evaluable' => $this->evaluable,
             'status_reason' => $this->statusReason,
+            'reason_code' => $this->reasonCode?->value,
+            'signal_families' => array_map(
+                static fn (SignalFamily $f): string => $f->value,
+                $this->distinctSignalFamilies(),
+            ),
         ];
+    }
+
+    /**
+     * Distinct signal families present in this result.
+     *
+     * Only HARD and SOFT evidence counts toward diversity -- readiness-only
+     * evidence is excluded because configuration / metadata hints cannot
+     * meaningfully corroborate a score.
+     *
+     * @return list<SignalFamily>
+     */
+    public function distinctSignalFamilies(): array
+    {
+        $seen = [];
+        foreach ($this->evidence as $e) {
+            if ($e->weight === EvidenceWeight::READINESS) {
+                continue;
+            }
+            $fam = SignalFamily::fromEvidenceSource($e->type);
+            $seen[$fam->value] = $fam;
+        }
+
+        return array_values($seen);
     }
 
     public function hasHardEvidence(): bool
@@ -90,6 +123,7 @@ final class DimensionResult
         array $blockers = [],
         EvidenceSource $primarySource = EvidenceSource::NOT_EVALUABLE,
         array $evidence = [],
+        ?DimensionReasonCode $reasonCode = null,
     ): self {
         return new self(
             dimension: $dimension,
@@ -101,6 +135,7 @@ final class DimensionResult
             blockers: $blockers,
             evaluable: false,
             statusReason: $reason,
+            reasonCode: $reasonCode,
         );
     }
 
@@ -109,6 +144,7 @@ final class DimensionResult
         string $reason,
         array $blockers = [],
         array $evidence = [],
+        ?DimensionReasonCode $reasonCode = null,
     ): self {
         return new self(
             dimension: $dimension,
@@ -120,6 +156,7 @@ final class DimensionResult
             blockers: $blockers,
             evaluable: false,
             statusReason: $reason,
+            reasonCode: $reasonCode,
         );
     }
 }

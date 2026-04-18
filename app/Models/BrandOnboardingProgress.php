@@ -88,26 +88,26 @@ class BrandOnboardingProgress extends Model
     }
 
     /**
-     * Minimum activation: name + color + brand mark (real proof) + ≥1 asset.
+     * Minimum activation: name + color + brand mark (real proof). Asset upload
+     * is no longer part of the cinematic onboarding flow — users drop into the
+     * library to upload after activation.
      */
     public function minimumActivationMet(): bool
     {
         return $this->brand_name_confirmed
             && $this->primary_color_set
-            && $this->brand_mark_confirmed
-            && $this->starter_assets_count >= 1;
+            && $this->brand_mark_confirmed;
     }
 
     public function recommendedCompletionMet(): bool
     {
         return $this->minimumActivationMet()
-            && $this->starter_assets_count >= 3
             && ($this->guideline_uploaded
                 || ($this->website_url !== null && $this->website_url !== ''));
     }
 
     /**
-     * Activation progress (0–100) across the 4 required steps.
+     * Activation progress (0–100) across the 3 required steps.
      */
     public function activationPercent(): int
     {
@@ -115,7 +115,6 @@ class BrandOnboardingProgress extends Model
             $this->brand_name_confirmed,
             $this->primary_color_set,
             $this->brand_mark_confirmed,
-            $this->starter_assets_count >= 1,
         ];
 
         return (int) round((count(array_filter($steps)) / count($steps)) * 100);
@@ -129,7 +128,6 @@ class BrandOnboardingProgress extends Model
         $activationPct = $this->activationPercent();
 
         $optional = [
-            $this->starter_assets_count >= 3,
             $this->guideline_uploaded,
             $this->website_url !== null && $this->website_url !== '',
             $this->industry !== null && $this->industry !== '',

@@ -3,6 +3,7 @@
 namespace App\Services\BrandIntelligence\Dimensions;
 
 use App\Enums\AlignmentDimension;
+use App\Enums\DimensionReasonCode;
 use App\Enums\DimensionStatus;
 use App\Enums\EvidenceSource;
 use App\Enums\MediaType;
@@ -27,6 +28,7 @@ final class VisualStyleEvaluator implements DimensionEvaluatorInterface
                     AlignmentDimension::VISUAL_STYLE,
                     'PDF page render is available but no stored embedding vector yet',
                     ['Generate asset embedding for the rendered page to enable visual style evaluation'],
+                    reasonCode: DimensionReasonCode::STYLE_PDF_EMBEDDING_PENDING,
                 );
             }
 
@@ -34,6 +36,7 @@ final class VisualStyleEvaluator implements DimensionEvaluatorInterface
                 AlignmentDimension::VISUAL_STYLE,
                 'Asset has no visual embedding for style comparison',
                 ['Generate asset embedding to enable visual style evaluation'],
+                reasonCode: DimensionReasonCode::STYLE_EMBEDDING_MISSING,
             );
         }
 
@@ -46,6 +49,7 @@ final class VisualStyleEvaluator implements DimensionEvaluatorInterface
                 AlignmentDimension::VISUAL_STYLE,
                 'No style references with embeddings available for comparison',
                 ['Add approved style reference images to enable visual style evaluation'],
+                reasonCode: DimensionReasonCode::STYLE_NO_REFERENCES,
             );
         }
 
@@ -59,6 +63,7 @@ final class VisualStyleEvaluator implements DimensionEvaluatorInterface
                 AlignmentDimension::VISUAL_STYLE,
                 'Asset embedding vector is empty',
                 ['Regenerate asset embedding'],
+                reasonCode: DimensionReasonCode::STYLE_EMBEDDING_EMPTY,
             );
         }
 
@@ -69,6 +74,7 @@ final class VisualStyleEvaluator implements DimensionEvaluatorInterface
                 AlignmentDimension::VISUAL_STYLE,
                 'No valid reference vectors available for comparison',
                 ['Ensure reference images have embeddings generated'],
+                reasonCode: DimensionReasonCode::STYLE_REFERENCE_VECTORS_INVALID,
             );
         }
 
@@ -129,6 +135,7 @@ final class VisualStyleEvaluator implements DimensionEvaluatorInterface
                 $totalRefs,
                 $stabilityLabel,
             ),
+            reasonCode: DimensionReasonCode::STYLE_EVALUATED,
         );
     }
 
@@ -220,5 +227,143 @@ final class VisualStyleEvaluator implements DimensionEvaluatorInterface
         $denom = sqrt($normA) * sqrt($normB);
 
         return $denom < 1e-10 ? 0.0 : (float) ($dot / $denom);
+    }
+
+    /**
+     * Upgrade a not_evaluable visual style result using VLM visual_style[] tags
+     * when no style references or asset embedding are available.
+     *
+     * Only activates when overlap exists against brand DNA visual traits; otherwise
+     * the result remains not_evaluable (absence of overlap is not negative evidence).
+     *
+     * @param  array<string, mixed>|null  $signals  creative_signals
+     */
+    public function applyCreativeSignals(DimensionResult $base, ?array $signals, Brand $brand): DimensionResult
+    {
+        if ($base->evaluable || $signals === null) {
+            return $base;
+        }
+
+        $relevantReasons = [
+            \App\Enums\DimensionReasonCode::STYLE_NO_REFERENCES,
+            \App\Enums\DimensionReasonCode::STYLE_EMBEDDING_MISSING,
+            \App\Enums\DimensionReasonCode::STYLE_PDF_EMBEDDING_PENDING,
+        ];
+        if (! in_array($base->reasonCode, $relevantReasons, true)) {
+            return $base;
+        }
+
+        $tags = is_array($signals['visual_style'] ?? null) ? $signals['visual_style'] : [];
+        $tags = array_values(array_filter(array_map(
+            static fn ($t) => is_string($t) ? strtolower(trim($t)) : null,
+            $tags,
+        )));
+        if ($tags === []) {
+            return $base;
+        }
+
+        $brandTags = $this->brandVisualStyleTags($brand);
+        if ($brandTags === []) {
+            return $base;
+        }
+
+        $overlap = $this->tagOverlap($tags, $brandTags);
+        if ($overlap['matched'] === []) {
+            return $base;
+        }
+
+        $ratio = count($overlap['matched']) / max(1, count($brandTags));
+        $rawScore = 0.30 + min(0.40, $ratio * 0.80);
+        $score = min(VlmSignalCaps::STYLE_TAG_MAX_SCORE, $rawScore);
+        $conf = min(VlmSignalCaps::STYLE_TAG_MAX_CONFIDENCE, 0.25 + $ratio * 0.30);
+
+        $detail = sprintf(
+            'VLM style tags overlap with brand DNA (%d/%d matched): %s',
+            count($overlap['matched']),
+            count($brandTags),
+            implode(', ', array_slice($overlap['matched'], 0, 5)),
+        );
+
+        $evidence = $base->evidence;
+        $evidence[] = EvidenceItem::soft(EvidenceSource::AI_ANALYSIS, $detail);
+
+        return new DimensionResult(
+            dimension: AlignmentDimension::VISUAL_STYLE,
+            status: DimensionStatus::PARTIAL,
+            score: $score,
+            confidence: $conf,
+            primaryEvidenceSource: EvidenceSource::AI_ANALYSIS,
+            evidence: $evidence,
+            blockers: $base->blockers,
+            evaluable: true,
+            statusReason: 'Visual style estimated from VLM tag overlap with brand DNA (no reference similarity)',
+            reasonCode: \App\Enums\DimensionReasonCode::STYLE_EVALUATED,
+        );
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function brandVisualStyleTags(Brand $brand): array
+    {
+        $brand->loadMissing('brandModel.activeVersion');
+        $payload = $brand->brandModel?->activeVersion?->model_payload ?? [];
+
+        $tags = [];
+        foreach (['visual_traits', 'style_keywords', 'visual_style'] as $key) {
+            $val = $payload[$key] ?? null;
+            if (is_array($val)) {
+                foreach ($val as $v) {
+                    if (is_string($v) && $v !== '') {
+                        $tags[] = $this->normalizeTag($v);
+                    }
+                }
+            }
+        }
+
+        $rules = is_array($payload['scoring_rules'] ?? null) ? $payload['scoring_rules'] : [];
+        foreach (['style_keywords', 'visual_keywords'] as $k) {
+            if (is_array($rules[$k] ?? null)) {
+                foreach ($rules[$k] as $v) {
+                    if (is_string($v) && $v !== '') {
+                        $tags[] = $this->normalizeTag($v);
+                    }
+                }
+            }
+        }
+
+        return array_values(array_unique(array_filter($tags, static fn ($t) => $t !== '')));
+    }
+
+    private function normalizeTag(string $raw): string
+    {
+        $slug = strtolower(trim($raw));
+        $slug = (string) preg_replace('/[^a-z0-9]+/', '-', $slug);
+
+        return trim($slug, '-');
+    }
+
+    /**
+     * @param  list<string>  $assetTags
+     * @param  list<string>  $brandTags
+     * @return array{matched: list<string>}
+     */
+    private function tagOverlap(array $assetTags, array $brandTags): array
+    {
+        $matched = [];
+        foreach ($brandTags as $bt) {
+            foreach ($assetTags as $at) {
+                if ($at === $bt) {
+                    $matched[] = $bt;
+                    continue 2;
+                }
+                if ($bt !== '' && (str_contains($at, $bt) || str_contains($bt, $at))) {
+                    $matched[] = $bt;
+                    continue 2;
+                }
+            }
+        }
+
+        return ['matched' => array_values(array_unique($matched))];
     }
 }

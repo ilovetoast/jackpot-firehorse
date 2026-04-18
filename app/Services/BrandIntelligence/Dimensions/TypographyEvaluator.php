@@ -3,11 +3,13 @@
 namespace App\Services\BrandIntelligence\Dimensions;
 
 use App\Enums\AlignmentDimension;
+use App\Enums\DimensionReasonCode;
 use App\Enums\DimensionStatus;
 use App\Enums\EvidenceSource;
 use App\Enums\MediaType;
 use App\Models\Asset;
 use App\Models\Brand;
+use Illuminate\Support\Str;
 
 /**
  * Typography is intentionally conservative.
@@ -32,6 +34,7 @@ final class TypographyEvaluator implements DimensionEvaluatorInterface
                 AlignmentDimension::TYPOGRAPHY,
                 'No typography configuration in brand DNA and no font metadata on asset',
                 ['Add typography settings to your brand guidelines'],
+                reasonCode: DimensionReasonCode::TYPOGRAPHY_NO_BRAND_NO_ASSET,
             );
         }
 
@@ -50,6 +53,7 @@ final class TypographyEvaluator implements DimensionEvaluatorInterface
                     ['Typography could not be reliably evaluated from this asset type'],
                     EvidenceSource::CONFIGURATION_ONLY,
                     $evidence,
+                    reasonCode: DimensionReasonCode::TYPOGRAPHY_NO_ASSET_FONTS,
                 );
             }
 
@@ -59,6 +63,7 @@ final class TypographyEvaluator implements DimensionEvaluatorInterface
                 ['Ensure asset has extractable font information'],
                 EvidenceSource::CONFIGURATION_ONLY,
                 $evidence,
+                reasonCode: DimensionReasonCode::TYPOGRAPHY_PDF_FONTS_UNAVAILABLE,
             );
         }
 
@@ -73,6 +78,7 @@ final class TypographyEvaluator implements DimensionEvaluatorInterface
                 'Asset has font metadata but brand has no typography configuration',
                 ['Add typography settings to your brand guidelines to enable comparison'],
                 $evidence,
+                reasonCode: DimensionReasonCode::TYPOGRAPHY_MISSING_BRAND_CONFIG,
             );
         }
 
@@ -92,6 +98,7 @@ final class TypographyEvaluator implements DimensionEvaluatorInterface
             blockers: $blockers,
             evaluable: true,
             statusReason: 'Typography comparison based on available metadata; confidence is limited',
+            reasonCode: DimensionReasonCode::TYPOGRAPHY_EVALUATED,
         );
     }
 
@@ -124,5 +131,166 @@ final class TypographyEvaluator implements DimensionEvaluatorInterface
         }
 
         return false;
+    }
+
+    /**
+     * Upgrade a not_evaluable typography result using VLM type_classification
+     * when the brand has font config but the asset has no readable fonts.
+     *
+     * Strictly capped (see VlmSignalCaps) and status is at most PARTIAL.
+     *
+     * @param  array<string, mixed>|null  $signals  creative_signals.type_classification
+     */
+    public function applyCreativeSignals(DimensionResult $base, ?array $signals, Brand $brand): DimensionResult
+    {
+        if ($base->evaluable || $signals === null) {
+            return $base;
+        }
+
+        $relevantReasons = [
+            DimensionReasonCode::TYPOGRAPHY_NO_ASSET_FONTS,
+            DimensionReasonCode::TYPOGRAPHY_PDF_FONTS_UNAVAILABLE,
+        ];
+        if (! in_array($base->reasonCode, $relevantReasons, true)) {
+            return $base;
+        }
+
+        $type = is_array($signals['type_classification'] ?? null) ? $signals['type_classification'] : null;
+        if ($type === null) {
+            return $base;
+        }
+
+        $category = is_string($type['primary_category'] ?? null) ? $type['primary_category'] : null;
+        $confidence = is_numeric($type['confidence'] ?? null) ? (float) $type['confidence'] : 0.0;
+        if ($category === null || $category === 'none' || $confidence < 0.5) {
+            return $base;
+        }
+
+        $weight = is_string($type['weight_hint'] ?? null) ? $type['weight_hint'] : null;
+        $allCaps = (bool) ($type['all_caps_detected'] ?? false);
+
+        $brandTypo = $this->brandTypographyPayload($brand);
+        $match = $this->compareTypeClassificationToBrand($category, $weight, $allCaps, $brandTypo);
+
+        $score = min(VlmSignalCaps::TYPE_CLASSIFICATION_MAX_SCORE, $match['score']);
+        $conf = min(VlmSignalCaps::TYPE_CLASSIFICATION_MAX_CONFIDENCE, $match['confidence']);
+
+        if ($score < 0.25) {
+            return $base;
+        }
+
+        $detail = sprintf(
+            'VLM type classification: %s%s%s -- %s',
+            $category,
+            $weight ? '/' . $weight : '',
+            $allCaps ? ', all-caps' : '',
+            $match['reason'],
+        );
+
+        $evidence = $base->evidence;
+        $evidence[] = EvidenceItem::soft(EvidenceSource::AI_ANALYSIS, $detail);
+
+        return new DimensionResult(
+            dimension: AlignmentDimension::TYPOGRAPHY,
+            status: DimensionStatus::PARTIAL,
+            score: $score,
+            confidence: $conf,
+            primaryEvidenceSource: EvidenceSource::AI_ANALYSIS,
+            evidence: $evidence,
+            blockers: $base->blockers,
+            evaluable: true,
+            statusReason: 'Typography estimated from visual font classification (no embedded fonts)',
+            reasonCode: DimensionReasonCode::TYPOGRAPHY_EVALUATED,
+        );
+    }
+
+    /**
+     * @return array{fonts: list<string>, keywords: list<string>}
+     */
+    private function brandTypographyPayload(Brand $brand): array
+    {
+        $brand->loadMissing('brandModel.activeVersion');
+        $payload = $brand->brandModel?->activeVersion?->model_payload ?? [];
+        $typo = is_array($payload['typography'] ?? null) ? $payload['typography'] : [];
+
+        $fonts = [];
+        foreach (['primary_font', 'secondary_font'] as $k) {
+            if (! empty($typo[$k]) && is_string($typo[$k])) {
+                $fonts[] = Str::lower(trim($typo[$k]));
+            }
+        }
+        if (is_array($typo['fonts'] ?? null)) {
+            foreach ($typo['fonts'] as $f) {
+                if (is_string($f) && $f !== '') {
+                    $fonts[] = Str::lower(trim($f));
+                }
+            }
+        }
+
+        $rules = is_array($payload['scoring_rules'] ?? null) ? $payload['scoring_rules'] : [];
+        $keywords = [];
+        if (is_array($rules['typography_keywords'] ?? null)) {
+            foreach ($rules['typography_keywords'] as $k) {
+                if (is_string($k) && $k !== '') {
+                    $keywords[] = Str::lower(trim($k));
+                }
+            }
+        }
+
+        return ['fonts' => array_values(array_unique($fonts)), 'keywords' => array_values(array_unique($keywords))];
+    }
+
+    /**
+     * @param  array{fonts: list<string>, keywords: list<string>}  $brandTypo
+     * @return array{score: float, confidence: float, reason: string}
+     */
+    private function compareTypeClassificationToBrand(string $category, ?string $weight, bool $allCaps, array $brandTypo): array
+    {
+        $haystack = strtolower(implode(' ', array_merge($brandTypo['fonts'], $brandTypo['keywords'])));
+        if ($haystack === '') {
+            return ['score' => 0.40, 'confidence' => 0.30, 'reason' => 'no brand type keywords to match against'];
+        }
+
+        $categorySynonyms = match ($category) {
+            'sans_serif' => ['sans', 'sans-serif', 'sans serif', 'grotesk', 'grotesque', 'gothic', 'neue', 'helvetica', 'inter', 'arial'],
+            'serif' => ['serif', 'roman', 'times', 'garamond', 'baskerville', 'caslon'],
+            'display' => ['display', 'headline', 'poster', 'title'],
+            'monospace' => ['mono', 'monospace', 'courier', 'code'],
+            'script' => ['script', 'handwritten', 'cursive'],
+            'mixed' => [],
+            default => [],
+        };
+
+        $categoryMatch = false;
+        foreach ($categorySynonyms as $syn) {
+            if (str_contains($haystack, $syn)) {
+                $categoryMatch = true;
+                break;
+            }
+        }
+
+        $weightBonus = 0.0;
+        if ($weight !== null && $weight !== 'unknown' && str_contains($haystack, $weight)) {
+            $weightBonus = 0.10;
+        }
+
+        $capsBonus = 0.0;
+        if ($allCaps && (str_contains($haystack, 'uppercase') || str_contains($haystack, 'all caps') || str_contains($haystack, 'all-caps'))) {
+            $capsBonus = 0.05;
+        }
+
+        if ($categoryMatch) {
+            return [
+                'score' => 0.50 + $weightBonus + $capsBonus,
+                'confidence' => 0.40,
+                'reason' => 'matches brand typography family',
+            ];
+        }
+
+        return [
+            'score' => 0.30 + $weightBonus + $capsBonus,
+            'confidence' => 0.30,
+            'reason' => 'type category does not clearly match brand typography',
+        ];
     }
 }

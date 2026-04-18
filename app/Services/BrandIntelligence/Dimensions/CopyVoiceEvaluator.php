@@ -3,6 +3,7 @@
 namespace App\Services\BrandIntelligence\Dimensions;
 
 use App\Enums\AlignmentDimension;
+use App\Enums\DimensionReasonCode;
 use App\Enums\DimensionStatus;
 use App\Enums\EvidenceSource;
 use App\Models\Asset;
@@ -27,6 +28,7 @@ final class CopyVoiceEvaluator implements DimensionEvaluatorInterface
                 AlignmentDimension::COPY_VOICE,
                 'No extractable text found',
                 ['No OCR, PDF text, or transcript available for copy/voice evaluation'],
+                reasonCode: DimensionReasonCode::COPY_NO_TEXT,
             );
         }
 
@@ -35,6 +37,7 @@ final class CopyVoiceEvaluator implements DimensionEvaluatorInterface
                 AlignmentDimension::COPY_VOICE,
                 'Insufficient text for voice comparison',
                 ['Very little text was extracted; not enough for meaningful voice alignment'],
+                reasonCode: DimensionReasonCode::COPY_TEXT_TOO_SHORT,
             );
         }
 
@@ -53,6 +56,7 @@ final class CopyVoiceEvaluator implements DimensionEvaluatorInterface
                 'Text extracted but no brand voice/tone configuration available',
                 ['Configure brand voice, tone, and messaging in brand DNA to enable copy evaluation'],
                 $evidence,
+                reasonCode: DimensionReasonCode::COPY_MISSING_BRAND_VOICE,
             );
         }
 
@@ -73,6 +77,7 @@ final class CopyVoiceEvaluator implements DimensionEvaluatorInterface
             blockers: [],
             evaluable: true,
             statusReason: 'Text extracted; basic voice comparison available but confidence is limited without dedicated AI copy analysis',
+            reasonCode: DimensionReasonCode::COPY_EVALUATED,
         );
     }
 
@@ -135,6 +140,7 @@ final class CopyVoiceEvaluator implements DimensionEvaluatorInterface
                 : $base->blockers,
             evaluable: true,
             statusReason: $statusReason,
+            reasonCode: DimensionReasonCode::COPY_EVALUATED,
         );
     }
 

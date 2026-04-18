@@ -8,9 +8,61 @@ import { flushSync } from 'react-dom'
 import { ArrowPathIcon, SparklesIcon } from '@heroicons/react/24/outline'
 import { Link, usePage } from '@inertiajs/react'
 import BrandSignalBreakdown from './BrandSignalBreakdown'
+import BrandIntelligenceDecisionTrace from './BrandIntelligenceDecisionTrace'
 
 const POLL_INTERVAL_MS = 1100
 const POLL_MAX_ATTEMPTS = 45
+
+/**
+ * Session-storage marker used to remember a rescore/deep-scan is in flight for a given asset.
+ *
+ * When the user clicks Re-score we delete the old BI row server-side and queue a new job; if they
+ * navigate away and return before the job finishes, we want to show an "Analyzing…" state (not
+ * the stale "Not analyzed yet" message, and definitely not the pre-rescore score).
+ *
+ * Stored value is an ISO timestamp; anything older than REANALYSIS_STALE_MS is treated as
+ * expired and ignored (covers the case where a job silently failed or the tab was left open).
+ */
+const REANALYSIS_STORAGE_KEY = (assetId) => `ebi:rescore:${assetId}`
+const REANALYSIS_STALE_MS = 10 * 60 * 1000 // 10 minutes
+
+function markReanalysisStarted(assetId) {
+    if (!assetId || typeof window === 'undefined') return
+    try {
+        window.sessionStorage.setItem(REANALYSIS_STORAGE_KEY(assetId), new Date().toISOString())
+    } catch {
+        // storage disabled / quota — non-fatal
+    }
+}
+
+function clearReanalysisMarker(assetId) {
+    if (!assetId || typeof window === 'undefined') return
+    try {
+        window.sessionStorage.removeItem(REANALYSIS_STORAGE_KEY(assetId))
+    } catch {
+        // ignore
+    }
+}
+
+function readReanalysisMarker(assetId) {
+    if (!assetId || typeof window === 'undefined') return false
+    try {
+        const raw = window.sessionStorage.getItem(REANALYSIS_STORAGE_KEY(assetId))
+        if (!raw) return false
+        const started = new Date(raw).getTime()
+        if (!Number.isFinite(started)) {
+            window.sessionStorage.removeItem(REANALYSIS_STORAGE_KEY(assetId))
+            return false
+        }
+        if (Date.now() - started > REANALYSIS_STALE_MS) {
+            window.sessionStorage.removeItem(REANALYSIS_STORAGE_KEY(assetId))
+            return false
+        }
+        return true
+    } catch {
+        return false
+    }
+}
 
 /**
  * Poll until Brand Intelligence row exists (queue may finish after POST).
@@ -106,6 +158,14 @@ export default function AssetBrandIntelligenceBlock({
     const brandColor = primaryColor || auth?.activeBrand?.primary_color || '#6366f1'
     const brandColorTint = brandColor.startsWith('#') ? `${brandColor}18` : `#${brandColor}18`
     const hasPublishedGuidelines = auth?.activeBrand?.has_published_guidelines === true
+    const brandRole = auth?.brand_role?.toLowerCase?.() ?? ''
+    const tenantRole = auth?.tenant_role?.toLowerCase?.() ?? ''
+    // Gate the admin "why did it score this way?" panel by role (brand admin/manager or tenant owner/admin).
+    const canViewDecisionTrace =
+        brandRole === 'admin' ||
+        brandRole === 'brand_manager' ||
+        tenantRole === 'owner' ||
+        tenantRole === 'admin'
 
     const [localBi, setLocalBi] = useState(null)
     const [rescoreLoading, setRescoreLoading] = useState(false)
@@ -120,6 +180,10 @@ export default function AssetBrandIntelligenceBlock({
     const [analysisGateNote, setAnalysisGateNote] = useState(null)
     const [campaignAlignment, setCampaignAlignment] = useState(null)
     const [campaignAlignmentFetchSettled, setCampaignAlignmentFetchSettled] = useState(true)
+    const [ocrRerunState, setOcrRerunState] = useState({ loading: false, queued: false, error: null })
+    // Persisted across component re-mounts (session-storage backed). True when a rescore/deep-scan
+    // is in flight but the new score hasn't arrived yet — used to suppress stale scores on return.
+    const [reanalysisInFlight, setReanalysisInFlight] = useState(() => readReanalysisMarker(asset?.id))
     const abortRef = useRef(null)
     const ensureAbortRef = useRef(null)
     const campaignAbortRef = useRef(null)
@@ -133,6 +197,7 @@ export default function AssetBrandIntelligenceBlock({
         setCampaignAlignment(null)
         setPdfBrandIntelligenceMeta(null)
         setDeepScanBaselineBi(null)
+        setReanalysisInFlight(readReanalysisMarker(asset?.id))
     }, [asset?.id])
 
     useEffect(() => {
@@ -195,7 +260,14 @@ export default function AssetBrandIntelligenceBlock({
         }
     }, [])
 
-    const rawBi = hasPublishedGuidelines ? (localBi ?? asset?.brand_intelligence) : null
+    // While a rescore is in flight we deliberately hide the previous score so the UI doesn't
+    // misrepresent a stale number as current. Deep-scan intentionally keeps the baseline visible
+    // (see deepScanBaselineBi) because deep scan is an additive refinement of an existing score.
+    const rawBi = hasPublishedGuidelines
+        ? reanalysisInFlight
+            ? null
+            : (localBi ?? asset?.brand_intelligence)
+        : null
     const bi = deepScanLoading && deepScanBaselineBi != null ? deepScanBaselineBi : rawBi
     const breakdown = bi?.breakdown_json
     const pdfDeep = breakdown?.pdf_deep_scan
@@ -243,7 +315,9 @@ export default function AssetBrandIntelligenceBlock({
 
     useEffect(() => {
         if (typeof onActivityBannerChange !== 'function') return
-        if (autoEnsureLoading && !rawBi) {
+        if (rescoreLoading || (reanalysisInFlight && !rawBi)) {
+            onActivityBannerChange('Re-analyzing brand alignment…')
+        } else if (autoEnsureLoading && !rawBi) {
             onActivityBannerChange('Running brand analysis…')
         } else if (deepScanLoading && !rawBi) {
             onActivityBannerChange('Deep PDF scan in progress…')
@@ -251,14 +325,17 @@ export default function AssetBrandIntelligenceBlock({
             onActivityBannerChange(null)
         }
         return () => onActivityBannerChange(null)
-    }, [autoEnsureLoading, deepScanLoading, rawBi, onActivityBannerChange])
+    }, [autoEnsureLoading, deepScanLoading, rawBi, onActivityBannerChange, rescoreLoading, reanalysisInFlight])
 
     /** When EBI is enabled and analysis is ready but no score exists yet, queue scoring and poll (or show a gate message). */
     useEffect(() => {
         if (!asset?.id) return
         if (!hasPublishedGuidelines) return
         if (!asset?.category?.ebi_enabled) return
-        if (asset.brand_intelligence) return
+        // Skip the ensure/poll dance when a score already exists — unless a rescore is in flight,
+        // in which case the "existing" score on the asset prop is the old, pre-rescore one and we
+        // need ensure/poll to pick up the new result.
+        if (asset.brand_intelligence && !reanalysisInFlight) return
 
         const st = asset?.analysis_status ?? ''
         if (!['complete', 'scoring'].includes(st)) {
@@ -300,6 +377,8 @@ export default function AssetBrandIntelligenceBlock({
                 }
 
                 if (data.status === 'ready' && data.brand_intelligence) {
+                    clearReanalysisMarker(asset.id)
+                    setReanalysisInFlight(false)
                     applyBrandIntelligenceRef.current(data.brand_intelligence, {
                         reference_promotion: data.reference_promotion,
                         pdf_brand_intelligence: data.pdf_brand_intelligence ?? null,
@@ -313,14 +392,22 @@ export default function AssetBrandIntelligenceBlock({
                     return
                 }
                 if (data.status === 'queued') {
+                    // A scoring job is queued (either a fresh one or a rescore we kicked off on a
+                    // previous drawer visit). Reflect that in the in-flight state so the UI shows
+                    // "Analyzing…" instead of a stale score until the new one lands.
+                    markReanalysisStarted(asset.id)
+                    setReanalysisInFlight(true)
                     const polled = await pollForBrandIntelligence(asset.id, { signal: ac.signal })
                     if (cancelled || ac.signal.aborted) return
                     if (polled != null) {
+                        clearReanalysisMarker(asset.id)
+                        setReanalysisInFlight(false)
                         applyBrandIntelligenceRef.current(polled.brand_intelligence, {
                             reference_promotion: polled.reference_promotion ?? data.reference_promotion,
                             pdf_brand_intelligence: polled.pdf_brand_intelligence ?? data.pdf_brand_intelligence ?? null,
                         })
                     } else {
+                        // Keep the marker set — job is still running; next drawer open will resume polling.
                         setPollTimedOut(true)
                     }
                     setAutoEnsureLoading(false)
@@ -341,7 +428,7 @@ export default function AssetBrandIntelligenceBlock({
                 ensureAbortRef.current = null
             }
         }
-    }, [asset?.id, asset?.brand_intelligence, asset?.category?.ebi_enabled, asset?.analysis_status, hasPublishedGuidelines])
+    }, [asset?.id, asset?.brand_intelligence, asset?.category?.ebi_enabled, asset?.analysis_status, hasPublishedGuidelines, reanalysisInFlight])
 
     const handleDeepPdfScan = async () => {
         if (!asset?.id || deepScanLoading || rescoreLoading || !hasPublishedGuidelines) return
@@ -391,6 +478,38 @@ export default function AssetBrandIntelligenceBlock({
         }
     }
 
+    const handleOcrRerun = async () => {
+        if (!asset?.id || ocrRerunState.loading) return
+        setOcrRerunState({ loading: true, queued: false, error: null })
+        try {
+            const res = await fetch(`/app/assets/${asset.id}/ocr/rerun`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Accept: 'application/json',
+                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content,
+                },
+                credentials: 'same-origin',
+            })
+            if (!res.ok) {
+                let message = 'Could not queue OCR'
+                try {
+                    const data = await res.json()
+                    if (data?.message) message = data.message
+                } catch {}
+                setOcrRerunState({ loading: false, queued: false, error: message })
+                return
+            }
+            setOcrRerunState({ loading: false, queued: true, error: null })
+        } catch (err) {
+            setOcrRerunState({
+                loading: false,
+                queued: false,
+                error: err?.message || 'Could not queue OCR',
+            })
+        }
+    }
+
     const handleRescore = async () => {
         if (!asset?.id || rescoreLoading || !hasPublishedGuidelines) return
         ensureAbortRef.current?.abort()
@@ -398,11 +517,22 @@ export default function AssetBrandIntelligenceBlock({
         const controller = new AbortController()
         abortRef.current = controller
 
+        // Drop the stale score immediately — both the local copy and the parent's cached asset
+        // so the drawer stops showing a pre-rescore score the moment the user clicks Re-score.
+        // Mark reanalysis as in-flight so that a refresh / drawer re-open during scoring also
+        // suppresses the old score and renders the loading state (backed by sessionStorage).
+        markReanalysisStarted(asset.id)
         flushSync(() => {
+            setLocalBi(null)
+            setReanalysisInFlight(true)
             setRescoreLoading(true)
             setRescoreMode(null)
             setPollTimedOut(false)
         })
+        if (onAssetUpdate) {
+            onAssetUpdate({ ...asset, id: asset.id, brand_intelligence: null })
+        }
+
         try {
             const res = await fetch(`/app/assets/${asset.id}/rescore`, {
                 method: 'POST',
@@ -415,6 +545,10 @@ export default function AssetBrandIntelligenceBlock({
                 signal: controller.signal,
             })
             if (!res.ok) {
+                // Rescore was rejected (permissions, validation, etc.) — clear the in-flight marker
+                // so the user isn't left with a permanent "Analyzing…" state.
+                clearReanalysisMarker(asset.id)
+                setReanalysisInFlight(false)
                 return
             }
 
@@ -430,11 +564,16 @@ export default function AssetBrandIntelligenceBlock({
                 return
             }
             if (payload != null) {
+                clearReanalysisMarker(asset.id)
+                setReanalysisInFlight(false)
                 applyBrandIntelligence(payload.brand_intelligence, {
                     reference_promotion: payload.reference_promotion,
                     pdf_brand_intelligence: payload.pdf_brand_intelligence ?? null,
                 })
             } else {
+                // Polling timed out but the job is still running in the background. Keep the
+                // in-flight marker so subsequent drawer opens continue to show "Analyzing…" until
+                // the new score lands (the auto-ensure effect will resume polling on remount).
                 setPollTimedOut(true)
             }
         } finally {
@@ -536,8 +675,14 @@ export default function AssetBrandIntelligenceBlock({
                         </p>
                     )}
                     {rescoreLoading ? (
-                        <p className="text-sm text-slate-600" role="status" aria-live="polite">
-                            Analyzing brand alignment…
+                        <p className="text-sm text-slate-600 flex items-center gap-2" role="status" aria-live="polite">
+                            <ArrowPathIcon className="h-4 w-4 flex-shrink-0 animate-spin" aria-hidden />
+                            Re-analyzing brand alignment…
+                        </p>
+                    ) : reanalysisInFlight ? (
+                        <p className="text-sm text-slate-600 flex items-center gap-2" role="status" aria-live="polite">
+                            <ArrowPathIcon className="h-4 w-4 flex-shrink-0 animate-spin" aria-hidden />
+                            Re-analysis in progress — the new score will appear here automatically.
                         </p>
                     ) : autoEnsureLoading ? (
                         <p
@@ -612,6 +757,13 @@ export default function AssetBrandIntelligenceBlock({
                         collectionId={collectionId}
                         isRefreshing={autoEnsureLoading || deepScanLoading || rescoreLoading}
                     />
+                    {canViewDecisionTrace && breakdown && (
+                        <BrandIntelligenceDecisionTrace
+                            breakdown={breakdown}
+                            scoredAt={bi?.scored_at ?? null}
+                            engineVersion={bi?.engine_version ?? null}
+                        />
+                    )}
                 </div>
             )}
             {!rescoreLoading &&
@@ -633,6 +785,29 @@ export default function AssetBrandIntelligenceBlock({
                     <p className="mt-2 text-xs text-amber-900/90 bg-amber-50/90 border border-amber-200/80 rounded px-2 py-1.5">
                         {pdfDeep.deep_scan_recommendation_reason}
                     </p>
+                )}
+            {!rescoreLoading &&
+                !deepScanLoading &&
+                breakdown?.recommend_ocr_rerun === true && (
+                    <div className="mt-2 text-xs text-sky-950/90 bg-sky-50 border border-sky-200/90 rounded px-2 py-1.5 flex items-center justify-between gap-2">
+                        <span>
+                            {ocrRerunState.queued
+                                ? 'OCR queued. Results will populate shortly.'
+                                : ocrRerunState.error
+                                    ? `OCR could not start: ${ocrRerunState.error}`
+                                    : 'Little readable text found on this asset. Running OCR may uncover copy, voice, and identity signals.'}
+                        </span>
+                        {!ocrRerunState.queued && (
+                            <button
+                                type="button"
+                                onClick={handleOcrRerun}
+                                disabled={ocrRerunState.loading}
+                                className="text-xs font-medium text-sky-900 underline-offset-2 hover:underline disabled:opacity-50"
+                            >
+                                {ocrRerunState.loading ? 'Queuing…' : 'Run OCR'}
+                            </button>
+                        )}
+                    </div>
                 )}
             {!rescoreLoading &&
                 breakdown?.ai_insight?.text &&

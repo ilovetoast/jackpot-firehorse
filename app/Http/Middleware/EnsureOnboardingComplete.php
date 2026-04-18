@@ -42,16 +42,18 @@ class EnsureOnboardingComplete
             }
         }
 
-        // Email verification gate
-        if ($this->onboarding->shouldShowVerificationGate($user)) {
+        // Activation gate: redirect to onboarding when not yet activated AND not dismissed.
+        // After "Finish later", dismissed_at is set and the middleware stops blocking.
+        $brand = app()->bound('brand') ? app('brand') : null;
+
+        // Email verification gate — only blocks account owners and members of
+        // free-plan tenants (bot-signup / free-storage abuse mitigation).
+        if ($this->onboarding->shouldShowVerificationGate($user, $brand)) {
             return $request->header('X-Inertia')
                 ? inertia()->location('/app/verify-email')
                 : redirect('/app/verify-email');
         }
 
-        // Activation gate: redirect to onboarding when not yet activated AND not dismissed.
-        // After "Finish later", dismissed_at is set and the middleware stops blocking.
-        $brand = app()->bound('brand') ? app('brand') : null;
         if (! $brand) {
             return $next($request);
         }

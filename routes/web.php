@@ -617,6 +617,8 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
                 ->name('assets.pdf-text-extraction.show');
             Route::post('/assets/{asset}/pdf-text-extraction', [\App\Http\Controllers\AssetPdfTextExtractionController::class, 'store'])
                 ->name('assets.pdf-text-extraction.store');
+            Route::post('/assets/{asset}/ocr/rerun', [\App\Http\Controllers\AssetImageOcrController::class, 'rerun'])
+                ->name('assets.ocr.rerun');
             Route::get('/assets/{asset}/view', [\App\Http\Controllers\AssetController::class, 'view'])->name('assets.view');
             Route::get('/assets/{asset}/processing-status', [\App\Http\Controllers\AssetController::class, 'processingGuardStatus'])->name('assets.processing-status');
             Route::get('/assets/{asset}/activity', [\App\Http\Controllers\AssetController::class, 'activity'])->name('assets.activity');

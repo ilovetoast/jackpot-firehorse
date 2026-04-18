@@ -5,13 +5,12 @@ import FilmGrainOverlay from '../../Components/FilmGrainOverlay'
 import StepProgressRail from '../../Components/Onboarding/StepProgressRail'
 import WelcomeStep from '../../Components/Onboarding/WelcomeStep'
 import BrandShellStep from '../../Components/Onboarding/BrandShellStep'
-import StarterAssetsStep from '../../Components/Onboarding/StarterAssetsStep'
 import CategorySelectionStep from '../../Components/Onboarding/CategorySelectionStep'
 import EnrichmentStep from '../../Components/Onboarding/EnrichmentStep'
 import CompletionStep from '../../Components/Onboarding/CompletionStep'
 import { workspaceOverviewBackdropCss, ensureDarkModeContrast } from '../../utils/colorUtils'
 
-const STEPS = ['welcome', 'brand_shell', 'starter_assets', 'categories', 'enrichment', 'complete']
+const STEPS = ['welcome', 'brand_shell', 'categories', 'enrichment', 'complete']
 
 function stepIndex(key) {
     return STEPS.indexOf(key)
@@ -33,9 +32,16 @@ async function postJson(url, data) {
     return res.json()
 }
 
+function normalizeStep(step) {
+    // Legacy progress rows may still be parked on the removed starter_assets
+    // step — nudge them straight to the next live step.
+    if (step === 'starter_assets') return 'categories'
+    return step || 'welcome'
+}
+
 export default function OnboardingIndex({ brand: initialBrand, progress: initialProgress, categories: initialCategories = [] }) {
     const { auth } = usePage().props
-    const [currentStep, setCurrentStep] = useState(initialProgress?.current_step || 'welcome')
+    const [currentStep, setCurrentStep] = useState(normalizeStep(initialProgress?.current_step))
     const [brand, setBrand] = useState(initialBrand)
     const [progress, setProgress] = useState(initialProgress)
 
@@ -104,12 +110,6 @@ export default function OnboardingIndex({ brand: initialBrand, progress: initial
         const result = await postJson('/app/onboarding/brand-shell', data)
         if (result.progress) setProgress(result.progress)
         if (result.brand) setBrand(prev => ({ ...prev, ...result.brand }))
-        goToStep('starter_assets')
-    }, [goToStep])
-
-    const handleStarterAssetsSave = useCallback(async (count) => {
-        const result = await postJson('/app/onboarding/starter-assets', { count })
-        if (result.progress) setProgress(result.progress)
         goToStep('categories')
     }, [goToStep])
 
@@ -237,18 +237,6 @@ export default function OnboardingIndex({ brand: initialBrand, progress: initial
                                     onSave={handleBrandShellSave}
                                     onBack={() => handleBack('brand_shell')}
                                     onColorsChange={handleColorsChange}
-                                />
-                            )}
-
-                            {currentStep === 'starter_assets' && (
-                                <StarterAssetsStep
-                                    key="starter_assets"
-                                    brandColor={accentColor}
-                                    initialCount={progress?.steps?.starter_assets_count || 0}
-                                    requiredMin={progress?.steps?.min_starter_assets || 1}
-                                    recommendedMin={progress?.steps?.recommended_starter_assets || 3}
-                                    onSave={handleStarterAssetsSave}
-                                    onBack={() => handleBack('starter_assets')}
                                 />
                             )}
 

@@ -191,6 +191,164 @@ final class BrandColorPaletteAlignmentEvaluator
     }
 
     /**
+     * Evaluate VLM / caller-supplied dominant color rows against the brand palette.
+     *
+     * Used by ColorEvaluator as a fallback when the asset's own dominant color
+     * extraction produced nothing (e.g. a PDF page we only see via VLM output).
+     *
+     * @param  list<array{hex: string, role?: string|null, coverage?: float|null}>  $hexRows
+     * @return array{
+     *     evaluated: bool,
+     *     aligned: bool|null,
+     *     opposite_palette: bool,
+     *     brand_colors_available: bool,
+     *     asset_colors_available: bool,
+     *     mean_min_delta_e: float|null,
+     *     per_brand_min_delta_e: list<float>,
+     *     color_signal_source: string|null,
+     *     branded_roles_matched: list<string>
+     * }
+     */
+    public function evaluateWithProvidedAssetColors(Brand $brand, array $hexRows): array
+    {
+        $brandHexes = $this->extractBrandPaletteHexes($brand);
+        $brandOk = count($brandHexes) > 0;
+
+        $normalized = [];
+        foreach ($hexRows as $row) {
+            if (! is_array($row)) {
+                continue;
+            }
+            $hex = $row['hex'] ?? null;
+            if (! is_string($hex)) {
+                continue;
+            }
+            $norm = $this->normalizeHex($hex);
+            if ($norm === null) {
+                continue;
+            }
+            $normalized[] = [
+                'hex' => $norm,
+                'coverage' => isset($row['coverage']) && is_numeric($row['coverage']) ? (float) $row['coverage'] : 1.0,
+                'role' => isset($row['role']) && is_string($row['role']) ? $row['role'] : null,
+            ];
+        }
+
+        $assetOk = count($normalized) > 0;
+
+        if (! $brandOk || ! $assetOk) {
+            return [
+                'evaluated' => false,
+                'aligned' => null,
+                'opposite_palette' => false,
+                'brand_colors_available' => $brandOk,
+                'asset_colors_available' => $assetOk,
+                'mean_min_delta_e' => null,
+                'per_brand_min_delta_e' => [],
+                'color_signal_source' => null,
+                'branded_roles_matched' => [],
+            ];
+        }
+
+        $brandLabs = [];
+        foreach ($brandHexes as $hex) {
+            $rgb = $this->hexToRgb($hex);
+            if ($rgb !== null) {
+                $brandLabs[] = $this->rgbToLab($rgb[0], $rgb[1], $rgb[2]);
+            }
+        }
+
+        $assetLabs = $this->assetRowsToLabs($normalized);
+
+        if ($brandLabs === [] || $assetLabs === []) {
+            return [
+                'evaluated' => false,
+                'aligned' => null,
+                'opposite_palette' => false,
+                'brand_colors_available' => $brandOk,
+                'asset_colors_available' => $assetOk,
+                'mean_min_delta_e' => null,
+                'per_brand_min_delta_e' => [],
+                'color_signal_source' => null,
+                'branded_roles_matched' => [],
+            ];
+        }
+
+        $perBrandMin = [];
+        foreach ($brandLabs as $bLab) {
+            $min = null;
+            foreach ($assetLabs as $a) {
+                $d = $this->deltaE76($bLab, $a['lab']);
+                $min = $min === null ? $d : min($min, $d);
+            }
+            $perBrandMin[] = (float) $min;
+        }
+
+        $meanMin = array_sum($perBrandMin) / max(1, count($perBrandMin));
+        $opposite = $this->detectOppositePalette($brandHexes, $normalized);
+
+        $strongHits = count(array_filter($perBrandMin, fn (float $d) => $d <= self::DELTA_E_STRONG));
+        $closeHits = count(array_filter($perBrandMin, fn (float $d) => $d <= self::DELTA_E_CLOSE));
+
+        $aligned = ! $opposite
+            && (
+                $meanMin <= self::DELTA_E_CLOSE
+                || ($closeHits >= max(1, (int) ceil(count($perBrandMin) * 0.5)) && $meanMin <= self::DELTA_E_AVG_FAIL)
+                || ($strongHits >= 1 && $meanMin <= self::DELTA_E_AVG_FAIL + 6)
+            );
+
+        if (! $opposite && $meanMin > self::DELTA_E_AVG_FAIL && $closeHits === 0) {
+            $aligned = false;
+        }
+
+        $brandedRolesMatched = [];
+        foreach ($normalized as $row) {
+            $role = $row['role'] ?? null;
+            if (! is_string($role) || $role === '') {
+                continue;
+            }
+            $rgb = $this->hexToRgb($row['hex']);
+            if ($rgb === null) {
+                continue;
+            }
+            $lab = $this->rgbToLab($rgb[0], $rgb[1], $rgb[2]);
+            foreach ($brandLabs as $bLab) {
+                if ($this->deltaE76($lab, $bLab) <= \App\Services\BrandIntelligence\Dimensions\VlmSignalCaps::COLOR_VLM_AUGMENT_DELTA_E_THRESHOLD) {
+                    $brandedRolesMatched[] = $role;
+                    break;
+                }
+            }
+        }
+
+        return [
+            'evaluated' => true,
+            'aligned' => $aligned,
+            'opposite_palette' => $opposite,
+            'brand_colors_available' => true,
+            'asset_colors_available' => true,
+            'mean_min_delta_e' => round($meanMin, 2),
+            'per_brand_min_delta_e' => array_map(fn (float $v) => round($v, 2), $perBrandMin),
+            'color_signal_source' => 'vlm',
+            'branded_roles_matched' => array_values(array_unique($brandedRolesMatched)),
+        ];
+    }
+
+    /**
+     * Compute which roles in a set of VLM hex rows match any brand palette color
+     * within the augment delta-E threshold. Used for the "augment-when-branded"
+     * additive bonus in ColorEvaluator when the main extractor has already run.
+     *
+     * @param  list<array{hex: string, role?: string|null, coverage?: float|null}>  $hexRows
+     * @return list<string>
+     */
+    public function vlmBrandedRolesMatched(Brand $brand, array $hexRows): array
+    {
+        $result = $this->evaluateWithProvidedAssetColors($brand, $hexRows);
+
+        return $result['branded_roles_matched'] ?? [];
+    }
+
+    /**
      * @param  list<array{hex: string, coverage?: float}>  $rows
      * @return list<array{lab: array{0: float, 1: float, 2: float}, weight: float}>
      */

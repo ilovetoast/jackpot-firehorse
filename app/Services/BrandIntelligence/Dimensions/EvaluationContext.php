@@ -30,6 +30,15 @@ final class EvaluationContext
     public bool $visualEvaluationRasterResolved = false;
 
     /**
+     * Embedding of the detected logo region crop (Stage 4). When present,
+     * {@see \App\Services\BrandIntelligence\Dimensions\IdentityEvaluator}
+     * prefers this over the full-asset embedding for logo-reference similarity.
+     *
+     * @var list<float>|null
+     */
+    public ?array $logoCropVector = null;
+
+    /**
      * @param  list<string>  $availableExtractions   e.g. ['screenshot', 'ocr', 'palette', 'embeddings']
      * @param  list<string>  $unavailableExtractions e.g. ['transcript']
      */

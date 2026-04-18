@@ -51,7 +51,7 @@ class OnboardingServiceTest extends TestCase
 
     // ── Minimum Activation Logic ───────────────────────────────────
 
-    public function test_minimum_activation_requires_all_four_steps(): void
+    public function test_minimum_activation_requires_all_three_steps(): void
     {
         $progress = $this->service->getOrCreateProgress($this->brand);
 
@@ -64,9 +64,6 @@ class OnboardingServiceTest extends TestCase
         $this->assertFalse($progress->minimumActivationMet());
 
         $progress->brand_mark_confirmed = true;
-        $this->assertFalse($progress->minimumActivationMet());
-
-        $progress->starter_assets_count = 1;
         $this->assertTrue($progress->minimumActivationMet());
     }
 
@@ -78,10 +75,9 @@ class OnboardingServiceTest extends TestCase
 
         $progress->brand_name_confirmed = true;
         $progress->primary_color_set = true;
-        $this->assertEquals(50, $progress->activationPercent());
+        $this->assertEquals(67, $progress->activationPercent());
 
         $progress->brand_mark_confirmed = true;
-        $progress->starter_assets_count = 1;
         $this->assertEquals(100, $progress->activationPercent());
     }
 
@@ -139,8 +135,6 @@ class OnboardingServiceTest extends TestCase
             'mark_type' => 'logo',
         ]);
 
-        $this->service->recordStarterAssets($this->brand, 3);
-
         $progress = $this->brand->fresh()->onboardingProgress;
 
         $this->assertFalse($progress->minimumActivationMet());
@@ -154,8 +148,6 @@ class OnboardingServiceTest extends TestCase
             'primary_color' => '#ff0000',
             'use_monogram' => true,
         ]);
-
-        $this->service->recordStarterAssets($this->brand, 1);
 
         $progress = $this->brand->fresh()->onboardingProgress;
 
@@ -273,7 +265,6 @@ class OnboardingServiceTest extends TestCase
             'primary_color_set' => true,
             'brand_mark_confirmed' => true,
             'brand_mark_type' => 'monogram',
-            'starter_assets_count' => 1,
             'activated_at' => now(),
         ]);
 
@@ -337,7 +328,7 @@ class OnboardingServiceTest extends TestCase
 
     // ── Recommended Completion ─────────────────────────────────────
 
-    public function test_recommended_completion_requires_three_assets_and_guidelines_or_url(): void
+    public function test_recommended_completion_requires_guidelines_or_url(): void
     {
         $progress = $this->service->getOrCreateProgress($this->brand);
         $progress->update([
@@ -345,7 +336,6 @@ class OnboardingServiceTest extends TestCase
             'primary_color_set' => true,
             'brand_mark_confirmed' => true,
             'brand_mark_type' => 'monogram',
-            'starter_assets_count' => 3,
         ]);
 
         $this->assertFalse($progress->recommendedCompletionMet());
@@ -435,17 +425,13 @@ class OnboardingServiceTest extends TestCase
 
     // ── Auto-Activation ────────────────────────────────────────────
 
-    public function test_auto_activation_triggers_when_all_criteria_met(): void
+    public function test_auto_activation_triggers_when_brand_shell_complete(): void
     {
         $this->service->saveBrandShell($this->brand, [
             'name' => 'My Brand',
             'primary_color' => '#ff0000',
             'use_monogram' => true,
         ]);
-
-        $this->assertNull($this->brand->fresh()->onboardingProgress->activated_at);
-
-        $this->service->recordStarterAssets($this->brand, 1);
 
         $progress = $this->brand->fresh()->onboardingProgress;
 
@@ -461,7 +447,6 @@ class OnboardingServiceTest extends TestCase
             'primary_color_set' => true,
             'brand_mark_type' => 'logo',
             'brand_mark_confirmed' => false,
-            'starter_assets_count' => 1,
         ]);
 
         $this->assertFalse($progress->isActivated());

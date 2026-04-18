@@ -91,12 +91,18 @@ final class EvaluationOrchestrator
      *   weights_note: string|null,
      * }
      */
-    public function evaluate(Asset $asset, Brand $brand, ?string $supplementalCreativeOcrText = null): array
+    /**
+     * @param  list<float>|null  $logoCropVector  Embedding of the detected logo region (Stage 4).
+     */
+    public function evaluate(Asset $asset, Brand $brand, ?string $supplementalCreativeOcrText = null, ?array $logoCropVector = null): array
     {
         $contextType = $this->contextClassifier->classify($asset);
         $context = EvaluationContext::fromAsset($asset, $contextType);
         if ($supplementalCreativeOcrText !== null && trim($supplementalCreativeOcrText) !== '') {
             $context = EvaluationContext::withSupplementalCreativeOcr($context, $supplementalCreativeOcrText);
+        }
+        if (is_array($logoCropVector) && $logoCropVector !== []) {
+            $context->logoCropVector = array_values(array_map('floatval', $logoCropVector));
         }
 
         $results = [];
@@ -146,6 +152,95 @@ final class EvaluationOrchestrator
                 $creativePayload['context_analysis'] ?? null,
             );
         }
+
+        return $dimensions;
+    }
+
+    /**
+     * Second enrichment pass: route structured VLM `creative_signals` into the four
+     * dimensions that can use them (Typography, Visual Style, Color, Context Fit).
+     *
+     * Safe to call with null; becomes a no-op. All evaluator hooks bail out when
+     * the current result is already evaluated with a non-VLM source, so this is
+     * strictly additive.
+     *
+     * @param  array<string, DimensionResult>  $dimensions
+     * @param  array<string, mixed>|null  $creativeSignals  breakdown.creative_signals
+     * @return array<string, DimensionResult>
+     */
+    public function enrichWithCreativeSignals(
+        Asset $asset,
+        Brand $brand,
+        array $dimensions,
+        ?array $creativeSignals,
+    ): array {
+        if ($creativeSignals === null) {
+            return $dimensions;
+        }
+
+        $typoKey = AlignmentDimension::TYPOGRAPHY->value;
+        if (isset($dimensions[$typoKey])) {
+            $dimensions[$typoKey] = $this->typographyEvaluator->applyCreativeSignals(
+                $dimensions[$typoKey],
+                $creativeSignals,
+                $brand,
+            );
+        }
+
+        $styleKey = AlignmentDimension::VISUAL_STYLE->value;
+        if (isset($dimensions[$styleKey])) {
+            $dimensions[$styleKey] = $this->visualStyleEvaluator->applyCreativeSignals(
+                $dimensions[$styleKey],
+                $creativeSignals,
+                $brand,
+            );
+        }
+
+        $colorKey = AlignmentDimension::COLOR->value;
+        if (isset($dimensions[$colorKey])) {
+            $dimensions[$colorKey] = $this->colorEvaluator->applyCreativeSignals(
+                $dimensions[$colorKey],
+                $creativeSignals,
+                $asset,
+                $brand,
+            );
+        }
+
+        $contextKey = AlignmentDimension::CONTEXT_FIT->value;
+        if (isset($dimensions[$contextKey])) {
+            $dimensions[$contextKey] = $this->contextFitEvaluator->applyCreativeSignals(
+                $dimensions[$contextKey],
+                $creativeSignals,
+            );
+        }
+
+        return $dimensions;
+    }
+
+    /**
+     * Third enrichment pass (Stage 8a): peer-cohort Context Fit fallback.
+     *
+     * Runs after {@see self::enrichWithCreativeSignals()} so a real VLM classification wins
+     * over peer similarity. Only acts when Context Fit is still unclassified/approximate.
+     *
+     * @param  array<string, DimensionResult>  $dimensions
+     * @return array<string, DimensionResult>
+     */
+    public function enrichWithPeerCohortContextFit(
+        Asset $asset,
+        array $dimensions,
+        \App\Services\BrandIntelligence\PeerCohortContextFitService $peerCohortService,
+    ): array {
+        $contextKey = AlignmentDimension::CONTEXT_FIT->value;
+        if (! isset($dimensions[$contextKey])) {
+            return $dimensions;
+        }
+
+        $dimensions[$contextKey] = $this->contextFitEvaluator->applyPeerCohortFallback(
+            $dimensions[$contextKey],
+            $asset,
+            $peerCohortService,
+        );
 
         return $dimensions;
     }

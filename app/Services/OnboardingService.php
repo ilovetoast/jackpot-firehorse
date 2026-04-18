@@ -17,6 +17,9 @@ class OnboardingService
 {
     public const STEP_WELCOME = 'welcome';
     public const STEP_BRAND_SHELL = 'brand_shell';
+    // Legacy step kept for backward compatibility with stored progress rows. The
+    // cinematic flow no longer asks users to upload assets — that now happens
+    // after onboarding inside the library.
     public const STEP_STARTER_ASSETS = 'starter_assets';
     public const STEP_CATEGORIES = 'categories';
     public const STEP_ENRICHMENT = 'enrichment';
@@ -28,7 +31,6 @@ class OnboardingService
     public const STEPS = [
         self::STEP_WELCOME,
         self::STEP_BRAND_SHELL,
-        self::STEP_STARTER_ASSETS,
         self::STEP_CATEGORIES,
         self::STEP_ENRICHMENT,
         self::STEP_COMPLETE,
@@ -36,9 +38,53 @@ class OnboardingService
 
     // ── Gate helpers ────────────────────────────────────────────────
 
-    public function shouldShowVerificationGate(User $user): bool
+    /**
+     * Whether the email-verification gate should block this user.
+     *
+     * Verified users always pass. For unverified users we only block when they
+     * pose a bot / free-storage abuse risk: either they own a tenant (every
+     * fresh signup that creates an account lands here), or the current tenant
+     * is on the free plan (still inside the storage-abuse blast radius).
+     *
+     * Members added to a paid tenant (e.g. agency-created accounts that get
+     * transferred to the client later) skip the gate — their ownership and
+     * storage already sit behind a paid subscription, so forcing a reverify
+     * later adds friction without mitigating abuse.
+     */
+    public function shouldShowVerificationGate(User $user, ?Brand $brand = null): bool
     {
-        return ! $user->hasVerifiedEmail();
+        if ($user->hasVerifiedEmail()) {
+            return false;
+        }
+
+        // Resolve the tenant from the provided brand, falling back to the
+        // container binding used throughout the tenant-scoped stack.
+        $tenant = null;
+        if ($brand) {
+            $tenant = $brand->tenant ?? Tenant::find($brand->tenant_id);
+        } elseif (app()->bound('brand')) {
+            $contextBrand = app('brand');
+            if ($contextBrand instanceof Brand) {
+                $tenant = $contextBrand->tenant ?? Tenant::find($contextBrand->tenant_id);
+            }
+        }
+
+        if (! $tenant) {
+            // No tenant context — fall back to the conservative behaviour so a
+            // stray unverified session can't silently bypass the gate.
+            return true;
+        }
+
+        if ($tenant->isOwner($user)) {
+            return true;
+        }
+
+        $planService = app(\App\Services\PlanService::class);
+        if ($planService->getCurrentPlan($tenant) === 'free') {
+            return true;
+        }
+
+        return false;
     }
 
     /**
@@ -62,7 +108,7 @@ class OnboardingService
 
     public function shouldShowCinematicFlow(User $user, Brand $brand): bool
     {
-        if ($this->shouldShowVerificationGate($user)) {
+        if ($this->shouldShowVerificationGate($user, $brand)) {
             return false;
         }
 
@@ -228,7 +274,17 @@ class OnboardingService
             $brand->update($brandUpdates);
         }
 
-        $progress->current_step = self::STEP_STARTER_ASSETS;
+        // Starter-asset upload step was removed from the cinematic flow (assets
+        // are now uploaded later from inside the library), so advance straight
+        // to category selection.
+        $progress->current_step = self::STEP_CATEGORIES;
+
+        // Brand shell captures all three activation requirements (name, colour,
+        // brand mark). As soon as they're all satisfied, flip activated_at so
+        // the Overview onboarding card stops blocking — no need to wait for
+        // the user to click the cinematic "Finish" button.
+        $this->maybeAutoActivate($progress);
+
         $progress->save();
 
         return $progress;
@@ -244,8 +300,6 @@ class OnboardingService
         }
 
         $this->maybeAutoActivate($progress);
-
-        $progress->current_step = self::STEP_CATEGORIES;
         $progress->save();
 
         return $progress;
@@ -577,19 +631,6 @@ class OnboardingService
                 'label' => 'Set your primary brand color',
                 'done' => $progress->primary_color_set,
                 'required' => true,
-            ],
-            [
-                'key' => 'starter_assets',
-                'label' => 'Upload your first asset',
-                'done' => $progress->starter_assets_count >= self::MIN_STARTER_ASSETS,
-                'required' => true,
-            ],
-            [
-                'key' => 'recommended_assets',
-                'label' => 'Add ' . self::RECOMMENDED_STARTER_ASSETS . ' more starter assets',
-                'done' => $progress->starter_assets_count >= self::RECOMMENDED_STARTER_ASSETS,
-                'required' => false,
-                'detail' => $progress->starter_assets_count . ' of ' . self::RECOMMENDED_STARTER_ASSETS . ' recommended',
             ],
             [
                 'key' => 'guidelines',

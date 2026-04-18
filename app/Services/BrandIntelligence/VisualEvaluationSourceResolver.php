@@ -169,7 +169,15 @@ final class VisualEvaluationSourceResolver
         if ($path === null || $path === '') {
             return false;
         }
-        if (! str_starts_with($path, 'assets/') && ! str_starts_with($path, 'temp/uploads/')) {
+        $allowedPrefixes = ['assets/', 'tenants/', 'temp/uploads/'];
+        $matched = false;
+        foreach ($allowedPrefixes as $prefix) {
+            if (str_starts_with($path, $prefix)) {
+                $matched = true;
+                break;
+            }
+        }
+        if (! $matched) {
             return false;
         }
         if (str_starts_with($path, 'temp/uploads/')) {

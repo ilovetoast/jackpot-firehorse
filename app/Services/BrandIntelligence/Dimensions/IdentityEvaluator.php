@@ -3,6 +3,7 @@
 namespace App\Services\BrandIntelligence\Dimensions;
 
 use App\Enums\AlignmentDimension;
+use App\Enums\DimensionReasonCode;
 use App\Enums\DimensionStatus;
 use App\Enums\EvidenceSource;
 use App\Models\Asset;
@@ -23,7 +24,7 @@ final class IdentityEvaluator implements DimensionEvaluatorInterface
 
         $ocrResult = $this->brandNameInOcrText($asset, $brand, $context);
         $metadataResult = $this->brandNameInMetadata($asset, $brand);
-        $embResult = $this->logoEmbeddingSimilarity($asset, $brand);
+        $embResult = $this->logoEmbeddingSimilarity($asset, $brand, $context->logoCropVector);
 
         $hasLogoReferences = BrandVisualReference::query()
             ->where('brand_id', $brand->id)
@@ -31,15 +32,16 @@ final class IdentityEvaluator implements DimensionEvaluatorInterface
             ->whereNotNull('embedding_vector')
             ->exists();
 
+        $sourceLabel = ($embResult['source'] ?? 'asset') === 'crop' ? ' (logo region crop)' : '';
         if ($embResult['similarity'] !== null && $embResult['similarity'] >= self::LOGO_EMBEDDING_SIMILARITY_THRESHOLD) {
             $evidence[] = EvidenceItem::hard(
                 EvidenceSource::VISUAL_SIMILARITY,
-                sprintf('Logo embedding similarity %.2f to reference #%s', $embResult['similarity'], $embResult['reference_id'] ?? '?'),
+                sprintf('Logo embedding similarity %.2f to reference #%s%s', $embResult['similarity'], $embResult['reference_id'] ?? '?', $sourceLabel),
             );
         } elseif ($embResult['similarity'] !== null) {
             $evidence[] = EvidenceItem::soft(
                 EvidenceSource::VISUAL_SIMILARITY,
-                sprintf('Logo embedding similarity %.2f (below threshold %.2f)', $embResult['similarity'], self::LOGO_EMBEDDING_SIMILARITY_THRESHOLD),
+                sprintf('Logo embedding similarity %.2f (below threshold %.2f)%s', $embResult['similarity'], self::LOGO_EMBEDDING_SIMILARITY_THRESHOLD, $sourceLabel),
             );
         }
 
@@ -97,7 +99,7 @@ final class IdentityEvaluator implements DimensionEvaluatorInterface
             $primarySource = EvidenceSource::METADATA_HINT;
         }
 
-        return $this->deriveResult($evidence, $blockers, $hasHard, $hasSoft, $metadataResult['matched'], $primarySource, $embResult);
+        return $this->deriveResult($evidence, $blockers, $hasHard, $hasSoft, $metadataResult['matched'], $primarySource, $embResult, $hasLogoReferences);
     }
 
     /**
@@ -198,15 +200,30 @@ final class IdentityEvaluator implements DimensionEvaluatorInterface
     }
 
     /**
-     * @return array{similarity: float|null, reference_id: int|string|null}
+     * Cosine similarity to the best matching brand logo reference.
+     *
+     * When a logo-region crop vector is supplied (from Stage 4), it is used in
+     * preference to the full-asset embedding because the full-asset vector is
+     * diluted by non-logo pixels on image-heavy PDF pages.
+     *
+     * @param  list<float>|null  $logoCropVector
+     * @return array{similarity: float|null, reference_id: int|string|null, source: 'crop'|'asset'|null}
      */
-    private function logoEmbeddingSimilarity(Asset $asset, Brand $brand): array
+    private function logoEmbeddingSimilarity(Asset $asset, Brand $brand, ?array $logoCropVector = null): array
     {
-        $row = AssetEmbedding::query()->where('asset_id', $asset->id)->first();
-        if (! $row || empty($row->embedding_vector)) {
-            return ['similarity' => null, 'reference_id' => null];
+        $vec = null;
+        $source = null;
+        if (is_array($logoCropVector) && $logoCropVector !== []) {
+            $vec = array_values(array_map('floatval', $logoCropVector));
+            $source = 'crop';
+        } else {
+            $row = AssetEmbedding::query()->where('asset_id', $asset->id)->first();
+            if (! $row || empty($row->embedding_vector)) {
+                return ['similarity' => null, 'reference_id' => null, 'source' => null];
+            }
+            $vec = array_values($row->embedding_vector);
+            $source = 'asset';
         }
-        $vec = array_values($row->embedding_vector);
 
         $q = BrandVisualReference::query()
             ->where('brand_id', $brand->id)
@@ -230,6 +247,7 @@ final class IdentityEvaluator implements DimensionEvaluatorInterface
         return [
             'similarity' => $best !== null ? round((float) $best, 4) : null,
             'reference_id' => $bestId,
+            'source' => $source,
         ];
     }
 
@@ -264,12 +282,16 @@ final class IdentityEvaluator implements DimensionEvaluatorInterface
         bool $hasMetadataHint,
         EvidenceSource $primarySource,
         array $embResult,
+        bool $hasLogoReferences,
     ): DimensionResult {
         if (count($evidence) === 0 || ($primarySource === EvidenceSource::NOT_EVALUABLE && ! $hasMetadataHint)) {
             return DimensionResult::notEvaluable(
                 AlignmentDimension::IDENTITY,
                 'No identity evidence found (no OCR text, no logo references, no embedding)',
                 $blockers,
+                reasonCode: $hasLogoReferences
+                    ? DimensionReasonCode::IDENTITY_NO_EVIDENCE
+                    : DimensionReasonCode::IDENTITY_NO_LOGO_REFERENCES,
             );
         }
 
@@ -317,6 +339,7 @@ final class IdentityEvaluator implements DimensionEvaluatorInterface
                 blockers: $blockers,
                 evaluable: true,
                 statusReason: $reason,
+                reasonCode: DimensionReasonCode::IDENTITY_EVALUATED,
             );
         }
 
@@ -331,6 +354,7 @@ final class IdentityEvaluator implements DimensionEvaluatorInterface
                 blockers: $blockers,
                 evaluable: true,
                 statusReason: 'Logo similarity below threshold; weak visual match only',
+                reasonCode: DimensionReasonCode::IDENTITY_WEAK_LOGO_SIMILARITY,
             );
         }
 
@@ -345,6 +369,7 @@ final class IdentityEvaluator implements DimensionEvaluatorInterface
             blockers: $blockers,
             evaluable: true,
             statusReason: 'Only filename/title metadata hints found; no visual or text evidence from creative',
+            reasonCode: DimensionReasonCode::IDENTITY_METADATA_ONLY,
         );
     }
 

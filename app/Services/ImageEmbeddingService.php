@@ -117,6 +117,70 @@ class ImageEmbeddingService implements \App\Contracts\ImageEmbeddingServiceInter
         return $this->normalize($vector);
     }
 
+    /**
+     * {@inheritdoc}
+     */
+    public function embedLocalImage(string $localPath): array
+    {
+        if ($localPath === '' || ! is_file($localPath)) {
+            return [];
+        }
+
+        if ($this->apiUrl) {
+            try {
+                $response = Http::timeout(30)
+                    ->attach('image', @file_get_contents($localPath) ?: '', basename($localPath))
+                    ->post($this->apiUrl, [
+                        'model' => $this->model,
+                    ]);
+
+                if ($response->failed()) {
+                    Log::warning('[ImageEmbeddingService] Local image API call failed', [
+                        'path' => $localPath,
+                        'status' => $response->status(),
+                    ]);
+
+                    return $this->embedPlaceholderFromFile($localPath);
+                }
+
+                $data = $response->json();
+                $vector = $data['embedding'] ?? $data['vector'] ?? $data;
+                if (! is_array($vector)) {
+                    return $this->embedPlaceholderFromFile($localPath);
+                }
+
+                return array_map('floatval', array_values($vector));
+            } catch (\Throwable $e) {
+                Log::warning('[ImageEmbeddingService] Local image API exception', [
+                    'path' => $localPath,
+                    'error' => $e->getMessage(),
+                ]);
+
+                return $this->embedPlaceholderFromFile($localPath);
+            }
+        }
+
+        return $this->embedPlaceholderFromFile($localPath);
+    }
+
+    /**
+     * Deterministic placeholder seeded by file contents (dev/test fallback).
+     *
+     * @return array<float>
+     */
+    protected function embedPlaceholderFromFile(string $localPath): array
+    {
+        $contents = @file_get_contents($localPath);
+        $seed = $contents !== false ? md5($contents) : md5($localPath);
+        $vector = [];
+        for ($i = 0; $i < self::EMBEDDING_DIMENSION; $i++) {
+            $byte = hexdec(substr($seed, $i % 32, 1)) / 15.0;
+            $vector[] = ($byte - 0.5) * 2;
+        }
+
+        return $this->normalize($vector);
+    }
+
     protected function normalize(array $v): array
     {
         $norm = sqrt(array_sum(array_map(fn ($x) => $x * $x, $v)));

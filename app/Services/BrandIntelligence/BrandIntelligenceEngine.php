@@ -475,6 +475,7 @@ class BrandIntelligenceEngine
         $layer = $this->creativeIntelligenceAnalyzer->analyze($asset, $brand, $assetContextType, $dryRun, $pdfScanMode);
 
         $withRefs['creative_analysis'] = $layer['creative_analysis'];
+        $withRefs['creative_signals'] = $layer['creative_signals'] ?? null;
         $withRefs['copy_alignment'] = $layer['copy_alignment'];
         $withRefs['context_analysis'] = array_merge(
             [
@@ -1052,7 +1053,21 @@ class BrandIntelligenceEngine
             $this->assetContextClassifier,
         );
 
-        $evalResult = $orchestrator->evaluate($asset, $brand, $this->supplementalCreativeOcrForDimensions);
+        $logoCrop = $this->maybeEmbedLogoRegion($asset, $breakdown['creative_signals'] ?? null);
+        if ($logoCrop !== null) {
+            $breakdown['logo_crop'] = [
+                'region' => $logoCrop['region'],
+                'embedding_dim' => count($logoCrop['vector']),
+                'source' => 'vlm_logo_presence',
+            ];
+        }
+
+        $evalResult = $orchestrator->evaluate(
+            $asset,
+            $brand,
+            $this->supplementalCreativeOcrForDimensions,
+            $logoCrop['vector'] ?? null,
+        );
 
         $creativePayload = null;
         if (isset($breakdown['copy_alignment']) || isset($breakdown['context_analysis'])) {
@@ -1066,6 +1081,22 @@ class BrandIntelligenceEngine
         $dimensions = $orchestrator->enrichWithCreativeIntelligence(
             $evalResult['dimensions'],
             $creativePayload,
+        );
+
+        $dimensions = $orchestrator->enrichWithCreativeSignals(
+            $asset,
+            $brand,
+            $dimensions,
+            $breakdown['creative_signals'] ?? null,
+        );
+
+        // Stage 8a: peer-cohort Context Fit fallback. Runs after the VLM creative_signals pass so
+        // a clean VLM context classification still wins; only fires when Context Fit is still
+        // unresolved. Uses the asset's collection peers (execution) first, then brand+category.
+        $dimensions = $orchestrator->enrichWithPeerCohortContextFit(
+            $asset,
+            $dimensions,
+            app(\App\Services\BrandIntelligence\PeerCohortContextFitService::class),
         );
 
         $deriver = new \App\Services\BrandIntelligence\Dimensions\AlignmentScoreDeriver();
@@ -1084,10 +1115,96 @@ class BrandIntelligenceEngine
         $breakdown['rating'] = $derived['rating'];
         $breakdown['rating_derivation'] = $derived['rating_derivation'];
         $breakdown['v2_alignment_state'] = $derived['alignment_state']->value;
+        $breakdown['signal_family_coverage'] = $derived['signal_family_coverage'];
+        $breakdown['confidence_dampeners'] = $derived['confidence_dampeners'];
 
         $breakdown['v2_recommendations'] = $this->generateDimensionRecommendations($dimensions);
 
+        $breakdown['recommend_ocr_rerun'] = $this->shouldRecommendOcrRerun($asset, $breakdown, $dimensions);
+
         return $breakdown;
+    }
+
+    /**
+     * OCR coverage audit: true when the asset has a visible raster but essentially
+     * no extractable text, AND the VLM saw dense text on the image. This is the
+     * signal that drives the "Run OCR" button in the drawer.
+     *
+     * @param  array<string, mixed>  $breakdown
+     * @param  array<string, \App\Services\BrandIntelligence\Dimensions\DimensionResult>  $dimensions
+     */
+    protected function shouldRecommendOcrRerun(Asset $asset, array $breakdown, array $dimensions): bool
+    {
+        $mime = strtolower((string) ($asset->mime_type ?? ''));
+        if (str_contains($mime, 'pdf')) {
+            return false;
+        }
+
+        if (! $this->visualEvaluationSourceResolver->assetHasRenderableRaster($asset)) {
+            return false;
+        }
+
+        $extractedText = \App\Services\BrandIntelligence\BrandIntelligenceTextEvidence::mergedCopyVoiceRaw(
+            $asset,
+            $this->supplementalCreativeOcrForDimensions,
+        );
+        $charCount = mb_strlen(trim($extractedText));
+        if ($charCount >= 40) {
+            return false;
+        }
+
+        $ocrMeta = is_array($asset->metadata['ocr'] ?? null) ? $asset->metadata['ocr'] : null;
+        $alreadyAttempted = is_array($ocrMeta)
+            && in_array($ocrMeta['source'] ?? '', ['tesseract', 'tesseract_failed', 'tesseract_nonzero', 'tesseract_unavailable'], true);
+        if ($alreadyAttempted && ($ocrMeta['character_count'] ?? 0) === 0) {
+            return false;
+        }
+
+        $creativeSignals = is_array($breakdown['creative_signals'] ?? null) ? $breakdown['creative_signals'] : [];
+        $typeSignal = is_array($creativeSignals['type_classification'] ?? null) ? $creativeSignals['type_classification'] : [];
+        $primaryCategory = is_string($typeSignal['primary_category'] ?? null) ? $typeSignal['primary_category'] : 'none';
+        $vlmSeesType = $primaryCategory !== '' && $primaryCategory !== 'none';
+
+        if (! $vlmSeesType) {
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * Produce a logo-region embedding from VLM creative_signals.logo_presence, if present.
+     *
+     * Failure modes return null -- IdentityEvaluator transparently falls back to
+     * the full-asset embedding when no crop vector is provided.
+     *
+     * @param  array<string, mixed>|null  $creativeSignals
+     * @return array{vector: list<float>, region: array<string, float>}|null
+     */
+    protected function maybeEmbedLogoRegion(Asset $asset, ?array $creativeSignals): ?array
+    {
+        if ($creativeSignals === null) {
+            return null;
+        }
+        $logoPresence = is_array($creativeSignals['logo_presence'] ?? null)
+            ? $creativeSignals['logo_presence']
+            : null;
+        if ($logoPresence === null) {
+            return null;
+        }
+
+        try {
+            $service = app(\App\Services\BrandIntelligence\LogoRegionEmbeddingService::class);
+
+            return $service->embedFromLogoPresence($asset, $logoPresence);
+        } catch (\Throwable $e) {
+            Log::warning('[EBI] Logo region embedding failed', [
+                'asset_id' => $asset->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return null;
+        }
     }
 
     /**

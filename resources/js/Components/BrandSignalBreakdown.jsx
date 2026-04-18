@@ -5,6 +5,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from '@inertiajs/react'
+import { v2RemediationFor } from './brandAlignmentRemediation'
 import {
     ArrowPathIcon,
     CheckCircleIcon,
@@ -316,15 +317,12 @@ function v2StatusLabel(status, dim, assetAnalysisStatus) {
     return V2_STATUS_LABELS[status] || status
 }
 
-function v2StatusSubtext(status, dim) {
-    if (status === 'not_evaluable') {
+function v2StatusSubtext(status, dim, remediation) {
+    if (status === 'not_evaluable' || status === 'missing_reference') {
+        if (remediation?.phrase) return remediation.phrase
         const reason = dim?.status_reason
         if (typeof reason === 'string' && reason.length > 0 && reason.length <= 60) return reason
-        return 'Missing data from this asset'
-    }
-    if (status === 'missing_reference') {
-        const reason = dim?.status_reason
-        if (typeof reason === 'string' && reason.length > 0 && reason.length <= 60) return reason
+        if (status === 'not_evaluable') return 'Missing data from this asset'
         return 'Configure in brand guidelines'
     }
     return null
@@ -396,7 +394,7 @@ function V2DimensionChips({ dimensions, assetAnalysisStatus }) {
     )
 }
 
-function V2DimensionGrid({ dimensions, assetAnalysisStatus }) {
+function V2DimensionGrid({ dimensions, assetAnalysisStatus, brandId = null, assetId = null }) {
     return (
         <div className="grid grid-cols-2 gap-x-2 gap-y-1.5">
             {V2_DIMENSION_ORDER.map((key) => {
@@ -405,8 +403,9 @@ function V2DimensionGrid({ dimensions, assetAnalysisStatus }) {
                 const Icon = V2_DIMENSION_ICONS[key] || Squares2X2Icon
                 const label = V2_DIMENSION_LABELS[key]
                 const hint = v2EvidenceHint(dim)
+                const remediation = v2RemediationFor(dim, { brandId, assetId })
                 const statusText = v2StatusLabel(dim.status, dim, assetAnalysisStatus)
-                const subtext = v2StatusSubtext(dim.status, dim)
+                const subtext = v2StatusSubtext(dim.status, dim, remediation)
                 const processing = assetAnalysisStatus && !['complete', 'scoring'].includes(assetAnalysisStatus)
                 const isPending = processing && (dim.status === 'not_evaluable' || dim.status === 'missing_reference')
                 const statusColor =
@@ -436,6 +435,14 @@ function V2DimensionGrid({ dimensions, assetAnalysisStatus }) {
                             )}
                             {subtext && (
                                 <p className="mt-0.5 line-clamp-2 text-[9px] leading-snug text-slate-500">{subtext}</p>
+                            )}
+                            {remediation?.href && remediation?.ctaLabel && (
+                                <Link
+                                    href={remediation.href}
+                                    className="mt-0.5 inline-flex text-[9px] font-medium text-indigo-600 underline decoration-indigo-300 underline-offset-2 hover:text-indigo-800"
+                                >
+                                    {remediation.ctaLabel}
+                                </Link>
                             )}
                             {dim.evaluable && dim.confidence > 0 && (
                                 <p className="mt-0.5 text-[9px] text-slate-400">
@@ -919,7 +926,12 @@ export default function BrandSignalBreakdown({
                                         Visual analysis limited for video assets.
                                     </div>
                                 )}
-                                <V2DimensionGrid dimensions={campaignDimensions} assetAnalysisStatus={assetAnalysisStatus} />
+                                <V2DimensionGrid
+                                    dimensions={campaignDimensions}
+                                    assetAnalysisStatus={assetAnalysisStatus}
+                                    brandId={brandId}
+                                    assetId={asset?.id ?? null}
+                                />
                                 <CampaignMasterSummary interpretation={interpretation} />
                                 {interpretation?.interpretation_text && (
                                     <div className="mt-1.5 rounded border border-slate-100 bg-slate-50/60 px-2 py-1.5 text-[10px] leading-snug text-slate-600">
@@ -943,7 +955,12 @@ export default function BrandSignalBreakdown({
                                         Visual analysis limited for video assets.
                                     </div>
                                 )}
-                                <V2DimensionGrid dimensions={v2Dimensions} assetAnalysisStatus={assetAnalysisStatus} />
+                                <V2DimensionGrid
+                                    dimensions={v2Dimensions}
+                                    assetAnalysisStatus={assetAnalysisStatus}
+                                    brandId={brandId}
+                                    assetId={asset?.id ?? null}
+                                />
                                 {campaignAlignment && !hasCampaignScore && (
                                     <CampaignCta campaignAlignment={campaignAlignment} collectionId={collectionId} />
                                 )}

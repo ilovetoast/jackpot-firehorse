@@ -30,8 +30,12 @@ class OnboardingController extends Controller
     public function verifyEmailGate(Request $request): InertiaResponse|\Illuminate\Http\RedirectResponse
     {
         $user = $request->user();
+        $brand = app()->bound('brand') ? app('brand') : null;
 
-        if ($user->hasVerifiedEmail()) {
+        // If the user no longer falls under the verification gate (verified
+        // already, or a non-owner member of a paid tenant), bounce them back
+        // to the app so they aren't stuck on a dead page.
+        if (! $this->onboarding->shouldShowVerificationGate($user, $brand)) {
             return redirect('/app/overview');
         }
 
@@ -45,7 +49,7 @@ class OnboardingController extends Controller
         $user = $request->user();
         $brand = app('brand');
 
-        if ($this->onboarding->shouldShowVerificationGate($user)) {
+        if ($this->onboarding->shouldShowVerificationGate($user, $brand)) {
             return redirect('/app/verify-email');
         }
 

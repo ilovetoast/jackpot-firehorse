@@ -4,13 +4,12 @@ import { CheckIcon } from '@heroicons/react/24/solid'
 const STEP_LABELS = {
     welcome: 'Welcome',
     brand_shell: 'Brand',
-    starter_assets: 'Assets',
     categories: 'Organize',
     enrichment: 'Enrich',
     complete: 'Ready',
 }
 
-const STEP_ORDER = ['welcome', 'brand_shell', 'starter_assets', 'categories', 'enrichment', 'complete']
+const STEP_ORDER = ['welcome', 'brand_shell', 'categories', 'enrichment', 'complete']
 
 function stepIndex(key) {
     return STEP_ORDER.indexOf(key)

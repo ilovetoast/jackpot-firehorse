@@ -27,6 +27,7 @@ final class CreativeIntelligenceAnalyzer
     /**
      * @return array{
      *   creative_analysis: array|null,
+     *   creative_signals: array|null,
      *   copy_alignment: array,
      *   context_analysis: array,
      *   visual_alignment_ai: array|null,
@@ -311,6 +312,7 @@ final class CreativeIntelligenceAnalyzer
      * @param  array<string, mixed>  $trace
      * @return array{
      *   creative_analysis: array|null,
+     *   creative_signals: array|null,
      *   copy_alignment: array,
      *   context_analysis: array,
      *   visual_alignment_ai: array|null,
@@ -370,6 +372,7 @@ final class CreativeIntelligenceAnalyzer
 
         return [
             'creative_analysis' => $this->normalizeCreativeAnalysis($creative),
+            'creative_signals' => $this->normalizeCreativeSignals($parsed, $creative),
             'copy_alignment' => $this->normalizeCopyAlignment($copyAlignment, $hasText),
             'context_analysis' => $ctxAnalysis,
             'visual_alignment_ai' => $visualAi,
@@ -461,6 +464,11 @@ final class CreativeIntelligenceAnalyzer
 
         return [
             'creative_analysis' => $mergedCreative,
+            'type_classification' => $this->mergeTypeClassificationFromPages($parsedPages),
+            'visual_style' => $this->mergeVisualStyleFromPages($parsedPages),
+            'logo_presence' => $this->mergeLogoPresenceFromPages($parsedPages),
+            'dominant_colors_visible' => $this->mergeDominantColorsFromPages($parsedPages),
+            'context_type' => $winnerContext,
             'copy_alignment' => $copyAlignment,
             'context_analysis' => [
                 'context_type_heuristic' => $heuristicContext->value,
@@ -725,12 +733,13 @@ final class CreativeIntelligenceAnalyzer
 
     /**
      * @param  array<string, mixed>  $trace
-     * @return array{creative_analysis: null, copy_alignment: array, context_analysis: array, visual_alignment_ai: null, ebi_ai_trace: array}
+     * @return array{creative_analysis: null, creative_signals: null, copy_alignment: array, context_analysis: array, visual_alignment_ai: null, ebi_ai_trace: array}
      */
     protected function emptyPayload(array $trace): array
     {
         return [
             'creative_analysis' => null,
+            'creative_signals' => null,
             'copy_alignment' => [
                 'score' => null,
                 'alignment_state' => 'not_applicable',
@@ -777,6 +786,25 @@ Return JSON only with this shape:
     "voice_traits_detected": ["<trait>", "..."],
     "visual_traits_detected": ["<trait>", "..."]
   },
+  "type_classification": {
+    "primary_category": "<one of: sans_serif, serif, display, monospace, script, mixed, none>",
+    "weight_hint": "<one of: bold, medium, regular, light, variable, unknown>",
+    "all_caps_detected": <true|false>,
+    "confidence": <0-1>,
+    "notes": "<optional short note on distinctive type characteristics>"
+  },
+  "visual_style": ["<short kebab-case tag>", "..."],
+  "logo_presence": {
+    "present": <true|false>,
+    "brand_name_visible": <true|false>,
+    "placement": "<one of: top-left, top-center, top-right, center-left, center, center-right, bottom-left, bottom-center, bottom-right, tiled, none>",
+    "region": {"x": <0-1>, "y": <0-1>, "w": <0-1>, "h": <0-1>},
+    "confidence": <0-1>
+  },
+  "dominant_colors_visible": [
+    {"hex": "#RRGGBB", "role": "<one of: primary, secondary, accent, background, text>", "coverage": <0-1>}
+  ],
+  "context_type": "<same taxonomy as creative_analysis.context_type, repeated here for direct access>",
   "visual_alignment": {
     "summary": "<one sentence how visuals fit a premium brand look>",
     "fit_score": <0-100 integer estimate of visual brand fit from the image alone>,
@@ -795,6 +823,11 @@ Return JSON only with this shape:
 Rules:
 - If there is no text or only trivial text (logos, watermarks), set copy_alignment.alignment_state to not_applicable or insufficient and copy_alignment.score null.
 - voice_traits_detected / visual_traits_detected: short phrases.
+- Do not invent long passages of text; detected_text should reflect what you actually see.
+- visual_style tags must be short kebab-case (e.g. "outdoor-lifestyle", "earth-tones", "rugged-craft", "premium-editorial"); return at most 8 tags that are clearly visible in the image.
+- logo_presence.region uses normalized coordinates (0..1) where x,y is the top-left and w,h is width/height of the logo bounding box. If no logo is visible, set present=false and region to zeros.
+- dominant_colors_visible: up to 6 entries, ordered by perceptual coverage. Assign role based on visual prominence (primary = most brand-forward large areas; background = neutral fill; text = legible typography color).
+- type_classification should reflect the most prominent typographic treatment in the image. If text is absent or illegible, use primary_category="none" and weight_hint="unknown".
 - Do not invent long passages of text; detected_text should reflect what you actually see.
 PROMPT;
     }
@@ -846,6 +879,318 @@ PROMPT;
             'voice_traits_detected' => $this->stringList($c['voice_traits_detected'] ?? []),
             'visual_traits_detected' => $this->stringList($c['visual_traits_detected'] ?? []),
         ];
+    }
+
+    /**
+     * Produce the structured, evaluator-facing "creative_signals" subset. Designed to be
+     * directly consumed by TypographyEvaluator / VisualStyleEvaluator / ColorEvaluator /
+     * ContextFitEvaluator / IdentityEvaluator in Stage 3 without re-parsing raw VLM output.
+     *
+     * Every subfield is optional. Callers should treat missing or null values as
+     * "no signal" and fall back to existing evaluation paths.
+     *
+     * @param  array<string, mixed>  $parsed    The full VLM JSON (top-level).
+     * @param  array<string, mixed>  $creative  The creative_analysis sub-object (already unpacked).
+     * @return array<string, mixed>|null
+     */
+    protected function normalizeCreativeSignals(array $parsed, array $creative): ?array
+    {
+        $type = $this->normalizeTypeClassification($parsed['type_classification'] ?? null);
+        $style = $this->normalizeVisualStyleList($parsed['visual_style'] ?? null);
+        $logo = $this->normalizeLogoPresence($parsed['logo_presence'] ?? null);
+        $colors = $this->normalizeDominantColorsVisible($parsed['dominant_colors_visible'] ?? null);
+        $contextType = is_string($parsed['context_type'] ?? null) && trim($parsed['context_type']) !== ''
+            ? trim($parsed['context_type'])
+            : (is_string($creative['context_type'] ?? null) ? $creative['context_type'] : null);
+
+        $anyPresent = $type !== null
+            || $style !== []
+            || $logo !== null
+            || $colors !== []
+            || $contextType !== null;
+
+        if (! $anyPresent) {
+            return null;
+        }
+
+        return [
+            'type_classification' => $type,
+            'visual_style' => $style,
+            'logo_presence' => $logo,
+            'dominant_colors_visible' => $colors,
+            'context_type' => $contextType,
+        ];
+    }
+
+    /**
+     * @return array{primary_category: ?string, weight_hint: ?string, all_caps_detected: bool, confidence: float, notes: ?string}|null
+     */
+    protected function normalizeTypeClassification(mixed $raw): ?array
+    {
+        if (! is_array($raw)) {
+            return null;
+        }
+        static $categories = ['sans_serif', 'serif', 'display', 'monospace', 'script', 'mixed', 'none'];
+        static $weights = ['bold', 'medium', 'regular', 'light', 'variable', 'unknown'];
+
+        $cat = is_string($raw['primary_category'] ?? null)
+            ? strtolower(str_replace('-', '_', trim($raw['primary_category'])))
+            : null;
+        if ($cat !== null && ! in_array($cat, $categories, true)) {
+            $cat = null;
+        }
+
+        $weight = is_string($raw['weight_hint'] ?? null)
+            ? strtolower(trim($raw['weight_hint']))
+            : null;
+        if ($weight !== null && ! in_array($weight, $weights, true)) {
+            $weight = null;
+        }
+
+        $allCaps = filter_var($raw['all_caps_detected'] ?? false, FILTER_VALIDATE_BOOLEAN);
+        $conf = is_numeric($raw['confidence'] ?? null)
+            ? round(max(0.0, min(1.0, (float) $raw['confidence'])), 2)
+            : 0.0;
+        $notes = is_string($raw['notes'] ?? null) && trim($raw['notes']) !== ''
+            ? trim($raw['notes'])
+            : null;
+
+        if ($cat === null && $weight === null && ! $allCaps && $notes === null) {
+            return null;
+        }
+
+        return [
+            'primary_category' => $cat,
+            'weight_hint' => $weight,
+            'all_caps_detected' => $allCaps,
+            'confidence' => $conf,
+            'notes' => $notes,
+        ];
+    }
+
+    /**
+     * @return list<string>
+     */
+    protected function normalizeVisualStyleList(mixed $raw): array
+    {
+        if (! is_array($raw)) {
+            return [];
+        }
+        $out = [];
+        foreach ($raw as $item) {
+            if (! is_string($item)) {
+                continue;
+            }
+            $slug = strtolower(trim($item));
+            $slug = preg_replace('/[^a-z0-9]+/', '-', $slug ?? '');
+            $slug = trim((string) $slug, '-');
+            if ($slug === '' || mb_strlen($slug, 'UTF-8') < 2) {
+                continue;
+            }
+            $out[$slug] = true;
+            if (count($out) >= 10) {
+                break;
+            }
+        }
+
+        return array_keys($out);
+    }
+
+    /**
+     * @return array{present: bool, brand_name_visible: bool, placement: ?string, region: ?array{x: float, y: float, w: float, h: float}, confidence: float}|null
+     */
+    protected function normalizeLogoPresence(mixed $raw): ?array
+    {
+        if (! is_array($raw)) {
+            return null;
+        }
+        static $placements = [
+            'top-left', 'top-center', 'top-right',
+            'center-left', 'center', 'center-right',
+            'bottom-left', 'bottom-center', 'bottom-right',
+            'tiled', 'none',
+        ];
+
+        $present = filter_var($raw['present'] ?? false, FILTER_VALIDATE_BOOLEAN);
+        $nameVisible = filter_var($raw['brand_name_visible'] ?? false, FILTER_VALIDATE_BOOLEAN);
+        $placement = is_string($raw['placement'] ?? null) ? strtolower(trim($raw['placement'])) : null;
+        if ($placement !== null && ! in_array($placement, $placements, true)) {
+            $placement = null;
+        }
+        $conf = is_numeric($raw['confidence'] ?? null)
+            ? round(max(0.0, min(1.0, (float) $raw['confidence'])), 2)
+            : 0.0;
+
+        $region = null;
+        if (is_array($raw['region'] ?? null)) {
+            $r = $raw['region'];
+            $x = is_numeric($r['x'] ?? null) ? (float) $r['x'] : null;
+            $y = is_numeric($r['y'] ?? null) ? (float) $r['y'] : null;
+            $w = is_numeric($r['w'] ?? null) ? (float) $r['w'] : null;
+            $h = is_numeric($r['h'] ?? null) ? (float) $r['h'] : null;
+            if ($x !== null && $y !== null && $w !== null && $h !== null
+                && $w > 0.0 && $h > 0.0
+                && $x >= 0.0 && $y >= 0.0
+                && $x + $w <= 1.001 && $y + $h <= 1.001
+            ) {
+                $region = [
+                    'x' => round(max(0.0, min(1.0, $x)), 4),
+                    'y' => round(max(0.0, min(1.0, $y)), 4),
+                    'w' => round(max(0.0, min(1.0, $w)), 4),
+                    'h' => round(max(0.0, min(1.0, $h)), 4),
+                ];
+            }
+        }
+
+        if (! $present && ! $nameVisible && $placement === null && $region === null && $conf === 0.0) {
+            return null;
+        }
+
+        return [
+            'present' => $present,
+            'brand_name_visible' => $nameVisible,
+            'placement' => $placement,
+            'region' => $present ? $region : null,
+            'confidence' => $conf,
+        ];
+    }
+
+    /**
+     * @return list<array{hex: string, role: ?string, coverage: float}>
+     */
+    protected function normalizeDominantColorsVisible(mixed $raw): array
+    {
+        if (! is_array($raw)) {
+            return [];
+        }
+        static $roles = ['primary', 'secondary', 'accent', 'background', 'text'];
+        $out = [];
+        foreach ($raw as $item) {
+            if (! is_array($item)) {
+                continue;
+            }
+            $hex = is_string($item['hex'] ?? null) ? strtoupper(trim($item['hex'])) : null;
+            if ($hex === null) {
+                continue;
+            }
+            if (preg_match('/^#?[0-9A-F]{6}$/', $hex)) {
+                $hex = '#' . substr($hex, -6);
+            } else {
+                continue;
+            }
+            $role = is_string($item['role'] ?? null) ? strtolower(trim($item['role'])) : null;
+            if ($role !== null && ! in_array($role, $roles, true)) {
+                $role = null;
+            }
+            $cov = is_numeric($item['coverage'] ?? null)
+                ? round(max(0.0, min(1.0, (float) $item['coverage'])), 3)
+                : 0.0;
+
+            $out[] = [
+                'hex' => $hex,
+                'role' => $role,
+                'coverage' => $cov,
+            ];
+            if (count($out) >= 6) {
+                break;
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * Pick the highest-confidence non-empty type classification across PDF pages.
+     *
+     * @param  list<array<string, mixed>>  $parsedPages
+     * @return array<string, mixed>|null
+     */
+    protected function mergeTypeClassificationFromPages(array $parsedPages): ?array
+    {
+        $best = null;
+        $bestConf = -1.0;
+        foreach ($parsedPages as $parsed) {
+            $t = $this->normalizeTypeClassification($parsed['type_classification'] ?? null);
+            if ($t === null) {
+                continue;
+            }
+            $c = (float) ($t['confidence'] ?? 0.0);
+            if ($c > $bestConf) {
+                $best = $t;
+                $bestConf = $c;
+            }
+        }
+
+        return $best;
+    }
+
+    /**
+     * Union of style tags across pages, capped.
+     *
+     * @param  list<array<string, mixed>>  $parsedPages
+     * @return list<string>
+     */
+    protected function mergeVisualStyleFromPages(array $parsedPages): array
+    {
+        $seen = [];
+        foreach ($parsedPages as $parsed) {
+            foreach ($this->normalizeVisualStyleList($parsed['visual_style'] ?? null) as $tag) {
+                $seen[$tag] = true;
+            }
+        }
+
+        return array_slice(array_keys($seen), 0, 10);
+    }
+
+    /**
+     * Prefer the page where a logo is actually present (highest confidence).
+     *
+     * @param  list<array<string, mixed>>  $parsedPages
+     * @return array<string, mixed>|null
+     */
+    protected function mergeLogoPresenceFromPages(array $parsedPages): ?array
+    {
+        $best = null;
+        $bestConf = -1.0;
+        foreach ($parsedPages as $parsed) {
+            $l = $this->normalizeLogoPresence($parsed['logo_presence'] ?? null);
+            if ($l === null) {
+                continue;
+            }
+            $score = ($l['present'] ? 1.0 : 0.0) + (float) ($l['confidence'] ?? 0.0);
+            if ($score > $bestConf) {
+                $best = $l;
+                $bestConf = $score;
+            }
+        }
+
+        return $best;
+    }
+
+    /**
+     * Concatenate all dominant colors across pages, de-duped on hex, capped.
+     *
+     * @param  list<array<string, mixed>>  $parsedPages
+     * @return list<array<string, mixed>>
+     */
+    protected function mergeDominantColorsFromPages(array $parsedPages): array
+    {
+        $byHex = [];
+        foreach ($parsedPages as $parsed) {
+            foreach ($this->normalizeDominantColorsVisible($parsed['dominant_colors_visible'] ?? null) as $c) {
+                $hex = (string) ($c['hex'] ?? '');
+                if ($hex === '') {
+                    continue;
+                }
+                if (! isset($byHex[$hex]) || ($byHex[$hex]['coverage'] ?? 0.0) < ($c['coverage'] ?? 0.0)) {
+                    $byHex[$hex] = $c;
+                }
+            }
+        }
+        $list = array_values($byHex);
+        usort($list, static fn ($a, $b) => ($b['coverage'] ?? 0.0) <=> ($a['coverage'] ?? 0.0));
+
+        return array_slice($list, 0, 6);
     }
 
     /**
