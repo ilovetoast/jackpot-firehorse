@@ -1006,7 +1006,7 @@ export default function AppNav({
                             )}
                         </div>
 
-                        {/* Main menu: Overview (dropdown: Tasks, Creator Home, …), Assets, Executions, Collections, Generative */}
+                        {/* Main menu: Overview (dropdown: Tasks, Creator Home, …), Assets, Executions, Collections, Studio */}
                         {isAppPage ? (isExternalCollectionChrome ? (
                             <div className="hidden min-w-0 flex-1 sm:flex sm:min-w-0 sm:items-center sm:gap-6 lg:gap-8 sm:pl-4 lg:pl-6 overflow-x-auto" data-collection-only="true">
                                 {(() => {
@@ -1146,7 +1146,7 @@ export default function AppNav({
                                                     aria-disabled="true"
                                                 >
                                                     <SparklesIcon className="h-4 w-4 shrink-0" aria-hidden="true" />
-                                                    Generative<sup className="ml-0.5 text-[7px] font-bold tracking-wide uppercase leading-none align-super" style={{ color: activeBrand?.primary_color || '#6366f1' }}>beta</sup>
+                                                    Studio<sup className="ml-0.5 text-[7px] font-bold tracking-wide uppercase leading-none align-super" style={{ color: activeBrand?.primary_color || '#6366f1' }}>beta</sup>
                                                 </span>
                                                 )}
                                             </div>
@@ -1219,7 +1219,7 @@ export default function AppNav({
                                     }}
                                 >
                                     <SparklesIcon className="h-4 w-4 shrink-0" />
-                                    Generative<sup className="ml-0.5 text-[7px] font-bold tracking-wide uppercase leading-none align-super" style={{ color: activeBrand?.primary_color || '#6366f1' }}>beta</sup>
+                                    Studio<sup className="ml-0.5 text-[7px] font-bold tracking-wide uppercase leading-none align-super" style={{ color: activeBrand?.primary_color || '#6366f1' }}>beta</sup>
                                 </Link>
                                 )}
                                 </div>
@@ -1287,7 +1287,7 @@ export default function AppNav({
                                     }}
                                 >
                                     <SparklesIcon className="h-4 w-4 shrink-0" />
-                                    Generative<sup className="ml-0.5 text-[7px] font-bold tracking-wide uppercase leading-none align-super" style={{ color: activeBrand?.primary_color || '#6366f1' }}>beta</sup>
+                                    Studio<sup className="ml-0.5 text-[7px] font-bold tracking-wide uppercase leading-none align-super" style={{ color: activeBrand?.primary_color || '#6366f1' }}>beta</sup>
                                 </Link>
                                 )}
                                 </div>
@@ -1442,7 +1442,7 @@ export default function AppNav({
                                     title="Not available for your access — use Collections and Downloads for shared content"
                                     aria-disabled="true"
                                 >
-                                    Generative<sup className="ml-0.5 text-[7px] font-bold tracking-wide uppercase leading-none align-super" style={{ color: activeBrand?.primary_color || '#6366f1' }}>beta</sup>
+                                    Studio<sup className="ml-0.5 text-[7px] font-bold tracking-wide uppercase leading-none align-super" style={{ color: activeBrand?.primary_color || '#6366f1' }}>beta</sup>
                                 </div>
                                 )}
                             </div>

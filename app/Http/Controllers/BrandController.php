@@ -558,6 +558,10 @@ class BrandController extends Controller
             }
         }
 
+        $logoUrls = $this->resolveLogoPreviewUrls($brand->logo_id);
+        $logoDarkUrls = $this->resolveLogoPreviewUrls($brand->logo_dark_id);
+        $logoHorizontalUrls = $this->resolveLogoPreviewUrls($brand->logo_horizontal_id);
+
         return Inertia::render('Brands/Edit', [
             'brand' => [
                 'id' => $brand->id,
@@ -565,16 +569,16 @@ class BrandController extends Controller
                 'slug' => $brand->slug,
                 'logo_path' => $brand->logo_path,
                 'logo_id' => $brand->logo_id,
-                'logo_thumbnail_url' => $brand->logo_id ? \App\Models\Asset::find($brand->logo_id)?->deliveryUrl(\App\Support\AssetVariant::THUMB_MEDIUM, \App\Support\DeliveryContext::AUTHENTICATED) : null,
-                'logo_original_url' => $brand->logo_id ? \App\Models\Asset::find($brand->logo_id)?->deliveryUrl(\App\Support\AssetVariant::ORIGINAL, \App\Support\DeliveryContext::AUTHENTICATED) : null,
+                'logo_thumbnail_url' => $logoUrls['thumbnail'],
+                'logo_original_url' => $logoUrls['original'],
                 'logo_dark_path' => $brand->logo_dark_path,
                 'logo_dark_id' => $brand->logo_dark_id,
-                'logo_dark_thumbnail_url' => $brand->logo_dark_id ? \App\Models\Asset::find($brand->logo_dark_id)?->deliveryUrl(\App\Support\AssetVariant::THUMB_MEDIUM, \App\Support\DeliveryContext::AUTHENTICATED) : null,
-                'logo_dark_original_url' => $brand->logo_dark_id ? \App\Models\Asset::find($brand->logo_dark_id)?->deliveryUrl(\App\Support\AssetVariant::ORIGINAL, \App\Support\DeliveryContext::AUTHENTICATED) : null,
+                'logo_dark_thumbnail_url' => $logoDarkUrls['thumbnail'],
+                'logo_dark_original_url' => $logoDarkUrls['original'],
                 'logo_horizontal_path' => $brand->logo_horizontal_path,
                 'logo_horizontal_id' => $brand->logo_horizontal_id,
-                'logo_horizontal_thumbnail_url' => $brand->logo_horizontal_id ? \App\Models\Asset::find($brand->logo_horizontal_id)?->deliveryUrl(\App\Support\AssetVariant::THUMB_MEDIUM, \App\Support\DeliveryContext::AUTHENTICATED) : null,
-                'logo_horizontal_original_url' => $brand->logo_horizontal_id ? \App\Models\Asset::find($brand->logo_horizontal_id)?->deliveryUrl(\App\Support\AssetVariant::ORIGINAL, \App\Support\DeliveryContext::AUTHENTICATED) : null,
+                'logo_horizontal_thumbnail_url' => $logoHorizontalUrls['thumbnail'],
+                'logo_horizontal_original_url' => $logoHorizontalUrls['original'],
                 'icon_bg_color' => $brand->icon_bg_color,
                 'icon_style' => $brand->icon_style ?? 'subtle',
                 'is_default' => $brand->is_default,
@@ -1546,8 +1550,70 @@ class BrandController extends Controller
             ->where('tenant_id', $brand->tenant_id)
             ->where('brand_id', $brand->id)
             ->first();
+        if (! $asset) {
+            return null;
+        }
 
-        return $asset?->deliveryUrl(\App\Support\AssetVariant::THUMB_MEDIUM, \App\Support\DeliveryContext::AUTHENTICATED) ?: null;
+        return $this->resolveLogoThumbnailUrl($asset) ?: null;
+    }
+
+    /**
+     * Build a {thumbnail, original} preview URL pair for a brand logo asset.
+     *
+     * SVGs are passthrough: no raster thumbnail is ever written to S3, so
+     * `deliveryUrl(THUMB_MEDIUM)` would return a *guessed* CDN path that 404s
+     * in the browser. For any asset without a real generated raster thumbnail
+     * (SVG, or anything still SKIPPED/FAILED), fall back to the original so
+     * the preview renders. For SVG, the original IS the preview.
+     *
+     * @return array{thumbnail: ?string, original: ?string}
+     */
+    protected function resolveLogoPreviewUrls(?string $assetId): array
+    {
+        if (! $assetId) {
+            return ['thumbnail' => null, 'original' => null];
+        }
+        $asset = \App\Models\Asset::find($assetId);
+        if (! $asset) {
+            return ['thumbnail' => null, 'original' => null];
+        }
+
+        $original = $asset->deliveryUrl(
+            \App\Support\AssetVariant::ORIGINAL,
+            \App\Support\DeliveryContext::AUTHENTICATED
+        ) ?: null;
+
+        return [
+            'thumbnail' => $this->resolveLogoThumbnailUrl($asset, $original),
+            'original' => $original,
+        ];
+    }
+
+    /**
+     * Return the best thumbnail URL for a logo, or the original when no
+     * generated raster thumbnail exists (SVG passthrough, SKIPPED/FAILED).
+     */
+    protected function resolveLogoThumbnailUrl(\App\Models\Asset $asset, ?string $originalFallback = null): ?string
+    {
+        $mime = strtolower((string) ($asset->mime_type ?? ''));
+        $ext = strtolower(pathinfo($asset->original_filename ?? '', PATHINFO_EXTENSION));
+        $isSvg = $mime === 'image/svg+xml' || $ext === 'svg';
+        if ($isSvg) {
+            return $originalFallback
+                ?? ($asset->deliveryUrl(\App\Support\AssetVariant::ORIGINAL, \App\Support\DeliveryContext::AUTHENTICATED) ?: null);
+        }
+
+        $hasGeneratedThumb = $asset->thumbnailPathForStyle('medium') !== null
+            || $asset->thumbnailPathForStyle('thumb') !== null;
+        if (! $hasGeneratedThumb) {
+            return $originalFallback
+                ?? ($asset->deliveryUrl(\App\Support\AssetVariant::ORIGINAL, \App\Support\DeliveryContext::AUTHENTICATED) ?: null);
+        }
+
+        return $asset->deliveryUrl(
+            \App\Support\AssetVariant::THUMB_MEDIUM,
+            \App\Support\DeliveryContext::AUTHENTICATED
+        ) ?: null;
     }
 
     protected function buildResearchInsights(Brand $brand, ?\App\Models\BrandModel $brandModel): array

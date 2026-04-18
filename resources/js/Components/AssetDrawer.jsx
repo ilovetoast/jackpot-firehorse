@@ -50,6 +50,7 @@ import AssetImage from './AssetImage'
 import AssetTimeline from './AssetTimeline'
 import AssetTagManager from './AssetTagManager'
 import AssetMetadataDisplay from './AssetMetadataDisplay'
+import AssetEmbeddedMetadataPanel from './AssetEmbeddedMetadataPanel'
 import PendingMetadataList from './PendingMetadataList'
 import ManageAssetModal from './ManageAssetModal'
 import ThumbnailPreview from './ThumbnailPreview'
@@ -107,6 +108,7 @@ import {
     getPreferredExecutionThumbnailTier,
     setPreferredExecutionThumbnailTier,
 } from '../utils/executionPreferredThumbnailStorage'
+import { ensureAccentContrastOnWhite } from '../utils/colorUtils'
 
 /** Assets that can appear in the drawer fullscreen carousel / lightbox (includes fonts). */
 function assetSupportsLightboxCarousel(a) {
@@ -374,6 +376,13 @@ export default function AssetDrawer({
     const damUploadAccept = pageProps.dam_file_types?.upload_accept || getUploadAcceptAttribute()
     const categories = pageProps.categories ?? []
     const brandPrimary = primaryColor || auth?.activeBrand?.primary_color || '#6366f1'
+    // WCAG AA (4.5:1) contrast-safe variant of the brand primary for use as text,
+    // icons, links, tab labels, and active-state borders drawn on the drawer's
+    // white surface. Light brand colors (pale yellows/greens) get progressively
+    // darkened until they meet the minimum readable ratio; saturated darks pass
+    // through unchanged. Use this anywhere brandPrimary would otherwise produce
+    // low-contrast text on white.
+    const brandPrimaryOnWhite = useMemo(() => ensureAccentContrastOnWhite(brandPrimary), [brandPrimary])
     const { can } = usePermission()
     const drawerRef = useRef(null)
     const closeButtonRef = useRef(null)
@@ -470,6 +479,10 @@ export default function AssetDrawer({
     // Metadata approval state
     const [pendingMetadataCount, setPendingMetadataCount] = useState(0)
     const [approvingAllMetadata, setApprovingAllMetadata] = useState(false)
+    /** Asset Data section sub-tab: 'fields' = editable metadata, 'embedded' = raw EXIF/XMP/IPTC. */
+    const [assetDataTab, setAssetDataTab] = useState('fields')
+    /** embedded_metadata summary loaded by AssetMetadataDisplay from /metadata/editable; shared with the Embedded tab. */
+    const [drawerEmbeddedMetadata, setDrawerEmbeddedMetadata] = useState(null)
     /** Synced from AssetMetadataDisplay — shown in Revue instead of above the metadata list when Revue is visible. */
     const [drawerPipelineBanner, setDrawerPipelineBanner] = useState(null)
 
@@ -844,6 +857,12 @@ export default function AssetDrawer({
     // Asset may be temporarily undefined while localAssets array is being updated
     const displayAsset = drawerAsset || asset || null
 
+    // Reset Asset Data embedded cache + tab on asset switch so we never briefly show a previous asset's EXIF.
+    useEffect(() => {
+        setDrawerEmbeddedMetadata(null)
+        setAssetDataTab('fields')
+    }, [displayAsset?.id])
+
     const handleDrawerCollectionsChange = useCallback(
         async (newCollectionIds) => {
             if (!displayAsset?.id || addToCollectionLoading) {
@@ -981,8 +1000,15 @@ export default function AssetDrawer({
     }, [categories, displayAsset])
 
     // Deliverables/Executions: sidebar categories from DeliverableController now include ebi_enabled; also trust asset payload.
+    // Tenant-level kill switches: if the tenant disabled the master AI switch OR the
+    // Brand Alignment-specific switch, hide the widget even for categories that have
+    // ebi_enabled=true. Defaults to true when unset (matches backend read-side fallback).
+    const tenantSettings = auth?.activeCompany?.settings ?? auth?.tenant?.settings ?? {}
+    const brandAlignmentAllowedByTenant =
+        tenantSettings?.ai_enabled !== false && tenantSettings?.brand_alignment_enabled !== false
     const ebiEnabledForAsset =
-        drawerCategory?.ebi_enabled === true || displayAsset?.category?.ebi_enabled === true
+        brandAlignmentAllowedByTenant &&
+        (drawerCategory?.ebi_enabled === true || displayAsset?.category?.ebi_enabled === true)
 
     const revueSuggestionsEligible =
         can('metadata.suggestions.view') ||
@@ -4376,28 +4402,14 @@ export default function AssetDrawer({
                             </span>
                             <span className="text-gray-500">views</span>
                         </div>
-                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                            <div className="flex items-center gap-2 text-sm text-gray-600">
-                                <ArrowDownTrayIcon className="h-4 w-4 text-gray-400" />
-                                <span className="font-medium text-gray-900">
-                                    {metricsLoading ? '...' : (downloadCount ?? 0)}
-                                </span>
-                                <span className="text-gray-500">downloads</span>
-                            </div>
-                            {displayAsset?.id &&
-                                !isVirtualGoogleFont &&
-                                can('metadata.edit_post_upload') && (
-                                    <button
-                                        type="button"
-                                        onClick={() => setManageAssetModalOpen(true)}
-                                        className="text-sm font-medium underline decoration-2 underline-offset-2 hover:opacity-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 rounded-sm"
-                                        style={{ color: brandPrimary }}
-                                        title="Edit metadata, tags, and more"
-                                    >
-                                        Edit asset
-                                    </button>
-                                )}
+                        <div className="flex items-center gap-2 text-sm text-gray-600">
+                            <ArrowDownTrayIcon className="h-4 w-4 text-gray-400" />
+                            <span className="font-medium text-gray-900">
+                                {metricsLoading ? '...' : (downloadCount ?? 0)}
+                            </span>
+                            <span className="text-gray-500">downloads</span>
                         </div>
+                        {/* "Edit asset" moved into the Asset Data section header; keep discoverability alongside the fields it edits. */}
                     </div>
                     )}
                     
@@ -4732,8 +4744,11 @@ export default function AssetDrawer({
                                                     style={
                                                         isEligibleForDownload
                                                             ? {
-                                                                  borderColor: isInBucket ? brandPrimary : brandPrimary,
-                                                                  color: isInBucket ? '#fff' : brandPrimary,
+                                                                  // Filled state uses the raw brand color as background (white text sits on it);
+                                                                  // outline state draws the color directly on the drawer's white surface, so it
+                                                                  // must meet WCAG AA — use the contrast-safe variant there.
+                                                                  borderColor: isInBucket ? brandPrimary : brandPrimaryOnWhite,
+                                                                  color: isInBucket ? '#fff' : brandPrimaryOnWhite,
                                                                   backgroundColor: isInBucket ? brandPrimary : undefined,
                                                               }
                                                             : undefined
@@ -5156,8 +5171,70 @@ export default function AssetDrawer({
                                 </CollapsibleSection>
                             )}
 
-                        <CollapsibleSection contentInset="flush" title="Fields" defaultExpanded={false}>
-                            <div className="space-y-3 pl-2.5">
+                        <CollapsibleSection contentInset="flush" title="Asset Data" defaultExpanded={true}>
+                            <div className="pl-2.5">
+                                {/* Sub-tabs + inline "Edit asset" action. Tabs left, Edit right on the
+                                    same baseline so the action lives with the fields it mutates. */}
+                                <div className="mb-3 flex items-center justify-between gap-2 border-b border-gray-200 text-sm">
+                                    <div
+                                        role="tablist"
+                                        aria-label="Asset Data sections"
+                                        className="flex items-center gap-1"
+                                    >
+                                        <button
+                                            type="button"
+                                            role="tab"
+                                            aria-selected={assetDataTab === 'fields'}
+                                            onClick={() => setAssetDataTab('fields')}
+                                            className={`px-3 py-2 font-medium rounded-t-md border-b-2 -mb-px transition-colors ${
+                                                assetDataTab === 'fields'
+                                                    ? 'border-transparent'
+                                                    : 'border-transparent text-gray-500 hover:text-gray-700'
+                                            }`}
+                                            style={
+                                                assetDataTab === 'fields'
+                                                    ? { borderBottomColor: brandPrimaryOnWhite, color: brandPrimaryOnWhite }
+                                                    : undefined
+                                            }
+                                        >
+                                            Fields
+                                        </button>
+                                        <button
+                                            type="button"
+                                            role="tab"
+                                            aria-selected={assetDataTab === 'embedded'}
+                                            onClick={() => setAssetDataTab('embedded')}
+                                            className={`px-3 py-2 font-medium rounded-t-md border-b-2 -mb-px transition-colors ${
+                                                assetDataTab === 'embedded'
+                                                    ? 'border-transparent'
+                                                    : 'border-transparent text-gray-500 hover:text-gray-700'
+                                            }`}
+                                            style={
+                                                assetDataTab === 'embedded'
+                                                    ? { borderBottomColor: brandPrimaryOnWhite, color: brandPrimaryOnWhite }
+                                                    : undefined
+                                            }
+                                        >
+                                            Embedded
+                                        </button>
+                                    </div>
+                                    {displayAsset?.id &&
+                                        !isVirtualGoogleFont &&
+                                        can('metadata.edit_post_upload') && (
+                                            <button
+                                                type="button"
+                                                onClick={() => setManageAssetModalOpen(true)}
+                                                className="pr-1 pb-2 text-xs font-medium underline decoration-2 underline-offset-2 hover:opacity-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 rounded-sm"
+                                                style={{ color: brandPrimaryOnWhite }}
+                                                title="Edit metadata, tags, and more"
+                                            >
+                                                Edit asset
+                                            </button>
+                                        )}
+                                </div>
+                            </div>
+                            {/* Keep Fields content mounted even when Embedded tab is active so /metadata/editable keeps polling and the embedded summary stays fresh. */}
+                            <div className={`space-y-3 pl-2.5 ${assetDataTab === 'fields' ? '' : 'hidden'}`}>
                             {/* Step 2: Pending Metadata Section - Moved above standard metadata list */}
                             {/* Phase M-2: Only show pending metadata if metadata approval is enabled for company + brand */}
                             {auth?.metadata_approval_features?.metadata_approval_enabled && 
@@ -5198,6 +5275,7 @@ export default function AssetDrawer({
                             <AssetMetadataDisplay
                                 assetId={displayAsset.id}
                                 onPendingCountChange={setPendingMetadataCount}
+                                onEmbeddedMetadataChange={setDrawerEmbeddedMetadata}
                                 primaryColor={brandPrimary}
                                 readOnly={!can('metadata.edit_post_upload')}
                                 suppressAnalysisRunningBanner={suppressAnalysisRunningBannerInMetadata}
@@ -5283,6 +5361,15 @@ export default function AssetDrawer({
                                 />
                             </div>
                             </div>
+                            {assetDataTab === 'embedded' && (
+                                <div className="space-y-3 pl-2.5 pb-2">
+                                    {drawerEmbeddedMetadata === null ? (
+                                        <p className="text-xs italic text-gray-400">Loading embedded file metadata…</p>
+                                    ) : (
+                                        <AssetEmbeddedMetadataPanel embeddedMetadata={drawerEmbeddedMetadata} />
+                                    )}
+                                </div>
+                            )}
                         </CollapsibleSection>
 
                         {showPreviewContentSection && (

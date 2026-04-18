@@ -89,7 +89,26 @@ export default function AssetGridToolbar({
     const pageUrl = inertiaPage.url
     const { auth } = pageProps
     const brand = auth?.activeBrand
-    const serverQ = (typeof pageProps.q === 'string' ? pageProps.q : searchQuery) || ''
+    // Derive the active search query from the Inertia page URL (source of truth for the
+    // browser URL), falling back to the shared `q` prop and the `searchQuery` prop.
+    // Inertia partial reloads that omit `q` from `only` can drop `pageProps.q`, which
+    // previously caused the search input to clear itself even though the URL still held
+    // ?q=… — keeping the input in sync with the URL avoids that stale-sync bug.
+    const serverQ = (() => {
+        if (typeof pageUrl === 'string' && pageUrl.length > 0) {
+            const qIndex = pageUrl.indexOf('?')
+            if (qIndex !== -1) {
+                try {
+                    const params = new URLSearchParams(pageUrl.slice(qIndex + 1))
+                    const fromUrl = params.get('q')
+                    if (fromUrl != null) return fromUrl
+                } catch {
+                    // fall through to prop-based fallback
+                }
+            }
+        }
+        return (typeof pageProps.q === 'string' ? pageProps.q : searchQuery) || ''
+    })()
 
     // Search loading: in-flight request feedback (no layout shift, typing uninterrupted)
     const [searchLoading, setSearchLoading] = useState(false)
@@ -119,15 +138,22 @@ export default function AssetGridToolbar({
             onStart: () => setSearchLoading(true),
             onFinish: () => {
                 setSearchLoading(false)
+                // Re-focus only if the input lost focus during the partial reload.
+                // Refocusing while it already has focus produces a visible caret blink
+                // and, on iOS, can re-open the software keyboard on every request —
+                // which users perceive as a page refresh mid-typing.
                 if (searchHadFocusRef.current) {
                     searchHadFocusRef.current = false
                     const el = searchInputRef.current
-                    const doFocus = () => {
-                        if (el?.focus) el.focus()
+                    if (el && document.activeElement !== el) {
+                        requestAnimationFrame(() => {
+                            requestAnimationFrame(() => {
+                                if (el && document.activeElement !== el && el.focus) {
+                                    el.focus()
+                                }
+                            })
+                        })
                     }
-                    requestAnimationFrame(() => {
-                        requestAnimationFrame(doFocus)
-                    })
                 }
             },
         })

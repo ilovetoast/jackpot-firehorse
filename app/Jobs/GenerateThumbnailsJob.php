@@ -221,6 +221,59 @@ class GenerateThumbnailsJob implements ShouldQueue
                 'storage_root_path' => $asset->storage_root_path,
             ]);
 
+            // Permanent-failure guard: if the asset has no storage path or bucket there is
+            // nothing to thumbnail, and retrying will never help. Mark SKIPPED with a clear
+            // reason and return cleanly so:
+            //   - Sentry is not spammed with "Asset missing storage path or bucket"
+            //   - The queue doesn't chew through 32 retries on a hopeless job
+            //   - Watchdog / ReliabilityEngine won't keep re-dispatching (status is terminal)
+            $sourcePathForCheck = $version ? ($version->file_path ?? null) : ($asset->storage_root_path ?? null);
+            if (! $sourcePathForCheck || ! $asset->storageBucket) {
+                $reason = 'missing_storage';
+                $userMsg = 'We could not build a preview because the source file reference is missing. Please re-upload the file.';
+                PipelineLogger::warning('THUMBNAILS: MISSING STORAGE — SKIPPING TERMINAL', [
+                    'asset_id' => $asset->id,
+                    'version_id' => $version?->id,
+                    'storage_bucket_id' => $asset->storage_bucket_id,
+                    'storage_root_path' => $asset->storage_root_path,
+                    'version_file_path' => $version?->file_path,
+                ]);
+                Log::warning('[GenerateThumbnailsJob] Asset missing storage path or bucket — marking SKIPPED (non-retryable)', [
+                    'asset_id' => $asset->id,
+                    'version_id' => $version?->id,
+                    'has_storage_bucket_id' => (bool) $asset->storage_bucket_id,
+                    'has_storage_root_path' => (bool) $asset->storage_root_path,
+                ]);
+                $meta = array_merge($asset->metadata ?? [], [
+                    'thumbnail_skip_reason' => $reason,
+                    'thumbnail_skip_message' => $userMsg,
+                    'preview_unavailable_user_message' => $userMsg,
+                    'thumbnails_generated' => false,
+                    'missing_storage_detected_at' => now()->toIso8601String(),
+                ]);
+                $analysis = $asset->analysis_status ?? 'uploading';
+                $asset->update([
+                    'thumbnail_status' => ThumbnailStatus::SKIPPED,
+                    'thumbnail_error' => null,
+                    'thumbnail_started_at' => null,
+                    'metadata' => $meta,
+                    'analysis_status' => in_array($analysis, ['uploading', 'generating_thumbnails'], true)
+                        ? 'complete'
+                        : $analysis,
+                ]);
+                if ($version) {
+                    $version->update([
+                        'pipeline_status' => 'complete',
+                        'metadata' => array_merge($version->metadata ?? [], [
+                            'thumbnail_skip_reason' => $reason,
+                            'thumbnails_generated' => false,
+                        ]),
+                    ]);
+                }
+
+                return;
+            }
+
             // Idempotency: Skip only for legacy path; version-aware always regenerates (Phase 5)
             if (! $version && $asset->thumbnail_status === ThumbnailStatus::COMPLETED) {
                 Log::info('[GenerateThumbnailsJob] Thumbnail generation skipped - already completed', [
@@ -1482,6 +1535,13 @@ class GenerateThumbnailsJob implements ShouldQueue
         }
         if ($e instanceof ClientException) {
             return true; // 4xx client errors (bad request, not found, etc.)
+        }
+        // Permanent-data failures: source path/bucket gone — retrying will never succeed.
+        // Belt-and-braces for the early guard in handle(); if that ever misses an edge
+        // case the exception still fails fast instead of burning 32 retries + Sentry events.
+        $msg = $e->getMessage();
+        if (str_contains($msg, 'Asset missing storage path or bucket')) {
+            return true;
         }
         // Check for nested Guzzle ClientException (e.g. wrapped by AWS SDK)
         $current = $e;

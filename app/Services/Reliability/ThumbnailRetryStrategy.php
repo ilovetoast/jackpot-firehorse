@@ -57,7 +57,27 @@ class ThumbnailRetryStrategy implements RepairStrategyInterface
         $retryCount = (int) ($metadata['retry_count'] ?? 0);
 
         if ($incident->retryable && $retryCount < self::MAX_RETRIES) {
-            $asset->loadMissing('currentVersion');
+            $asset->loadMissing('currentVersion', 'storageBucket');
+
+            // Guard: dispatching a thumbnail job for an asset with no storage path or bucket
+            // is guaranteed to throw RuntimeException inside ThumbnailGenerationService. Mark
+            // the incident non-retryable so we stop spinning on a permanent data failure.
+            if (! $asset->storage_root_path || ! $asset->storageBucket) {
+                $incident->update([
+                    'retryable' => false,
+                    'metadata' => array_merge($metadata, [
+                        'retry_skipped_reason' => 'missing_storage',
+                        'retry_skipped_at' => now()->toIso8601String(),
+                    ]),
+                ]);
+                Log::warning('[ThumbnailRetryStrategy] Skipping retry — asset has no storage path or bucket', [
+                    'incident_id' => $incident->id,
+                    'asset_id' => $asset->id,
+                ]);
+
+                return new RepairResult(false, $result['changes'] ?? []);
+            }
+
             GenerateThumbnailsJob::dispatch($asset->id)->onQueue(PipelineQueueResolver::imagesQueueForAsset($asset));
             $incident->update([
                 'metadata' => array_merge($metadata, [

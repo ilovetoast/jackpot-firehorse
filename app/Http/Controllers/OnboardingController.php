@@ -51,7 +51,10 @@ class OnboardingController extends Controller
 
         $progress = $this->onboarding->getOrCreateProgress($brand);
 
-        if ($progress->isActivated() && $progress->isCompleted()) {
+        // Hide the onboarding flow once the brand is either activated (minimum setup done)
+        // or fully completed. Previously this required BOTH, so users who hit "Finish" but
+        // never triggered the recommended-completion path kept landing back on onboarding.
+        if ($progress->isActivated() || $progress->isCompleted()) {
             return redirect('/app/overview');
         }
 

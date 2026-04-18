@@ -32,10 +32,36 @@ class ScoreAssetBrandIntelligenceJob implements ShouldQueue
     public function handle(BrandIntelligenceEngine $engine): void
     {
         $asset = Asset::query()
-            ->with(['brand'])
+            ->with(['brand', 'tenant'])
             ->find($this->assetId);
 
         if (! $asset || ! $asset->brand_id) {
+            return;
+        }
+
+        // Tenant-level kill switches. This is the single chokepoint for every
+        // dispatcher path (BrandIntelligenceScheduleService, GenerateAssetEmbeddingJob,
+        // AssetMetadataController::rescore, MetadataPersistenceService, FinalizeAssetJob,
+        // GenerateVideoInsightsJob, BulkActionService, AdminBrandIntelligenceController).
+        // - `ai_enabled === false` -> master AI switch off; no AI work anywhere.
+        // - `brand_alignment_enabled === false` -> per-tenant Brand Alignment kill switch.
+        // Both default to true when absent (new tenants, unset flag).
+        $tenantSettings = $asset->tenant?->settings ?? [];
+        if (($tenantSettings['ai_enabled'] ?? true) === false
+            || ($tenantSettings['brand_alignment_enabled'] ?? true) === false) {
+            // Unstick the asset's analysis lifecycle so it doesn't linger in `scoring`
+            // just because the tenant disabled scoring mid-flight.
+            $status = $asset->analysis_status ?? '';
+            if ($status === 'scoring') {
+                $asset->update(['analysis_status' => 'complete']);
+                AnalysisStatusLogger::log(
+                    $asset,
+                    'scoring',
+                    'complete',
+                    'ScoreAssetBrandIntelligenceJob:tenant-gate-off',
+                );
+            }
+
             return;
         }
 

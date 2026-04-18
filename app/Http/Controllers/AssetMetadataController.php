@@ -1147,6 +1147,38 @@ class AssetMetadataController extends Controller
     }
 
     /**
+     * Tenant-level kill switches for Brand Alignment endpoints. Returns 409 Conflict
+     * with `disabled: true` so the drawer widget (if somehow rendered) degrades
+     * cleanly. Mirrored by the job-level chokepoint in ScoreAssetBrandIntelligenceJob
+     * and the frontend's ebiEnabledForAsset gate in AssetDrawer.jsx.
+     *
+     *  - `settings.ai_enabled === false`       -> master AI switch off.
+     *  - `settings.brand_alignment_enabled === false` -> feature-specific kill switch.
+     *
+     * Both flags default to true when absent.
+     */
+    protected function assertBrandAlignmentEnabledForTenant(?Asset $asset = null): ?JsonResponse
+    {
+        $tenant = $asset?->tenant ?? app('tenant');
+        $settings = $tenant?->settings ?? [];
+        $masterOff = ($settings['ai_enabled'] ?? true) === false;
+        $featureOff = ($settings['brand_alignment_enabled'] ?? true) === false;
+
+        if ($masterOff || $featureOff) {
+            return response()->json([
+                'status' => 'disabled',
+                'disabled' => true,
+                'reason' => $masterOff ? 'ai_features_disabled' : 'brand_alignment_disabled',
+                'message' => $masterOff
+                    ? 'AI features are disabled for this workspace.'
+                    : 'Brand Alignment is disabled for this workspace.',
+            ], 409);
+        }
+
+        return null;
+    }
+
+    /**
      * Manually trigger a full brand compliance rescore for an asset.
      *
      * Runs the strongest evaluation available:
@@ -1169,6 +1201,10 @@ class AssetMetadataController extends Controller
         }
 
         $this->authorize('view', $asset);
+
+        if ($blocked = $this->assertBrandAlignmentEnabledForTenant($asset)) {
+            return $blocked;
+        }
 
         if ($blocked = $this->assertPublishedBrandGuidelinesForBrand($brand)) {
             return $blocked;
@@ -1273,6 +1309,10 @@ class AssetMetadataController extends Controller
 
         $this->authorize('view', $asset);
 
+        if ($blocked = $this->assertBrandAlignmentEnabledForTenant($asset)) {
+            return $blocked;
+        }
+
         $fresh = Asset::query()
             ->whereKey($asset->id)
             ->with(['latestBrandIntelligenceScore', 'brandReferenceAsset'])
@@ -1306,6 +1346,10 @@ class AssetMetadataController extends Controller
         }
 
         $this->authorize('view', $asset);
+
+        if ($blocked = $this->assertBrandAlignmentEnabledForTenant($asset)) {
+            return $blocked;
+        }
 
         if ($blocked = $this->assertPublishedBrandGuidelinesForBrand($brand)) {
             return $blocked;
@@ -1363,6 +1407,10 @@ class AssetMetadataController extends Controller
         }
 
         $this->authorize('view', $asset);
+
+        if ($blocked = $this->assertBrandAlignmentEnabledForTenant($asset)) {
+            return $blocked;
+        }
 
         if ($blocked = $this->assertPublishedBrandGuidelinesForBrand($brand)) {
             return $blocked;
@@ -1427,6 +1475,10 @@ class AssetMetadataController extends Controller
         }
 
         $this->authorize('view', $asset);
+
+        if ($blocked = $this->assertBrandAlignmentEnabledForTenant($asset)) {
+            return $blocked;
+        }
 
         $validated = $request->validate([
             'rating' => 'required|string|in:up,down',

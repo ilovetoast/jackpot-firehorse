@@ -4,7 +4,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { ExclamationTriangleIcon, CheckCircleIcon, InformationCircleIcon } from '@heroicons/react/24/outline'
+import { ExclamationTriangleIcon, CheckCircleIcon, InformationCircleIcon, SparklesIcon } from '@heroicons/react/24/outline'
 import { debounce } from 'lodash-es'
 
 /** @param {string | null | undefined} iso */
@@ -324,7 +324,8 @@ export default function AiTaggingSettings({
                                 AI tag suggestions
                             </label>
                             <p className="text-sm text-gray-500">
-                                Let AI suggest tags for assets.
+                                Let AI suggest tags for assets. Auto-apply and per-asset limit below
+                                are configured underneath this master.
                             </p>
                         </div>
                         <Toggle
@@ -349,26 +350,26 @@ export default function AiTaggingSettings({
                         </div>
                     )}
 
-                    <div className={`space-y-6 ${isAiDisabled ? 'opacity-50 pointer-events-none' : ''}`}>
+                    {/*
+                     * Nested sub-items of "AI tag suggestions" (visually indented under the parent
+                     * master so the hierarchy is obvious). The `border-l` and `ml-3 pl-4` draw a
+                     * parent-child tree feel; `opacity-50 pointer-events-none` cascades the
+                     * disabled state from the parent toggle (and, transitively, the tenant-wide
+                     * `ai_enabled` master via the outer wrapper in Settings.jsx).
+                     *
+                     * NOTE: the "Show tag suggestions on assets" toggle (previously the first sub-
+                     * item) has been removed from the UI per product direction. The underlying
+                     * setting is force-treated as always-on in AiTagPolicyService::getTenantSettings
+                     * so existing tenants that stored `false` still see suggestions — no migration.
+                     */}
+                    <div
+                        className={`ml-3 space-y-6 border-l-2 border-gray-200 pl-4 ${
+                            isAiDisabled ? 'opacity-50 pointer-events-none' : ''
+                        }`}
+                    >
                         <div className="flex items-center justify-between">
                             <div className="flex-1 pr-4">
-                                <label className="text-base font-medium text-gray-900">
-                                    Show tag suggestions on assets
-                                </label>
-                                <p className="text-sm text-gray-500">
-                                    Display suggestions when viewing an asset.
-                                </p>
-                            </div>
-                            <Toggle
-                                checked={settings.enable_ai_tag_suggestions}
-                                onChange={(enabled) => updateSetting('enable_ai_tag_suggestions', enabled)}
-                                disabled={!canEdit || isAiDisabled}
-                            />
-                        </div>
-
-                        <div className="flex items-center justify-between">
-                            <div className="flex-1 pr-4">
-                                <label className="text-base font-medium text-gray-900">
+                                <label className="text-sm font-medium text-gray-900">
                                     Auto-apply tags
                                 </label>
                                 <p className="text-sm text-gray-500">
@@ -384,7 +385,7 @@ export default function AiTaggingSettings({
 
                         {!isAiDisabled && (
                             <div className="rounded-lg bg-white p-4 ring-1 ring-gray-100">
-                                <label className="text-base font-medium text-gray-900">
+                                <label className="text-sm font-medium text-gray-900">
                                     Max tags per asset
                                 </label>
                                 <p className="text-sm text-gray-500 mb-4">
@@ -418,20 +419,34 @@ export default function AiTaggingSettings({
                 <div className="h-px flex-1 bg-gradient-to-r from-transparent via-gray-300 to-transparent" />
             </div>
 
+            {/*
+             * Asset Field Intelligence — branded indigo treatment (parity with Studio's violet
+             * BrandedAiCard and Brand Alignment's primary-color card over in Settings.jsx).
+             * Pill badge + icon tile match the BulkActionsModal "Video AI" pattern so all AI
+             * sub-features share one visual language.
+             */}
             <div className="rounded-xl border border-indigo-100 bg-indigo-50/30 p-5 shadow-sm">
-                <div>
-                    <h3 className="text-sm font-semibold uppercase tracking-wide text-indigo-900/70">
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-indigo-100/80 pb-2">
+                    <span className="inline-flex items-center rounded bg-indigo-600 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">
                         Asset fields
+                    </span>
+                    <h3 className="text-sm font-semibold text-gray-800">
+                        Structured field intelligence
                     </h3>
-                    <p className="mt-1 text-xs text-gray-600">Structured data — not the Tags section above.</p>
-                    <p className="mt-3 text-base font-medium text-gray-900">Suggest structured fields</p>
-                    <p className="mt-1 text-sm text-gray-600">
-                        AI analyzes your assets to suggest new fields and field values.
-                    </p>
+                    <span className="ml-auto flex h-8 w-8 items-center justify-center rounded-md bg-indigo-100">
+                        <SparklesIcon className="h-4 w-4 text-indigo-700" />
+                    </span>
                 </div>
-                <div className="mt-5 flex items-center justify-between">
+                <p className="mt-3 text-sm leading-snug text-gray-600">
+                    AI analyzes your assets to suggest new fields and field values. Structured data
+                    — separate from the Tags section above.
+                </p>
+                <div className="mt-4 flex items-center justify-between rounded-lg border border-indigo-200 bg-white p-3 shadow-sm">
                     <div className="flex-1 pr-4">
-                        <label className="text-base font-medium text-gray-900">Enable Asset Field Intelligence</label>
+                        <label className="text-sm font-medium text-gray-900">Enable Asset Field Intelligence</label>
+                        <p className="mt-0.5 text-xs text-gray-500">
+                            Score and suggest structured fields for new and edited assets.
+                        </p>
                     </div>
                     <Toggle
                         checked={!!settings.ai_insights_enabled}

@@ -21,6 +21,28 @@ class BrandIntelligenceScheduleService
     public const TAG_METADATA_DEBOUNCE_SECONDS = 120;
 
     /**
+     * Tenant-level belt-and-suspenders gate. Keeps us from enqueuing jobs we'll just
+     * early-return from inside {@see ScoreAssetBrandIntelligenceJob::handle()}.
+     *
+     * Either kill switch (master AI or Brand Alignment specifically) short-circuits
+     * dispatch. Both default to true when absent.
+     */
+    protected function tenantAllowsBrandAlignment(Asset $asset): bool
+    {
+        $asset->loadMissing('tenant');
+        $settings = $asset->tenant?->settings ?? [];
+
+        if (($settings['ai_enabled'] ?? true) === false) {
+            return false;
+        }
+        if (($settings['brand_alignment_enabled'] ?? true) === false) {
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
      * Queue a first-pass EBI score when the pipeline completes without the embedding path
      * (non-images, or images where thumbnails/embeddings are skipped).
      *
@@ -28,6 +50,10 @@ class BrandIntelligenceScheduleService
      */
     public function dispatchAfterPipelineComplete(Asset $asset): void
     {
+        if (! $this->tenantAllowsBrandAlignment($asset)) {
+            return;
+        }
+
         $category = $asset->resolveCategoryForTenant();
         if (! $category instanceof Category || ! $category->isEbiEnabled()) {
             return;
@@ -103,6 +129,10 @@ class BrandIntelligenceScheduleService
      */
     public function scheduleDebouncedRescoreAfterUserEdit(Asset $asset): void
     {
+        if (! $this->tenantAllowsBrandAlignment($asset)) {
+            return;
+        }
+
         $category = $asset->resolveCategoryForTenant();
         if (! $category instanceof Category || ! $category->isEbiEnabled()) {
             return;
@@ -132,6 +162,14 @@ class BrandIntelligenceScheduleService
             ->where('brand_id', $asset->brand_id)
             ->whereNull('execution_id')
             ->delete();
+
+        // Keep purge behavior (existing scores wiped) but skip the dispatch entirely
+        // when the tenant has disabled the feature. Matches the intent: "no new scores
+        // are computed." The job's own tenant-gate would also no-op it, but skipping
+        // dispatch avoids queue churn.
+        if (! $this->tenantAllowsBrandAlignment($asset)) {
+            return;
+        }
 
         ScoreAssetBrandIntelligenceJob::dispatch($asset->id, false);
     }

@@ -494,6 +494,7 @@ class CompanyController extends Controller
             'settings.require_landing_page' => 'nullable|boolean',
             'settings.generative_enabled' => 'nullable|boolean',
             'settings.ai_enabled' => 'nullable|boolean',
+            'settings.brand_alignment_enabled' => 'nullable|boolean',
         ]);
 
         // Phase M-2: Handle settings separately
@@ -535,6 +536,15 @@ class CompanyController extends Controller
                 abort(403, 'You do not have permission to manage AI settings.');
             }
             $mergedSettings['ai_enabled'] = (bool) $settings['ai_enabled'];
+        }
+        // Brand Alignment tenant-level kill switch. Defaults to true when missing
+        // (see Tenant read-side fallback + frontend `?? true`). Gated by the same
+        // `manage_ai_settings` permission agency admins already have — no seeder change.
+        if (array_key_exists('brand_alignment_enabled', $settings)) {
+            if (! $user->hasPermissionForTenant($tenant, 'company_settings.manage_ai_settings')) {
+                abort(403, 'You do not have permission to manage AI settings.');
+            }
+            $mergedSettings['brand_alignment_enabled'] = (bool) $settings['brand_alignment_enabled'];
         }
 
         $tenant->update($validated);

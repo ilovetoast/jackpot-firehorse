@@ -1,5 +1,6 @@
 import { motion } from 'framer-motion'
 import { SparklesIcon, SwatchIcon, PhotoIcon, DocumentTextIcon } from '@heroicons/react/24/outline'
+import { getContrastTextColor, ensureDarkModeContrast } from '../../utils/colorUtils'
 
 const SETUP_ITEMS = [
     { icon: SwatchIcon, label: 'Brand basics', desc: 'Name, mark, and colors' },
@@ -8,7 +9,13 @@ const SETUP_ITEMS = [
 ]
 
 export default function WelcomeStep({ brandName, brandColor = '#6366f1', isAgencyCreated = false, onStart, onDismiss }) {
-    const accent = brandColor
+    // The incoming brandColor has already been passed through ensureDarkModeContrast for
+    // chrome on the dark shell. For the solid CTA button we need a second safety net so
+    // very light brand primaries (near-white) don't end up as a white button with white
+    // text. ensureDarkModeContrast with a higher min ratio clamps toward a readable tone,
+    // and getContrastTextColor picks black/white text against that final surface.
+    const accent = ensureDarkModeContrast(brandColor, '#6366f1', 4.5)
+    const buttonTextColor = getContrastTextColor(accent)
 
     const headline = isAgencyCreated
         ? `Finish setting up ${brandName || 'your workspace'}`
@@ -70,10 +77,11 @@ export default function WelcomeStep({ brandName, brandColor = '#6366f1', isAgenc
                 <button
                     type="button"
                     onClick={onStart}
-                    className="px-8 py-3.5 rounded-xl text-base font-semibold text-white transition-all duration-300 hover:brightness-110"
+                    className="px-8 py-3.5 rounded-xl text-base font-semibold transition-all duration-300 hover:brightness-110"
                     style={{
                         background: `linear-gradient(135deg, ${accent}, ${accent}dd)`,
                         boxShadow: `0 4px 24px ${accent}30`,
+                        color: buttonTextColor,
                     }}
                 >
                     {isAgencyCreated ? 'Continue setup' : 'Start setup'}

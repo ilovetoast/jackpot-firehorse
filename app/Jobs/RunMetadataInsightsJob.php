@@ -45,6 +45,19 @@ class RunMetadataInsightsJob implements ShouldQueue
             return;
         }
 
+        // Master AI kill switch (tenant.settings.ai_enabled) gates every AI pipeline.
+        // Defaults to true when absent. Checked before the feature-specific flag so
+        // logs clearly distinguish the master vs feature-specific paths.
+        $tenantSettings = $tenant->settings ?? [];
+        if (($tenantSettings['ai_enabled'] ?? true) === false) {
+            Log::info('[RunMetadataInsightsJob] Skipped — master ai_enabled is false', [
+                'tenant_id' => $tenant->id,
+                'agent' => InsightsAgentConstants::AI_AGENT_INSIGHTS,
+            ]);
+
+            return;
+        }
+
         if (! $tenant->ai_insights_enabled) {
             Log::info('[RunMetadataInsightsJob] Skipped — ai_insights_enabled is false', [
                 'tenant_id' => $tenant->id,

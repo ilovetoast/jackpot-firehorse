@@ -62,6 +62,8 @@ export default function AssetMetadataDisplay({
     onAnalysisPipelineStateChange = null,
     /** After a successful inline toggle save (e.g. Starred). Parent can sync grid / toast. */
     onToggleFieldSaved = null,
+    /** Fires with the embedded_metadata summary from /metadata/editable so parents can render an Embedded tab alongside. */
+    onEmbeddedMetadataChange = null,
 }) {
     const { auth } = usePage().props
     const brandPrimary = primaryColor || auth?.activeBrand?.primary_color || '#6366f1'
@@ -89,6 +91,9 @@ export default function AssetMetadataDisplay({
         setThumbnailStatus(data.thumbnail_status ?? 'pending')
         if (onPendingCountChange) {
             onPendingCountChange(count)
+        }
+        if (typeof onEmbeddedMetadataChange === 'function') {
+            onEmbeddedMetadataChange(data.embedded_metadata ?? null)
         }
     }
 

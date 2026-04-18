@@ -158,6 +158,43 @@ class AssetsWatchdogCommand extends Command
             }
         }
 
+        foreach ($failedWithRetriesLeft as $asset) {
+            try {
+                app(\App\Services\Assets\AssetStateReconciliationService::class)->reconcile($asset->fresh());
+                $asset->refresh();
+                if ($asset->thumbnail_status !== ThumbnailStatus::FAILED) {
+                    continue;
+                }
+            } catch (\Throwable $e) {
+                // Continue — still worth recording an incident.
+            }
+
+            // Include retry_count in the signature so each new failure cycle emits a fresh
+            // incident (ThumbnailRetryStrategy allows MAX_RETRIES retries *per incident*).
+            $uniqueSignature = "thumbnail_failed_with_retries:{$asset->id}:{$asset->thumbnail_retry_count}";
+
+            $incident = $reliabilityEngine->report([
+                'source_type' => 'asset',
+                'source_id' => $asset->id,
+                'tenant_id' => $asset->tenant_id,
+                'severity' => 'warning',
+                'title' => 'Thumbnail generation failed (auto-retry eligible)',
+                'message' => "Asset {$asset->id} has thumbnail_status=failed with {$asset->thumbnail_retry_count}/{$maxRetries} retries used.",
+                'retryable' => true,
+                'metadata' => [
+                    'thumbnail_error' => $asset->thumbnail_error,
+                    'thumbnail_retry_count' => $asset->thumbnail_retry_count,
+                    'mime_type' => $asset->mime_type,
+                    'unique_signature' => $uniqueSignature,
+                ],
+                'unique_signature' => $uniqueSignature,
+            ]);
+
+            if ($incident) {
+                $recorded++;
+            }
+        }
+
         if ($recorded > 0) {
             $this->info("Recorded {$recorded} incident(s) for stuck assets.");
         }

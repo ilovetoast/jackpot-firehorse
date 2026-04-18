@@ -100,7 +100,11 @@ export default function AssetImagePickerField({
   const assetId = value?.asset_id ?? null
   const hasValue = !!(previewUrl || assetId || value?.file)
 
-  const isSvg = typeof previewUrl === 'string' && previewUrl.toLowerCase().endsWith('.svg')
+  const isSvg = typeof previewUrl === 'string' && (() => {
+    const lower = previewUrl.toLowerCase()
+    const pathOnly = lower.split('?')[0].split('#')[0]
+    return pathOnly.endsWith('.svg') || lower.includes('image/svg') || lower.includes('.svg?')
+  })()
   const canCrop = allowCrop && hasValue && previewUrl && !isSvg && !uploading
 
   const handleSelect = (result) => {

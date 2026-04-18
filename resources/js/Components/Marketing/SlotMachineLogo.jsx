@@ -14,46 +14,81 @@ const SYMBOLS = {
 }
 
 const SYM_KEYS = Object.keys(SYMBOLS)
+const NON_CHERRY_KEYS = SYM_KEYS.filter(k => k !== 'cherry')
 const JACKPOT = [['j', 'p'], ['a', 'o'], ['c', 't'], ['k', 'cherry']]
 const NUM_COLS = JACKPOT.length
 const DECOY_COUNT = 10
 
 const pick = () => SYM_KEYS[Math.floor(Math.random() * SYM_KEYS.length)]
+const pickNoCherry = () => NON_CHERRY_KEYS[Math.floor(Math.random() * NON_CHERRY_KEYS.length)]
 
-const PARTICLE_PALETTE = ['#a78bfa', '#818cf8', '#c084fc', '#e9d5ff', '#f0abfc', '#fff']
+// Site brand colors (hardcoded so tenant theming never overrides the logo animation).
+const SITE_PRIMARY = '#6366f1'
+const SITE_PRIMARY_RGB = '99,102,241'
 
+const PARTICLE_PALETTE = ['#818cf8', '#a5b4fc', '#c7d2fe', '#6366f1', '#4f46e5', '#fff']
+
+/**
+ * Cycle sequence on the homepage:
+ *   cycle 0 (mod 0) → 'random'   : intentionally incorrect spin – centered in the middle,
+ *                                   the reels come to rest staggered/offset.
+ *   cycle 1 (mod 1) → 'cherries' : success state – all cherries centered vertically,
+ *                                   cells blink site-primary indigo with fireworks.
+ *   cycle 2 (mod 2) → 'jackpot'  : final resting pose – JACKPOT text, reels perfectly aligned.
+ *
+ * The first three spins play automatically as an intro. After cycle 2 the reels stop
+ * and only a user "pull" (mousedown → mouseup) advances to the next cycle.
+ */
 function spinMode(cycle) {
-    if (cycle % 3 === 0) return 'jackpot'
-    if (cycle % 3 === 2) return 'near-miss'
-    return 'random'
+    const mod = cycle % 3
+    if (mod === 0) return 'random'
+    if (mod === 1) return 'cherries'
+    return 'jackpot'
 }
 
 function buildReels(mode) {
     if (mode === 'jackpot') {
-        return JACKPOT.map(([wT, wB]) => [...Array.from({ length: DECOY_COUNT }, pick), wT, wB])
+        // Bracketed with 'blank' rows so the strip can be shifted up/down a few px
+        // at rest and show empty white space at the cropped edge (instead of a decoy).
+        return JACKPOT.map(([wT, wB]) => [
+            ...Array.from({ length: DECOY_COUNT - 1 }, pick),
+            'blank',
+            wT,
+            wB,
+            'blank',
+        ])
     }
-    if (mode === 'near-miss') {
-        const missCol = Math.floor(Math.random() * NUM_COLS)
-        return JACKPOT.map(([wT, wB], i) => {
-            const decoys = Array.from({ length: DECOY_COUNT }, pick)
-            return i === missCol ? [...decoys, pick(), pick()] : [...decoys, wT, wB]
-        })
+    if (mode === 'cherries') {
+        // Reel of length DECOY_COUNT + 3 with 'cherry' at index DECOY_COUNT + 1.
+        // Paired with a custom targetY the cherry lands centered in the viewport
+        // and the surrounding decoys are cropped at the top & bottom edges.
+        return JACKPOT.map(() => [
+            ...Array.from({ length: DECOY_COUNT + 1 }, pickNoCherry),
+            'cherry',
+            pickNoCherry(),
+        ])
     }
-    return JACKPOT.map(() => [...Array.from({ length: DECOY_COUNT }, pick), pick(), pick()])
+    // 'random' – same centered structure as cherries so a single (non-matching)
+    // symbol lands in the vertical middle with decoys cropped above/below.
+    return JACKPOT.map(() => [
+        ...Array.from({ length: DECOY_COUNT + 1 }, pickNoCherry),
+        pickNoCherry(),
+        pickNoCherry(),
+    ])
 }
 
-function makeParticles(count = 44) {
+function makeParticles(count = 56) {
     return Array.from({ length: count }, () => {
         const angle = Math.random() * Math.PI * 2
-        const dist = 40 + Math.random() * 200
+        const dist = 40 + Math.random() * 220
         const isLarge = Math.random() > 0.65
         return {
             x: Math.cos(angle) * dist,
             y: Math.sin(angle) * dist - 30,
             size: isLarge ? 4.5 + Math.random() * 4 : 2 + Math.random() * 3,
             color: PARTICLE_PALETTE[Math.floor(Math.random() * PARTICLE_PALETTE.length)],
-            delay: Math.random() * 280,
-            dur: 700 + Math.random() * 600,
+            delay: Math.random() * 320,
+            dur: 700 + Math.random() * 700,
         }
     })
 }
@@ -61,25 +96,25 @@ function makeParticles(count = 44) {
 const FIRST_DUR    = 2600
 const FAST_DUR     = 1600
 const STAGGER      = 220
-const PAUSE        = 2000
 const FIRST_WAIT   = 700
 const VBLUR_PX     = 14
 
-const PRE_SNAP_HOLD = 1200
-const SNAP_DUR      = 350
-const CELEBRATE_MS  = 2200
-const POST_CELEB    = 800
+const BETWEEN_INTRO = 1400  // gap between cycle 0 → 1 and 1 → 2 during the intro
+const CELEBRATE_MS  = 2200  // full cherry-celebration duration
+const SETTLE_MS     = 350   // brief hold before reels relax into offsets
 
+// Staggered per-column offsets applied to the slot *frames* for the "incorrect
+// random" resting pose and for the visual response when the user pulls the lever.
 const REEL_OFFSETS = [-6, 5, -3, 8]
+// Jackpot rest: how far each reel's strip content is shifted vertically inside
+// its (aligned) slot frame. Positive = content slides DOWN (top crops to white,
+// bottom content pushes past the slot); negative = content slides UP (top clipped).
+//   col 0 (J/P)        : P lower / J more centered, P cut at bottom
+//   col 1 (A/O)        : A cut at top
+//   col 2 (C/T)        : C lower / T cut at bottom
+//   col 3 (K/cherry)   : K cut at top
+const JACKPOT_STRIP_OFFSETS = [20, -15, 15, -22]
 const HOVER_LIFT   = [-2, -3, -2, -4]   // spring-loaded: lift UP on hover
-const PULL_DOWN    = [5, 8, 6, 10]      // lever pull: shift DOWN on mousedown
-
-/**
- * Interaction states:
- *  'idle'     → auto-spinning, no mouse nearby
- *  'hovering' → mouse over, reels stopped, lifted up (spring-loaded)
- *  'pulling'  → mousedown, reels pulled down (lever)
- */
 
 const STYLES = `
 @keyframes slot-scroll {
@@ -104,11 +139,23 @@ const STYLES = `
     30%  { opacity: 1; }
     100% { transform: translate(calc(-50% + var(--sx)), calc(-50% + var(--sy))) scale(1); opacity: 0; }
 }
-@keyframes jackpot-glow {
-    0%   { box-shadow: 0 0 0 0 rgba(139,92,246,0); }
-    20%  { box-shadow: 0 0 30px 8px rgba(139,92,246,0.5), 0 0 60px 16px rgba(192,132,252,0.2); }
-    50%  { box-shadow: 0 0 22px 5px rgba(139,92,246,0.35), 0 0 44px 10px rgba(192,132,252,0.15); }
-    100% { box-shadow: 0 0 0 0 rgba(139,92,246,0); }
+@keyframes cherry-cell-blink {
+    0%, 100% {
+        background: #fff;
+        box-shadow: 0 0 0 0 rgba(${SITE_PRIMARY_RGB}, 0);
+    }
+    25% {
+        background: ${SITE_PRIMARY};
+        box-shadow: 0 0 28px 6px rgba(${SITE_PRIMARY_RGB}, 0.55), 0 0 56px 14px rgba(${SITE_PRIMARY_RGB}, 0.25);
+    }
+    50% {
+        background: #fff;
+        box-shadow: 0 0 22px 5px rgba(${SITE_PRIMARY_RGB}, 0.35);
+    }
+    75% {
+        background: ${SITE_PRIMARY};
+        box-shadow: 0 0 30px 8px rgba(${SITE_PRIMARY_RGB}, 0.55), 0 0 60px 16px rgba(${SITE_PRIMARY_RGB}, 0.25);
+    }
 }
 @keyframes jackpot-bounce {
     0%   { transform: scale(1); }
@@ -120,6 +167,7 @@ const STYLES = `
 }
 @media (prefers-reduced-motion: reduce) {
     .slot-strip { animation: none !important; }
+    .slot-cell  { animation: none !important; }
 }`
 
 export default function SlotMachineLogo({ className = '' }) {
@@ -129,7 +177,6 @@ export default function SlotMachineLogo({ className = '' }) {
     const [cycle, setCycle] = useState(0)
     const [interactive, setInteractive] = useState(false)
     const [mouse, setMouse] = useState('idle')       // idle | hovering | pulling
-    const [preSnap, setPreSnap] = useState(false)
     const [celebrating, setCelebrating] = useState(false)
     const [celebKey, setCelebKey] = useState(0)
     const landed = useRef(0)
@@ -141,15 +188,19 @@ export default function SlotMachineLogo({ className = '' }) {
 
     const mode = spinMode(cycle)
     const isJackpot = mode === 'jackpot'
+    const isCherries = mode === 'cherries'
     const reels = useMemo(() => buildReels(mode), [cycle, mode])
     const dur = cycle === 0 ? FIRST_DUR : FAST_DUR
 
     const particles = useMemo(() => celebrating ? makeParticles() : [], [celebKey])
 
+    // During the intro (cycles 0 → 1 → 2) the reels auto-advance.
+    // After the jackpot-rest pose is reached, only a user "pull" advances the cycle.
+    const isIntro = cycle < 2
+
     useEffect(() => {
         landed.current = 0
         spinning.current = true
-        setPreSnap(isJackpot)
         setCelebrating(false)
         seqTimers.current.forEach(clearTimeout)
         seqTimers.current = []
@@ -182,32 +233,39 @@ export default function SlotMachineLogo({ className = '' }) {
 
     const onReelLand = useCallback(() => {
         landed.current++
-        if (landed.current >= NUM_COLS) {
-            spinning.current = false
-            if (!interactive) setInteractive(true)
+        if (landed.current < NUM_COLS) return
 
-            if (isJackpot) {
-                seqTimers.current.push(
-                    setTimeout(() => setPreSnap(false), PRE_SNAP_HOLD),
-                    setTimeout(() => {
-                        setCelebrating(true)
-                        setCelebKey(k => k + 1)
-                    }, PRE_SNAP_HOLD + SNAP_DUR),
-                    setTimeout(() => setCelebrating(false), PRE_SNAP_HOLD + SNAP_DUR + CELEBRATE_MS),
+        spinning.current = false
+        if (!interactive) setInteractive(true)
+
+        if (isCherries) {
+            // Big success moment: cherries blink purple & fireworks fly out.
+            seqTimers.current.push(
+                setTimeout(() => {
+                    setCelebrating(true)
+                    setCelebKey(k => k + 1)
+                }, SETTLE_MS),
+                setTimeout(() => setCelebrating(false), SETTLE_MS + CELEBRATE_MS),
+            )
+            if (isIntro && !hovering.current) {
+                timer.current = setTimeout(
+                    () => setCycle(c => c + 1),
+                    SETTLE_MS + CELEBRATE_MS + 400,
                 )
-                if (!hovering.current) {
-                    timer.current = setTimeout(
-                        () => setCycle(c => c + 1),
-                        PRE_SNAP_HOLD + SNAP_DUR + CELEBRATE_MS + POST_CELEB,
-                    )
-                }
-            } else {
-                if (!hovering.current) {
-                    timer.current = setTimeout(() => setCycle(c => c + 1), PAUSE)
-                }
             }
+            return
         }
-    }, [interactive, isJackpot])
+
+        if (isJackpot) {
+            // Final resting pose – reels stay aligned (translateY 0) and wait for a user pull.
+            return
+        }
+
+        // 'random' – auto-advance only during intro.
+        if (isIntro && !hovering.current) {
+            timer.current = setTimeout(() => setCycle(c => c + 1), BETWEEN_INTRO)
+        }
+    }, [interactive, isCherries, isJackpot, isIntro])
 
     // --- Interaction handlers ---
 
@@ -222,9 +280,8 @@ export default function SlotMachineLogo({ className = '' }) {
         if (!interactive) return
         hovering.current = false
         setMouse('idle')
-        if (!spinning.current) {
-            timer.current = setTimeout(() => setCycle(c => c + 1), 600)
-        }
+        // Intentionally no auto-respin on leave once the intro has finished.
+        // The user must pull the lever to trigger the next spin.
     }, [interactive])
 
     const onMouseDown = useCallback((e) => {
@@ -241,7 +298,6 @@ export default function SlotMachineLogo({ className = '' }) {
         setCycle(c => c + 1)
     }, [interactive, mouse])
 
-    // Handle mouseup outside the component (user drags out while holding)
     useEffect(() => {
         if (mouse !== 'pulling') return
         const handleGlobalUp = () => {
@@ -262,20 +318,34 @@ export default function SlotMachineLogo({ className = '' }) {
 
     const cellH = reelH / 2
     const symCount = reels[0]?.length ?? DECOY_COUNT + 2
-    const targetY = -((symCount - 2) * cellH)
+    // Jackpot reels have a trailing 'blank' buffer cell, so the winning pair
+    // (wT, wB) sits at indices symCount-3 / symCount-2. Random & cherries center
+    // a single symbol in the viewport with neighbours cropped top & bottom.
+    const isCentered = isCherries || mode === 'random'
+    const baseTargetY = isJackpot
+        ? -((symCount - 3) * cellH)
+        : isCentered
+            ? -((symCount - 2.5) * cellH)
+            : -((symCount - 2) * cellH)
+    // For jackpot rest the slot frames stay aligned, but the strip inside each reel
+    // lands shifted a few px so the J-A-C-K / P-O-T-cherry content is staggered
+    // within the frames — matching the flat JACKPOT logo.
+    const getTargetY = (col) => (isJackpot ? baseTargetY + JACKPOT_STRIP_OFFSETS[col] : baseTargetY)
     const cellW = cellH * (95 / 108.25)
 
     const getReelY = (col) => {
-        if (isJackpot && preSnap) return REEL_OFFSETS[col]
-        if (mouse === 'pulling' && !spinning.current) return PULL_DOWN[col]
+        // Pulling the lever staggers the reels into the logo-style offset pose.
+        if (mouse === 'pulling' && !spinning.current) return REEL_OFFSETS[col]
         if (mouse === 'hovering' && !spinning.current) return HOVER_LIFT[col]
+        // The "incorrect" random result rests with its reels intentionally offset.
+        if (mode === 'random') return REEL_OFFSETS[col]
+        // Cherries success & jackpot final state: perfectly aligned.
         return 0
     }
 
     const getReelTransition = () => {
-        if (preSnap) return 'none'
         if (mouse === 'pulling') return 'transform 120ms ease-out'
-        return `transform ${SNAP_DUR}ms cubic-bezier(0.22, 0, 0, 1.12)`
+        return `transform ${SETTLE_MS}ms cubic-bezier(0.22, 0, 0, 1.12)`
     }
 
     const cursor = interactive
@@ -320,25 +390,28 @@ export default function SlotMachineLogo({ className = '' }) {
                     {reelH > 0 && reels.map((reel, col) => {
                         const delay = (cycle === 0 ? FIRST_WAIT : 0) + col * STAGGER
                         const reelY = getReelY(col)
+                        const tY = getTargetY(col)
 
                         return (
                             <div
                                 key={col}
-                                className="overflow-hidden rounded-lg"
+                                className="slot-cell overflow-hidden rounded-lg"
                                 style={{
                                     width: cellW,
                                     background: '#fff',
                                     transform: `translateY(${reelY}px)`,
                                     transition: getReelTransition(),
-                                    animation: celebrating ? `jackpot-glow ${CELEBRATE_MS}ms ease ${col * 100}ms` : 'none',
+                                    animation: celebrating && isCherries
+                                        ? `cherry-cell-blink ${CELEBRATE_MS}ms ease ${col * 90}ms`
+                                        : 'none',
                                 }}
                             >
                                 <div
                                     key={`s${col}-${cycle}`}
                                     className="slot-strip flex flex-col"
                                     style={{
-                                        '--slot-end': `${targetY}px`,
-                                        transform: `translateY(${targetY}px)`,
+                                        '--slot-end': `${tY}px`,
+                                        transform: `translateY(${tY}px)`,
                                         willChange: 'transform',
                                         animation: `slot-scroll ${dur}ms ${delay}ms both`,
                                         filter: `url(#svb${col})`,
@@ -351,12 +424,14 @@ export default function SlotMachineLogo({ className = '' }) {
                                             className="flex shrink-0 items-center justify-center"
                                             style={{ height: cellH, padding: '10%' }}
                                         >
-                                            <img
-                                                src={SYMBOLS[sym]}
-                                                alt=""
-                                                className="h-full w-full object-contain select-none pointer-events-none invert"
-                                                draggable={false}
-                                            />
+                                            {sym !== 'blank' && (
+                                                <img
+                                                    src={SYMBOLS[sym]}
+                                                    alt=""
+                                                    className="h-full w-full object-contain select-none pointer-events-none invert"
+                                                    draggable={false}
+                                                />
+                                            )}
                                         </div>
                                     ))}
                                 </div>

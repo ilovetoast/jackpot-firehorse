@@ -25,6 +25,8 @@ use App\Services\AssetVariantPathResolver;
 use App\Services\BrandIntelligence\BrandIntelligenceScheduleService;
 use App\Services\BulkMetadataService;
 use App\Services\FileTypeService;
+use App\Services\ThumbnailRetryService;
+use App\Services\ThumbnailTimeoutGuard;
 use App\Support\AssetVariant;
 use App\Support\PipelineQueueResolver;
 use App\Support\Roles\PermissionMap;
@@ -1142,6 +1144,8 @@ class BulkActionService
         $errors = [];
 
         $scheduler = app(BrandIntelligenceScheduleService::class);
+        $thumbnailRetryService = app(ThumbnailRetryService::class);
+        $timeoutGuard = app(ThumbnailTimeoutGuard::class);
 
         foreach ($assets as $asset) {
             if (! Gate::forUser($user)->allows('view', $asset)) {
@@ -1163,6 +1167,12 @@ class BulkActionService
                 $asset->intake_state = 'normal';
                 $asset->builder_staged = false; // Clear builder_staged when classifying
                 $asset->save();
+
+                // Auto-recover: when a user classifies an asset into a real category, it's
+                // their way of saying "I care about this file". If it's stuck without a
+                // usable thumbnail, kick the thumbnail pipeline so the new category view
+                // doesn't render a placeholder. Safe for all categories; cheap if already ok.
+                $this->autoRetryStuckThumbnailOnClassification($asset->fresh(), $thumbnailRetryService, $timeoutGuard);
 
                 // Brand Intelligence: existing scores are asset-wide, not category-aware.
                 // When the classification moves the asset into a meaningfully different context,
@@ -1201,6 +1211,62 @@ class BulkActionService
             errors: $errors,
             perActionSummary: []
         );
+    }
+
+    /**
+     * If the asset is clearly stuck (no thumbnail, FAILED/PENDING, or PROCESSING past worker timeout),
+     * nudge the thumbnail pipeline so the user sees a real preview in the destination category.
+     * No-op when thumbnails are already healthy, retries are exhausted, or the file type cannot
+     * produce a thumbnail.
+     */
+    protected function autoRetryStuckThumbnailOnClassification(
+        Asset $asset,
+        ThumbnailRetryService $retryService,
+        ThumbnailTimeoutGuard $timeoutGuard
+    ): void {
+        try {
+            $thumbStatus = $asset->thumbnail_status;
+
+            // If it's been PROCESSING for longer than the worker would ever run, flip to FAILED
+            // so the retry path is legal, then retry.
+            if ($thumbStatus instanceof \App\Enums\ThumbnailStatus
+                && $thumbStatus === \App\Enums\ThumbnailStatus::PROCESSING
+                && $timeoutGuard->isStuck($asset)
+            ) {
+                $timeoutGuard->checkAndRepair($asset);
+                $asset->refresh();
+                $thumbStatus = $asset->thumbnail_status;
+            }
+
+            $needsRetry = $thumbStatus instanceof \App\Enums\ThumbnailStatus && in_array(
+                $thumbStatus,
+                [\App\Enums\ThumbnailStatus::FAILED, \App\Enums\ThumbnailStatus::PENDING],
+                true
+            );
+
+            if (! $needsRetry) {
+                return;
+            }
+
+            $result = $retryService->dispatchRetry($asset, 0);
+            if (! ($result['success'] ?? false)) {
+                Log::info('[BulkActionService] Classification auto-retry skipped', [
+                    'asset_id' => $asset->id,
+                    'reason' => $result['error'] ?? 'unknown',
+                ]);
+                return;
+            }
+            Log::info('[BulkActionService] Classification auto-retry dispatched', [
+                'asset_id' => $asset->id,
+                'job_id' => $result['job_id'] ?? null,
+                'thumbnail_retry_count' => $asset->fresh()->thumbnail_retry_count,
+            ]);
+        } catch (\Throwable $e) {
+            Log::warning('[BulkActionService] Classification auto-retry failed', [
+                'asset_id' => $asset->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 
     protected function executeMetadataBulk(array $assetIds, AssetBulkAction $action, array $metadata, User $user, int $tenantId, ?int $brandId): BulkActionResult

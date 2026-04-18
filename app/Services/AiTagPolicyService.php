@@ -104,7 +104,20 @@ class AiTagPolicyService
             ];
         }
 
-        // Master toggle check (hard stop)
+        // Tenant-wide master AI kill switch. Historically `ai_enabled === false` only
+        // blocked AiUsageService::checkUsage (credit guard), which meant tenants who
+        // disabled "AI features" could still generate AI tags. Tighten the gate here
+        // so the master truly is a hard kill switch for AI tagging.
+        $tenantSettings = $tenant->settings ?? [];
+        if (($tenantSettings['ai_enabled'] ?? true) === false) {
+            return [
+                'should_proceed' => false,
+                'reason' => 'ai_features_disabled',
+            ];
+        }
+
+        // Feature-specific toggle (stored in tenant_ai_tag_settings, separate from
+        // tenant.settings JSON). Kept for backwards compatibility.
         if (!$this->isAiTaggingEnabled($tenant)) {
             return [
                 'should_proceed' => false,
@@ -286,7 +299,11 @@ class AiTagPolicyService
 
             return [
                 'disable_ai_tagging' => (bool) $settings->disable_ai_tagging,
-                'enable_ai_tag_suggestions' => (bool) $settings->enable_ai_tag_suggestions,
+                // Force-on: the user-facing "Show tag suggestions on assets" toggle was
+                // removed (product direction), so we uniformly treat this as true at
+                // read time — even for tenants who previously stored `false`. Avoids a
+                // migration while ensuring the UI that relies on this flag renders.
+                'enable_ai_tag_suggestions' => true,
                 'enable_ai_tag_auto_apply' => (bool) $settings->enable_ai_tag_auto_apply,
                 'ai_auto_tag_limit_mode' => $settings->ai_auto_tag_limit_mode,
                 'ai_auto_tag_limit_value' => $settings->ai_auto_tag_limit_value,

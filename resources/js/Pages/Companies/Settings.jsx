@@ -1,6 +1,6 @@
 import { Link, useForm, usePage, router } from '@inertiajs/react'
 import AppHead from '../../Components/AppHead'
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import AppNav from '../../Components/AppNav'
 import AppFooter from '../../Components/AppFooter'
 import CompanyTabs from '../../Components/Company/CompanyTabs'
@@ -8,7 +8,10 @@ import ConfirmDialog from '../../Components/ConfirmDialog'
 import AiTaggingSettings from '../../Components/Companies/AiTaggingSettings'
 import AiUsagePanel from '../../Components/Companies/AiUsagePanel'
 import TagQuality from '../../Components/Companies/TagQuality'
+import BrandedAiCard from '../../Components/Companies/BrandedAiCard'
 import { usePermission } from '../../hooks/usePermission'
+import { ensureAccentContrastOnWhite } from '../../utils/colorUtils'
+import { SparklesIcon, ShieldCheckIcon } from '@heroicons/react/24/outline'
 import { debounce } from 'lodash-es'
 
 const DEFAULT_DOWNLOAD_POLICY = {
@@ -66,6 +69,15 @@ export default function CompanySettings({
     const [generativeSaved, setGenerativeSaved] = useState(false)
     const [aiEnabledSaving, setAiEnabledSaving] = useState(false)
     const [aiEnabledSaved, setAiEnabledSaved] = useState(false)
+    const [brandAlignmentSaving, setBrandAlignmentSaving] = useState(false)
+    const [brandAlignmentSaved, setBrandAlignmentSaved] = useState(false)
+
+    // Brand primary color for branded card treatments (Brand Alignment uses tenant's
+    // actual color; Studio keeps the violet treatment). `brandPrimaryOnWhite` is the
+    // WCAG-AA safe variant for text/icon usage on white surfaces — pale brand colors
+    // get darkened to remain readable.
+    const brandPrimary = auth?.activeBrand?.primary_color || '#6366f1'
+    const brandPrimaryOnWhite = useMemo(() => ensureAccentContrastOnWhite(brandPrimary), [brandPrimary])
 
     const csrf = () => document.querySelector('meta[name="csrf-token"]')?.content || ''
 
@@ -211,6 +223,7 @@ export default function CompanySettings({
             require_landing_page: tenant.settings?.require_landing_page ?? false,
             generative_enabled: tenant.settings?.generative_enabled ?? true,
             ai_enabled: tenant.settings?.ai_enabled ?? true,
+            brand_alignment_enabled: tenant.settings?.brand_alignment_enabled ?? true,
         },
     })
 
@@ -467,9 +480,11 @@ export default function CompanySettings({
             label: 'AI',
             items: [
                 { id: 'ai-settings', label: 'AI Settings', canAccess: canManageAiSettings },
-                ...(canManageGenerative ? [{ id: 'generative-settings', label: 'Generative', canAccess: true }] : []),
-                { id: 'tag-quality', label: 'Tag Quality', canAccess: canViewTagQuality },
-                { id: 'ai-usage', label: 'AI Usage', canAccess: canViewAiUsage },
+                // "Generative" renamed to "Studio" to match the product nav; underlying settings key
+                // (`generative_enabled`) and route/middleware identifiers are intentionally NOT renamed.
+                ...(canManageGenerative ? [{ id: 'generative-settings', label: 'Studio', canAccess: true }] : []),
+                { id: 'tag-quality', label: 'Insights', canAccess: canViewTagQuality },
+                { id: 'ai-usage', label: 'Usage', canAccess: canViewAiUsage },
             ],
         },
         {
@@ -1424,22 +1439,323 @@ export default function CompanySettings({
                         </div>
                     )}
 
-                    {/* AI Settings */}
+                    {/* AI Settings — top-of-section anchor for the AI side-nav. Houses the master
+                        AI switch (tenant-wide kill) and the branded sub-feature cards (Studio,
+                        Brand Alignment). Ordering is: master switch FIRST, then branded feature
+                        cards that visually cascade to disabled when the master is off, then the
+                        AI Tag / Asset Field Intelligence settings block. */}
                     <div id="ai-settings" className="mb-12 scroll-mt-8">
                         {canManageAiSettings ? (
-                            <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
-                                <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-                                    <div className="lg:col-span-1 px-6 py-6 border-b lg:border-b-0 lg:border-r border-gray-200">
-                                        <h2 className="text-lg font-semibold text-gray-900">AI Settings</h2>
-                                        <p className="mt-1 text-sm text-gray-500">
-                                            Control AI for tags and structured asset fields.
-                                        </p>
+                            <div className="space-y-6">
+                                {/* Master: AI Features kill switch (parent of all sub-toggles). */}
+                                <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
+                                    <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+                                        <div className="lg:col-span-1 px-6 py-6 border-b lg:border-b-0 lg:border-r border-gray-200">
+                                            <h2 className="text-lg font-semibold text-gray-900">AI Features</h2>
+                                            <p className="mt-1 text-sm text-gray-500">
+                                                Master switch for every AI feature in this workspace. When off, no AI
+                                                API calls are made, no credits are consumed, and every sub-feature below
+                                                (Studio, Brand Alignment, AI tag suggestions, Asset Field Intelligence)
+                                                is disabled for all users. Existing AI-generated content is preserved.
+                                            </p>
+                                        </div>
+                                        <div className="lg:col-span-2 px-6 py-6">
+                                            <div className="flex items-center justify-between">
+                                                <div className="flex-1">
+                                                    <label htmlFor="ai_enabled" className="block text-sm font-medium leading-6 text-gray-900">
+                                                        Enable AI features
+                                                    </label>
+                                                    <p className="mt-1 text-sm text-gray-500">
+                                                        Turning this off is a hard kill switch — every AI pipeline below
+                                                        is blocked until it is re-enabled.
+                                                    </p>
+                                                </div>
+                                                <div className="ml-4 flex items-center gap-2">
+                                                    {aiEnabledSaving && (
+                                                        <span className="text-xs text-gray-400">Saving…</span>
+                                                    )}
+                                                    {aiEnabledSaved && !aiEnabledSaving && (
+                                                        <span className="text-xs text-green-600 transition-opacity duration-300">Saved</span>
+                                                    )}
+                                                    <button
+                                                        type="button"
+                                                        disabled={aiEnabledSaving}
+                                                        onClick={() => {
+                                                            const nextVal = !data.settings?.ai_enabled
+                                                            const nextSettings = { ...data.settings, ai_enabled: nextVal }
+                                                            setData('settings', nextSettings)
+                                                            setAiEnabledSaving(true)
+                                                            setAiEnabledSaved(false)
+                                                            router.put('/app/companies/settings', {
+                                                                name: data.name,
+                                                                slug: data.slug,
+                                                                timezone: data.timezone,
+                                                                settings: nextSettings,
+                                                            }, {
+                                                                preserveScroll: true,
+                                                                onSuccess: () => {
+                                                                    setAiEnabledSaving(false)
+                                                                    setAiEnabledSaved(true)
+                                                                    setTimeout(() => setAiEnabledSaved(false), 2500)
+                                                                },
+                                                                onError: () => {
+                                                                    setAiEnabledSaving(false)
+                                                                    setData('settings', { ...nextSettings, ai_enabled: !nextVal })
+                                                                },
+                                                            })
+                                                        }}
+                                                        className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:ring-offset-2 disabled:opacity-50 ${
+                                                            data.settings?.ai_enabled !== false ? 'bg-indigo-600' : 'bg-gray-200'
+                                                        }`}
+                                                        role="switch"
+                                                        aria-checked={data.settings?.ai_enabled !== false}
+                                                    >
+                                                        <span
+                                                            className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                                                                data.settings?.ai_enabled !== false ? 'translate-x-5' : 'translate-x-0'
+                                                            }`}
+                                                        />
+                                                    </button>
+                                                </div>
+                                            </div>
+                                            {data.settings?.ai_enabled === false && (
+                                                <div className="mt-4 rounded-md bg-amber-50 p-3">
+                                                    <p className="text-sm text-amber-800">
+                                                        <strong>AI features are disabled.</strong> All sub-features below
+                                                        are blocked — Studio, Brand Alignment, AI tag suggestions, and
+                                                        Asset Field Intelligence will not run. Existing content is kept.
+                                                    </p>
+                                                </div>
+                                            )}
+                                        </div>
                                     </div>
-                                    <div className="lg:col-span-2 px-6 py-6">
-                                        <AiTaggingSettings 
-                                            canEdit={canManageAiSettings} 
-                                            currentPlan={billing?.current_plan}
-                                        />
+                                </div>
+
+                                {/* AI sub-feature cards — visually cascade to disabled when the master is off.
+                                    `aria-disabled` is set on the wrapper; `opacity-50 pointer-events-none` on
+                                    the inner stack matches the pattern in AiTaggingSettings.jsx (line 352). */}
+                                <div
+                                    aria-disabled={data.settings?.ai_enabled === false || undefined}
+                                    className={`space-y-6 transition-opacity ${
+                                        data.settings?.ai_enabled === false ? 'opacity-60' : ''
+                                    }`}
+                                >
+                                    {/* Studio (formerly "Generative") — branded card. `generative_enabled`
+                                        key is intentionally preserved to avoid a migration / middleware
+                                        rename. Only the user-facing label changes. */}
+                                    {canManageGenerative && (
+                                        <div id="generative-settings" className="scroll-mt-8">
+                                            <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
+                                                <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+                                                    <div className="lg:col-span-1 px-6 py-6 border-b lg:border-b-0 lg:border-r border-gray-200">
+                                                        <h2 className="text-lg font-semibold text-gray-900">Studio</h2>
+                                                        <p className="mt-1 text-sm text-gray-500">
+                                                            Control access to the Studio (generative) editor for your
+                                                            entire company. When disabled, the Studio tab is hidden for
+                                                            all users across all brands in this workspace.
+                                                        </p>
+                                                    </div>
+                                                    <div className="lg:col-span-2 px-6 py-6">
+                                                        <BrandedAiCard
+                                                            variant="violet"
+                                                            badgeLabel="Studio"
+                                                            title="Generative editor"
+                                                            description="Team members can create AI-generated images, copy, and compositions from the Studio tab. Turning this off removes the Studio tab from the navigation for everyone in this company."
+                                                            icon={SparklesIcon}
+                                                            cascadedOff={data.settings?.ai_enabled === false}
+                                                        >
+                                                            <div className="flex items-center justify-between rounded-lg border border-violet-200 bg-white p-3 shadow-sm">
+                                                                <div className="flex-1 pr-4">
+                                                                    <label htmlFor="generative_enabled" className="block text-sm font-medium text-gray-900">
+                                                                        Enable Studio
+                                                                    </label>
+                                                                    <p className="mt-0.5 text-xs text-gray-500">
+                                                                        Controls the Studio tab visibility and generative API access.
+                                                                    </p>
+                                                                </div>
+                                                                <div className="ml-4 flex items-center gap-2">
+                                                                    {generativeSaving && (
+                                                                        <span className="text-xs text-gray-400">Saving…</span>
+                                                                    )}
+                                                                    {generativeSaved && !generativeSaving && (
+                                                                        <span className="text-xs text-green-600 transition-opacity duration-300">Saved</span>
+                                                                    )}
+                                                                    <button
+                                                                        type="button"
+                                                                        disabled={generativeSaving}
+                                                                        onClick={() => {
+                                                                            const nextVal = !data.settings?.generative_enabled
+                                                                            const nextSettings = { ...data.settings, generative_enabled: nextVal }
+                                                                            setData('settings', nextSettings)
+                                                                            setGenerativeSaving(true)
+                                                                            setGenerativeSaved(false)
+                                                                            router.put('/app/companies/settings', {
+                                                                                name: data.name,
+                                                                                slug: data.slug,
+                                                                                timezone: data.timezone,
+                                                                                settings: nextSettings,
+                                                                            }, {
+                                                                                preserveScroll: true,
+                                                                                onSuccess: () => {
+                                                                                    setGenerativeSaving(false)
+                                                                                    setGenerativeSaved(true)
+                                                                                    setTimeout(() => setGenerativeSaved(false), 2500)
+                                                                                },
+                                                                                onError: () => {
+                                                                                    setGenerativeSaving(false)
+                                                                                    setData('settings', { ...nextSettings, generative_enabled: !nextVal })
+                                                                                },
+                                                                            })
+                                                                        }}
+                                                                        className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-violet-600 focus:ring-offset-2 disabled:opacity-50 ${
+                                                                            data.settings?.generative_enabled ? 'bg-violet-600' : 'bg-gray-200'
+                                                                        }`}
+                                                                        role="switch"
+                                                                        aria-checked={!!data.settings?.generative_enabled}
+                                                                    >
+                                                                        <span
+                                                                            className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                                                                                data.settings?.generative_enabled ? 'translate-x-5' : 'translate-x-0'
+                                                                            }`}
+                                                                        />
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+                                                            {!data.settings?.generative_enabled && (
+                                                                <div className="mt-3 rounded-md bg-amber-50 p-2.5">
+                                                                    <p className="text-xs text-amber-800">
+                                                                        Studio is hidden for all users in this company until re-enabled.
+                                                                    </p>
+                                                                </div>
+                                                            )}
+                                                        </BrandedAiCard>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* Brand Alignment — NEW tenant-wide kill switch. Gated on the same
+                                        `manage_ai_settings` permission agency admins already have. When off,
+                                        the drawer widget hides, the scoring job early-returns, and controller
+                                        actions return 409 so the widget (if somehow rendered) degrades cleanly. */}
+                                    <div id="brand-alignment-settings" className="scroll-mt-8">
+                                        <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
+                                            <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+                                                <div className="lg:col-span-1 px-6 py-6 border-b lg:border-b-0 lg:border-r border-gray-200">
+                                                    <h2 className="text-lg font-semibold text-gray-900">Brand Alignment</h2>
+                                                    <p className="mt-1 text-sm text-gray-500">
+                                                        Control the per-asset Brand Alignment widget for your entire
+                                                        company. When off, scores stop being computed and the widget is
+                                                        hidden from every asset drawer. Existing scores are kept.
+                                                    </p>
+                                                </div>
+                                                <div className="lg:col-span-2 px-6 py-6">
+                                                    <BrandedAiCard
+                                                        variant="brand"
+                                                        brandPrimary={brandPrimary}
+                                                        brandPrimaryOnWhite={brandPrimaryOnWhite}
+                                                        badgeLabel="Brand"
+                                                        title="Asset brand alignment"
+                                                        description="Measures each asset's alignment with your brand identity (colors, imagery, voice). Used to surface off-brand assets in search and review flows."
+                                                        icon={ShieldCheckIcon}
+                                                        cascadedOff={data.settings?.ai_enabled === false}
+                                                    >
+                                                        <div
+                                                            className="flex items-center justify-between rounded-lg border bg-white p-3 shadow-sm"
+                                                            style={{ borderColor: brandPrimaryOnWhite + '55' }}
+                                                        >
+                                                            <div className="flex-1 pr-4">
+                                                                <label htmlFor="brand_alignment_enabled" className="block text-sm font-medium text-gray-900">
+                                                                    Enable Brand Alignment
+                                                                </label>
+                                                                <p className="mt-0.5 text-xs text-gray-500">
+                                                                    Score new and edited assets for brand alignment.
+                                                                </p>
+                                                            </div>
+                                                            <div className="ml-4 flex items-center gap-2">
+                                                                {brandAlignmentSaving && (
+                                                                    <span className="text-xs text-gray-400">Saving…</span>
+                                                                )}
+                                                                {brandAlignmentSaved && !brandAlignmentSaving && (
+                                                                    <span className="text-xs text-green-600 transition-opacity duration-300">Saved</span>
+                                                                )}
+                                                                <button
+                                                                    type="button"
+                                                                    disabled={brandAlignmentSaving}
+                                                                    onClick={() => {
+                                                                        const nextVal = !(data.settings?.brand_alignment_enabled !== false)
+                                                                        const nextSettings = { ...data.settings, brand_alignment_enabled: nextVal }
+                                                                        setData('settings', nextSettings)
+                                                                        setBrandAlignmentSaving(true)
+                                                                        setBrandAlignmentSaved(false)
+                                                                        router.put('/app/companies/settings', {
+                                                                            name: data.name,
+                                                                            slug: data.slug,
+                                                                            timezone: data.timezone,
+                                                                            settings: nextSettings,
+                                                                        }, {
+                                                                            preserveScroll: true,
+                                                                            onSuccess: () => {
+                                                                                setBrandAlignmentSaving(false)
+                                                                                setBrandAlignmentSaved(true)
+                                                                                setTimeout(() => setBrandAlignmentSaved(false), 2500)
+                                                                            },
+                                                                            onError: () => {
+                                                                                setBrandAlignmentSaving(false)
+                                                                                setData('settings', { ...nextSettings, brand_alignment_enabled: !nextVal })
+                                                                            },
+                                                                        })
+                                                                    }}
+                                                                    className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 ${
+                                                                        data.settings?.brand_alignment_enabled !== false ? '' : 'bg-gray-200'
+                                                                    }`}
+                                                                    style={
+                                                                        data.settings?.brand_alignment_enabled !== false
+                                                                            ? { backgroundColor: brandPrimaryOnWhite }
+                                                                            : undefined
+                                                                    }
+                                                                    role="switch"
+                                                                    aria-checked={data.settings?.brand_alignment_enabled !== false}
+                                                                >
+                                                                    <span
+                                                                        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                                                                            data.settings?.brand_alignment_enabled !== false ? 'translate-x-5' : 'translate-x-0'
+                                                                        }`}
+                                                                    />
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                        {data.settings?.brand_alignment_enabled === false && (
+                                                            <div className="mt-3 rounded-md bg-amber-50 p-2.5">
+                                                                <p className="text-xs text-amber-800">
+                                                                    Brand Alignment is disabled — no new scores will be computed and the widget is hidden in asset drawers.
+                                                                </p>
+                                                            </div>
+                                                        )}
+                                                    </BrandedAiCard>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* AI Tag Suggestions + Asset Field Intelligence (the AiTaggingSettings
+                                        component already owns the branded treatment for "Asset fields"). */}
+                                    <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
+                                        <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+                                            <div className="lg:col-span-1 px-6 py-6 border-b lg:border-b-0 lg:border-r border-gray-200">
+                                                <h2 className="text-lg font-semibold text-gray-900">Tags &amp; Asset Fields</h2>
+                                                <p className="mt-1 text-sm text-gray-500">
+                                                    Control AI for tag suggestions and structured asset fields.
+                                                </p>
+                                            </div>
+                                            <div className="lg:col-span-2 px-6 py-6">
+                                                <AiTaggingSettings
+                                                    canEdit={canManageAiSettings}
+                                                    currentPlan={billing?.current_plan}
+                                                />
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -1470,179 +1786,15 @@ export default function CompanySettings({
                         )}
                     </div>
 
-                    {/* AI Features Toggle */}
-                    {canManageAiSettings && (
-                        <div id="ai-features-settings" className="mb-12 scroll-mt-8">
-                            <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
-                                <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-                                    <div className="lg:col-span-1 px-6 py-6 border-b lg:border-b-0 lg:border-r border-gray-200">
-                                        <h2 className="text-lg font-semibold text-gray-900">AI Features</h2>
-                                        <p className="mt-1 text-sm text-gray-500">
-                                            Master switch for all AI-powered features across your workspace. When disabled, AI image generation, copy assist, layout generation, and all other AI operations are turned off for every user. Existing content is preserved.
-                                        </p>
-                                    </div>
-                                    <div className="lg:col-span-2 px-6 py-6">
-                                        <div className="flex items-center justify-between">
-                                            <div className="flex-1">
-                                                <label htmlFor="ai_enabled" className="block text-sm font-medium leading-6 text-gray-900">
-                                                    Enable AI features
-                                                </label>
-                                                <p className="mt-1 text-sm text-gray-500">
-                                                    Controls AI image generation, copy assist, layout generation, smart tagging, and all other AI-powered operations. Disabling this prevents any AI API calls and credit usage for this workspace.
-                                                </p>
-                                            </div>
-                                            <div className="ml-4 flex items-center gap-2">
-                                                {aiEnabledSaving && (
-                                                    <span className="text-xs text-gray-400">Saving…</span>
-                                                )}
-                                                {aiEnabledSaved && !aiEnabledSaving && (
-                                                    <span className="text-xs text-green-600 transition-opacity duration-300">Saved</span>
-                                                )}
-                                                <button
-                                                    type="button"
-                                                    disabled={aiEnabledSaving}
-                                                    onClick={() => {
-                                                        const nextVal = !data.settings?.ai_enabled
-                                                        const nextSettings = { ...data.settings, ai_enabled: nextVal }
-                                                        setData('settings', nextSettings)
-                                                        setAiEnabledSaving(true)
-                                                        setAiEnabledSaved(false)
-                                                        router.put('/app/companies/settings', {
-                                                            name: data.name,
-                                                            slug: data.slug,
-                                                            timezone: data.timezone,
-                                                            settings: nextSettings,
-                                                        }, {
-                                                            preserveScroll: true,
-                                                            onSuccess: () => {
-                                                                setAiEnabledSaving(false)
-                                                                setAiEnabledSaved(true)
-                                                                setTimeout(() => setAiEnabledSaved(false), 2500)
-                                                            },
-                                                            onError: () => {
-                                                                setAiEnabledSaving(false)
-                                                                setData('settings', { ...nextSettings, ai_enabled: !nextVal })
-                                                            },
-                                                        })
-                                                    }}
-                                                    className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:ring-offset-2 disabled:opacity-50 ${
-                                                        data.settings?.ai_enabled !== false ? 'bg-indigo-600' : 'bg-gray-200'
-                                                    }`}
-                                                    role="switch"
-                                                    aria-checked={data.settings?.ai_enabled !== false}
-                                                >
-                                                    <span
-                                                        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                                                            data.settings?.ai_enabled !== false ? 'translate-x-5' : 'translate-x-0'
-                                                        }`}
-                                                    />
-                                                </button>
-                                            </div>
-                                        </div>
-                                        {data.settings?.ai_enabled === false && (
-                                            <div className="mt-4 rounded-md bg-amber-50 p-3">
-                                                <p className="text-sm text-amber-800">
-                                                    <strong>AI features are disabled.</strong> No AI API calls will be made and no credits will be consumed. AI-powered buttons and features will appear disabled for all users in this workspace. Existing AI-generated content is not affected.
-                                                </p>
-                                            </div>
-                                        )}
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    )}
-
-                    {/* Generative Settings */}
-                    {canManageGenerative && (
-                        <div id="generative-settings" className="mb-12 scroll-mt-8">
-                            <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
-                                <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-                                    <div className="lg:col-span-1 px-6 py-6 border-b lg:border-b-0 lg:border-r border-gray-200">
-                                        <h2 className="text-lg font-semibold text-gray-900">Generative</h2>
-                                        <p className="mt-1 text-sm text-gray-500">
-                                            Control access to the generative editor for your entire company. When disabled, the Generative tab is hidden for all users across all brands in this workspace.
-                                        </p>
-                                    </div>
-                                    <div className="lg:col-span-2 px-6 py-6">
-                                        <div className="flex items-center justify-between">
-                                            <div className="flex-1">
-                                                <label htmlFor="generative_enabled" className="block text-sm font-medium leading-6 text-gray-900">
-                                                    Enable generative editor
-                                                </label>
-                                                <p className="mt-1 text-sm text-gray-500">
-                                                    When enabled, team members can access the Generative tab to create AI-generated images, copy, and compositions. Turning this off removes the Generative tab from the navigation for everyone in this company.
-                                                </p>
-                                            </div>
-                                            <div className="ml-4 flex items-center gap-2">
-                                                {generativeSaving && (
-                                                    <span className="text-xs text-gray-400">Saving…</span>
-                                                )}
-                                                {generativeSaved && !generativeSaving && (
-                                                    <span className="text-xs text-green-600 transition-opacity duration-300">Saved</span>
-                                                )}
-                                                <button
-                                                    type="button"
-                                                    disabled={generativeSaving}
-                                                    onClick={() => {
-                                                        const nextVal = !data.settings?.generative_enabled
-                                                        const nextSettings = { ...data.settings, generative_enabled: nextVal }
-                                                        setData('settings', nextSettings)
-                                                        setGenerativeSaving(true)
-                                                        setGenerativeSaved(false)
-                                                        router.put('/app/companies/settings', {
-                                                            name: data.name,
-                                                            slug: data.slug,
-                                                            timezone: data.timezone,
-                                                            settings: nextSettings,
-                                                        }, {
-                                                            preserveScroll: true,
-                                                            onSuccess: () => {
-                                                                setGenerativeSaving(false)
-                                                                setGenerativeSaved(true)
-                                                                setTimeout(() => setGenerativeSaved(false), 2500)
-                                                            },
-                                                            onError: () => {
-                                                                setGenerativeSaving(false)
-                                                                setData('settings', { ...nextSettings, generative_enabled: !nextVal })
-                                                            },
-                                                        })
-                                                    }}
-                                                    className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:ring-offset-2 disabled:opacity-50 ${
-                                                        data.settings?.generative_enabled ? 'bg-indigo-600' : 'bg-gray-200'
-                                                    }`}
-                                                    role="switch"
-                                                    aria-checked={data.settings?.generative_enabled}
-                                                >
-                                                    <span
-                                                        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                                                            data.settings?.generative_enabled ? 'translate-x-5' : 'translate-x-0'
-                                                        }`}
-                                                    />
-                                                </button>
-                                            </div>
-                                        </div>
-                                        {!data.settings?.generative_enabled && (
-                                            <div className="mt-4 rounded-md bg-amber-50 p-3">
-                                                <p className="text-sm text-amber-800">
-                                                    The Generative tab is currently hidden for all users in this company. No one can access the generative editor until this is re-enabled.
-                                                </p>
-                                            </div>
-                                        )}
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    )}
-
-                    {/* Tag Quality */}
+                    {/* Insights (formerly Tag Quality) — side-nav label under AI */}
                     <div id="tag-quality" className="mb-12 scroll-mt-8">
                         {canViewTagQuality ? (
                             <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
                                 <div className="px-6 py-6">
                                     <div className="mb-4">
-                                        <h2 className="text-lg font-semibold text-gray-900">Tag Quality & Trust Metrics</h2>
+                                        <h2 className="text-lg font-semibold text-gray-900">Insights</h2>
                                         <p className="mt-1 text-sm text-gray-500">
-                                            Understand how AI-generated tags perform and identify areas for improvement
+                                            Tag quality and trust metrics — how AI-generated tags perform across your workspace.
                                         </p>
                                     </div>
                                     <TagQuality canView={canViewTagQuality} />
@@ -1653,8 +1805,8 @@ export default function CompanySettings({
                                 <div className="relative">
                                     <div className="blur-sm select-none pointer-events-none">
                                         <div className="px-6 py-6">
-                                            <h2 className="text-lg font-semibold text-gray-900">Tag Quality & Trust Metrics</h2>
-                                            <p className="mt-1 text-sm text-gray-500">Understand how AI-generated tags perform and identify areas for improvement</p>
+                                            <h2 className="text-lg font-semibold text-gray-900">Insights</h2>
+                                            <p className="mt-1 text-sm text-gray-500">Tag quality and trust metrics — how AI-generated tags perform across your workspace.</p>
                                             <div className="mt-4 h-24 bg-gray-100 rounded" />
                                         </div>
                                     </div>
@@ -1669,14 +1821,14 @@ export default function CompanySettings({
                         )}
                     </div>
 
-                    {/* AI Usage */}
+                    {/* Usage (formerly AI Usage) — side-nav label under AI */}
                     {canViewAiUsage && (
                         <div id="ai-usage" className="mb-12 scroll-mt-8">
                             <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
                                 <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
                                     <div className="lg:col-span-1 px-6 py-6 border-b lg:border-b-0 lg:border-r border-gray-200">
-                                        <h2 className="text-lg font-semibold text-gray-900">AI Usage</h2>
-                                        <p className="mt-1 text-sm text-gray-500">View current month's AI feature usage and caps</p>
+                                        <h2 className="text-lg font-semibold text-gray-900">Usage</h2>
+                                        <p className="mt-1 text-sm text-gray-500">View current month's AI feature usage and caps.</p>
                                     </div>
                                     <div className="lg:col-span-2 px-6 py-6">
                                         <AiUsagePanel canView={canViewAiUsage} />
