@@ -157,7 +157,10 @@ final class BrandLogoVariantAutomationService
         if ($bytes === null || $bytes === '') {
             $mime = strtolower((string) ($logoAsset->mime_type ?? ''));
             if (str_contains($mime, 'svg')) {
-                $out['errors'][] = 'Could not load a raster thumbnail for this SVG. Wait until processing finishes (thumbnail ready), then try again.';
+                // rsvg-convert path failed AND the processed thumbnail wasn't usable. This is
+                // very rare -- usually rsvg-convert handles any valid SVG. Likely a malformed
+                // SVG, disabled exec(), or missing rsvg binary on the host.
+                $out['errors'][] = 'Could not read this SVG. Try re-uploading the logo, or upload a PNG/JPG version.';
             } else {
                 $out['errors'][] = 'Could not load the primary logo file. Try re-uploading the logo.';
             }
@@ -258,12 +261,21 @@ final class BrandLogoVariantAutomationService
     }
 
     /**
-     * Raster originals: S3 original. SVG (and other non-raster): large/medium/thumb derivative (same as grid).
+     * Raster originals: S3 original. SVG: rasterize the original via rsvg-convert on demand
+     * (decouples variant generation from the processed-thumbnail pipeline, which can sit in
+     * `pending` indefinitely for SVGs in some tenants). Falls back to the processed
+     * thumbnail when rsvg-convert isn't available or fails. Other non-raster types use the
+     * existing thumbnail path.
      */
     private function resolveLogoSourceBytes(Asset $asset): ?string
     {
         $mime = strtolower((string) ($asset->mime_type ?? ''));
         if (str_contains($mime, 'svg')) {
+            $rasterized = $this->rasterizeSvgOriginal($asset);
+            if ($rasterized !== null && $rasterized !== '') {
+                return $rasterized;
+            }
+
             return $this->downloadThumbnailBytesForLogoVariants($asset);
         }
         if ($this->isRasterMime($mime)) {
@@ -271,6 +283,74 @@ final class BrandLogoVariantAutomationService
         }
 
         return $this->downloadThumbnailBytesForLogoVariants($asset);
+    }
+
+    /**
+     * Download the original SVG bytes and rasterize them to PNG via rsvg-convert.
+     *
+     * This is the fast path for SVG logo variants: it doesn't require the processed
+     * thumbnail to be ready, so users can generate on-dark / primary-color variants
+     * immediately after upload. The resulting PNG is then fed through the same
+     * {@see LogoVariantRasterProcessor} pipeline as raster originals.
+     *
+     * Returns null when: rsvg-convert isn't on PATH, the SVG can't be downloaded,
+     * exec() is disabled, or rsvg-convert exits non-zero.
+     */
+    private function rasterizeSvgOriginal(Asset $asset, int $targetWidth = 1024): ?string
+    {
+        if (! function_exists('exec') || ! function_exists('escapeshellarg')) {
+            return null;
+        }
+        $exists = @exec('command -v rsvg-convert 2>/dev/null');
+        if (! is_string($exists) || trim($exists) === '') {
+            return null;
+        }
+
+        $svgBytes = $this->downloadOriginalBytes($asset);
+        if ($svgBytes === null || $svgBytes === '') {
+            return null;
+        }
+
+        if (! preg_match('/<\s*(svg|\?xml)/i', substr($svgBytes, 0, 1024))) {
+            return null;
+        }
+
+        $tmpDir = sys_get_temp_dir();
+        $stem = $tmpDir.'/logo-variant-'.bin2hex(random_bytes(6));
+        $svgPath = $stem.'.svg';
+        $pngPath = $stem.'.png';
+
+        try {
+            if (@file_put_contents($svgPath, $svgBytes) === false) {
+                return null;
+            }
+
+            $command = sprintf(
+                'rsvg-convert -w %d %s -o %s 2>&1',
+                max(64, min(8192, $targetWidth)),
+                escapeshellarg($svgPath),
+                escapeshellarg($pngPath)
+            );
+            $out = [];
+            $exit = 1;
+            @exec($command, $out, $exit);
+            if ($exit !== 0 || ! is_file($pngPath)) {
+                Log::channel('pipeline')->warning('[BrandLogoVariantAutomation] rsvg-convert failed for SVG logo', [
+                    'asset_id' => $asset->id,
+                    'exit_code' => $exit,
+                    'stderr' => implode("\n", $out),
+                ]);
+
+                return null;
+            }
+
+            $png = @file_get_contents($pngPath);
+
+            return $png !== false && $png !== '' ? $png : null;
+        } finally {
+            @unlink($svgPath);
+            @unlink($pngPath);
+        }
     }
 
     /**
