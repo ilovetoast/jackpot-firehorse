@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Editor;
 
 use App\Enums\AITaskType;
+use App\Enums\AssetType;
 use App\Exceptions\AIBudgetExceededException;
 use App\Http\Controllers\Controller;
 use App\Models\Asset;
@@ -11,6 +12,8 @@ use App\Models\Category;
 use App\Models\Tenant;
 use App\Services\AIService;
 use App\Services\AiUsageService;
+use App\Support\AssetVariant;
+use App\Support\DeliveryContext;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -83,6 +86,11 @@ class EditorGenerateLayoutController extends Controller
     /**
      * GET /app/api/editor/ai-credit-status — lightweight monthly credit snapshot
      * for display in the editor top bar. Refreshed after each AI generation.
+     *
+     * Optional query param:
+     *   composition_id — when present, also returns `this_composition_used`, the
+     *   weighted credit total for AIAgentRun rows tied to that composition in the
+     *   current calendar month. Drives the "this composition" counter in the pill.
      */
     public function creditStatus(Request $request): JsonResponse
     {
@@ -97,6 +105,16 @@ class EditorGenerateLayoutController extends Controller
             + ($perFeature['generative_editor_images']['credits_used'] ?? 0)
             + ($perFeature['generative_editor_edits']['credits_used'] ?? 0);
 
+        $thisCompositionUsed = null;
+        $compositionIdRaw = $request->query('composition_id');
+        if ($compositionIdRaw !== null && $compositionIdRaw !== '') {
+            // Compositions use bigint primary keys; accept stringified ids from the client.
+            $compositionId = (string) $compositionIdRaw;
+            if (ctype_digit($compositionId)) {
+                $thisCompositionUsed = $this->computeCompositionCreditsThisMonth($tenant, $compositionId);
+            }
+        }
+
         return response()->json([
             'credits_used' => (int) ($status['credits_used'] ?? 0),
             'credits_cap' => (int) ($status['credits_cap'] ?? 0),
@@ -106,7 +124,295 @@ class EditorGenerateLayoutController extends Controller
             'is_exceeded' => (bool) ($status['is_exceeded'] ?? false),
             'warning_level' => $status['warning_level'] ?? 'ok',
             'generative_editor_used' => (int) $generativeEditorUsed,
+            'this_composition_used' => $thisCompositionUsed,
         ]);
+    }
+
+    /**
+     * Sum weighted credits for AIAgentRun rows tied to a composition this month.
+     *
+     * Filtering rules:
+     *   - tenant scoped (tenant_id must match)
+     *   - entity_type='composition' with matching entity_id
+     *   - started_at within current calendar month
+     *   - only successful runs count — failed/skipped shouldn't charge the user
+     *   - task_type mapped to its ai_credits.weights entry
+     *
+     * Returns 0 when no runs exist, keeping the UI simple (render "0 credits").
+     */
+    private function computeCompositionCreditsThisMonth(Tenant $tenant, string $compositionId): int
+    {
+        $start = now()->startOfMonth();
+        $end = now()->endOfMonth();
+
+        $taskToFeature = [
+            AITaskType::EDITOR_LAYOUT_GENERATION => 'generative_editor_layout',
+            AITaskType::EDITOR_GENERATIVE_IMAGE => 'generative_editor_images',
+            AITaskType::EDITOR_EDIT_IMAGE => 'generative_editor_edits',
+        ];
+
+        $rows = DB::table('ai_agent_runs')
+            ->where('tenant_id', $tenant->id)
+            ->where('entity_type', 'composition')
+            ->where('entity_id', $compositionId)
+            ->where('status', 'success')
+            ->whereIn('task_type', array_keys($taskToFeature))
+            ->whereBetween('started_at', [$start, $end])
+            ->select('task_type', DB::raw('COUNT(*) as call_count'))
+            ->groupBy('task_type')
+            ->get();
+
+        $total = 0;
+        foreach ($rows as $row) {
+            $feature = $taskToFeature[$row->task_type] ?? null;
+            if ($feature === null) {
+                continue;
+            }
+            $weight = $this->aiUsageService->getCreditWeight($feature);
+            $total += (int) $row->call_count * $weight;
+        }
+
+        return $total;
+    }
+
+    /**
+     * GET /app/api/editor/wizard-defaults
+     *
+     * Returns the brand's primary logo (for any `role=logo` layers) and up to 8
+     * photography candidates (for `role=background|hero_image` image layers) that
+     * the Create-from-Template wizard auto-applies in step 3.
+     *
+     * Background candidates are drawn from assets tagged with any of:
+     *   background, hero, photo, photography, lifestyle
+     * — falling back to raw photo_type metadata (lifestyle/editorial/etc.) when
+     * the brand hasn't explicitly tagged anything, so the feature isn't dead on
+     * brand-new accounts. Ordered by brand_score DESC so the best photos come
+     * first; the wizard picks randomly from the returned set (seeded by
+     * composition id) so the output stays varied across new drafts.
+     *
+     * Shape is aligned with DamPickerAsset (id / name / file_url / thumbnail_url /
+     * width / height) so the wizard can feed results straight into the same
+     * replace-image path used by the asset picker.
+     */
+    public function wizardDefaults(Request $request): JsonResponse
+    {
+        $tenant = app('tenant');
+        if (! $tenant instanceof Tenant) {
+            return response()->json(['message' => 'Tenant context required.'], 422);
+        }
+
+        $brand = app('brand');
+        if (! $brand instanceof Brand) {
+            return response()->json([
+                'logo' => null,
+                'background_candidates' => [],
+            ]);
+        }
+
+        $logoPayload = $this->resolvePrimaryLogoPayload($brand);
+        $backgroundCandidates = $this->fetchBackgroundCandidates($tenant, $brand);
+
+        return response()->json([
+            'logo' => $logoPayload,
+            'background_candidates' => $backgroundCandidates,
+        ]);
+    }
+
+    /**
+     * Look up the brand's primary logo (logo_id) and hydrate it into a picker-
+     * friendly payload. Returns null when the brand has no primary logo set.
+     *
+     * We resolve the Asset through `Asset::find` rather than trusting the brand's
+     * `logo_path` accessor so we get the real mime type + dimensions (needed by
+     * the frontend's replace-image path, which measures the image to avoid
+     * aspect-ratio surprises).
+     */
+    private function resolvePrimaryLogoPayload(Brand $brand): ?array
+    {
+        $logoId = $brand->logoAssetIdForSurface('primary');
+        if (! $logoId) {
+            return null;
+        }
+
+        $asset = Asset::query()
+            ->where('tenant_id', $brand->tenant_id)
+            ->where('id', $logoId)
+            ->first();
+        if (! $asset) {
+            return null;
+        }
+
+        $fileUrl = $asset->deliveryUrl(AssetVariant::ORIGINAL, DeliveryContext::AUTHENTICATED);
+        $thumbnailUrl = $asset->deliveryUrl(AssetVariant::THUMB_MEDIUM, DeliveryContext::AUTHENTICATED)
+            ?: $asset->deliveryUrl(AssetVariant::THUMB_SMALL, DeliveryContext::AUTHENTICATED)
+            ?: $fileUrl;
+
+        if (! $fileUrl) {
+            return null;
+        }
+
+        return [
+            'id' => (string) $asset->id,
+            'name' => $asset->title ?? $asset->original_filename ?? 'Brand Logo',
+            'file_url' => $fileUrl,
+            'thumbnail_url' => $thumbnailUrl,
+            'width' => $asset->width ? (int) $asset->width : null,
+            'height' => $asset->height ? (int) $asset->height : null,
+        ];
+    }
+
+    /**
+     * Fetch up to 8 photography candidates suitable for a "background" layer.
+     *
+     * Query strategy:
+     *   1. Scope to tenant + brand + image mime types.
+     *   2. Prefer assets tagged background|hero|photo|photography|lifestyle.
+     *   3. Fall back to photo_type metadata (lifestyle/editorial/event) when
+     *      no tagged candidates exist, so the feature isn't a dead letter on
+     *      fresh accounts.
+     *   4. Order by latest brand_intelligence_score overall_score DESC, then
+     *      recency, so the best photos surface first.
+     *   5. Exclude logos (category_slug='logos') defensively in case a brand
+     *      mistagged its logo as "hero".
+     *
+     * Each returned row matches {@see \App\Pages\Editor\documentModel.DamPickerAsset}
+     * so it drops into the existing replace-image path.
+     *
+     * @return list<array{id:string,name:string,file_url:?string,thumbnail_url:?string,width:?int,height:?int,tags:list<string>}>
+     */
+    private function fetchBackgroundCandidates(Tenant $tenant, Brand $brand): array
+    {
+        $matchTags = ['background', 'hero', 'photo', 'photography', 'lifestyle'];
+
+        try {
+            // Pass 1: tag-matched (preferred).
+            $taggedIds = DB::table('asset_tags')
+                ->whereIn('tag', $matchTags)
+                ->pluck('asset_id')
+                ->map(fn ($v) => (string) $v)
+                ->unique()
+                ->values()
+                ->all();
+
+            // Real-photography-only filter shared across all three passes.
+            // Generative / AI-edited output is persisted back to the DAM as
+            // `type = ai_generated` (see EditorGenerativeImagePersistService)
+            // and composition previews / WIP exports get flagged in metadata.
+            // Both categories were leaking into the wizard's background pool —
+            // a brand with one tagged hero photo plus a dozen AI iterations
+            // would spin the wheel and land on an AI image 12 / 13 times.
+            // Product rule: templates use the library's real photography.
+            // AI is reserved for the Feeling Lucky / generative flow, not as
+            // a silent fallback on user uploads.
+            $applyPhotoOnlyFilter = function ($q) {
+                $q->whereIn('type', [AssetType::ASSET, AssetType::DELIVERABLE])
+                    ->excludeCompositionTagged();
+            };
+
+            $query = Asset::query()
+                ->where('tenant_id', $tenant->id)
+                ->where('brand_id', $brand->id)
+                ->whereNotNull('mime_type')
+                ->where('mime_type', 'like', 'image/%')
+                ->tap($applyPhotoOnlyFilter)
+                ->with(['latestBrandIntelligenceScore', 'category']);
+
+            if ($taggedIds !== []) {
+                $query->whereIn('id', $taggedIds);
+            } else {
+                // Pass 2: photo_type fallback. metadata->fields->photo_type is a
+                // JSON column on assets. We use whereRaw because PeerCohort code
+                // elsewhere already uses JSON_EXTRACT the same way; keeps the
+                // query portable across MySQL 8 / MariaDB.
+                $query->where(function ($q) {
+                    $q->whereRaw("JSON_EXTRACT(metadata, '$.fields.photo_type') IN ('\"lifestyle\"', '\"editorial\"', '\"event\"', '\"hero\"')")
+                        ->orWhereRaw("JSON_EXTRACT(metadata, '$.fields.subject_type') = '\"scene\"'");
+                });
+            }
+
+            $assets = $query
+                ->orderByDesc('created_at')
+                ->limit(32) // oversample; we'll trim to 8 after scoring
+                ->get();
+
+            // Filter out anything categorized as a logo even if it matched tags —
+            // brands occasionally tag a logo as "hero". Keeps logo slot + bg slot
+            // from ever resolving to the same asset.
+            $assets = $assets->filter(function (Asset $a) {
+                $slug = $a->category?->slug;
+                return $slug !== 'logos';
+            });
+
+            // Pass 3 fallback — any brand image.
+            //
+            // Brands without careful tagging (the majority, early on) were
+            // landing in the generative-AI path purely because passes 1 + 2
+            // returned no candidates. That broke the "templates use real
+            // photography by default" product rule. If we made it here with
+            // nothing, broaden to every image asset on the brand, still
+            // excluding logos via category slug *and* AI-generated output.
+            // Fresh brands with zero uploads return an empty list — template
+            // BG stays empty and the user is prompted to add a photo from
+            // the library.
+            if ($assets->isEmpty()) {
+                $assets = Asset::query()
+                    ->where('tenant_id', $tenant->id)
+                    ->where('brand_id', $brand->id)
+                    ->whereNotNull('mime_type')
+                    ->where('mime_type', 'like', 'image/%')
+                    ->tap($applyPhotoOnlyFilter)
+                    ->with(['latestBrandIntelligenceScore', 'category'])
+                    ->orderByDesc('created_at')
+                    ->limit(32)
+                    ->get()
+                    ->filter(fn (Asset $a) => $a->category?->slug !== 'logos');
+            }
+
+            $tagsByAssetId = $this->loadTagsForAssets($assets->pluck('id')->all());
+
+            $scored = $assets->map(function (Asset $a) use ($tagsByAssetId) {
+                $score = $a->latestBrandIntelligenceScore?->overall_score ?? 0;
+                return [
+                    'asset' => $a,
+                    'score' => (float) $score,
+                    'tags' => array_values(array_map('strval', $tagsByAssetId[(string) $a->id] ?? [])),
+                ];
+            })
+                ->sortByDesc('score')
+                ->take(8)
+                ->values();
+
+            $candidates = [];
+            foreach ($scored as $row) {
+                /** @var Asset $asset */
+                $asset = $row['asset'];
+                $fileUrl = $asset->deliveryUrl(AssetVariant::ORIGINAL, DeliveryContext::AUTHENTICATED);
+                if (! $fileUrl) {
+                    continue;
+                }
+                $thumbnailUrl = $asset->deliveryUrl(AssetVariant::THUMB_MEDIUM, DeliveryContext::AUTHENTICATED)
+                    ?: $asset->deliveryUrl(AssetVariant::THUMB_SMALL, DeliveryContext::AUTHENTICATED)
+                    ?: $fileUrl;
+                $candidates[] = [
+                    'id' => (string) $asset->id,
+                    'name' => $asset->title ?? $asset->original_filename ?? 'Photo',
+                    'file_url' => $fileUrl,
+                    'thumbnail_url' => $thumbnailUrl,
+                    'width' => $asset->width ? (int) $asset->width : null,
+                    'height' => $asset->height ? (int) $asset->height : null,
+                    'tags' => $row['tags'],
+                ];
+            }
+
+            return $candidates;
+        } catch (\Throwable $e) {
+            Log::warning('editor.wizard_defaults_background_failed', [
+                'tenant_id' => $tenant->id,
+                'brand_id' => $brand->id,
+                'error' => $e->getMessage(),
+            ]);
+            return [];
+        }
     }
 
     public function generate(Request $request): JsonResponse

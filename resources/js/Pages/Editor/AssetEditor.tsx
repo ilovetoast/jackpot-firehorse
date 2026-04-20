@@ -21,9 +21,13 @@ import {
     ArrowsRightLeftIcon,
     ChevronDoubleDownIcon,
     ChevronDoubleUpIcon,
+    ChevronDownIcon,
+    ChevronRightIcon,
     ClockIcon,
     DocumentDuplicateIcon,
+    DocumentIcon,
     ExclamationTriangleIcon,
+    RectangleGroupIcon,
     EyeIcon,
     EyeSlashIcon,
     FolderOpenIcon,
@@ -46,6 +50,7 @@ import type {
     DamPickerAsset,
     DocumentModel,
     GenerativeImageLayer,
+    Group,
     ImageLayer,
     Layer,
     LayerBlendMode,
@@ -81,13 +86,37 @@ import {
     nextZIndex,
     normalizeZ,
     isFillLayer,
+    isMaskLayer,
+    buildMaskStyleForLayer,
+    findGroupForLayer,
+    groupMemberLayers,
+    unionRectForGroup,
+    createGroup,
+    createDefaultMaskLayer,
+    ungroup as ungroupInDoc,
+    updateGroup as updateGroupInDoc,
+    addLayerToGroup as addLayerToGroupInDoc,
+    removeLayerFromGroup as removeLayerFromGroupInDoc,
     parseDocumentFromApi,
     PLACEHOLDER_IMAGE_SRC,
     resolvedFillGradientStops,
     editorBridgeFileUrlForAssetId,
 } from './documentModel'
 import FillGradientStopField from './FillGradientStopField'
-import { TEMPLATE_CATEGORIES, allFormats, blueprintToLayers, buildLayersForStyle, LAYOUT_STYLES, type TemplateFormat, type TemplateCategory, type LayoutStyleId } from './templateConfig'
+import { TEMPLATE_CATEGORIES, allFormats, blueprintToLayers, blueprintToLayersAndGroups, buildLayersForStyle, LAYOUT_STYLES, textBoostToFillFields, inferTextBoostStyle, type LayerBlueprint, type TemplateFormat, type TemplateCategory, type LayoutStyleId } from './templateConfig'
+import { applyWizardAssetDefaults, fetchWizardDefaults, type WizardDefaults } from './wizardDefaults'
+import GridOverlay from '../../Components/Editor/GridOverlay'
+import PlacementPicker from '../../Components/Editor/PlacementPicker'
+import {
+    placementToXY,
+    snapMove as snapEngineMove,
+    snapResize as snapEngineResize,
+    xyToPlacement,
+    type GridDensity,
+    type Placement,
+    type SnapHit,
+    type SnapMode,
+} from '../../utils/snapEngine'
 import EditorConfirmDialog, { useEditorConfirm } from './EditorConfirmDialog'
 import {
     confirmDamAssetDimensions,
@@ -173,6 +202,31 @@ import {
 const REPLACE_ASPECT_WARN_RATIO = 1.75
 
 const ASSET_EDITOR_PROPERTIES_WIDTH_KEY = 'asset-editor:properties-panel-width'
+const ASSET_EDITOR_GRID_ENABLED_KEY = 'asset-editor:grid-enabled'
+const ASSET_EDITOR_SNAP_ENABLED_KEY = 'asset-editor:snap-enabled'
+const ASSET_EDITOR_GRID_DENSITY_KEY = 'asset-editor:grid-density'
+/**
+ * Remember whether the user has the Canvas (document-level) section expanded
+ * in the properties panel. Defaults to collapsed so it doesn't compete with
+ * the layer editing workflow, but stays sticky once the user opens it.
+ */
+const ASSET_EDITOR_CANVAS_SECTION_KEY = 'asset-editor:canvas-section-open'
+/** Target pixels (screen space) for line_align snap threshold — converted to doc space per-drag. */
+const SNAP_THRESHOLD_SCREEN_PX = 8
+
+function readStoredFlag(key: string, fallback: boolean): boolean {
+    if (typeof window === 'undefined') return fallback
+    const v = window.localStorage.getItem(key)
+    if (v === '1' || v === 'true') return true
+    if (v === '0' || v === 'false') return false
+    return fallback
+}
+
+function readStoredGridDensity(): GridDensity {
+    if (typeof window === 'undefined') return 3
+    const n = Number(window.localStorage.getItem(ASSET_EDITOR_GRID_DENSITY_KEY))
+    return n === 6 || n === 12 ? n : 3
+}
 
 const DOCUMENT_DIMENSION_MIN = 64
 const DOCUMENT_DIMENSION_MAX = 8192
@@ -393,6 +447,19 @@ async function runWithConcurrency<T>(items: T[], limit: number, worker: (item: T
 
 type ResizeCorner = 'nw' | 'ne' | 'sw' | 'se'
 
+/**
+ * Snapshot of a single member's transform captured on `beginMove`/`beginResize`
+ * so we can re-apply the group's delta/scale proportionally without losing
+ * precision to repeated floating-point rounding.
+ */
+type GroupMemberStart = {
+    layerId: string
+    x: number
+    y: number
+    width: number
+    height: number
+}
+
 type DragState =
     | {
           kind: 'move'
@@ -401,6 +468,16 @@ type DragState =
           startDocY: number
           startLayerX: number
           startLayerY: number
+          /**
+           * When the subject is a group, this is the list of member transforms
+           * captured at drag-start. The handler moves *every* member by the
+           * same dx/dy so the group travels as a rigid body. Snap still runs
+           * against the union rect (which is the clicked layer's rect + all
+           * sibling offsets).
+           */
+          groupMembers?: GroupMemberStart[]
+          /** Union rect at drag-start — used as the snap subject for groups. */
+          groupStartRect?: { x: number; y: number; width: number; height: number }
       }
     | {
           kind: 'resize'
@@ -411,6 +488,14 @@ type DragState =
           start: { x: number; y: number; width: number; height: number }
           aspectRatio: number
           lockAspectResize: boolean
+          /**
+           * When resizing a group, every member is scaled proportionally
+           * around the union rect. We capture the original union rect and each
+           * member's relative position/size once and reapply on every move
+           * event.
+           */
+          groupMembers?: GroupMemberStart[]
+          groupStartRect?: { x: number; y: number; width: number; height: number }
       }
 
 const UNTITLED_DRAFT_NAME = 'Untitled draft'
@@ -923,9 +1008,50 @@ export default function AssetEditor() {
     const documentRef = useRef(document)
     documentRef.current = document
     const [selectedLayerId, setSelectedLayerId] = useState<string | null>(null)
+    /**
+     * When the selection is a *group* (not a single layer), this holds the
+     * group id and `selectedLayerId` points at the clicked member so
+     * text/image-specific property controls still have something to target.
+     *
+     * Clicking a grouped layer without modifiers → sets both.
+     * Alt-clicking a grouped layer → sets layer only, clears group.
+     * Empty-canvas click or non-grouped layer click → clears group.
+     *
+     * Never set manually — always go through `selectLayerOrGroup` below so
+     * click semantics stay consistent across canvas + layer panel call sites.
+     */
+    const [selectedGroupId, setSelectedGroupIdState] = useState<string | null>(null)
+    /**
+     * Ad-hoc multi-select used *only* by the layer panel's "Group Selected"
+     * flow. Populated by shift-clicking panel rows. Kept in a Set for O(1)
+     * membership and always reset whenever we leave the grouping UI.
+     *
+     * Not used by the canvas — canvas selection stays single-layer/group-based
+     * (decision doc: no marquee select in v1).
+     */
+    const [groupingSelection, setGroupingSelection] = useState<Set<string>>(() => new Set())
+    // Mirror ref so synchronous click handlers (select → beginMove in the same
+    // event) can read the selection that was just set without waiting for the
+    // next render.
+    const selectedGroupIdRef = useRef<string | null>(null)
+    const setSelectedGroupId = useCallback((id: string | null) => {
+        selectedGroupIdRef.current = id
+        setSelectedGroupIdState(id)
+    }, [])
     const [editingTextLayerId, setEditingTextLayerId] = useState<string | null>(null)
     const [pickerOpen, setPickerOpen] = useState(false)
     const [pickerMode, setPickerMode] = useState<'add' | 'replace' | 'references' | null>(null)
+    /**
+     * Guards against double-clicks on a picker tile: `handlePickDamAsset`
+     * awaits an image-probe network hop before mutating state and closing
+     * the modal, so a fast second click would otherwise land a second
+     * layer. We set this to the in-flight asset id on click, gate the
+     * handler and every other tile on it, and clear it in `finally`. A
+     * ref mirror is also kept so the guard is synchronous — setState
+     * alone would race the second click before React flushed.
+     */
+    const [pickerPickingAssetId, setPickerPickingAssetId] = useState<string | null>(null)
+    const pickerPickingRef = useRef<string | null>(null)
     const [replaceLayerId, setReplaceLayerId] = useState<string | null>(null)
     const [referencePickerLayerId, setReferencePickerLayerId] = useState<string | null>(null)
     const [referenceSelectionIds, setReferenceSelectionIds] = useState<string[]>([])
@@ -1002,6 +1128,36 @@ export default function AssetEditor() {
     const [propertiesPanelWidth, setPropertiesPanelWidth] = useState(readStoredPropertiesPanelWidth)
     const propertiesPanelWidthRef = useRef(propertiesPanelWidth)
     const [propertiesMode, setPropertiesMode] = useState<'basic' | 'advanced'>('basic')
+
+    // Grid + snap state. `gridEnabled` drives the overlay; `snapEnabled` drives
+    // whether drag/resize actually snap (Advanced mode only — Basic always snaps
+    // so the user's mental model matches the Placement picker). `gridDensity`
+    // is advanced-only; Basic stays on 3x3 to match the 9-slot picker.
+    const [gridEnabled, setGridEnabled] = useState<boolean>(() => readStoredFlag(ASSET_EDITOR_GRID_ENABLED_KEY, true))
+    const [snapEnabled, setSnapEnabled] = useState<boolean>(() => readStoredFlag(ASSET_EDITOR_SNAP_ENABLED_KEY, true))
+    const [gridDensity, setGridDensity] = useState<GridDensity>(readStoredGridDensity)
+    // Canvas (document-level) properties section — collapsed by default so
+    // the layer editing content stays above the fold, but sticky across
+    // page loads via localStorage.
+    const [canvasSectionOpen, setCanvasSectionOpen] = useState<boolean>(() => readStoredFlag(ASSET_EDITOR_CANVAS_SECTION_KEY, false))
+    useEffect(() => {
+        if (typeof window === 'undefined') return
+        window.localStorage.setItem(ASSET_EDITOR_CANVAS_SECTION_KEY, canvasSectionOpen ? '1' : '0')
+    }, [canvasSectionOpen])
+    const [snapHits, setSnapHits] = useState<SnapHit[]>([])
+    const snapHitsClearTimerRef = useRef<number | null>(null)
+    useEffect(() => {
+        if (typeof window === 'undefined') return
+        window.localStorage.setItem(ASSET_EDITOR_GRID_ENABLED_KEY, gridEnabled ? '1' : '0')
+    }, [gridEnabled])
+    useEffect(() => {
+        if (typeof window === 'undefined') return
+        window.localStorage.setItem(ASSET_EDITOR_SNAP_ENABLED_KEY, snapEnabled ? '1' : '0')
+    }, [snapEnabled])
+    useEffect(() => {
+        if (typeof window === 'undefined') return
+        window.localStorage.setItem(ASSET_EDITOR_GRID_DENSITY_KEY, String(gridDensity))
+    }, [gridDensity])
     const [spinPhraseIdx, setSpinPhraseIdx] = useState(0)
     propertiesPanelWidthRef.current = propertiesPanelWidth
 
@@ -1094,11 +1250,49 @@ export default function AssetEditor() {
     const spaceHeldRef = useRef(false)
     const effectiveScale = userZoom ?? viewportScale
 
+    // Derived snap mode: Basic mode always quadrant-locks (mirrors the Placement
+    // picker). Advanced mode respects the snapEnabled toggle. Basic also forces
+    // density to 3 regardless of stored value so the UI matches the picker.
+    const effectiveSnapMode: SnapMode = propertiesMode === 'basic'
+        ? 'cell_center'
+        : (snapEnabled ? 'line_align' : 'off')
+    const effectiveGridDensity: GridDensity = propertiesMode === 'basic' ? 3 : gridDensity
+    /** Kept in a ref so the long-lived pointermove listener can read latest values
+     *  without being torn down and recreated on every state change. */
+    const snapConfigRef = useRef({
+        mode: effectiveSnapMode,
+        density: effectiveGridDensity,
+        screenScale: effectiveScale,
+    })
+    snapConfigRef.current = {
+        mode: effectiveSnapMode,
+        density: effectiveGridDensity,
+        screenScale: effectiveScale,
+    }
+    const reportSnapHits = useCallback((hits: SnapHit[]) => {
+        setSnapHits(hits)
+        if (snapHitsClearTimerRef.current !== null) {
+            window.clearTimeout(snapHitsClearTimerRef.current)
+        }
+        if (hits.length > 0) {
+            snapHitsClearTimerRef.current = window.setTimeout(() => {
+                setSnapHits([])
+                snapHitsClearTimerRef.current = null
+            }, 180)
+        }
+    }, [])
+    useEffect(() => {
+        return () => {
+            if (snapHitsClearTimerRef.current !== null) {
+                window.clearTimeout(snapHitsClearTimerRef.current)
+            }
+        }
+    }, [])
+
     const [leftPanel, setLeftPanel] = useState<'layers' | 'assets' | 'templates' | 'menu' | 'history' | null>('layers')
     const [addLayerOpen, setAddLayerOpen] = useState(false)
     const [shortcutsOpen, setShortcutsOpen] = useState(false)
     const [templateCategory, setTemplateCategory] = useState<TemplateCategory | 'all'>('all')
-    const [templateWizardOpen, setTemplateWizardOpen] = useState(false)
     const { confirmState, confirm: editorConfirm, handleClose: handleConfirmClose } = useEditorConfirm()
     const [wizardStep, setWizardStep] = useState(1)
     const [wizardCategory, setWizardCategory] = useState<TemplateCategory | 'all'>('all')
@@ -1107,6 +1301,59 @@ export default function AssetEditor() {
     const [wizardLayoutStyle, setWizardLayoutStyle] = useState<LayoutStyleId | null>(null)
     const [wizardName, setWizardName] = useState('')
     const [wizardSearch, setWizardSearch] = useState('')
+    /** Per-blueprint-index override for the Customize sub-step of wizardStep 2.
+     * Keyed by blueprint array index (stable once a layout style is chosen) so
+     * we don't have to mutate blueprint identities. `enabled` defaults true;
+     * `placement` falls back to the blueprint's xRatio/yRatio. */
+    const [wizardLayerOverrides, setWizardLayerOverrides] = useState<Record<number, { enabled?: boolean; placement?: Placement }>>({})
+    const [wizardSelectedLayerIdx, setWizardSelectedLayerIdx] = useState<number | null>(null)
+    const [templateWizardOpen, setTemplateWizardOpenRaw] = useState(false)
+    /**
+     * When the user explicitly picks "Blank canvas — I'll build it myself"
+     * from the welcome screen, suppress the welcome overlay so they can
+     * actually start adding layers to an empty canvas. Without this the
+     * overlay's `document.layers.length === 0` guard keeps showing because
+     * a fresh composition legitimately has zero layers — there was no way
+     * out other than picking a template. Resets the moment layers exist,
+     * the composition changes, or a new composition is started.
+     */
+    const [welcomeDismissed, setWelcomeDismissed] = useState(false)
+    /**
+     * Cached per-brand wizard defaults (primary logo + photography candidates).
+     * Fetched once per wizard-open so step 3 can auto-fill logo slots with the
+     * brand's primary logo and background/hero_image slots with a real photo
+     * instead of leaving them empty. Null while loading / on error; the wizard
+     * treats that as "no auto-fill" and still works.
+     */
+    const [wizardDefaults, setWizardDefaults] = useState<WizardDefaults | null>(null)
+    /**
+     * Opt-out flag for wizard auto-fill, per session. Users who don't want the
+     * brand photo/logo dropped in can toggle this off in step 3 and get the
+     * classic empty-slot behavior. Defaults true because the whole point of
+     * the feature is zero-config.
+     */
+    const [wizardAutoFillEnabled, setWizardAutoFillEnabled] = useState(true)
+    const setTemplateWizardOpen = useCallback((v: boolean) => {
+        setTemplateWizardOpenRaw(v)
+        if (!v) {
+            setWizardLayerOverrides({})
+            setWizardSelectedLayerIdx(null)
+        }
+    }, [])
+
+    // Load wizard defaults exactly once per open so the fetch doesn't refire
+    // on every wizard-step change. We keep any previously-loaded value while
+    // re-fetching so step 3 doesn't flash-empty between runs.
+    useEffect(() => {
+        if (!templateWizardOpen) return
+        let cancelled = false
+        void fetchWizardDefaults().then((d) => {
+            if (!cancelled) setWizardDefaults(d)
+        })
+        return () => {
+            cancelled = true
+        }
+    }, [templateWizardOpen])
 
     const [aiLayoutPromptOpen, setAiLayoutPromptOpen] = useState(false)
     const [aiLayoutPrompt, setAiLayoutPrompt] = useState('')
@@ -1119,11 +1366,25 @@ export default function AssetEditor() {
         is_exceeded: boolean
         warning_level: string
         generative_editor_used: number
+        /**
+         * Credits consumed by AI runs tied to the currently loaded composition,
+         * this calendar month. Null when no composition is loaded yet (new draft)
+         * or when the backend didn't return a value (legacy response shape).
+         */
+        this_composition_used: number | null
     } | null>(null)
+    const [aiCreditPopoverOpen, setAiCreditPopoverOpen] = useState(false)
 
+    // Read composition id from a ref so this callback stays stable — we don't want
+    // a new function identity each time compositionId flips, because that would
+    // rerun the load-time effect and double-fetch on mount.
     const refreshAiCreditStatus = useCallback(async () => {
         try {
-            const res = await fetch('/app/api/editor/ai-credit-status', {
+            const cid = compositionIdRef.current
+            const url = cid
+                ? `/app/api/editor/ai-credit-status?composition_id=${encodeURIComponent(cid)}`
+                : '/app/api/editor/ai-credit-status'
+            const res = await fetch(url, {
                 headers: { Accept: 'application/json' },
                 credentials: 'same-origin',
             })
@@ -1138,6 +1399,13 @@ export default function AssetEditor() {
     useEffect(() => {
         if (aiEnabled) void refreshAiCreditStatus()
     }, [aiEnabled, refreshAiCreditStatus])
+
+    // When the user switches compositions (opens an existing draft, starts a new
+    // one, etc.) re-pull the status so `this_composition_used` retargets. Gated
+    // on aiEnabled to avoid noise for accounts without AI features.
+    useEffect(() => {
+        if (aiEnabled) void refreshAiCreditStatus()
+    }, [aiEnabled, compositionId, refreshAiCreditStatus])
 
     const canvasContainerRef = useRef<HTMLDivElement>(null)
     const stageRef = useRef<HTMLDivElement>(null)
@@ -1154,11 +1422,179 @@ export default function AssetEditor() {
         [document.layers]
     )
     const layersForPanel = useMemo(() => sortLayersPanelFrontAtTop(document.layers), [document.layers])
+    const toggleGroupingSelection = useCallback((layerId: string) => {
+        setGroupingSelection((prev) => {
+            const next = new Set(prev)
+            if (next.has(layerId)) {
+                next.delete(layerId)
+            } else {
+                next.add(layerId)
+            }
+            return next
+        })
+    }, [])
+
+    /**
+     * Flat list of panel rows interleaving group headers with their members.
+     *
+     * Rendering rules:
+     *   - Orphan layers (no groupId) appear as a plain layer row.
+     *   - A group appears as a single header row immediately followed by its
+     *     member rows (when not collapsed), indented.
+     *   - A member is only rendered under its group — never as an orphan —
+     *     which keeps the panel readable and matches the canvas's rigid-body
+     *     selection model.
+     *   - Group position in the panel = position of its top-most member (the
+     *     one with the highest z). This keeps z-order readable.
+     */
+    const layerPanelRows = useMemo(() => {
+        type Row =
+            | { kind: 'layer'; layer: Layer }
+            | { kind: 'group'; group: Group; members: Layer[] }
+        const groups = document.groups ?? []
+        const groupsById = new Map(groups.map((g) => [g.id, g]))
+        // For every group, collect its members in panel order.
+        const membersByGroup = new Map<string, Layer[]>()
+        for (const g of groups) {
+            const list: Layer[] = []
+            for (const l of layersForPanel) {
+                if (l.groupId === g.id) list.push(l)
+            }
+            membersByGroup.set(g.id, list)
+        }
+        const rows: Row[] = []
+        const emittedGroups = new Set<string>()
+        for (const layer of layersForPanel) {
+            if (layer.groupId && groupsById.has(layer.groupId)) {
+                if (emittedGroups.has(layer.groupId)) continue
+                const group = groupsById.get(layer.groupId)!
+                rows.push({
+                    kind: 'group',
+                    group,
+                    members: membersByGroup.get(group.id) ?? [],
+                })
+                emittedGroups.add(group.id)
+                continue
+            }
+            rows.push({ kind: 'layer', layer })
+        }
+        return rows
+    }, [document.groups, layersForPanel])
 
     const selectedLayer = useMemo(
         () => document.layers.find((l) => l.id === selectedLayerId) ?? null,
         [document.layers, selectedLayerId]
     )
+
+    /**
+     * Shared renderer for layer rows (orphan + grouped).
+     * `indented` = true when the row lives under a group header; we drop the
+     * drag handle column for alignment since grouped members are reordered
+     * inside their group via the existing drag-into-group flow rather than
+     * free re-ordering.
+     *
+     * Kept as a plain closure (not `useCallback`) because some of its deps
+     * — `onLayerPanelDragOver`, `onLayerPanelDrop`, `onLayerPanelDragStart`,
+     * `selectLayerOrGroup` — are declared further down in the component
+     * body. A `useCallback(... , [deps])` here would hit the temporal
+     * dead zone on first render and throw a ReferenceError. It's only
+     * called during render of the layer panel, so the per-render cost of
+     * redefining this arrow is negligible.
+     */
+    const renderLayerPanelRow = (layer: Layer, indented: boolean) => {
+        const selected = layer.id === selectedLayerId
+        const inGroupingSet = groupingSelection.has(layer.id)
+        const layerIcon = layer.type === 'text' ? 'T' : layer.type === 'image' ? '🖼' : layer.type === 'generative_image' ? '✦' : layer.type === 'fill' ? '◼' : layer.type === 'mask' ? '◑' : '▣'
+        return (
+            <li
+                key={layer.id}
+                onDragOver={onLayerPanelDragOver}
+                onDrop={(e) => onLayerPanelDrop(e, layer.id)}
+                className={`group/layer rounded ${layerDragId === layer.id ? 'opacity-60' : ''}`}
+            >
+                <div className={`flex items-center gap-1.5 rounded px-2 py-1.5 text-xs ${
+                    selected
+                        ? 'bg-blue-600/30 text-white'
+                        : inGroupingSet
+                            ? 'bg-indigo-700/25 text-white'
+                            : 'text-gray-300 hover:bg-gray-800'
+                }`}>
+                    {!indented && (
+                        <button
+                            type="button"
+                            draggable
+                            onDragStart={(e) => { e.stopPropagation(); onLayerPanelDragStart(e, layer.id) }}
+                            onDragEnd={() => setLayerDragId(null)}
+                            className="shrink-0 cursor-grab text-gray-500 active:cursor-grabbing"
+                            title="Drag to reorder"
+                        >
+                            <Bars3Icon className="h-3.5 w-3.5" aria-hidden />
+                        </button>
+                    )}
+                    <span className="shrink-0 text-[10px] opacity-60 w-4 text-center">{layerIcon}</span>
+                    <button
+                        type="button"
+                        draggable={false}
+                        className="min-w-0 flex-1 truncate text-left font-medium"
+                        onClick={(e) => {
+                            // Shift-click builds the ad-hoc grouping selection.
+                            // Plain click routes through `selectLayerOrGroup`
+                            // so grouped layers still select their group.
+                            if (e.shiftKey) {
+                                e.preventDefault()
+                                toggleGroupingSelection(layer.id)
+                                return
+                            }
+                            selectLayerOrGroup(layer.id, { alt: e.altKey })
+                            setEditingTextLayerId(null)
+                        }}
+                    >
+                        {layer.name || layer.type}
+                    </button>
+                    <div className="flex shrink-0 items-center gap-0 opacity-0 transition-opacity group-hover/layer:opacity-100">
+                        <button type="button" draggable={false} className="rounded p-0.5 text-gray-500 hover:bg-gray-700 hover:text-gray-200" title="Bring forward" onClick={(e) => { e.stopPropagation(); setDocument((d) => moveLayerZOrder(d, layer.id, 'up')) }}><ArrowUpIcon className="h-3 w-3" /></button>
+                        <button type="button" draggable={false} className="rounded p-0.5 text-gray-500 hover:bg-gray-700 hover:text-gray-200" title="Send backward" onClick={(e) => { e.stopPropagation(); setDocument((d) => moveLayerZOrder(d, layer.id, 'down')) }}><ArrowDownIcon className="h-3 w-3" /></button>
+                        {layer.groupId && (
+                            <button
+                                type="button"
+                                draggable={false}
+                                className="rounded px-1 text-[10px] text-gray-500 hover:bg-gray-700 hover:text-gray-200"
+                                title="Remove from group"
+                                onClick={(e) => {
+                                    e.stopPropagation()
+                                    setDocument((d) => removeLayerFromGroupInDoc(d, layer.id))
+                                }}
+                            >
+                                ungroup
+                            </button>
+                        )}
+                    </div>
+                    <button type="button" draggable={false} className="shrink-0 text-gray-500 hover:text-gray-200" title={layer.visible ? 'Hide' : 'Show'} onClick={() => updateLayer(layer.id, (l) => ({ ...l, visible: !l.visible }))}>{layer.visible ? <EyeIcon className="h-3.5 w-3.5" /> : <EyeSlashIcon className="h-3.5 w-3.5 opacity-40" />}</button>
+                </div>
+            </li>
+        )
+    }
+    /**
+     * Union rect for the currently-selected group (null when nothing grouped
+     * is selected). Rendered as a dashed outline over the canvas so users can
+     * see the group's bounds — the individual member's per-layer ring is
+     * suppressed when this is non-null to avoid double outlines.
+     */
+    const selectedGroupRect = useMemo(() => {
+        if (!selectedGroupId) return null
+        return unionRectForGroup(document, selectedGroupId)
+    }, [document, selectedGroupId])
+
+    // Auto-clear a stale `selectedGroupId` if the group got deleted (e.g. the
+    // user swapped the whole document, loaded a different draft, or ungrouped
+    // from the layer panel). Keeps UI from rendering a phantom outline.
+    useEffect(() => {
+        if (!selectedGroupId) return
+        const exists = document.groups?.some((g) => g.id === selectedGroupId)
+        if (!exists) {
+            setSelectedGroupId(null)
+        }
+    }, [document.groups, selectedGroupId, setSelectedGroupId])
 
     const selectedImageLayerWithAsset = useMemo(() => {
         if (!selectedLayerId) {
@@ -1713,6 +2149,16 @@ export default function AssetEditor() {
                 const el = canvasContainerRef.current
                 if (el) el.style.cursor = 'grab'
             }
+            // G toggles grid overlay; Shift+G toggles snap. Disabled while typing
+            // so it doesn't hijack the keystroke inside text layers / inputs.
+            if ((e.key === 'g' || e.key === 'G') && !e.metaKey && !e.ctrlKey && !e.altKey && !editingTextLayerId && !isTypingTarget()) {
+                e.preventDefault()
+                if (e.shiftKey) {
+                    setSnapEnabled((v) => !v)
+                } else {
+                    setGridEnabled((v) => !v)
+                }
+            }
         }
         const onKeyUp = (e: KeyboardEvent) => {
             if (e.code === 'Space') {
@@ -2094,7 +2540,10 @@ export default function AssetEditor() {
             const docA = parseDocumentFromApi(va.document)
             const docB = parseDocumentFromApi(vb.document)
             const capture = async (doc: DocumentModel) => {
-                flushSync(() => setDocument(doc))
+                flushSync(() => {
+                    setDocument(doc)
+                    setUiMode('preview')
+                })
                 await new Promise<void>((r) =>
                     requestAnimationFrame(() => requestAnimationFrame(() => r()))
                 )
@@ -2125,7 +2574,12 @@ export default function AssetEditor() {
         } finally {
             const prev = documentBeforeCompareRef.current
             if (prev) {
-                flushSync(() => setDocument(prev))
+                flushSync(() => {
+                    setDocument(prev)
+                    setUiMode('edit')
+                })
+            } else {
+                setUiMode('edit')
             }
             documentBeforeCompareRef.current = null
             setCompareBusy(false)
@@ -2158,6 +2612,14 @@ export default function AssetEditor() {
                 setActivityToast('Exported empty canvas')
             }
             await waitForImagesToLoad(node)
+            // Mask gizmos, selection rings, and snap guides are edit-only
+            // decorations. Switch to preview mode for the duration of the
+            // rasterization so none of them leak into the exported PNG/JPG.
+            const priorUiMode = uiMode
+            flushSync(() => setUiMode('preview'))
+            await new Promise<void>((r) =>
+                requestAnimationFrame(() => requestAnimationFrame(() => r()))
+            )
             const opts = {
                 cacheBust: true,
                 skipFonts: true,
@@ -2172,17 +2634,21 @@ export default function AssetEditor() {
                     height: `${document.height}px`,
                 },
             } as const
-            const dataUrl =
-                kind === 'png'
-                    ? await toPng(node, opts)
-                    : await toJpeg(node, { ...opts, quality: 0.92 })
-            const a = window.document.createElement('a')
-            a.href = dataUrl
-            a.download = `${fileStem}.${kind === 'png' ? 'png' : 'jpg'}`
-            a.click()
-            setActivityToast(kind === 'json' ? 'Document exported' : 'Image exported')
+            try {
+                const dataUrl =
+                    kind === 'png'
+                        ? await toPng(node, opts)
+                        : await toJpeg(node, { ...opts, quality: 0.92 })
+                const a = window.document.createElement('a')
+                a.href = dataUrl
+                a.download = `${fileStem}.${kind === 'png' ? 'png' : 'jpg'}`
+                a.click()
+                setActivityToast(kind === 'json' ? 'Document exported' : 'Image exported')
+            } finally {
+                flushSync(() => setUiMode(priorUiMode))
+            }
         },
-        [document, compositionName]
+        [document, compositionName, uiMode]
     )
 
     const startNewComposition = useCallback(async (opts?: { skipDiscardConfirm?: boolean }) => {
@@ -2212,6 +2678,7 @@ export default function AssetEditor() {
             setCompositionLoadError(null)
             setCompareSlider(50)
             setUiMode('edit')
+            setWelcomeDismissed(false)
         })
         replaceUrlCompositionParam(null)
     }, [discardRequiresConfirmation, editorConfirm])
@@ -2543,6 +3010,18 @@ export default function AssetEditor() {
             if (pickerMode === 'references') {
                 return
             }
+            // Synchronous double-click guard. `pickerPickingRef` is checked
+            // first (state updates don't flush fast enough to block a
+            // near-simultaneous second click). Once claimed, every other
+            // tile is dimmed via the `pickerPickingAssetId` state and
+            // returns early here.
+            if (pickerPickingRef.current) {
+                return
+            }
+            pickerPickingRef.current = asset.id
+            setPickerPickingAssetId(asset.id)
+            setActivityToast(pickerMode === 'replace' ? 'Replacing image…' : 'Adding image…')
+            try {
             const dims = await confirmDamAssetDimensions(asset)
             const enriched: DamPickerAsset = { ...asset, width: dims.width, height: dims.height }
 
@@ -2601,6 +3080,10 @@ export default function AssetEditor() {
             setPickerOpen(false)
             setPickerMode(null)
             setReplaceLayerId(null)
+            } finally {
+                pickerPickingRef.current = null
+                setPickerPickingAssetId(null)
+            }
         },
         [pickerMode, replaceLayerId, updateLayer, document.layers]
     )
@@ -2917,6 +3400,9 @@ export default function AssetEditor() {
                 } catch {
                     /* ignore — server already counted; UI may be slightly stale until reload */
                 }
+                // Pull fresh credit totals so the top-bar pill updates live after
+                // each generation. Fire-and-forget — never block the render path.
+                void refreshAiCreditStatus()
             } catch (e) {
                 if (e instanceof DOMException && e.name === 'AbortError') {
                     if (genSeqRef.current[layerId] === seq) {
@@ -2976,7 +3462,7 @@ export default function AssetEditor() {
                 }))
             }
         },
-        [genUsage, updateLayer, brandContext, snapshotCheckpoint, compositionId, activeBrandId]
+        [genUsage, updateLayer, brandContext, snapshotCheckpoint, compositionId, activeBrandId, refreshAiCreditStatus]
     )
 
     const runImageLayerEdit = useCallback(
@@ -3132,6 +3618,7 @@ export default function AssetEditor() {
                 } catch {
                     /* ignore */
                 }
+                void refreshAiCreditStatus()
             } catch (e) {
                 if (e instanceof DOMException && e.name === 'AbortError') {
                     if (imageEditSeqRef.current[layerId] === seq) {
@@ -3189,7 +3676,7 @@ export default function AssetEditor() {
                 }))
             }
         },
-        [genUsage, updateLayer, brandContext, snapshotCheckpoint, compositionId, activeBrandId]
+        [genUsage, updateLayer, brandContext, snapshotCheckpoint, compositionId, activeBrandId, refreshAiCreditStatus]
     )
 
     const runGenerativeVariations = useCallback(
@@ -3322,6 +3809,7 @@ export default function AssetEditor() {
                 } catch {
                     /* ignore */
                 }
+                void refreshAiCreditStatus()
             } catch (e) {
                 if (e instanceof DOMException && e.name === 'AbortError') {
                     if (genSeqRef.current[layerId] === seq) {
@@ -3393,7 +3881,7 @@ export default function AssetEditor() {
                 }))
             }
         },
-        [genUsage, updateLayer, brandContext, compositionId, activeBrandId]
+        [genUsage, updateLayer, brandContext, compositionId, activeBrandId, refreshAiCreditStatus]
     )
 
     const applyVariationChoice = useCallback(
@@ -3517,27 +4005,60 @@ export default function AssetEditor() {
                     }
                 }
 
-                if (layer.type === 'generative_image') {
-                    const genLayer = layer as any
+                // Background layer handling (Jackpot Spin path).
+                //
+                // Blueprints now ship with the background as `type: 'image'`
+                // (real photography first). The AI response can either assign
+                // a specific asset or supply a prompt to synthesize one. The
+                // two blueprint start-states are handled symmetrically:
+                //
+                //   - image → image: set src + assetId from AI's chosen asset
+                //   - image → generative_image: flip to generative so the
+                //       user (or auto-run) can materialize a synthesized BG
+                //   - generative_image → image: same as before (asset wins
+                //       over prompt)
+                //   - generative_image → generative_image: keep prompt
+                //
+                // Role + name matching keeps this working for templates that
+                // haven't been migrated to the new default layer name/type.
+                const looksLikeBg = layer.name?.toLowerCase?.().includes('background')
+                    || (layer as any).role === 'background'
+                if (layer.type === 'generative_image' || (layer.type === 'image' && looksLikeBg)) {
+                    const bgLayer = layer as any
                     const bgAssignment = assignments.find(a => a.role === 'background')
-                    if (bgAssignment?.source === 'use_asset' && bgAssignment.asset_id) {
-                        genLayer.type = 'image'
-                        genLayer.src = editorBridgeFileUrlForAssetId(bgAssignment.asset_id)
-                        genLayer.assetId = bgAssignment.asset_id
-                        genLayer.objectFit = 'cover'
-                        genLayer.opacity = 1
-                        delete genLayer.prompt
-                        delete genLayer.status
-                        delete genLayer.history
-                        delete genLayer.feedback
-                    } else if (ai.background_prompt || bgAssignment?.prompt) {
-                        genLayer.prompt = {
+                    const wantsAsset = bgAssignment?.source === 'use_asset' && bgAssignment.asset_id
+                    const wantsPrompt = !wantsAsset && (ai.background_prompt || bgAssignment?.prompt)
+
+                    if (wantsAsset) {
+                        bgLayer.type = 'image'
+                        bgLayer.src = editorBridgeFileUrlForAssetId(bgAssignment!.asset_id!)
+                        bgLayer.assetId = bgAssignment!.asset_id
+                        bgLayer.fit = 'cover'
+                        bgLayer.opacity = 1
+                        delete bgLayer.prompt
+                        delete bgLayer.status
+                        delete bgLayer.history
+                        delete bgLayer.feedback
+                    } else if (wantsPrompt) {
+                        // Flip an empty image slot into a generative layer so
+                        // the user can hit Generate in the properties panel
+                        // and materialize a real image from the AI's prompt.
+                        // This is the only path in the app that still emits
+                        // a generative_image by default — regular templates
+                        // stick with photography from the library.
+                        bgLayer.type = 'generative_image'
+                        bgLayer.status = 'idle'
+                        bgLayer.history = bgLayer.history ?? []
+                        bgLayer.feedback = bgLayer.feedback ?? []
+                        bgLayer.prompt = {
                             scene: bgAssignment?.prompt || ai.background_prompt || '',
                             style: brandContext?.visual_style || '',
                             palette: (brandContext?.colors || []).join(', '),
                             mood: '',
                             additionalDirections: '',
                         }
+                        delete bgLayer.src
+                        delete bgLayer.assetId
                     }
                 }
 
@@ -3673,6 +4194,35 @@ export default function AssetEditor() {
             setAiLayoutPromptOpen(false)
             setLeftPanel('layers')
             void refreshAiCreditStatus()
+
+            // Auto-fire generation for any generative_image layer the AI
+            // seeded with a prompt. "Feeling Lucky" is a one-click action —
+            // the user expects a finished composition with a real image, not
+            // a placeholder telling them to press Generate themselves.
+            // We walk the *local* `layers` array rather than deferring to
+            // `runRegenerateAllUnlockedGenerative` because `documentRef`
+            // hasn't caught up yet on the next microtask (it's sync-assigned
+            // at render time, and this runs before React's next commit).
+            const autoGenIds = layers
+                .filter((l) =>
+                    l.type === 'generative_image' &&
+                    !l.locked &&
+                    !!((l as GenerativeImageLayer).prompt?.scene?.trim())
+                )
+                .map((l) => l.id)
+            if (autoGenIds.length > 0) {
+                // Defer a tick so `setDocument` has committed and the layers
+                // are in the ref by the time `runGenerativeGeneration` reads
+                // them. `setTimeout(..., 0)` is sufficient — no need for
+                // intermediate microtasks.
+                window.setTimeout(() => {
+                    void runWithConcurrency(
+                        autoGenIds,
+                        MAX_CONCURRENT_AI_REQUESTS,
+                        (id) => runGenerativeGeneration(id),
+                    )
+                }, 0)
+            }
         } catch (e: any) {
             await editorConfirm({ title: 'Generation failed', message: e.message || 'Could not generate layout. Please try again.', confirmText: 'OK', variant: 'danger' })
         } finally {
@@ -3851,15 +4401,119 @@ export default function AssetEditor() {
         })
     }, [auth?.activeBrand?.primary_color])
 
+    /**
+     * Insert a new mask layer on top of the current stack. By default it's
+     * placed directly above the currently-selected non-mask layer so the
+     * user's intent ("mask the thing I have selected") maps cleanly onto the
+     * `below_one` default target. If nothing is selected the mask lands at
+     * the top of the stack.
+     */
+    const addMaskLayer = useCallback(() => {
+        setDocument((prev) => {
+            const mask = createDefaultMaskLayer(nextZIndex(prev.layers), prev)
+            const selectedId = selectedLayerId
+            const selected = selectedId ? prev.layers.find((l) => l.id === selectedId) : null
+            let layers: Layer[]
+            if (selected && selected.type !== 'mask') {
+                const selectedZ = Number(selected.z) || 0
+                // Nudge every layer at or above the selected z up by one, then
+                // place the mask at `selectedZ + 1`. normalizeZ after ensures
+                // a clean 0..n sequence.
+                const bumped = prev.layers.map((l) =>
+                    (Number(l.z) || 0) > selectedZ
+                        ? { ...l, z: (Number(l.z) || 0) + 1 }
+                        : l
+                )
+                layers = normalizeZ([...bumped, { ...mask, z: selectedZ + 1 }])
+            } else {
+                layers = normalizeZ([...prev.layers, mask])
+            }
+            setSelectedLayerId(mask.id)
+            return {
+                ...prev,
+                layers,
+                updated_at: new Date().toISOString(),
+            }
+        })
+    }, [selectedLayerId])
+
+    /**
+     * Resolve a canvas/panel click into the correct selection:
+     *
+     *   - If the layer belongs to a group and the user didn't hold Alt, select
+     *     the group (we still surface `selectedLayerId = clicked id` so the
+     *     properties panel remains layer-centric).
+     *   - If Alt is held, drill into the single layer even if grouped.
+     *
+     * This is the ONE way selection should change in response to a user click.
+     * Other callers (programmatic: start-new, load-draft) clear both ids
+     * directly — that's fine, they're explicit.
+     */
+    const selectLayerOrGroup = useCallback(
+        (layerId: string, opts?: { alt?: boolean }) => {
+            const doc = documentRef.current
+            const layer = doc.layers.find((l) => l.id === layerId)
+            if (!layer) {
+                setSelectedLayerId(null)
+                setSelectedGroupId(null)
+                return
+            }
+            if (layer.groupId && !opts?.alt) {
+                setSelectedLayerId(layerId)
+                setSelectedGroupId(layer.groupId)
+                return
+            }
+            setSelectedLayerId(layerId)
+            setSelectedGroupId(null)
+        },
+        [setSelectedGroupId]
+    )
+
     const beginMove = useCallback(
         (layerId: string, e: React.MouseEvent) => {
-            const layer = document.layers.find((l) => l.id === layerId)
+            const doc = documentRef.current
+            const layer = doc.layers.find((l) => l.id === layerId)
             if (!layer || layer.locked || !layer.visible) {
                 return
             }
             e.stopPropagation()
             e.preventDefault()
             const { x, y } = clientToDoc(e.clientX, e.clientY)
+
+            // If the clicked layer is in a group AND the group is currently
+            // the active selection (Alt wasn't held on the click that brought
+            // us here), move the whole group as a rigid body. We bail out if
+            // any member is locked — partial group drags produce surprising
+            // results, and the lock icon already communicates "won't move".
+            const group = layer.groupId ? findGroupForLayer(doc, layerId) : null
+            const groupActive = !!group && selectedGroupIdRef.current === group.id
+            if (group && groupActive) {
+                const members = groupMemberLayers(doc, group.id)
+                if (members.some((m) => m.locked)) {
+                    return
+                }
+                const unionRect = unionRectForGroup(doc, group.id)
+                if (unionRect) {
+                    dragRef.current = {
+                        kind: 'move',
+                        layerId,
+                        startDocX: x,
+                        startDocY: y,
+                        startLayerX: layer.transform.x,
+                        startLayerY: layer.transform.y,
+                        groupMembers: members.map((m) => ({
+                            layerId: m.id,
+                            x: m.transform.x,
+                            y: m.transform.y,
+                            width: m.transform.width,
+                            height: m.transform.height,
+                        })),
+                        groupStartRect: unionRect,
+                    }
+                    return
+                }
+            }
+
             dragRef.current = {
                 kind: 'move',
                 layerId,
@@ -3869,12 +4523,13 @@ export default function AssetEditor() {
                 startLayerY: layer.transform.y,
             }
         },
-        [clientToDoc, document.layers]
+        [clientToDoc]
     )
 
     const beginResize = useCallback(
         (layerId: string, corner: ResizeCorner, e: React.MouseEvent) => {
-            const layer = document.layers.find((l) => l.id === layerId)
+            const doc = documentRef.current
+            const layer = doc.layers.find((l) => l.id === layerId)
             if (!layer || layer.locked || !layer.visible) {
                 return
             }
@@ -3883,6 +4538,42 @@ export default function AssetEditor() {
             setSelectedLayerId(layerId)
             setEditingTextLayerId(null)
             const { x, y } = clientToDoc(e.clientX, e.clientY)
+
+            // Group resize: we treat the union rect as the subject and every
+            // member gets scaled proportionally. Aspect is always locked for
+            // groups so CTA fill + text can't drift out of alignment.
+            const group = layer.groupId ? findGroupForLayer(doc, layerId) : null
+            const groupActive = !!group && selectedGroupIdRef.current === group.id
+            if (group && groupActive) {
+                const members = groupMemberLayers(doc, group.id)
+                if (members.some((m) => m.locked)) {
+                    return
+                }
+                const unionRect = unionRectForGroup(doc, group.id)
+                if (unionRect) {
+                    const groupAr = unionRect.width / Math.max(unionRect.height, 0.001)
+                    dragRef.current = {
+                        kind: 'resize',
+                        layerId,
+                        corner,
+                        startDocX: x,
+                        startDocY: y,
+                        start: { ...unionRect },
+                        aspectRatio: groupAr,
+                        lockAspectResize: true,
+                        groupMembers: members.map((m) => ({
+                            layerId: m.id,
+                            x: m.transform.x,
+                            y: m.transform.y,
+                            width: m.transform.width,
+                            height: m.transform.height,
+                        })),
+                        groupStartRect: unionRect,
+                    }
+                    return
+                }
+            }
+
             const ar = layer.transform.width / Math.max(layer.transform.height, 0.001)
             dragRef.current = {
                 kind: 'resize',
@@ -3900,7 +4591,7 @@ export default function AssetEditor() {
                 lockAspectResize: locksAspectOnResize(layer),
             }
         },
-        [clientToDoc, document.layers]
+        [clientToDoc]
     )
 
     useEffect(() => {
@@ -3910,15 +4601,90 @@ export default function AssetEditor() {
                 return
             }
             const { x: mx, y: my } = clientToDoc(e.clientX, e.clientY)
+            const snapCfg = snapConfigRef.current
+            // Hold Alt to temporarily disable snap (pro escape hatch).
+            const altDisable = e.altKey
+            const doc = documentRef.current
+            const thresholdDoc = (SNAP_THRESHOLD_SCREEN_PX / Math.max(0.05, snapCfg.screenScale))
             if (d.kind === 'move') {
                 const dx = mx - d.startDocX
                 const dy = my - d.startDocY
+
+                // Group move: snap the union rect as the subject, then shift
+                // every member by the same snapped delta so their relative
+                // positions stay intact.
+                if (d.groupMembers && d.groupStartRect) {
+                    const startRect = d.groupStartRect
+                    const rawX = startRect.x + dx
+                    const rawY = startRect.y + dy
+                    let finalX = rawX
+                    let finalY = rawY
+                    let hits: SnapHit[] = []
+                    if (!altDisable && snapCfg.mode !== 'off' && startRect.width > 0 && startRect.height > 0) {
+                        const res = snapEngineMove({
+                            rect: { x: rawX, y: rawY, width: startRect.width, height: startRect.height },
+                            docW: doc.width,
+                            docH: doc.height,
+                            mode: snapCfg.mode,
+                            density: snapCfg.density,
+                            thresholdDoc,
+                        })
+                        finalX = res.x
+                        finalY = res.y
+                        hits = res.hits
+                    }
+                    reportSnapHits(hits)
+                    const deltaX = finalX - startRect.x
+                    const deltaY = finalY - startRect.y
+                    const memberIds = new Set(d.groupMembers.map((m) => m.layerId))
+                    const startById = new Map(d.groupMembers.map((m) => [m.layerId, m] as const))
+                    setDocument((prev) => ({
+                        ...prev,
+                        layers: prev.layers.map((l) => {
+                            if (!memberIds.has(l.id)) return l
+                            const s = startById.get(l.id)!
+                            return {
+                                ...l,
+                                transform: {
+                                    ...l.transform,
+                                    x: s.x + deltaX,
+                                    y: s.y + deltaY,
+                                },
+                            }
+                        }),
+                        updated_at: new Date().toISOString(),
+                    }))
+                    return
+                }
+
+                const layer = doc.layers.find((l) => l.id === d.layerId)
+                const w = layer?.transform.width ?? 0
+                const h = layer?.transform.height ?? 0
+                const rawX = d.startLayerX + dx
+                const rawY = d.startLayerY + dy
+                let finalX = rawX
+                let finalY = rawY
+                let hits: SnapHit[] = []
+                if (!altDisable && snapCfg.mode !== 'off' && w > 0 && h > 0) {
+                    const res = snapEngineMove({
+                        rect: { x: rawX, y: rawY, width: w, height: h },
+                        docW: doc.width,
+                        docH: doc.height,
+                        mode: snapCfg.mode,
+                        density: snapCfg.density,
+                        thresholdDoc,
+                    })
+                    finalX = res.x
+                    finalY = res.y
+                    hits = res.hits
+                }
+                reportSnapHits(hits)
                 updateLayer(d.layerId, (l) => ({
                     ...l,
                     transform: {
                         ...l.transform,
-                        x: d.startLayerX + dx,
-                        y: d.startLayerY + dy,
+                        x: finalX,
+                        y: finalY,
                     },
                 }))
                 return
@@ -3937,19 +4703,68 @@ export default function AssetEditor() {
                 lockAspect,
                 d.aspectRatio
             )
+            let finalRect = { x, y, width: w, height: h }
+            let hits: SnapHit[] = []
+            if (!altDisable && snapCfg.mode === 'line_align') {
+                const res = snapEngineResize({
+                    rect: finalRect,
+                    corner: d.corner,
+                    docW: doc.width,
+                    docH: doc.height,
+                    mode: snapCfg.mode,
+                    density: snapCfg.density,
+                    thresholdDoc,
+                })
+                finalRect = { x: res.x, y: res.y, width: res.width, height: res.height }
+                hits = res.hits
+            }
+            reportSnapHits(hits)
+
+            // Group resize: union rect transforms into finalRect, and each
+            // member's (x, y, w, h) gets mapped into the new rect preserving
+            // its normalized position/size within the old union rect.
+            if (d.groupMembers && d.groupStartRect) {
+                const src = d.groupStartRect
+                const dst = finalRect
+                const sx = dst.width / Math.max(src.width, 0.001)
+                const sy = dst.height / Math.max(src.height, 0.001)
+                const memberIds = new Set(d.groupMembers.map((m) => m.layerId))
+                const startById = new Map(d.groupMembers.map((m) => [m.layerId, m] as const))
+                setDocument((prev) => ({
+                    ...prev,
+                    layers: prev.layers.map((l) => {
+                        if (!memberIds.has(l.id)) return l
+                        const s = startById.get(l.id)!
+                        return {
+                            ...l,
+                            transform: {
+                                ...l.transform,
+                                x: dst.x + (s.x - src.x) * sx,
+                                y: dst.y + (s.y - src.y) * sy,
+                                width: s.width * sx,
+                                height: s.height * sy,
+                            },
+                        }
+                    }),
+                    updated_at: new Date().toISOString(),
+                }))
+                return
+            }
+
             updateLayer(d.layerId, (l) => ({
                 ...l,
                 transform: {
                     ...l.transform,
-                    x,
-                    y,
-                    width: w,
-                    height: h,
+                    x: finalRect.x,
+                    y: finalRect.y,
+                    width: finalRect.width,
+                    height: finalRect.height,
                 },
             }))
         }
         const onUp = () => {
             dragRef.current = null
+            reportSnapHits([])
         }
         window.addEventListener('mousemove', onMove)
         window.addEventListener('mouseup', onUp)
@@ -3957,17 +4772,24 @@ export default function AssetEditor() {
             window.removeEventListener('mousemove', onMove)
             window.removeEventListener('mouseup', onUp)
         }
-    }, [clientToDoc, updateLayer])
+    }, [clientToDoc, updateLayer, reportSnapHits])
 
     const clearSelection = useCallback((e: React.MouseEvent) => {
         if (e.target === e.currentTarget) {
             setSelectedLayerId(null)
+            setSelectedGroupId(null)
             setEditingTextLayerId(null)
         }
     }, [])
 
     return (
-        <div className="flex h-screen flex-col overflow-hidden bg-neutral-950">
+        // `dark` is forced so every `dark:*` rule inside the editor fires regardless of
+        // the user's OS preference or the top-level html class. On staging the html root
+        // wasn't getting `dark` applied, which made inner chrome fall back to light
+        // `border-gray-200` / `bg-white` — the "hard white borders" the user saw.
+        // `bg-gray-950` (vs `neutral-950`) is the slightly-blue near-black that reads as
+        // "navy" in the editor surround.
+        <div className="jp-editor-shell dark flex h-screen flex-col overflow-hidden bg-gray-950">
             {compositionBootstrapping && (
                 <div
                     className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-3 bg-gray-950/80 text-sm text-white"
@@ -3980,9 +4802,10 @@ export default function AssetEditor() {
             )}
             <AppHead title="Generative editor" />
             <div className={uiMode === 'preview' ? 'hidden' : ''}>
-                {/* Cinematic (transparent) variant so the nav chrome blends into the dark editor
-                   surface instead of creating a hard white band above it. */}
-                <AppNav brand={auth?.activeBrand} tenant={null} variant="transparent" />
+                {/* Standard white nav — matches the rest of the product. Forcing `dark`
+                   above does NOT change AppNav because it uses explicit `variant` branching
+                   (not `dark:` Tailwind variants), so the white nav chrome stays intact. */}
+                <AppNav brand={auth?.activeBrand} tenant={null} />
             </div>
 
             {/* Top bar */}
@@ -4077,39 +4900,179 @@ export default function AssetEditor() {
                             <button type="button" onClick={centerCanvas} className="flex h-6 w-6 items-center justify-center rounded hover:bg-gray-800 hover:text-white" title="Center canvas">
                                 <ViewfinderCircleIcon className="h-3.5 w-3.5" />
                             </button>
+                            <div className="mx-1 h-3.5 w-px bg-gray-700" />
+                            <button
+                                type="button"
+                                onClick={() => setGridEnabled((v) => !v)}
+                                className={`flex h-6 w-6 items-center justify-center rounded hover:bg-gray-800 hover:text-white ${gridEnabled ? 'text-indigo-400' : ''}`}
+                                title={`${gridEnabled ? 'Hide' : 'Show'} grid (G)`}
+                                aria-pressed={gridEnabled}
+                            >
+                                <Squares2X2Icon className="h-3.5 w-3.5" />
+                            </button>
                         </div>
                     </div>
                 )}
 
                 {/* Right: credit indicator (edit mode) / preview controls (preview mode) */}
                 {uiMode === 'edit' && aiEnabled && aiCreditStatus && (
-                    <div className="ml-auto flex items-center">
-                        <button
-                            type="button"
-                            onClick={() => { setLeftPanel('history'); if (compositionId) void refreshVersions() }}
-                            title={
-                                aiCreditStatus.is_unlimited
-                                    ? `AI credits: unlimited. This composition used ${aiCreditStatus.generative_editor_used} credit(s) across all brand generations this month.`
-                                    : `Monthly AI credits: ${aiCreditStatus.credits_used} / ${aiCreditStatus.credits_cap} used (${aiCreditStatus.credits_remaining} remaining). Click to view history.`
-                            }
-                            className={`group flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-[11px] font-medium tabular-nums transition-colors ${
-                                aiCreditStatus.is_exceeded
+                    <div className="relative ml-auto flex items-center">
+                        {(() => {
+                            const s = aiCreditStatus
+                            const compUsed = s.this_composition_used
+                            const hasCompCount =
+                                compositionId != null && compUsed !== null && compUsed !== undefined
+                            const pct = s.is_unlimited || s.credits_cap <= 0
+                                ? 0
+                                : Math.min(100, Math.round((s.credits_used / s.credits_cap) * 100))
+                            // Compute tone buckets once; reused between pill and popover accent.
+                            const tone = s.is_exceeded
+                                ? 'exceeded'
+                                : s.warning_level === 'warning' || s.warning_level === 'danger'
+                                    ? 'warn'
+                                    : 'ok'
+                            const toneButtonClasses =
+                                tone === 'exceeded'
                                     ? 'border-red-500/50 bg-red-500/10 text-red-300 hover:bg-red-500/20'
-                                    : aiCreditStatus.warning_level === 'warning' || aiCreditStatus.warning_level === 'danger'
+                                    : tone === 'warn'
                                         ? 'border-amber-500/40 bg-amber-500/10 text-amber-200 hover:bg-amber-500/20'
                                         : 'border-gray-700 bg-gray-800/60 text-gray-300 hover:border-gray-600 hover:bg-gray-800 hover:text-white'
-                            }`}
-                        >
-                            <SparklesIcon className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                            {aiCreditStatus.is_unlimited ? (
-                                <span>AI: unlimited</span>
-                            ) : (
+                            const toneBarClasses =
+                                tone === 'exceeded'
+                                    ? 'bg-red-400'
+                                    : tone === 'warn'
+                                        ? 'bg-amber-400'
+                                        : 'bg-indigo-400'
+                            const titleText = s.is_unlimited
+                                ? `AI credits: unlimited${hasCompCount ? ` · this composition used ${compUsed} credit(s)` : ''}.`
+                                : `Monthly AI credits: ${s.credits_used.toLocaleString()} / ${s.credits_cap.toLocaleString()} used (${s.credits_remaining.toLocaleString()} remaining)${hasCompCount ? ` · this composition: ${compUsed}` : ''}.`
+                            return (
                                 <>
-                                    <span>{aiCreditStatus.credits_used.toLocaleString()} / {aiCreditStatus.credits_cap.toLocaleString()}</span>
-                                    <span className="hidden md:inline text-gray-500 group-hover:text-gray-400">credits</span>
+                                    <button
+                                        type="button"
+                                        onClick={() => setAiCreditPopoverOpen((v) => !v)}
+                                        aria-expanded={aiCreditPopoverOpen}
+                                        aria-haspopup="dialog"
+                                        title={titleText}
+                                        className={`group flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-[11px] font-medium tabular-nums transition-colors ${toneButtonClasses}`}
+                                    >
+                                        <SparklesIcon className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                                        {s.is_unlimited ? (
+                                            <span>AI: unlimited</span>
+                                        ) : (
+                                            <>
+                                                {hasCompCount && (
+                                                    // Inline "this composition" chip. Shown even at 0 so users
+                                                    // learn the counter exists and see it tick up as they work.
+                                                    <span
+                                                        className="rounded-sm bg-gray-900/80 px-1 text-[10px] font-semibold text-indigo-300"
+                                                        title="Credits used by this composition this month"
+                                                    >
+                                                        +{(compUsed ?? 0).toLocaleString()}
+                                                    </span>
+                                                )}
+                                                <span>
+                                                    {s.credits_used.toLocaleString()} / {s.credits_cap.toLocaleString()}
+                                                </span>
+                                                <span className="hidden md:inline text-gray-500 group-hover:text-gray-400">credits</span>
+                                            </>
+                                        )}
+                                    </button>
+                                    {aiCreditPopoverOpen && (
+                                        <>
+                                            {/* click-away scrim — covers the whole viewport so any click outside
+                                                the popover closes it without bubbling to editor handlers. */}
+                                            <button
+                                                type="button"
+                                                aria-label="Close credits panel"
+                                                className="fixed inset-0 z-40 cursor-default"
+                                                onClick={() => setAiCreditPopoverOpen(false)}
+                                            />
+                                            <div
+                                                role="dialog"
+                                                aria-label="AI credit usage"
+                                                className="absolute right-0 top-full z-50 mt-2 w-72 rounded-lg border border-gray-700 bg-gray-900 p-3 shadow-xl"
+                                            >
+                                                <div className="mb-2 flex items-center justify-between">
+                                                    <span className="text-xs font-semibold uppercase tracking-wide text-gray-400">
+                                                        AI credits
+                                                    </span>
+                                                    {s.is_exceeded && (
+                                                        <span className="rounded bg-red-500/20 px-1.5 py-0.5 text-[10px] font-semibold text-red-300">
+                                                            Limit reached
+                                                        </span>
+                                                    )}
+                                                </div>
+                                                <dl className="space-y-1.5 text-xs text-gray-200">
+                                                    <div className="flex items-baseline justify-between gap-2">
+                                                        <dt className="text-gray-400">This composition</dt>
+                                                        <dd className="tabular-nums font-semibold text-indigo-300">
+                                                            {hasCompCount
+                                                                ? `${(compUsed ?? 0).toLocaleString()} credits`
+                                                                : compositionId == null
+                                                                    ? 'Save first'
+                                                                    : '—'}
+                                                        </dd>
+                                                    </div>
+                                                    <div className="flex items-baseline justify-between gap-2">
+                                                        <dt className="text-gray-400">This month</dt>
+                                                        <dd className="tabular-nums font-semibold">
+                                                            {s.credits_used.toLocaleString()}
+                                                            {!s.is_unlimited && (
+                                                                <span className="text-gray-500"> / {s.credits_cap.toLocaleString()}</span>
+                                                            )}
+                                                        </dd>
+                                                    </div>
+                                                    {!s.is_unlimited && (
+                                                        <div className="flex items-baseline justify-between gap-2">
+                                                            <dt className="text-gray-400">Remaining</dt>
+                                                            <dd className="tabular-nums font-semibold text-gray-100">
+                                                                {s.credits_remaining.toLocaleString()}
+                                                            </dd>
+                                                        </div>
+                                                    )}
+                                                </dl>
+                                                {!s.is_unlimited && s.credits_cap > 0 && (
+                                                    <div className="mt-2">
+                                                        <div className="h-1.5 w-full overflow-hidden rounded-full bg-gray-800">
+                                                            <div
+                                                                className={`h-full transition-all ${toneBarClasses}`}
+                                                                style={{ width: `${pct}%` }}
+                                                            />
+                                                        </div>
+                                                        <div className="mt-1 flex items-center justify-between text-[10px] text-gray-500">
+                                                            <span>{pct}% used</span>
+                                                            <span>Resets monthly</span>
+                                                        </div>
+                                                    </div>
+                                                )}
+                                                <div className="mt-3 flex items-center justify-between gap-2 border-t border-gray-800 pt-2 text-[11px]">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            setAiCreditPopoverOpen(false)
+                                                            setLeftPanel('history')
+                                                            if (compositionId) void refreshVersions()
+                                                        }}
+                                                        className="text-indigo-300 hover:text-indigo-200"
+                                                    >
+                                                        View history
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => void refreshAiCreditStatus()}
+                                                        className="text-gray-400 hover:text-gray-200"
+                                                        title="Refresh"
+                                                    >
+                                                        <ArrowPathIcon className="h-3.5 w-3.5" aria-hidden />
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </>
+                                    )}
                                 </>
-                            )}
-                        </button>
+                            )
+                        })()}
                     </div>
                 )}
                 {uiMode === 'preview' && (
@@ -4336,28 +5299,143 @@ export default function AssetEditor() {
                                             <h2 className="text-xs font-semibold uppercase tracking-wide text-gray-400">Layer Stack</h2>
                                             <button type="button" onClick={() => setLeftPanel(null)} className="text-gray-500 hover:text-gray-300"><XMarkIcon className="h-4 w-4" /></button>
                                         </div>
+                                        {/* Grouping toolbar — visible whenever the user has shift-clicked 2+ rows.
+                                            Intentionally unobtrusive so the normal flow stays clean. */}
+                                        {groupingSelection.size > 0 && (
+                                            <div className="flex items-center justify-between gap-2 border-b border-gray-800 bg-gray-900/60 px-3 py-1.5 text-[11px] text-gray-300">
+                                                <span className="truncate">{groupingSelection.size} selected</span>
+                                                <div className="flex items-center gap-2">
+                                                    <button
+                                                        type="button"
+                                                        className="rounded border border-gray-700 bg-gray-800 px-2 py-0.5 text-[10px] text-gray-200 hover:border-gray-600 disabled:opacity-50"
+                                                        disabled={groupingSelection.size < 2}
+                                                        title="Group selected layers so they move and resize together"
+                                                        onClick={() => {
+                                                            const ids = Array.from(groupingSelection)
+                                                            setDocument((d) => {
+                                                                const res = createGroup(d, ids)
+                                                                if (res.groupId) {
+                                                                    setSelectedGroupId(res.groupId)
+                                                                }
+                                                                return res.doc
+                                                            })
+                                                            setGroupingSelection(new Set())
+                                                        }}
+                                                    >
+                                                        Group selected
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        className="text-gray-500 hover:text-gray-300"
+                                                        onClick={() => setGroupingSelection(new Set())}
+                                                        title="Clear grouping selection"
+                                                    >
+                                                        Clear
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        )}
                                         <div className="flex-1 overflow-y-auto p-2">
-                                            {layersForPanel.length === 0 ? (
+                                            {layerPanelRows.length === 0 ? (
                                                 <p className="px-2 py-4 text-center text-xs text-gray-500">No layers yet</p>
                                             ) : (
                                                 <ul className="space-y-0.5">
-                                                    {layersForPanel.map((layer) => {
-                                                        const selected = layer.id === selectedLayerId
-                                                        const layerIcon = layer.type === 'text' ? 'T' : layer.type === 'image' ? '🖼' : layer.type === 'generative_image' ? '✦' : layer.type === 'fill' ? '◼' : '▣'
-                                                        return (
-                                                            <li key={layer.id} onDragOver={onLayerPanelDragOver} onDrop={(e) => onLayerPanelDrop(e, layer.id)} className={`group/layer rounded ${layerDragId === layer.id ? 'opacity-60' : ''}`}>
-                                                                <div className={`flex items-center gap-1.5 rounded px-2 py-1.5 text-xs ${selected ? 'bg-blue-600/30 text-white' : 'text-gray-300 hover:bg-gray-800'}`}>
-                                                                    <button type="button" draggable onDragStart={(e) => { e.stopPropagation(); onLayerPanelDragStart(e, layer.id) }} onDragEnd={() => setLayerDragId(null)} className="shrink-0 cursor-grab text-gray-500 active:cursor-grabbing" title="Drag to reorder"><Bars3Icon className="h-3.5 w-3.5" aria-hidden /></button>
-                                                                    <span className="shrink-0 text-[10px] opacity-60 w-4 text-center">{layerIcon}</span>
-                                                                    <button type="button" draggable={false} className="min-w-0 flex-1 truncate text-left font-medium" onClick={() => { setSelectedLayerId(layer.id); setEditingTextLayerId(null) }}>{layer.name || layer.type}</button>
-                                                                    <div className="flex shrink-0 items-center gap-0 opacity-0 transition-opacity group-hover/layer:opacity-100">
-                                                                        <button type="button" draggable={false} className="rounded p-0.5 text-gray-500 hover:bg-gray-700 hover:text-gray-200" title="Bring forward" onClick={(e) => { e.stopPropagation(); setDocument((d) => moveLayerZOrder(d, layer.id, 'up')) }}><ArrowUpIcon className="h-3 w-3" /></button>
-                                                                        <button type="button" draggable={false} className="rounded p-0.5 text-gray-500 hover:bg-gray-700 hover:text-gray-200" title="Send backward" onClick={(e) => { e.stopPropagation(); setDocument((d) => moveLayerZOrder(d, layer.id, 'down')) }}><ArrowDownIcon className="h-3 w-3" /></button>
+                                                    {layerPanelRows.map((row) => {
+                                                        if (row.kind === 'group') {
+                                                            const g = row.group
+                                                            const isGroupSelected = selectedGroupId === g.id
+                                                            const anyMemberVisible = row.members.some((m) => m.visible)
+                                                            const allMembersLocked = row.members.length > 0 && row.members.every((m) => m.locked)
+                                                            return (
+                                                                <li key={`g:${g.id}`} className="rounded">
+                                                                    <div className={`flex items-center gap-1.5 rounded px-2 py-1.5 text-xs ${isGroupSelected ? 'bg-indigo-600/20 text-white ring-1 ring-indigo-500/60' : 'text-gray-200 hover:bg-gray-800'}`}>
+                                                                        <button
+                                                                            type="button"
+                                                                            className="shrink-0 text-gray-400 hover:text-gray-100"
+                                                                            onClick={() => setDocument((d) => updateGroupInDoc(d, g.id, { collapsed: !g.collapsed }))}
+                                                                            title={g.collapsed ? 'Expand group' : 'Collapse group'}
+                                                                            aria-label={g.collapsed ? 'Expand group' : 'Collapse group'}
+                                                                        >
+                                                                            {g.collapsed ? '▸' : '▾'}
+                                                                        </button>
+                                                                        <span className="shrink-0 text-[10px] opacity-70 w-4 text-center">⧉</span>
+                                                                        <button
+                                                                            type="button"
+                                                                            className="min-w-0 flex-1 truncate text-left font-medium"
+                                                                            onClick={() => {
+                                                                                // Selecting a group picks the top-most
+                                                                                // member as the "anchor" (for the
+                                                                                // properties panel) and marks the group
+                                                                                // active.
+                                                                                const anchor = row.members[0]
+                                                                                if (anchor) {
+                                                                                    selectLayerOrGroup(anchor.id)
+                                                                                }
+                                                                            }}
+                                                                            onDoubleClick={() => {
+                                                                                const next = window.prompt('Group name', g.name)
+                                                                                if (next && next.trim() !== g.name) {
+                                                                                    setDocument((d) => updateGroupInDoc(d, g.id, { name: next.trim() }))
+                                                                                }
+                                                                            }}
+                                                                            title="Click to select group. Double-click to rename."
+                                                                        >
+                                                                            {g.name}
+                                                                        </button>
+                                                                        <span className="text-[10px] text-gray-500">{row.members.length}</span>
+                                                                        <button
+                                                                            type="button"
+                                                                            className="shrink-0 text-gray-500 hover:text-gray-200"
+                                                                            title={anyMemberVisible ? 'Hide all' : 'Show all'}
+                                                                            onClick={() => {
+                                                                                setDocument((d) => ({
+                                                                                    ...d,
+                                                                                    layers: d.layers.map((l) =>
+                                                                                        l.groupId === g.id ? { ...l, visible: !anyMemberVisible } : l
+                                                                                    ),
+                                                                                }))
+                                                                            }}
+                                                                        >
+                                                                            {anyMemberVisible ? <EyeIcon className="h-3.5 w-3.5" /> : <EyeSlashIcon className="h-3.5 w-3.5 opacity-40" />}
+                                                                        </button>
+                                                                        <button
+                                                                            type="button"
+                                                                            className="shrink-0 text-gray-500 hover:text-gray-200"
+                                                                            title={allMembersLocked ? 'Unlock all' : 'Lock all'}
+                                                                            onClick={() => {
+                                                                                setDocument((d) => ({
+                                                                                    ...d,
+                                                                                    layers: d.layers.map((l) =>
+                                                                                        l.groupId === g.id ? { ...l, locked: !allMembersLocked } : l
+                                                                                    ),
+                                                                                }))
+                                                                            }}
+                                                                        >
+                                                                            {allMembersLocked ? <LockClosedIcon className="h-3.5 w-3.5" /> : <LockOpenIcon className="h-3.5 w-3.5 opacity-60" />}
+                                                                        </button>
+                                                                        <button
+                                                                            type="button"
+                                                                            className="shrink-0 rounded px-1 text-[10px] text-gray-400 hover:bg-gray-700 hover:text-gray-100"
+                                                                            title="Ungroup"
+                                                                            onClick={() => {
+                                                                                setDocument((d) => ungroupInDoc(d, g.id))
+                                                                                if (selectedGroupId === g.id) {
+                                                                                    setSelectedGroupId(null)
+                                                                                }
+                                                                            }}
+                                                                        >
+                                                                            Ungroup
+                                                                        </button>
                                                                     </div>
-                                                                    <button type="button" draggable={false} className="shrink-0 text-gray-500 hover:text-gray-200" title={layer.visible ? 'Hide' : 'Show'} onClick={() => updateLayer(layer.id, (l) => ({ ...l, visible: !l.visible }))}>{layer.visible ? <EyeIcon className="h-3.5 w-3.5" /> : <EyeSlashIcon className="h-3.5 w-3.5 opacity-40" />}</button>
-                                                                </div>
-                                                            </li>
-                                                        )
+                                                                    {!g.collapsed && (
+                                                                        <ul className="ml-4 mt-0.5 space-y-0.5 border-l border-gray-800 pl-2">
+                                                                            {row.members.map((layer) => renderLayerPanelRow(layer, true))}
+                                                                        </ul>
+                                                                    )}
+                                                                </li>
+                                                            )
+                                                        }
+                                                        return renderLayerPanelRow(row.layer, false)
                                                     })}
                                                 </ul>
                                             )}
@@ -4388,6 +5466,10 @@ export default function AssetEditor() {
                                                         <button type="button" onClick={() => { setAddLayerOpen(false); addFillLayer() }} className="flex flex-col items-center gap-1.5 rounded-md border border-gray-700 bg-gray-800 px-2 py-2.5 text-gray-300 hover:border-gray-500 hover:bg-gray-700 hover:text-white transition-colors">
                                                             <SwatchIcon className="h-5 w-5" />
                                                             <span className="text-[11px] font-medium">Fill</span>
+                                                        </button>
+                                                        <button type="button" onClick={() => { setAddLayerOpen(false); addMaskLayer() }} className="flex flex-col items-center gap-1.5 rounded-md border border-gray-700 bg-gray-800 px-2 py-2.5 text-gray-300 hover:border-gray-500 hover:bg-gray-700 hover:text-white transition-colors" title="Clip the layer directly beneath with a shape or gradient">
+                                                            <span className="flex h-5 w-5 items-center justify-center text-lg leading-none">◑</span>
+                                                            <span className="text-[11px] font-medium">Mask</span>
                                                         </button>
                                                     </div>
                                                 </div>
@@ -4618,7 +5700,7 @@ export default function AssetEditor() {
                 >
                     {/* Zoom controls moved to top bar */}
 
-                    {document.layers.length === 0 && (
+                    {document.layers.length === 0 && !welcomeDismissed && (
                         <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center p-6">
                             <style>{`
                                 @keyframes jp-slot-spin { 0% { transform: translateY(0); } 25% { transform: translateY(-6px); } 50% { transform: translateY(0); } 75% { transform: translateY(4px); } 100% { transform: translateY(0); } }
@@ -4628,7 +5710,13 @@ export default function AssetEditor() {
                                 .group:hover .jp-slot-reel-2 { animation: jp-slot-spin-delay 0.6s ease-in-out 0.08s; }
                                 .group:hover .jp-slot-reel-3 { animation: jp-slot-spin 0.55s ease-in-out 0.15s; }
                             `}</style>
-                            <div className="pointer-events-auto w-full max-w-lg">
+                            {/*
+                              * White card behind the welcome copy — lifts it off the
+                              * canvas dot-grid and keeps the action buttons legible
+                              * against busy brand backgrounds without having to fight
+                              * every individual text color.
+                              */}
+                            <div className="pointer-events-auto w-full max-w-lg rounded-2xl bg-white p-8 shadow-2xl ring-1 ring-black/5 sm:p-10">
                                 {/* Hero with slot icon trio */}
                                 <div className="mb-9 text-center">
                                     <div className="mb-4 flex items-center justify-center gap-3">
@@ -4789,7 +5877,19 @@ export default function AssetEditor() {
                                     {/* Blank canvas */}
                                     <button
                                         type="button"
-                                        onClick={() => startNewComposition()}
+                                        onClick={async () => {
+                                            // If there's an existing composition loaded, wipe it back
+                                            // to a fresh draft first so "blank canvas" really means
+                                            // blank. startNewComposition resets welcomeDismissed to
+                                            // false, so we set it *after* awaiting. Otherwise just
+                                            // hide the welcome overlay so the user can start adding
+                                            // layers on the current empty doc.
+                                            if (compositionId || document.layers.length > 0) {
+                                                await startNewComposition()
+                                            }
+                                            setWelcomeDismissed(true)
+                                            setActivityToast('Blank canvas ready — add a layer to get started')
+                                        }}
                                         className="group flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-gray-300 py-3 text-xs font-medium text-gray-400 transition-all hover:border-gray-400 hover:text-gray-600"
                                     >
                                         <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
@@ -4856,11 +5956,43 @@ export default function AssetEditor() {
                                 ...(uiMode === 'edit' ? { overflow: 'visible' } : {}),
                             }}
                         >
+                            {uiMode === 'edit' && gridEnabled && (
+                                <GridOverlay
+                                    docW={document.width}
+                                    docH={document.height}
+                                    density={effectiveGridDensity}
+                                    hits={snapHits}
+                                />
+                            )}
                             {layersForCanvas.map((layer) => {
                                 if (!layer.visible) {
                                     return null
                                 }
+                                // Mask layers are rendered as a non-exported
+                                // gizmo in edit mode (dashed outline so users
+                                // can move/resize/select them) and completely
+                                // omitted in preview/export mode — their job
+                                // is to alter other layers, not to be visible
+                                // themselves. The actual clipping is applied
+                                // to target layers via `buildMaskStyleForLayer`
+                                // below.
+                                if (isMaskLayer(layer) && uiMode === 'preview') {
+                                    return null
+                                }
                                 const isSelected = layer.id === selectedLayerId
+                                // When the active selection is a group, we
+                                // draw the ring once around the union rect
+                                // (see `selectedGroupRect` overlay below) and
+                                // suppress per-member rings so members don't
+                                // look like they were individually selected.
+                                const showMemberRing = isSelected && !selectedGroupId
+                                // Highlight non-primary group members with a
+                                // subtle teal outline so the user can see the
+                                // link without losing the primary selection.
+                                const isGroupMate =
+                                    !!selectedGroupId &&
+                                    !isSelected &&
+                                    layer.groupId === selectedGroupId
                                 const t = layer.transform
                                 const rot = t.rotation ?? 0
                                 return (
@@ -4868,11 +6000,13 @@ export default function AssetEditor() {
                                         key={layer.id}
                                         role="presentation"
                                         className={`group relative box-border ${
-                                            isSelected
+                                            showMemberRing
                                                 ? isTextLayer(layer)
                                                     ? 'ring-2 ring-indigo-500 ring-offset-0 outline outline-1 outline-dashed outline-indigo-400/90 dark:ring-indigo-400 dark:outline-indigo-500/80'
                                                     : 'ring-2 ring-indigo-500 ring-offset-0 dark:ring-indigo-400'
-                                                : ''
+                                                : isGroupMate
+                                                    ? 'outline outline-1 outline-dashed outline-teal-400/70'
+                                                    : ''
                                         }`}
                                         style={{
                                             position: 'absolute',
@@ -4893,13 +6027,23 @@ export default function AssetEditor() {
                                                           layer.blendMode as CSSProperties['mixBlendMode'],
                                                   }
                                                 : {}),
+                                            // Apply any masks that target this layer. Spread AFTER
+                                            // the other style props so mask-related props can't be
+                                            // accidentally overwritten. Mask layers themselves never
+                                            // get masked (guarded by buildMaskStyleForLayer returning
+                                            // {} for type==='mask').
+                                            ...(buildMaskStyleForLayer(layer, document.layers) as CSSProperties),
                                         }}
                                         onMouseDown={(e) => {
                                             e.stopPropagation()
                                             if (selectedLayerId !== layer.id) {
                                                 setEditingTextLayerId(null)
                                             }
-                                            setSelectedLayerId(layer.id)
+                                            // Alt/Option → drill into a single grouped member; plain
+                                            // click selects the whole group if this layer belongs to
+                                            // one. Must run BEFORE beginMove so the latter can read
+                                            // `selectedGroupId` and decide rigid-body vs single.
+                                            selectLayerOrGroup(layer.id, { alt: e.altKey })
                                             if (!isTextLayer(layer) || editingTextLayerId !== layer.id) {
                                                 beginMove(layer.id, e)
                                             }
@@ -4927,6 +6071,22 @@ export default function AssetEditor() {
                                                 title="Layer locked — won&apos;t change when regenerating"
                                             >
                                                 <LockClosedIcon className="h-3.5 w-3.5" aria-hidden />
+                                            </div>
+                                        )}
+                                        {isMaskLayer(layer) && uiMode === 'edit' && (
+                                            // Non-exported gizmo: dashed outline + small label so the
+                                            // user can see and manipulate the mask's extent. This div
+                                            // gets clipped out of the PNG/JPG export because the export
+                                            // path switches uiMode to 'preview' before rasterizing (and
+                                            // the mask layer is omitted from the render entirely in
+                                            // preview — see the guard up above).
+                                            <div
+                                                className="pointer-events-none absolute inset-0 rounded border-2 border-dashed border-amber-400/80 bg-amber-400/5"
+                                                aria-hidden
+                                            >
+                                                <span className="absolute left-1 top-1 rounded bg-amber-400 px-1 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-black">
+                                                    Mask · {layer.shape}
+                                                </span>
                                             </div>
                                         )}
                                         {isGenerativeImageLayer(layer) && (
@@ -5150,9 +6310,31 @@ export default function AssetEditor() {
                                                     }}
                                                 />
                                                 ) : (
-                                                <div className="flex h-full w-full items-center justify-center bg-gray-100 dark:bg-gray-800">
-                                                    <svg className="h-8 w-8 text-gray-300 dark:text-gray-600" fill="none" viewBox="0 0 24 24" strokeWidth="1" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909M3.75 21h16.5A2.25 2.25 0 0 0 22.5 18.75V5.25A2.25 2.25 0 0 0 20.25 3H3.75A2.25 2.25 0 0 0 1.5 5.25v13.5A2.25 2.25 0 0 0 3.75 21Z" /></svg>
-                                                </div>
+                                                /*
+                                                 * Empty image slot — now that templates default to real-photo
+                                                 * backgrounds (BG_LAYER type: 'image'), this placeholder is the
+                                                 * brand's first signal when their library has no tag-matched
+                                                 * candidates. We show a click-to-pick CTA instead of a bare
+                                                 * gray box so they can resolve the empty slot without hunting
+                                                 * through the right-panel buttons.
+                                                 */
+                                                <button
+                                                    type="button"
+                                                    disabled={layer.locked}
+                                                    onClick={(e) => {
+                                                        e.stopPropagation()
+                                                        openPickerForReplaceImage(layer.id)
+                                                    }}
+                                                    // Hard-coded dark palette + translucency so an empty
+                                                    // slot never renders as an opaque white square when the
+                                                    // editor root drops its dark-mode class (happens briefly
+                                                    // during template applies). Translucent + muted keeps
+                                                    // the slot legible without dominating the canvas.
+                                                    className="flex h-full w-full cursor-pointer flex-col items-center justify-center gap-1 border-2 border-dashed border-gray-600/70 bg-gray-900/40 px-2 text-center text-[10px] text-gray-300 backdrop-blur-sm transition-colors hover:border-indigo-500 hover:bg-indigo-950/40 hover:text-indigo-200 disabled:cursor-not-allowed disabled:opacity-50"
+                                                >
+                                                    <svg className="h-6 w-6 opacity-70" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909M3.75 21h16.5A2.25 2.25 0 0 0 22.5 18.75V5.25A2.25 2.25 0 0 0 20.25 3H3.75A2.25 2.25 0 0 0 1.5 5.25v13.5A2.25 2.25 0 0 0 3.75 21Z" /></svg>
+                                                    <span className="font-medium">Click to pick a photo</span>
+                                                </button>
                                                 )}
                                                 {imageLoadFailedByLayerId[layer.id] && (
                                                     <div
@@ -5285,6 +6467,26 @@ export default function AssetEditor() {
                                     </div>
                                 )
                             })}
+                            {uiMode === 'edit' && selectedGroupRect && (
+                                // Single dashed outline enclosing every group
+                                // member. Sits above the per-layer rings (which
+                                // are suppressed when a group is active) so
+                                // it's visually unambiguous that "this is the
+                                // thing that will move/resize". pointer-events
+                                // off — we still want the underlying layers
+                                // handling the click.
+                                <div
+                                    className="pointer-events-none absolute outline outline-2 outline-dashed outline-indigo-400"
+                                    style={{
+                                        left: selectedGroupRect.x - 2,
+                                        top: selectedGroupRect.y - 2,
+                                        width: selectedGroupRect.width + 4,
+                                        height: selectedGroupRect.height + 4,
+                                        zIndex: 9999,
+                                    }}
+                                    aria-hidden
+                                />
+                            )}
                             </div>
                     </div>
 
@@ -5377,72 +6579,157 @@ export default function AssetEditor() {
                         )}
                     </div>
                     <div className="flex-1 overflow-y-auto p-3 text-xs">
-                        {propertiesMode === 'advanced' && (
-                        <div className="mb-4 space-y-2 border-b border-gray-700 pb-4">
-                            <h3 className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">
-                                Document size
-                            </h3>
-                            <div className="grid grid-cols-2 gap-2">
-                                <div>
-                                    <label className="mb-1 block text-gray-400">
-                                        Width (px)
-                                    </label>
-                                    <input
-                                        type="number"
-                                        min={DOCUMENT_DIMENSION_MIN}
-                                        max={DOCUMENT_DIMENSION_MAX}
-                                        value={document.width}
-                                        onChange={(e) => {
-                                            const v = Number(e.target.value)
-                                            if (Number.isNaN(v)) {
-                                                return
-                                            }
-                                            setDocumentDimensions(v, document.height)
-                                        }}
-                                        className="w-full rounded border border-gray-700 bg-gray-800 px-2 py-1 text-gray-200"
-                                    />
+                        {/*
+                          * ── CANVAS (document-level) section ──────────────────────────
+                          * Global settings that apply to the whole composition, not the
+                          * currently selected layer. Collapsible accordion so it
+                          * doesn't compete with the layer editing workflow, but sticky
+                          * across page loads. Includes: canvas size + presets, snap
+                          * on/off, and grid density. Previously these were spread
+                          * between an advanced-only Document Size block at the top
+                          * and a nested card inside "Placement & Snap" (which read
+                          * as layer-specific). Grouping them under one clearly-labeled
+                          * CANVAS section makes the layer/global split unambiguous.
+                          */}
+                        <div className="mb-3">
+                            <button
+                                type="button"
+                                onClick={() => setCanvasSectionOpen((v) => !v)}
+                                className="flex w-full items-center justify-between gap-2 rounded-md bg-gray-800/60 px-2.5 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-gray-300 hover:bg-gray-800"
+                                aria-expanded={canvasSectionOpen}
+                                aria-controls="jp-canvas-section"
+                            >
+                                <span className="flex items-center gap-1.5">
+                                    <DocumentIcon className="h-3.5 w-3.5" aria-hidden />
+                                    Canvas
+                                    <span className="ml-1 rounded bg-gray-900/70 px-1.5 py-px text-[9px] font-normal normal-case tracking-normal text-gray-500">
+                                        {document.width}×{document.height}
+                                    </span>
+                                </span>
+                                {canvasSectionOpen
+                                    ? <ChevronDownIcon className="h-3.5 w-3.5 text-gray-500" aria-hidden />
+                                    : <ChevronRightIcon className="h-3.5 w-3.5 text-gray-500" aria-hidden />}
+                            </button>
+                            {canvasSectionOpen && (
+                                <div id="jp-canvas-section" className="mt-2 space-y-3 rounded-md bg-gray-900/40 p-2.5">
+                                    {/* Canvas size */}
+                                    <div className="space-y-2">
+                                        <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Size</p>
+                                        <div className="grid grid-cols-2 gap-2">
+                                            <div>
+                                                <label className="mb-1 block text-gray-400">Width (px)</label>
+                                                <input
+                                                    type="number"
+                                                    min={DOCUMENT_DIMENSION_MIN}
+                                                    max={DOCUMENT_DIMENSION_MAX}
+                                                    value={document.width}
+                                                    onChange={(e) => {
+                                                        const v = Number(e.target.value)
+                                                        if (Number.isNaN(v)) return
+                                                        setDocumentDimensions(v, document.height)
+                                                    }}
+                                                    className="w-full rounded border border-gray-800 bg-gray-900 px-2 py-1 text-gray-200"
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="mb-1 block text-gray-400">Height (px)</label>
+                                                <input
+                                                    type="number"
+                                                    min={DOCUMENT_DIMENSION_MIN}
+                                                    max={DOCUMENT_DIMENSION_MAX}
+                                                    value={document.height}
+                                                    onChange={(e) => {
+                                                        const v = Number(e.target.value)
+                                                        if (Number.isNaN(v)) return
+                                                        setDocumentDimensions(document.width, v)
+                                                    }}
+                                                    className="w-full rounded border border-gray-800 bg-gray-900 px-2 py-1 text-gray-200"
+                                                />
+                                            </div>
+                                        </div>
+                                        <div className="flex flex-wrap gap-1">
+                                            {DOCUMENT_SIZE_PRESETS.map((p) => (
+                                                <button
+                                                    key={`${p.w}x${p.h}`}
+                                                    type="button"
+                                                    onClick={() => setDocumentDimensions(p.w, p.h)}
+                                                    title={`${p.w} × ${p.h}px`}
+                                                    className="rounded border border-gray-800 bg-gray-900 px-1.5 py-0.5 text-[10px] font-medium text-gray-300 hover:bg-gray-800"
+                                                >
+                                                    {p.label}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+
+                                    {/* Snap + grid — advanced only (Basic locks to 3×3 + snap-on) */}
+                                    {propertiesMode === 'advanced' && (
+                                        <div className="space-y-2 border-t border-gray-800 pt-2.5">
+                                            <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Snap &amp; grid</p>
+                                            <label className="flex items-center gap-2 text-[11px] text-gray-300">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={snapEnabled}
+                                                    onChange={(e) => setSnapEnabled(e.target.checked)}
+                                                    className="rounded border-gray-600 bg-gray-900 text-indigo-500 focus:ring-indigo-500"
+                                                />
+                                                Snap to grid
+                                                <span className="ml-auto text-[10px] text-gray-500">Shift+G</span>
+                                            </label>
+                                            <div>
+                                                <p className="mb-1 text-[10px] text-gray-500">Grid density</p>
+                                                <div className="flex gap-1">
+                                                    {([3, 6, 12] as const).map((d) => (
+                                                        <button
+                                                            key={d}
+                                                            type="button"
+                                                            disabled={!snapEnabled}
+                                                            onClick={() => setGridDensity(d)}
+                                                            className={`flex-1 rounded border px-2 py-1 text-[11px] font-medium transition-colors ${
+                                                                gridDensity === d
+                                                                    ? 'border-indigo-500 bg-indigo-900/40 text-white'
+                                                                    : 'border-gray-800 bg-gray-900 text-gray-300 hover:border-gray-700'
+                                                            } ${!snapEnabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                                        >
+                                                            {d}×{d}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+                                    {propertiesMode === 'basic' && (
+                                        <p className="border-t border-gray-800 pt-2.5 text-[10px] leading-snug text-gray-500">
+                                            Basic mode snaps layers to a 3×3 grid. Switch to Advanced for finer control.
+                                        </p>
+                                    )}
                                 </div>
-                                <div>
-                                    <label className="mb-1 block text-gray-400">
-                                        Height (px)
-                                    </label>
-                                    <input
-                                        type="number"
-                                        min={DOCUMENT_DIMENSION_MIN}
-                                        max={DOCUMENT_DIMENSION_MAX}
-                                        value={document.height}
-                                        onChange={(e) => {
-                                            const v = Number(e.target.value)
-                                            if (Number.isNaN(v)) {
-                                                return
-                                            }
-                                            setDocumentDimensions(document.width, v)
-                                        }}
-                                        className="w-full rounded border border-gray-700 bg-gray-800 px-2 py-1 text-gray-200"
-                                    />
-                                </div>
-                            </div>
-                            <div className="flex flex-wrap gap-1">
-                                {DOCUMENT_SIZE_PRESETS.map((p) => (
-                                    <button
-                                        key={`${p.w}x${p.h}`}
-                                        type="button"
-                                        onClick={() => setDocumentDimensions(p.w, p.h)}
-                                        title={`${p.w} × ${p.h}px`}
-                                        className="rounded border border-gray-700 bg-gray-800 px-1.5 py-0.5 text-[10px] font-medium text-gray-200 hover:bg-gray-700"
-                                    >
-                                        {p.label}
-                                    </button>
-                                ))}
-                            </div>
+                            )}
                         </div>
-                        )}
+
                         {!selectedLayer && (
                             <p className="text-gray-400">Select a layer to edit properties.</p>
                         )}
                         {selectedLayer && (
                             <div className="space-y-4">
-                                <div className="flex flex-wrap gap-2 border-b border-gray-700 pb-3">
+                                {/*
+                                  * ── LAYER section header ────────────────────────────
+                                  * Visually disambiguates layer-specific controls below
+                                  * from the Canvas (global) controls above. Echoes the
+                                  * Canvas header's visual language (small pill card,
+                                  * icon + uppercase label) so the two sections read
+                                  * as peers.
+                                  */}
+                                <div className="flex items-center justify-between gap-2 rounded-md bg-indigo-950/40 px-2.5 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-indigo-200 ring-1 ring-inset ring-indigo-900/50">
+                                    <span className="flex min-w-0 items-center gap-1.5">
+                                        <RectangleGroupIcon className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                                        Layer
+                                        <span className="ml-1 min-w-0 truncate rounded bg-gray-900/70 px-1.5 py-px text-[9px] font-normal normal-case tracking-normal text-gray-400">
+                                            {selectedLayer.name ?? selectedLayer.type}
+                                        </span>
+                                    </span>
+                                </div>
+                                <div className="flex flex-wrap gap-2">
                                     <button
                                         type="button"
                                         onClick={duplicateSelectedLayer}
@@ -5536,6 +6823,49 @@ export default function AssetEditor() {
                                         Lock
                                     </button>
                                 </div>
+
+                                {/*
+                                  * Placement (layer-specific). Snap on/off + grid
+                                  * density moved up into the Canvas section — they're
+                                  * composition-wide, not per-layer. This block now
+                                  * only exposes the 3×3 quadrant picker + a status
+                                  * hint reflecting the canvas-level snap setting.
+                                  * Hidden for full-bleed backgrounds since "which
+                                  * quadrant" is meaningless there.
+                                  */}
+                                {(() => {
+                                    const t = selectedLayer.transform
+                                    const isFullBleed = t.width >= document.width * 0.999 && t.height >= document.height * 0.999
+                                    if (isFullBleed) return null
+                                    const currentPlacement = xyToPlacement(t.x, t.y, t.width, t.height, document.width, document.height)
+                                    const applyPlacement = (p: Placement) => {
+                                        const { x, y } = placementToXY(p, t.width, t.height, document.width, document.height)
+                                        updateLayer(selectedLayer.id, (l) => ({
+                                            ...l,
+                                            transform: { ...l.transform, x, y },
+                                        }))
+                                    }
+                                    return (
+                                        <div className="space-y-3">
+                                            <h3 className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">Placement</h3>
+                                            <div className="flex items-start gap-3">
+                                                <PlacementPicker
+                                                    value={currentPlacement}
+                                                    onChange={applyPlacement}
+                                                    size="sm"
+                                                    label="Quadrant"
+                                                />
+                                                <div className="flex-1 pt-1 text-[11px] leading-snug text-gray-500">
+                                                    {propertiesMode === 'basic'
+                                                        ? 'Snaps to the 3×3 grid. Canvas settings control density.'
+                                                        : (snapEnabled
+                                                            ? `Snapping to a ${gridDensity}×${gridDensity} grid. Hold Alt to disable while dragging.`
+                                                            : 'Free positioning — grid is visual only. Re-enable snap in Canvas to align.')}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )
+                                })()}
 
                                 {/* Advanced: Transform, Rotation, Blend */}
                                 {propertiesMode === 'advanced' && (
@@ -5674,6 +7004,302 @@ export default function AssetEditor() {
                                     </select>
                                 </div>
                                 </>
+                                )}
+
+                                {isFillLayer(selectedLayer) && selectedLayer.kind === 'text_boost' && (() => {
+                                    // Local working values — default to inferred if a field
+                                    // somehow wasn't set (older drafts loaded pre-model change).
+                                    const tbStyle = selectedLayer.textBoostStyle ?? 'gradient_bottom'
+                                    const tbColor = selectedLayer.textBoostColor
+                                        ?? (typeof auth?.activeBrand?.primary_color === 'string' ? auth.activeBrand.primary_color : '#000000')
+                                    const tbOpacity = typeof selectedLayer.textBoostOpacity === 'number'
+                                        ? selectedLayer.textBoostOpacity
+                                        : 0.7
+                                    const tbSource = selectedLayer.textBoostSource ?? 'auto'
+                                    const palette = labeledBrandPalette(brandContext)
+
+                                    // Applies a new text-boost triple and mirrors it into the underlying
+                                    // fill fields so the renderer doesn't need a second code path. Any
+                                    // call into this flips `source` to 'manual' — brand edits after a
+                                    // user deliberately tweaks the scrim shouldn't silently overwrite.
+                                    const applyTextBoost = (
+                                        next: { style?: typeof tbStyle; color?: string; opacity?: number },
+                                    ) => {
+                                        updateLayer(selectedLayer.id, (l) => {
+                                            if (!isFillLayer(l) || l.kind !== 'text_boost') return l
+                                            const style = next.style ?? l.textBoostStyle ?? 'gradient_bottom'
+                                            const color = next.color ?? l.textBoostColor ?? tbColor
+                                            const opacity = typeof next.opacity === 'number'
+                                                ? next.opacity
+                                                : (l.textBoostOpacity ?? 0.7)
+                                            const derived = textBoostToFillFields(style, color, opacity)
+                                            return {
+                                                ...l,
+                                                textBoostStyle: style,
+                                                textBoostColor: color,
+                                                textBoostOpacity: opacity,
+                                                textBoostSource: 'manual' as const,
+                                                fillKind: derived.fillKind,
+                                                color: derived.color,
+                                                gradientStartColor: derived.gradientStartColor,
+                                                gradientEndColor: derived.gradientEndColor,
+                                                gradientAngleDeg: derived.gradientAngleDeg,
+                                            }
+                                        })
+                                    }
+
+                                    return (
+                                        <div className="space-y-3 border-t border-gray-700 pt-3">
+                                            <div className="flex items-center justify-between">
+                                                <h3 className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+                                                    Text Boost
+                                                </h3>
+                                                {tbSource === 'manual' && (
+                                                    <button
+                                                        type="button"
+                                                        className="rounded border border-gray-700 bg-gray-800 px-2 py-0.5 text-[10px] text-gray-300 hover:border-gray-600"
+                                                        disabled={selectedLayer.locked}
+                                                        onClick={() => {
+                                                            const inferred = inferTextBoostStyle(
+                                                                { primary_color: typeof auth?.activeBrand?.primary_color === 'string' ? auth.activeBrand.primary_color : undefined },
+                                                                { background_is_photo: true },
+                                                            )
+                                                            updateLayer(selectedLayer.id, (l) => {
+                                                                if (!isFillLayer(l) || l.kind !== 'text_boost') return l
+                                                                const derived = textBoostToFillFields(
+                                                                    inferred.style,
+                                                                    inferred.color,
+                                                                    inferred.opacity,
+                                                                )
+                                                                return {
+                                                                    ...l,
+                                                                    textBoostStyle: inferred.style,
+                                                                    textBoostColor: inferred.color,
+                                                                    textBoostOpacity: inferred.opacity,
+                                                                    textBoostSource: 'auto' as const,
+                                                                    fillKind: derived.fillKind,
+                                                                    color: derived.color,
+                                                                    gradientStartColor: derived.gradientStartColor,
+                                                                    gradientEndColor: derived.gradientEndColor,
+                                                                    gradientAngleDeg: derived.gradientAngleDeg,
+                                                                }
+                                                            })
+                                                        }}
+                                                        title="Re-infer style from brand DNA. Clears your manual override."
+                                                    >
+                                                        Reset to auto
+                                                    </button>
+                                                )}
+                                            </div>
+                                            <div>
+                                                <label className="mb-1 block text-gray-400">Preset</label>
+                                                <select
+                                                    value={tbStyle}
+                                                    disabled={selectedLayer.locked}
+                                                    onChange={(e) => applyTextBoost({ style: e.target.value as typeof tbStyle })}
+                                                    className="w-full rounded border border-gray-700 bg-gray-800 px-2 py-1 text-gray-200"
+                                                >
+                                                    <option value="solid">Solid wash</option>
+                                                    <option value="gradient_bottom">Gradient — bottom up</option>
+                                                    <option value="gradient_top">Gradient — top down</option>
+                                                    <option value="radial">Radial vignette</option>
+                                                </select>
+                                            </div>
+                                            <div>
+                                                <label className="mb-1 block text-gray-400">Color</label>
+                                                {palette.length > 0 && (
+                                                    <div className="mb-2 flex flex-wrap gap-1.5">
+                                                        {palette.map((p) => (
+                                                            <button
+                                                                type="button"
+                                                                key={`${p.label}-${p.color}`}
+                                                                title={p.label}
+                                                                disabled={selectedLayer.locked}
+                                                                onClick={() => applyTextBoost({ color: p.color })}
+                                                                className={`h-6 w-6 rounded border ${tbColor.toLowerCase() === p.color.toLowerCase() ? 'border-white ring-1 ring-indigo-400' : 'border-gray-600'}`}
+                                                                style={{ background: p.color }}
+                                                            />
+                                                        ))}
+                                                    </div>
+                                                )}
+                                                <div className="flex gap-2">
+                                                    <input
+                                                        type="color"
+                                                        value={/^#[0-9a-fA-F]{6}$/.test(tbColor) ? tbColor : '#000000'}
+                                                        disabled={selectedLayer.locked}
+                                                        onChange={(e) => applyTextBoost({ color: e.target.value })}
+                                                        className="h-9 w-12 cursor-pointer rounded border border-gray-700 bg-gray-800"
+                                                    />
+                                                    <input
+                                                        type="text"
+                                                        value={tbColor}
+                                                        disabled={selectedLayer.locked}
+                                                        onChange={(e) => applyTextBoost({ color: e.target.value })}
+                                                        className="min-w-0 flex-1 rounded border border-gray-700 bg-gray-800 px-2 py-1 font-mono text-[11px] text-gray-200"
+                                                        placeholder="#RRGGBB"
+                                                    />
+                                                </div>
+                                            </div>
+                                            <div>
+                                                <label className="mb-1 block text-gray-400">
+                                                    Opacity ({Math.round(tbOpacity * 100)}%)
+                                                </label>
+                                                <input
+                                                    type="range"
+                                                    min={0}
+                                                    max={100}
+                                                    value={Math.round(tbOpacity * 100)}
+                                                    disabled={selectedLayer.locked}
+                                                    onChange={(e) => applyTextBoost({ opacity: Number(e.target.value) / 100 })}
+                                                    className="w-full accent-indigo-600"
+                                                />
+                                            </div>
+                                            <p className="text-[9px] text-gray-500">
+                                                {tbSource === 'auto'
+                                                    ? 'Auto — recomputes if the brand primary changes.'
+                                                    : 'Manual — locked to your choice. Use Reset to re-infer.'}
+                                            </p>
+                                        </div>
+                                    )
+                                })()}
+
+                                {isMaskLayer(selectedLayer) && (
+                                    <div className="space-y-3 border-t border-gray-700 pt-3">
+                                        <div className="flex items-center justify-between">
+                                            <h3 className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+                                                Mask
+                                            </h3>
+                                            <span className="rounded bg-amber-500/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-amber-300">Clips layers below</span>
+                                        </div>
+                                        <div>
+                                            <label className="mb-1 block text-gray-400">Shape</label>
+                                            <select
+                                                value={selectedLayer.shape}
+                                                disabled={selectedLayer.locked}
+                                                onChange={(e) => {
+                                                    const v = e.target.value as 'rect' | 'ellipse' | 'rounded_rect' | 'gradient_linear' | 'gradient_radial'
+                                                    updateLayer(selectedLayer.id, (l) => isMaskLayer(l) ? { ...l, shape: v } : l)
+                                                }}
+                                                className="w-full rounded border border-gray-700 bg-gray-800 px-2 py-1 text-gray-200"
+                                            >
+                                                <option value="rect">Rectangle</option>
+                                                <option value="rounded_rect">Rounded rectangle</option>
+                                                <option value="ellipse">Ellipse</option>
+                                                <option value="gradient_linear">Gradient (linear)</option>
+                                                <option value="gradient_radial">Gradient (radial)</option>
+                                            </select>
+                                        </div>
+                                        {selectedLayer.shape === 'rounded_rect' && (
+                                            <div>
+                                                <label className="mb-1 block text-gray-400">
+                                                    Corner radius ({Math.round(selectedLayer.radius ?? 12)}px)
+                                                </label>
+                                                <input
+                                                    type="range"
+                                                    min={0}
+                                                    max={128}
+                                                    value={Math.round(selectedLayer.radius ?? 12)}
+                                                    disabled={selectedLayer.locked}
+                                                    onChange={(e) => updateLayer(selectedLayer.id, (l) => isMaskLayer(l) ? { ...l, radius: Number(e.target.value) } : l)}
+                                                    className="w-full accent-indigo-600"
+                                                />
+                                            </div>
+                                        )}
+                                        <div>
+                                            <label className="mb-1 block text-gray-400">
+                                                Feather ({Math.round(selectedLayer.featherPx ?? 0)}px)
+                                            </label>
+                                            <input
+                                                type="range"
+                                                min={0}
+                                                max={128}
+                                                value={Math.round(selectedLayer.featherPx ?? 0)}
+                                                disabled={selectedLayer.locked}
+                                                onChange={(e) => updateLayer(selectedLayer.id, (l) => isMaskLayer(l) ? { ...l, featherPx: Number(e.target.value) } : l)}
+                                                className="w-full accent-indigo-600"
+                                            />
+                                        </div>
+                                        <div className="flex items-center justify-between">
+                                            <label className="text-gray-400">Invert</label>
+                                            <input
+                                                type="checkbox"
+                                                checked={!!selectedLayer.invert}
+                                                disabled={selectedLayer.locked}
+                                                onChange={(e) => updateLayer(selectedLayer.id, (l) => isMaskLayer(l) ? { ...l, invert: e.target.checked } : l)}
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="mb-1 block text-gray-400">Target</label>
+                                            <select
+                                                value={selectedLayer.target}
+                                                disabled={selectedLayer.locked}
+                                                onChange={(e) => {
+                                                    const v = e.target.value as 'below_one' | 'below_all' | 'group'
+                                                    updateLayer(selectedLayer.id, (l) => isMaskLayer(l) ? { ...l, target: v } : l)
+                                                }}
+                                                className="w-full rounded border border-gray-700 bg-gray-800 px-2 py-1 text-gray-200"
+                                            >
+                                                <option value="below_one">Layer directly beneath</option>
+                                                <option value="below_all">All layers beneath</option>
+                                                <option value="group" disabled={!selectedLayer.groupId}>Group members{selectedLayer.groupId ? '' : ' (set on a group first)'}</option>
+                                            </select>
+                                        </div>
+                                        {(selectedLayer.shape === 'gradient_linear' || selectedLayer.shape === 'gradient_radial') && (
+                                            <>
+                                                {selectedLayer.shape === 'gradient_linear' && (
+                                                    <div>
+                                                        <label className="mb-1 block text-gray-400">
+                                                            Angle ({Math.round(selectedLayer.gradientAngle ?? 0)}°)
+                                                        </label>
+                                                        <input
+                                                            type="range"
+                                                            min={0}
+                                                            max={360}
+                                                            value={Math.round(selectedLayer.gradientAngle ?? 0)}
+                                                            disabled={selectedLayer.locked}
+                                                            onChange={(e) => updateLayer(selectedLayer.id, (l) => isMaskLayer(l) ? { ...l, gradientAngle: Number(e.target.value) } : l)}
+                                                            className="w-full accent-indigo-600"
+                                                        />
+                                                    </div>
+                                                )}
+                                                <div className="rounded border border-gray-800 bg-gray-900/60 p-2">
+                                                    <p className="mb-1 text-[10px] text-gray-400">Alpha stops</p>
+                                                    {(selectedLayer.gradientStops ?? [
+                                                        { offset: 0, alpha: 1 },
+                                                        { offset: 1, alpha: 0 },
+                                                    ]).map((stop, idx) => (
+                                                        <div key={idx} className="mb-1 flex items-center gap-2">
+                                                            <span className="w-8 shrink-0 text-[10px] text-gray-500">{Math.round(stop.offset * 100)}%</span>
+                                                            <input
+                                                                type="range"
+                                                                min={0}
+                                                                max={100}
+                                                                value={Math.round(stop.alpha * 100)}
+                                                                disabled={selectedLayer.locked}
+                                                                onChange={(e) => {
+                                                                    const next = Number(e.target.value) / 100
+                                                                    updateLayer(selectedLayer.id, (l) => {
+                                                                        if (!isMaskLayer(l)) return l
+                                                                        const stops = (l.gradientStops ?? [
+                                                                            { offset: 0, alpha: 1 },
+                                                                            { offset: 1, alpha: 0 },
+                                                                        ]).slice()
+                                                                        stops[idx] = { ...stops[idx], alpha: next }
+                                                                        return { ...l, gradientStops: stops }
+                                                                    })
+                                                                }}
+                                                                className="w-full accent-indigo-600"
+                                                            />
+                                                            <span className="w-10 shrink-0 text-right text-[10px] text-gray-400">{Math.round(stop.alpha * 100)}%</span>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </>
+                                        )}
+                                        <p className="text-[9px] text-gray-500">
+                                            Masks aren&apos;t rendered themselves — they clip whatever they target. Move / resize the dashed rectangle on the canvas to reshape the mask.
+                                        </p>
+                                    </div>
                                 )}
 
                                 {isFillLayer(selectedLayer) && (
@@ -6422,7 +8048,72 @@ export default function AssetEditor() {
                                             <option value="contain">contain</option>
                                             <option value="fill">fill</option>
                                         </select>
+                                        <p className="mt-1 text-[10px] leading-snug text-gray-500">
+                                            <span className="font-semibold text-gray-400">contain</span>: reveals the full image when the layer is scaled (best for logos).{' '}
+                                            <span className="font-semibold text-gray-400">cover</span>: fills the layer, crops overflow (best for hero photos).
+                                        </p>
                                         </div>
+                                        {/*
+                                          * Snap the layer shape back to the asset's aspect ratio.
+                                          * This is the one-click fix for "my logo is cropped in a
+                                          * square" — it resizes the layer so no part of the image
+                                          * is cut off, keeping it centered in its current slot.
+                                          */}
+                                        {selectedLayer.naturalWidth &&
+                                            selectedLayer.naturalHeight &&
+                                            selectedLayer.naturalWidth > 0 &&
+                                            selectedLayer.naturalHeight > 0 &&
+                                            (() => {
+                                                const nw = selectedLayer.naturalWidth
+                                                const nh = selectedLayer.naturalHeight
+                                                const lw = selectedLayer.transform.width
+                                                const lh = selectedLayer.transform.height
+                                                const layerRatio = lw / Math.max(1, lh)
+                                                const imageRatio = nw / Math.max(1, nh)
+                                                // Only offer the action when the layer shape is meaningfully
+                                                // off the image's aspect — otherwise the button is a no-op.
+                                                const misaligned =
+                                                    Math.abs(layerRatio - imageRatio) / imageRatio > 0.02
+                                                if (!misaligned) return null
+                                                return (
+                                                    <button
+                                                        type="button"
+                                                        disabled={selectedLayer.locked}
+                                                        onClick={() =>
+                                                            updateLayer(selectedLayer.id, (l) => {
+                                                                if (!isImageLayer(l)) return l
+                                                                const inw = l.naturalWidth ?? 0
+                                                                const inh = l.naturalHeight ?? 0
+                                                                if (inw <= 0 || inh <= 0) return l
+                                                                const ilw = l.transform.width
+                                                                const ilh = l.transform.height
+                                                                // Preserve the layer's current pixel area —
+                                                                // users expect "fix the shape" not "shrink".
+                                                                const area = Math.max(1, ilw * ilh)
+                                                                const ir = inw / Math.max(1, inh)
+                                                                const newW = Math.round(Math.sqrt(area * ir))
+                                                                const newH = Math.max(1, Math.round(newW / ir))
+                                                                const cx = l.transform.x + ilw / 2
+                                                                const cy = l.transform.y + ilh / 2
+                                                                return {
+                                                                    ...l,
+                                                                    transform: {
+                                                                        ...l.transform,
+                                                                        x: Math.round(cx - newW / 2),
+                                                                        y: Math.round(cy - newH / 2),
+                                                                        width: newW,
+                                                                        height: newH,
+                                                                    },
+                                                                }
+                                                            })
+                                                        }
+                                                        className="w-full rounded-md border border-indigo-800 bg-indigo-950/40 px-3 py-2 text-left text-xs font-medium text-indigo-200 shadow-sm hover:bg-indigo-900/40 disabled:cursor-not-allowed disabled:opacity-50"
+                                                        title="Resize the layer so it matches the image's natural aspect ratio"
+                                                    >
+                                                        Fit layer to image shape
+                                                    </button>
+                                                )
+                                            })()}
 
                                         {selectedLayer.assetId && (
                                             <div className="mt-4">
@@ -6924,13 +8615,13 @@ export default function AssetEditor() {
                                             </div>
                                         </div>
 
-                                        <div className="rounded-md border border-violet-800 bg-violet-950/20 p-2">
+                                        <div className="rounded-md border border-violet-900/60 bg-violet-950/20 p-2">
                                             <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-violet-200">
                                                 Copy Assist
                                             </p>
                                             {copyAssistLoadingId === selectedLayer.id && (
                                                 <div
-                                                    className="mb-2 flex items-center gap-2 rounded border border-violet-700 bg-violet-950/50 px-2 py-1.5 text-[10px] font-medium text-violet-100"
+                                                    className="mb-2 flex items-center gap-2 rounded border border-violet-900/60 bg-violet-950/50 px-2 py-1.5 text-[10px] font-medium text-violet-100"
                                                     role="status"
                                                     aria-live="polite"
                                                 >
@@ -6957,7 +8648,7 @@ export default function AssetEditor() {
                                                             copyAssistLoadingId === selectedLayer.id
                                                         }
                                                         onClick={() => void runCopyAssist(op)}
-                                                        className="rounded border border-violet-700 bg-violet-950/40 px-2 py-1 text-[10px] font-medium text-violet-100 hover:bg-violet-900/50 disabled:cursor-not-allowed disabled:opacity-50"
+                                                        className="rounded border border-violet-900/60 bg-violet-950/40 px-2 py-1 text-[10px] font-medium text-violet-100 hover:bg-violet-900/50 disabled:cursor-not-allowed disabled:opacity-50"
                                                     >
                                                         {label}
                                                     </button>
@@ -6981,7 +8672,7 @@ export default function AssetEditor() {
                                                 </div>
                                             )}
                                             {copyAssistScore && (
-                                                <div className="mt-2 rounded border border-violet-800 bg-violet-950/40 p-1.5">
+                                                <div className="mt-2 rounded border border-violet-900/60 bg-violet-950/40 p-1.5">
                                                     <p className="text-[10px] font-semibold text-gray-100">
                                                         Estimated brand voice alignment: {copyAssistScore.score}%
                                                     </p>
@@ -8028,8 +9719,16 @@ export default function AssetEditor() {
                     aria-modal="true"
                     aria-label="Choose asset"
                 >
-                    <div className="flex max-h-[85vh] w-full max-w-3xl min-h-0 flex-col overflow-hidden rounded-lg border border-gray-200 bg-white shadow-xl dark:border-gray-700 dark:bg-gray-900">
-                        <div className="flex shrink-0 items-center justify-between border-b border-gray-200 px-4 py-3 dark:border-gray-700">
+                    {/*
+                      * The picker only ever opens inside the Studio editor, which is
+                      * permanently dark-themed. Using explicit dark palette classes
+                      * (rather than `dark:` variants over a `bg-white` base) makes the
+                      * modal render correctly even if some unusual wrapper or portal
+                      * breaks the `.dark` ancestor chain — previously the title came
+                      * through as near-white text on a near-white backdrop.
+                      */}
+                    <div className="flex max-h-[85vh] w-full max-w-3xl min-h-0 flex-col overflow-hidden rounded-lg border border-gray-700 bg-gray-900 shadow-xl">
+                        <div className="flex shrink-0 items-center justify-between border-b border-gray-700 px-4 py-3">
                             <h3 className="text-sm font-semibold text-gray-100">
                                 {pickerMode === 'references'
                                     ? `Reference images (max ${MAX_REFERENCE_ASSETS})`
@@ -8039,25 +9738,26 @@ export default function AssetEditor() {
                             </h3>
                             <button
                                 type="button"
-                                className="rounded p-1 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800"
+                                className="rounded p-1 text-gray-400 hover:bg-gray-800 hover:text-gray-200 disabled:cursor-not-allowed disabled:opacity-40"
                                 onClick={closeAssetPicker}
+                                disabled={pickerPickingAssetId !== null}
                                 aria-label="Close"
                             >
                                 <XMarkIcon className="h-5 w-5" />
                             </button>
                         </div>
-                        <div className="shrink-0 border-b border-gray-200 px-4 py-2 dark:border-gray-700">
+                        <div className="shrink-0 border-b border-gray-700 px-4 py-2">
                             <div className="flex flex-wrap items-center gap-2">
                                 <span className="text-[10px] font-medium uppercase tracking-wide text-gray-400">
                                     Source
                                 </span>
-                                <div className="inline-flex rounded-md border border-gray-200 p-0.5 dark:border-gray-700">
+                                <div className="inline-flex rounded-md border border-gray-700 p-0.5">
                                     <button
                                         type="button"
                                         className={`rounded px-2.5 py-1 text-[11px] font-medium ${
                                             pickerScope === 'library'
                                                 ? 'bg-indigo-600 text-white'
-                                                : 'text-gray-600 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-800'
+                                                : 'text-gray-300 hover:bg-gray-800'
                                         }`}
                                         onClick={() => {
                                             setPickerScope('library')
@@ -8071,7 +9771,7 @@ export default function AssetEditor() {
                                         className={`rounded px-2.5 py-1 text-[11px] font-medium ${
                                             pickerScope === 'executions'
                                                 ? 'bg-indigo-600 text-white'
-                                                : 'text-gray-600 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-800'
+                                                : 'text-gray-300 hover:bg-gray-800'
                                         }`}
                                         onClick={() => {
                                             setPickerScope('executions')
@@ -8084,7 +9784,7 @@ export default function AssetEditor() {
                                 <label className="ml-auto flex items-center gap-1.5 text-[10px] text-gray-400">
                                     <span className="whitespace-nowrap">Category</span>
                                     <select
-                                        className="max-w-[200px] rounded border border-gray-300 bg-white py-1 pl-1.5 pr-6 text-[11px] text-gray-800 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
+                                        className="max-w-[200px] rounded border border-gray-700 bg-gray-800 py-1 pl-1.5 pr-6 text-[11px] text-gray-100"
                                         value={pickerCategoryFilterId === '' ? '' : String(pickerCategoryFilterId)}
                                         onChange={(e) => {
                                             const v = e.target.value
@@ -8106,7 +9806,7 @@ export default function AssetEditor() {
                                     href={pickerScope === 'executions' ? '/app/executions' : '/app/assets'}
                                     target="_blank"
                                     rel="noopener noreferrer"
-                                    className="font-medium text-indigo-600 underline decoration-indigo-400/60 underline-offset-2 hover:text-indigo-500 dark:text-indigo-400"
+                                    className="font-medium text-indigo-300 underline decoration-indigo-400/60 underline-offset-2 hover:text-indigo-200"
                                 >
                                     Open {pickerScope === 'executions' ? 'Executions' : 'Assets'}
                                 </a>{' '}
@@ -8114,7 +9814,7 @@ export default function AssetEditor() {
                             </p>
                         </div>
                         {pickerMode === 'references' && referenceSelectionIds.length > 0 && (
-                            <div className="shrink-0 border-b border-violet-200 bg-violet-50/70 px-4 py-2.5 dark:border-violet-800 dark:bg-violet-950/25">
+                            <div className="shrink-0 border-b border-violet-800 bg-violet-950/25 px-4 py-2.5">
                                 <p className="mb-1.5 text-[10px] font-medium text-violet-200">
                                     Selected ({referenceSelectionIds.length} / {MAX_REFERENCE_ASSETS})
                                 </p>
@@ -8126,9 +9826,9 @@ export default function AssetEditor() {
                                         return (
                                             <div
                                                 key={rid}
-                                                className="flex max-w-[200px] items-center gap-1.5 rounded-md border border-violet-200 bg-white pr-1 shadow-sm dark:border-violet-700 dark:bg-gray-900"
+                                                className="flex max-w-[200px] items-center gap-1.5 rounded-md border border-violet-700 bg-gray-900 pr-1 shadow-sm"
                                             >
-                                                <div className="h-11 w-11 shrink-0 overflow-hidden rounded-l bg-gray-100 dark:bg-gray-800">
+                                                <div className="h-11 w-11 shrink-0 overflow-hidden rounded-l bg-gray-800">
                                                     {refAsset ? (
                                                         <img
                                                             src={refAsset.thumbnail_url || refAsset.file_url}
@@ -8141,12 +9841,12 @@ export default function AssetEditor() {
                                                         </div>
                                                     )}
                                                 </div>
-                                                <span className="min-w-0 flex-1 truncate text-[10px] text-gray-700 dark:text-gray-200">
+                                                <span className="min-w-0 flex-1 truncate text-[10px] text-gray-200">
                                                     {refAsset?.name ?? 'Asset'}
                                                 </span>
                                                 <button
                                                     type="button"
-                                                    className="shrink-0 rounded p-0.5 text-gray-500 hover:bg-gray-100 hover:text-gray-800 dark:hover:bg-gray-800 dark:hover:text-gray-100"
+                                                    className="shrink-0 rounded p-0.5 text-gray-400 hover:bg-gray-800 hover:text-gray-100"
                                                     aria-label="Remove from selection"
                                                     onClick={() => toggleReferenceAssetInPicker(rid)}
                                                 >
@@ -8162,7 +9862,7 @@ export default function AssetEditor() {
                             {pickerMode === 'references' && (
                                 <p className="mb-3 text-[10px] text-gray-400">
                                     Tap assets to add them to your selection (you can pick more than one). Choose{' '}
-                                    <strong className="font-semibold text-gray-700 dark:text-gray-300">
+                                    <strong className="font-semibold text-gray-300">
                                         Use selection
                                     </strong>{' '}
                                     at the bottom when finished. {referenceSelectionIds.length} /{' '}
@@ -8183,7 +9883,7 @@ export default function AssetEditor() {
                                         {Array.from({ length: 4 }).map((_, i) => (
                                             <div
                                                 key={i}
-                                                className="aspect-square animate-pulse rounded bg-gray-200 dark:bg-gray-700"
+                                                className="aspect-square animate-pulse rounded bg-gray-700"
                                             />
                                         ))}
                                     </div>
@@ -8197,28 +9897,35 @@ export default function AssetEditor() {
                             )}
                             {!damLoading && !damError && damAssets.length > 0 && (
                                 <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
-                                    {damAssets.map((a) => (
+                                    {damAssets.map((a) => {
+                                        const isPicking = pickerPickingAssetId === a.id
+                                        const otherPicking = pickerPickingAssetId !== null && !isPicking
+                                        return (
                                         <button
                                             key={a.id}
                                             type="button"
-                                            className={`group flex flex-col overflow-hidden rounded border bg-gray-50 text-left transition hover:border-indigo-400 hover:ring-1 hover:ring-indigo-400 dark:bg-gray-800 ${
-                                                pickerMode === 'references' &&
-                                                referenceSelectionIds.includes(a.id)
-                                                    ? 'border-violet-500 ring-2 ring-violet-400 ring-offset-1 dark:border-violet-400'
-                                                    : pickerMode === 'replace' &&
-                                                        pickerHighlightAssetId === a.id
-                                                      ? 'border-indigo-500 ring-2 ring-indigo-400 ring-offset-1 dark:border-indigo-400'
-                                                      : 'border-gray-200 dark:border-gray-700'
-                                            }`}
+                                            disabled={pickerPickingAssetId !== null && pickerMode !== 'references'}
+                                            aria-busy={isPicking || undefined}
+                                            className={`group relative flex flex-col overflow-hidden rounded border bg-gray-800 text-left transition hover:border-indigo-400 hover:ring-1 hover:ring-indigo-400 ${
+                                                isPicking
+                                                    ? 'border-indigo-400 ring-2 ring-indigo-400 ring-offset-1'
+                                                    : pickerMode === 'references' &&
+                                                      referenceSelectionIds.includes(a.id)
+                                                      ? 'border-violet-400 ring-2 ring-violet-400 ring-offset-1'
+                                                      : pickerMode === 'replace' &&
+                                                          pickerHighlightAssetId === a.id
+                                                        ? 'border-indigo-400 ring-2 ring-indigo-400 ring-offset-1'
+                                                        : 'border-gray-700'
+                                            } ${otherPicking ? 'pointer-events-none cursor-not-allowed opacity-40' : ''} ${isPicking ? 'cursor-wait' : ''}`}
                                             onClick={() => {
                                                 if (pickerMode === 'references') {
                                                     toggleReferenceAssetInPicker(a.id)
                                                 } else {
-                                                    handlePickDamAsset(a)
+                                                    void handlePickDamAsset(a)
                                                 }
                                             }}
                                         >
-                                            <div className="aspect-square w-full overflow-hidden bg-gray-200 dark:bg-gray-700">
+                                            <div className="aspect-square w-full overflow-hidden bg-gray-700">
                                                 <img
                                                     src={a.thumbnail_url || a.file_url}
                                                     alt=""
@@ -8235,19 +9942,31 @@ export default function AssetEditor() {
                                                     }}
                                                 />
                                             </div>
-                                            <span className="truncate px-1 py-1 text-[10px] text-gray-700 dark:text-gray-300">
+                                            <span className="truncate px-1 py-1 text-[10px] text-gray-300">
                                                 {a.name || 'Untitled'}
                                             </span>
+                                            {isPicking && (
+                                                <div
+                                                    className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2 bg-gray-900/70 backdrop-blur-[1px]"
+                                                    aria-live="polite"
+                                                >
+                                                    <ArrowPathIcon className="h-6 w-6 animate-spin text-indigo-300" />
+                                                    <span className="text-[10px] font-medium text-white">
+                                                        {pickerMode === 'replace' ? 'Replacing…' : 'Adding…'}
+                                                    </span>
+                                                </div>
+                                            )}
                                         </button>
-                                    ))}
+                                        )
+                                    })}
                                 </div>
                             )}
                         </div>
                         {pickerMode === 'references' && (
-                            <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-gray-200 bg-white px-4 py-3 dark:border-gray-700 dark:bg-gray-900">
+                            <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-gray-700 bg-gray-900 px-4 py-3">
                                 <button
                                     type="button"
-                                    className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200"
+                                    className="rounded-md border border-gray-700 bg-gray-800 px-3 py-1.5 text-xs font-medium text-gray-200 hover:bg-gray-700"
                                     onClick={closeAssetPicker}
                                 >
                                     Cancel
@@ -8276,16 +9995,44 @@ export default function AssetEditor() {
                 const selectedPlatformObj = allPlatforms.find(p => p.id === wizardPlatform)
                 const selectedFormatObj = selectedPlatformObj?.formats.find(f => f.id === wizardFormat)
 
+                /** Apply Customize overrides (enable/disable + placement) onto the base
+                 * blueprint list. Keyed by index, so the wizard's checkbox/placement UI
+                 * lines up 1:1 with whatever `buildLayersForStyle` or `fmt.layers` returns. */
+                const applyWizardOverrides = (bps: LayerBlueprint[]): LayerBlueprint[] => bps.map((bp, i) => {
+                    const o = wizardLayerOverrides[i]
+                    if (!o) return bp
+                    return {
+                        ...bp,
+                        enabled: o.enabled === false ? false : true,
+                        placement: o.placement ?? bp.placement,
+                    }
+                })
+
                 const applyTemplate = (fmt: TemplateFormat, name: string, styleId: LayoutStyleId | null) => {
                     const brandColor = typeof auth?.activeBrand?.primary_color === 'string' ? auth.activeBrand.primary_color : undefined
-                    const bps = styleId ? buildLayersForStyle(styleId, fmt.width, fmt.height) : fmt.layers
-                    const layers = blueprintToLayers(bps, fmt.width, fmt.height, brandColor)
+                    const baseBps = styleId ? buildLayersForStyle(styleId, fmt.width, fmt.height) : fmt.layers
+                    // Seed background randomization by format+style+brand so the wizard
+                    // gives varied output across templates but is stable for a given
+                    // (brand, format, style) combo. Date.now() would make every re-open
+                    // reshuffle — we want users re-opening the same template to see the
+                    // same photo they just walked past.
+                    const autoFillSeed = `${auth?.activeBrand?.id ?? 'no-brand'}|${fmt.id}|${styleId ?? 'default'}`
+                    const enriched = wizardAutoFillEnabled
+                        ? applyWizardAssetDefaults(baseBps, wizardDefaults, autoFillSeed)
+                        : baseBps
+                    const bps = applyWizardOverrides(enriched)
+                    const { layers, groups } = blueprintToLayersAndGroups(bps, fmt.width, fmt.height, brandColor)
                     const fresh = {
                         id: generateId(),
                         width: fmt.width,
                         height: fmt.height,
                         preset: 'custom' as const,
                         layers,
+                        // Pre-groupings from the template (e.g. CTA fill + text
+                        // shipping as one group) land here. Users can ungroup
+                        // from the layer panel — the fresh composition will
+                        // still save correctly either way.
+                        groups,
                         created_at: new Date().toISOString(),
                         updated_at: new Date().toISOString(),
                     }
@@ -8423,7 +10170,13 @@ export default function AssetEditor() {
                                                         <button
                                                             key={style.id}
                                                             type="button"
-                                                            onClick={() => setWizardLayoutStyle(style.id)}
+                                                            onClick={() => {
+                                                                setWizardLayoutStyle(style.id)
+                                                                // Picking a different style invalidates any per-index overrides
+                                                                // because the blueprint list identity changes.
+                                                                setWizardLayerOverrides({})
+                                                                setWizardSelectedLayerIdx(null)
+                                                            }}
                                                             className={`group flex flex-col items-center rounded-xl border-2 p-5 text-center transition-all ${isSelected ? 'border-indigo-500 bg-indigo-950/30 ring-1 ring-indigo-500/50' : 'border-gray-700 bg-gray-800/50 hover:border-gray-500 hover:bg-gray-800'}`}
                                                         >
                                                             <div className={`mb-3 flex h-16 w-16 items-center justify-center rounded-lg ${isSelected ? 'bg-indigo-900/40' : 'bg-gray-700/60 group-hover:bg-gray-700'}`}>
@@ -8459,31 +10212,196 @@ export default function AssetEditor() {
                                                 })}
                                             </div>
 
-                                            {wizardLayoutStyle && selectedFormatObj && (
-                                                <div className="mt-6 rounded-lg border border-gray-700 bg-gray-800/40 p-4">
-                                                    <h4 className="mb-2 flex items-center gap-2 text-xs font-semibold text-gray-300">
-                                                        <span>{LAYOUT_STYLES.find(s => s.id === wizardLayoutStyle)?.name} Layer Stack</span>
-                                                    </h4>
-                                                    <p className="mb-3 text-[11px] text-gray-500">Don't worry, you can always add/remove later</p>
-                                                    <div className="space-y-1">
-                                                        {[...buildLayersForStyle(wizardLayoutStyle, selectedFormatObj.width, selectedFormatObj.height)].reverse().map((bp, i) => (
-                                                            <div key={i} className="flex items-center gap-2 rounded-md px-2.5 py-1.5 text-sm text-gray-300">
-                                                                <span className={`flex h-5 w-5 items-center justify-center rounded text-[10px] ${
-                                                                    bp.type === 'text' ? 'bg-blue-900/50 text-blue-300' :
-                                                                    bp.type === 'fill' ? 'bg-purple-900/50 text-purple-300' :
-                                                                    bp.type === 'generative_image' ? 'bg-violet-900/50 text-violet-300' :
-                                                                    bp.type === 'image' ? 'bg-amber-900/50 text-amber-300' :
-                                                                    'bg-gray-700 text-gray-400'
-                                                                }`}>
-                                                                    {bp.type === 'text' ? 'T' : bp.type === 'fill' ? '◐' : bp.type === 'generative_image' ? '✦' : bp.type === 'image' ? '□' : '·'}
-                                                                </span>
-                                                                <span className="flex-1 truncate">{bp.name}</span>
-                                                                <span className="text-[10px] text-gray-500 capitalize">{bp.role.replace('_', ' ')}</span>
+                                            {wizardLayoutStyle && selectedFormatObj && (() => {
+                                                // Build blueprint list for the chosen style and merge in the wizard's
+                                                // per-index overrides (enabled + placement). `activeBps` is what both
+                                                // the layer checkbox list and the mini-preview render from.
+                                                const baseBps = buildLayersForStyle(wizardLayoutStyle, selectedFormatObj.width, selectedFormatObj.height)
+                                                const activeBps = applyWizardOverrides(baseBps)
+                                                const brandLogoUrl = (auth?.activeBrand?.logo_dark_path
+                                                    || auth?.activeBrand?.logo_path
+                                                    || null) as string | null
+                                                const brandPrimary = (auth?.activeBrand?.primary_color as string | undefined) || '#6366f1'
+                                                const toggleEnabled = (idx: number) => setWizardLayerOverrides((prev) => ({
+                                                    ...prev,
+                                                    [idx]: { ...(prev[idx] ?? {}), enabled: prev[idx]?.enabled === false ? true : false },
+                                                }))
+                                                const setPlacement = (idx: number, p: Placement) => setWizardLayerOverrides((prev) => ({
+                                                    ...prev,
+                                                    [idx]: { ...(prev[idx] ?? {}), placement: p },
+                                                }))
+                                                const selectedBp = wizardSelectedLayerIdx !== null ? activeBps[wizardSelectedLayerIdx] : null
+                                                const selectedCurrentPlacement: Placement | null = (() => {
+                                                    if (selectedBp === null || selectedBp === undefined) return null
+                                                    if (selectedBp.placement) return selectedBp.placement
+                                                    return xyToPlacement(
+                                                        selectedBp.xRatio * selectedFormatObj.width,
+                                                        selectedBp.yRatio * selectedFormatObj.height,
+                                                        selectedBp.widthRatio * selectedFormatObj.width,
+                                                        selectedBp.heightRatio * selectedFormatObj.height,
+                                                        selectedFormatObj.width,
+                                                        selectedFormatObj.height,
+                                                    )
+                                                })()
+                                                // Scale the preview to fit a ~260 px-wide, 320 px-tall viewport.
+                                                const previewMaxW = 260
+                                                const previewMaxH = 320
+                                                const ar = selectedFormatObj.width / selectedFormatObj.height
+                                                const previewH = ar > previewMaxW / previewMaxH ? Math.round(previewMaxW / ar) : previewMaxH
+                                                const previewW = ar > previewMaxW / previewMaxH ? previewMaxW : Math.round(previewMaxH * ar)
+                                                const roleTypeBadge = (bp: LayerBlueprint) => ({
+                                                    bg: bp.type === 'text' ? 'bg-blue-900/50 text-blue-300'
+                                                        : bp.type === 'fill' ? 'bg-purple-900/50 text-purple-300'
+                                                        : bp.type === 'generative_image' ? 'bg-violet-900/50 text-violet-300'
+                                                        : bp.type === 'image' ? 'bg-amber-900/50 text-amber-300'
+                                                        : 'bg-gray-700 text-gray-400',
+                                                    glyph: bp.type === 'text' ? 'T' : bp.type === 'fill' ? '◐' : bp.type === 'generative_image' ? '✦' : bp.type === 'image' ? '□' : '·',
+                                                })
+                                                return (
+                                                    <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-[220px_minmax(0,1fr)_auto]">
+                                                        {/* Left: per-layer placement + (for logo) brand source */}
+                                                        <div className="rounded-lg border border-gray-700 bg-gray-800/40 p-4">
+                                                            <h4 className="text-xs font-semibold text-gray-300">
+                                                                {selectedBp ? selectedBp.name : 'Customize'}
+                                                            </h4>
+                                                            {!selectedBp && (
+                                                                <p className="mt-2 text-[11px] leading-snug text-gray-500">
+                                                                    Select a layer from the stack to pick its placement on the 3×3 grid.
+                                                                </p>
+                                                            )}
+                                                            {selectedBp && (
+                                                                <div className="mt-3 space-y-3">
+                                                                    {selectedBp.role === 'logo' && brandLogoUrl && (
+                                                                        <div className="flex items-center gap-2 rounded-md border border-gray-700 bg-gray-900/60 p-2">
+                                                                            <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded bg-neutral-900">
+                                                                                <img src={brandLogoUrl} alt="Brand logo" className="max-h-8 max-w-8 object-contain" />
+                                                                            </div>
+                                                                            <div className="min-w-0 flex-1 text-[11px] text-gray-400">
+                                                                                <p className="font-medium text-gray-300">Brand logo</p>
+                                                                                <p className="truncate">Will auto-fill on create.</p>
+                                                                            </div>
+                                                                        </div>
+                                                                    )}
+                                                                    <div>
+                                                                        <PlacementPicker
+                                                                            value={selectedCurrentPlacement ?? undefined}
+                                                                            onChange={(p) => setPlacement(wizardSelectedLayerIdx!, p)}
+                                                                            label="Placement"
+                                                                            size="sm"
+                                                                            disabled={selectedBp.widthRatio >= 0.999 && selectedBp.heightRatio >= 0.999}
+                                                                        />
+                                                                        {(selectedBp.widthRatio >= 0.999 && selectedBp.heightRatio >= 0.999) && (
+                                                                            <p className="mt-1 text-[10px] text-gray-500">Full-bleed layers ignore placement.</p>
+                                                                        )}
+                                                                    </div>
+                                                                </div>
+                                                            )}
+                                                        </div>
+
+                                                        {/* Middle: layer stack with checkboxes */}
+                                                        <div className="rounded-lg border border-gray-700 bg-gray-800/40 p-4">
+                                                            <h4 className="mb-2 flex items-center gap-2 text-xs font-semibold text-gray-300">
+                                                                <span>Layer Stack</span>
+                                                                <span className="text-[10px] font-normal text-gray-500">Toggle layers on/off before you create.</span>
+                                                            </h4>
+                                                            <div className="space-y-1">
+                                                                {activeBps.map((bp, revIdx) => {
+                                                                    // Stack is shown visually top-to-bottom as top-of-z first (reverse blueprint array).
+                                                                    const idx = activeBps.length - 1 - revIdx
+                                                                    const forward = activeBps[idx]
+                                                                    const badge = roleTypeBadge(forward)
+                                                                    const enabled = forward.enabled !== false
+                                                                    const selected = wizardSelectedLayerIdx === idx
+                                                                    return (
+                                                                        <button
+                                                                            type="button"
+                                                                            key={idx}
+                                                                            onClick={() => setWizardSelectedLayerIdx(idx)}
+                                                                            className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm text-left transition-colors ${
+                                                                                selected ? 'bg-indigo-900/40 ring-1 ring-indigo-500/60 text-white' : 'text-gray-300 hover:bg-gray-800'
+                                                                            }`}
+                                                                        >
+                                                                            <input
+                                                                                type="checkbox"
+                                                                                checked={enabled}
+                                                                                onChange={(e) => { e.stopPropagation(); toggleEnabled(idx) }}
+                                                                                onClick={(e) => e.stopPropagation()}
+                                                                                className="rounded border-gray-600 bg-gray-900 text-indigo-500 focus:ring-indigo-500"
+                                                                                aria-label={`Include ${forward.name}`}
+                                                                            />
+                                                                            <span className={`flex h-5 w-5 items-center justify-center rounded text-[10px] ${badge.bg}`}>{badge.glyph}</span>
+                                                                            <span className={`flex-1 truncate ${enabled ? '' : 'line-through opacity-50'}`}>{forward.name}</span>
+                                                                            <span className="text-[10px] text-gray-500 capitalize">{forward.role.replace('_', ' ')}</span>
+                                                                        </button>
+                                                                    )
+                                                                })}
                                                             </div>
-                                                        ))}
+                                                        </div>
+
+                                                        {/* Right: live snapped preview */}
+                                                        <div className="rounded-lg border border-gray-700 bg-gray-800/40 p-4">
+                                                            <h4 className="mb-2 text-xs font-semibold text-gray-300">Preview</h4>
+                                                            <div className="flex flex-col items-center">
+                                                                <div
+                                                                    className="relative overflow-hidden rounded-md bg-neutral-900 shadow-lg ring-1 ring-black/40"
+                                                                    style={{ width: previewW, height: previewH }}
+                                                                >
+                                                                    {/* Layers */}
+                                                                    {activeBps.filter((bp) => bp.enabled !== false).map((bp, i) => {
+                                                                        const isFullBleed = bp.widthRatio >= 0.999 && bp.heightRatio >= 0.999
+                                                                        const w = bp.widthRatio * previewW
+                                                                        const h = bp.heightRatio * previewH
+                                                                        const pos = bp.placement && !isFullBleed
+                                                                            ? placementToXY(bp.placement, w, h, previewW, previewH)
+                                                                            : { x: bp.xRatio * previewW, y: bp.yRatio * previewH }
+                                                                        const isLogo = bp.role === 'logo'
+                                                                        const style: CSSProperties = {
+                                                                            position: 'absolute',
+                                                                            left: pos.x,
+                                                                            top: pos.y,
+                                                                            width: w,
+                                                                            height: h,
+                                                                            display: 'flex',
+                                                                            alignItems: 'center',
+                                                                            justifyContent: 'center',
+                                                                        }
+                                                                        if (isLogo && brandLogoUrl) {
+                                                                            return (
+                                                                                <div key={i} style={style}>
+                                                                                    <img src={brandLogoUrl} alt="" className="max-h-full max-w-full object-contain" />
+                                                                                </div>
+                                                                            )
+                                                                        }
+                                                                        let bg = 'rgba(255,255,255,0.12)'
+                                                                        let label = bp.name
+                                                                        if (bp.type === 'fill') bg = bp.role === 'cta_button' ? brandPrimary : 'rgba(0,0,0,0.35)'
+                                                                        if (bp.type === 'text') bg = 'rgba(255,255,255,0.08)'
+                                                                        if (bp.type === 'generative_image') bg = 'rgba(124,58,237,0.25)'
+                                                                        if (bp.type === 'image') bg = 'rgba(245,158,11,0.2)'
+                                                                        if (isFullBleed) label = ''
+                                                                        return (
+                                                                            <div
+                                                                                key={i}
+                                                                                style={{ ...style, background: bg, border: isFullBleed ? 'none' : '1px dashed rgba(255,255,255,0.25)' }}
+                                                                                className="text-[9px] font-medium text-white/80"
+                                                                            >
+                                                                                <span className="truncate px-1">{label}</span>
+                                                                            </div>
+                                                                        )
+                                                                    })}
+                                                                    {/* 3x3 grid overlay */}
+                                                                    <GridOverlay docW={previewW} docH={previewH} density={3} />
+                                                                </div>
+                                                                <p className="mt-3 text-[11px] text-center text-gray-400">
+                                                                    <span className="font-medium text-gray-200">{selectedPlatformObj?.name} — {selectedFormatObj.name}</span>
+                                                                </p>
+                                                                <p className="text-[10px] text-gray-500">{selectedFormatObj.width} × {selectedFormatObj.height}px</p>
+                                                                <p className="mt-1 text-[10px] text-indigo-400">{LAYOUT_STYLES.find(s => s.id === wizardLayoutStyle)?.name}</p>
+                                                            </div>
+                                                        </div>
                                                     </div>
-                                                </div>
-                                            )}
+                                                )
+                                            })()}
                                         </div>
 
                                         <div className="shrink-0 border-t border-gray-700 px-6 py-3">
@@ -8496,9 +10414,32 @@ export default function AssetEditor() {
                                 )}
 
                                 {wizardStep === 3 && selectedFormatObj && (() => {
-                                    const previewLayers = wizardLayoutStyle
+                                    const baseLayers = wizardLayoutStyle
                                         ? buildLayersForStyle(wizardLayoutStyle, selectedFormatObj.width, selectedFormatObj.height)
                                         : selectedFormatObj.layers
+                                    // Mirror the same enrichment applyTemplate uses so the step-3
+                                    // preview list accurately reflects what the user will get
+                                    // (image type for background/logo slots, asset thumbnails shown
+                                    // inline below).
+                                    const autoFillSeed = `${auth?.activeBrand?.id ?? 'no-brand'}|${selectedFormatObj.id}|${wizardLayoutStyle ?? 'default'}`
+                                    const previewLayers = wizardAutoFillEnabled
+                                        ? applyWizardAssetDefaults(baseLayers, wizardDefaults, autoFillSeed)
+                                        : baseLayers
+                                    const hasLogoSlot = previewLayers.some((bp) => bp.role === 'logo')
+                                    const hasBgSlot = previewLayers.some((bp) => bp.role === 'background' || bp.role === 'hero_image')
+                                    const autoLogo = wizardDefaults?.logo ?? null
+                                    const autoBgPick = (() => {
+                                        const cands = wizardDefaults?.background_candidates ?? []
+                                        if (cands.length === 0) return null
+                                        // Same seeded pick as applyWizardAssetDefaults — keep UI in sync.
+                                        const slotCount = cands.length
+                                        let h = 2166136261
+                                        for (let i = 0; i < autoFillSeed.length; i++) {
+                                            h ^= autoFillSeed.charCodeAt(i)
+                                            h = Math.imul(h, 16777619)
+                                        }
+                                        return cands[Math.abs(h) % slotCount]
+                                    })()
                                     return (
                                     <div className="flex min-h-0 flex-1">
                                         <div className="flex-1 overflow-y-auto p-6">
@@ -8512,6 +10453,65 @@ export default function AssetEditor() {
                                                     className="w-full rounded-md border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-100 placeholder-gray-500 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
                                                 />
                                             </div>
+                                            {/* Auto-fill summary — shows the brand logo + hero photo
+                                                that will be dropped into matching layers, plus a toggle
+                                                for users who want the classic empty-slot behavior. */}
+                                            {wizardDefaults && (hasLogoSlot || hasBgSlot) && (
+                                                <div className="mb-6 rounded-lg border border-gray-700 bg-gray-800/30 p-3">
+                                                    <div className="mb-2 flex items-center justify-between">
+                                                        <h4 className="text-xs font-semibold text-gray-300">Auto-filled assets</h4>
+                                                        <label className="flex cursor-pointer items-center gap-1.5 text-[11px] text-gray-400">
+                                                            <input
+                                                                type="checkbox"
+                                                                checked={wizardAutoFillEnabled}
+                                                                onChange={(e) => setWizardAutoFillEnabled(e.target.checked)}
+                                                                className="h-3.5 w-3.5 rounded border-gray-600 bg-gray-800 text-indigo-500 focus:ring-indigo-500"
+                                                            />
+                                                            Enabled
+                                                        </label>
+                                                    </div>
+                                                    <div className="grid gap-2 sm:grid-cols-2">
+                                                        {hasLogoSlot && (
+                                                            <div className="flex items-center gap-2 rounded-md border border-gray-700 bg-gray-800/60 p-2">
+                                                                <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded bg-gray-900">
+                                                                    {wizardAutoFillEnabled && autoLogo?.thumbnail_url ? (
+                                                                        <img src={autoLogo.thumbnail_url} alt="" className="max-h-full max-w-full object-contain" />
+                                                                    ) : (
+                                                                        <span className="text-[10px] text-gray-500">Logo</span>
+                                                                    )}
+                                                                </div>
+                                                                <div className="min-w-0 flex-1">
+                                                                    <p className="truncate text-[11px] font-medium text-gray-200">Logo slot</p>
+                                                                    <p className="truncate text-[10px] text-gray-500">
+                                                                        {wizardAutoFillEnabled && autoLogo ? autoLogo.name : 'Empty — add in editor'}
+                                                                    </p>
+                                                                </div>
+                                                            </div>
+                                                        )}
+                                                        {hasBgSlot && (
+                                                            <div className="flex items-center gap-2 rounded-md border border-gray-700 bg-gray-800/60 p-2">
+                                                                <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded bg-gray-900">
+                                                                    {wizardAutoFillEnabled && autoBgPick?.thumbnail_url ? (
+                                                                        <img src={autoBgPick.thumbnail_url} alt="" className="h-full w-full object-cover" />
+                                                                    ) : (
+                                                                        <span className="text-[10px] text-gray-500">Photo</span>
+                                                                    )}
+                                                                </div>
+                                                                <div className="min-w-0 flex-1">
+                                                                    <p className="truncate text-[11px] font-medium text-gray-200">Background photo</p>
+                                                                    <p className="truncate text-[10px] text-gray-500">
+                                                                        {wizardAutoFillEnabled && autoBgPick
+                                                                            ? autoBgPick.name
+                                                                            : (wizardDefaults.background_candidates.length === 0
+                                                                                ? 'No tagged background photos — add one with tag "background" or "hero"'
+                                                                                : 'Disabled — generative background')}
+                                                                    </p>
+                                                                </div>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            )}
                                             <div className="mb-6">
                                                 <h4 className="mb-2 text-xs font-semibold text-gray-300">
                                                     {wizardLayoutStyle ? `${LAYOUT_STYLES.find(s => s.id === wizardLayoutStyle)?.name} ` : ''}Layer Stack
@@ -8537,13 +10537,55 @@ export default function AssetEditor() {
                                             </div>
                                         </div>
                                         <div className="flex w-72 shrink-0 flex-col items-center justify-center border-l border-gray-700 bg-gray-800/30 p-6">
-                                            <div
-                                                className="rounded-lg border border-gray-700 bg-white shadow-lg"
-                                                style={{
-                                                    width: 200,
-                                                    height: Math.min(280, Math.round(200 * (selectedFormatObj.height / selectedFormatObj.width))),
-                                                }}
-                                            />
+                                            {/* Mini composition preview — shows the auto-filled
+                                                background photo with the brand logo stamped at
+                                                the template's LOGO slot, so the user can see
+                                                what "Let's Go" will produce before clicking.
+                                                Falls back to a blank card when no auto-fill is
+                                                available or the user disabled it, matching the
+                                                empty-canvas behavior the editor will start at. */}
+                                            {(() => {
+                                                const previewW = 200
+                                                const previewH = Math.min(280, Math.round(200 * (selectedFormatObj.height / selectedFormatObj.width)))
+                                                const showBg = wizardAutoFillEnabled && autoBgPick && autoBgPick.file_url
+                                                const showLogo = wizardAutoFillEnabled && autoLogo && autoLogo.file_url
+                                                return (
+                                                    <div
+                                                        className="relative overflow-hidden rounded-lg border border-gray-700 bg-white shadow-lg"
+                                                        style={{ width: previewW, height: previewH }}
+                                                    >
+                                                        {showBg ? (
+                                                            <img
+                                                                src={autoBgPick!.thumbnail_url || autoBgPick!.file_url}
+                                                                alt=""
+                                                                className="absolute inset-0 h-full w-full object-cover"
+                                                                onError={(e) => {
+                                                                    // Thumbnail may 404 for non-photo mimes; fall back to the original.
+                                                                    const img = e.currentTarget
+                                                                    if (img.src !== autoBgPick!.file_url) img.src = autoBgPick!.file_url
+                                                                }}
+                                                            />
+                                                        ) : null}
+                                                        {showLogo ? (
+                                                            <img
+                                                                src={autoLogo!.thumbnail_url || autoLogo!.file_url}
+                                                                alt=""
+                                                                className="absolute object-contain"
+                                                                style={{
+                                                                    left: '5%',
+                                                                    top: '5%',
+                                                                    width: '20%',
+                                                                    height: '15%',
+                                                                }}
+                                                                onError={(e) => {
+                                                                    const img = e.currentTarget
+                                                                    if (img.src !== autoLogo!.file_url) img.src = autoLogo!.file_url
+                                                                }}
+                                                            />
+                                                        ) : null}
+                                                    </div>
+                                                )
+                                            })()}
                                             <p className="mt-3 text-sm font-medium text-gray-200">{selectedPlatformObj?.name} — {selectedFormatObj.name}</p>
                                             <p className="mt-1 text-xs text-gray-500">{selectedFormatObj.width} &times; {selectedFormatObj.height}px</p>
                                             {wizardLayoutStyle && (

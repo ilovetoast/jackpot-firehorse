@@ -679,6 +679,7 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
                 Route::post('/api/generate-copy', [\App\Http\Controllers\Editor\EditorGenerateCopyController::class, 'store'])->name('api.editor.generate-copy');
                 Route::post('/api/generate-layout', [\App\Http\Controllers\Editor\EditorGenerateLayoutController::class, 'generate'])->name('api.editor.generate-layout');
                 Route::get('/api/editor/ai-credit-status', [\App\Http\Controllers\Editor\EditorGenerateLayoutController::class, 'creditStatus'])->name('api.editor.ai-credit-status');
+                Route::get('/api/editor/wizard-defaults', [\App\Http\Controllers\Editor\EditorGenerateLayoutController::class, 'wizardDefaults'])->name('api.editor.wizard-defaults');
 
                 // Compositions + version history
                 Route::get('/api/compositions/thumbnail/{asset}', [\App\Http\Controllers\Editor\EditorCompositionController::class, 'thumbnailAsset'])

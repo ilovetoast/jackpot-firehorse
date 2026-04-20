@@ -357,6 +357,44 @@ nav.app-nav span {
     }
 }
 
+/*
+ * Studio / Generative editor: unified border color.
+ *
+ * The editor chrome uses a mix of `border-gray-700`, `border-gray-800`,
+ * and the `divide-*` utilities. On the near-black `bg-gray-950` surround
+ * those tokens read as hard, contrasty lines — especially the lighter
+ * 600/700 values which skew toward white when the underlying surface is
+ * very dark. The design calls for a subtle navy-gray instead. This rule
+ * pins every border inside the editor shell to `#444e63` so the chrome
+ * stays coherent no matter which Tailwind gray shade an individual
+ * component reaches for. Scoped tightly to `.jp-editor-shell` so nothing
+ * else in the product is affected.
+ *
+ * We include the most common neighboring tokens here (500–800) because
+ * the properties panel in particular mixes several of them in hover /
+ * focus states. If a future component wants to escape this uniformity
+ * it can use an arbitrary value like `border-[#1f2937]` and the selector
+ * below won't touch it.
+ */
+.jp-editor-shell .border-gray-500,
+.jp-editor-shell .border-gray-600,
+.jp-editor-shell .border-gray-700,
+.jp-editor-shell .border-gray-800,
+.jp-editor-shell .border-neutral-700,
+.jp-editor-shell .border-neutral-800 {
+    border-color: #444e63;
+}
+.jp-editor-shell .divide-gray-700 > :not([hidden]) ~ :not([hidden]),
+.jp-editor-shell .divide-gray-800 > :not([hidden]) ~ :not([hidden]) {
+    border-color: #444e63;
+}
+.jp-editor-shell .hover\:border-gray-500:hover,
+.jp-editor-shell .hover\:border-gray-600:hover,
+.jp-editor-shell .hover\:border-gray-700:hover,
+.jp-editor-shell .hover\:border-gray-800:hover {
+    border-color: #5c6880;
+}
+
 /* Executions category bar: hide scrollbar, prevent overlap */
 .executions-category-tabs {
     scrollbar-width: none;

@@ -48,17 +48,51 @@ export type DocumentModel = {
     height: number
     preset?: DocumentPreset
     layers: Layer[]
+    /**
+     * Layer groups. Groups are flat (no nested groups in v1 — a layer can
+     * belong to at most one group) so selection/transform math stays simple.
+     * Missing on old documents — the editor treats an unset value as `[]` via
+     * {@link migrateDocumentIfNeeded}.
+     */
+    groups?: Group[]
     created_at?: string
     updated_at?: string
 }
 
+/**
+ * A named collection of layers that move/resize/toggle together. The group is
+ * the atom of selection in the editor — clicking any member selects the whole
+ * group and transform operations apply proportionally to every member.
+ *
+ * - `memberIds` is ordered; ordering is used only by the layer panel UI.
+ * - `z` isn't tracked here; each member layer keeps its own z and the editor
+ *   re-normalizes so group members stay contiguous when the group is moved in
+ *   the stack.
+ * - Masks target groups by id (see {@link MaskLayer.groupId}).
+ */
+export type Group = {
+    id: string
+    name: string
+    memberIds: string[]
+    /** When locked, all member layers behave as locked (drag/resize disabled). */
+    locked: boolean
+    /** When true, the layer panel collapses members under a single row. */
+    collapsed: boolean
+}
+
 export type BaseLayer = {
     id: string
-    type: 'image' | 'text' | 'generative_image' | 'fill'
+    type: 'image' | 'text' | 'generative_image' | 'fill' | 'mask'
     name?: string
     visible: boolean
     locked: boolean
     z: number
+    /**
+     * When set, this layer belongs to a {@link Group} with the matching id.
+     * Drag/resize/visibility toggles propagate to every other layer sharing
+     * this id. Cleared on ungroup.
+     */
+    groupId?: string
     /** How this layer composites over layers below (CSS mix-blend-mode). Default: normal. */
     blendMode?: LayerBlendMode
     transform: {
@@ -277,6 +311,22 @@ export type GenerativePrompt = {
     }
 }
 
+/**
+ * Declarative text-boost preset. Applied on top of `FillLayer.fillKind`/`gradientStartColor`
+ * etc. at render time so the user sees a brand-derived scrim (or a preset they chose)
+ * without having to hand-author gradient stops.
+ *
+ * - `solid`           → flat color wash at `textBoostOpacity`.
+ * - `gradient_bottom` → fully-transparent at top, `textBoostColor` at bottom.
+ * - `gradient_top`    → `textBoostColor` at top, transparent at bottom.
+ * - `radial`          → vignette, centered, `textBoostColor` at edges.
+ *
+ * `source='auto'` means the layer will re-infer when the brand changes (e.g. the
+ * brand primary color gets updated). `source='manual'` locks the user's choice so
+ * later brand edits don't wipe it out.
+ */
+export type TextBoostStyle = 'solid' | 'gradient_bottom' | 'gradient_top' | 'radial'
+
 /** Solid color or linear gradient (e.g. brand wash) — no bitmap. */
 export type FillLayer = BaseLayer & {
     type: 'fill'
@@ -297,6 +347,24 @@ export type FillLayer = BaseLayer & {
     gradientAngleDeg?: number
     /** Optional border-radius in px. Used for pill/rounded-button CTA backgrounds. */
     borderRadius?: number
+    /**
+     * When set to 'text_boost', this fill layer is a semantic scrim behind
+     * headline/body copy. We treat it specially so the properties panel can
+     * expose a preset picker (solid / gradient bottom-up / top-down / radial)
+     * instead of forcing users to hand-author gradient stops, and so the
+     * renderer can honor the `textBoost*` fields below over `fillKind`.
+     *
+     * Undefined / other values = ordinary fill layer; no special behavior.
+     */
+    kind?: 'text_boost'
+    /** Preset style for text-boost rendering. */
+    textBoostStyle?: TextBoostStyle
+    /** Accent color driving the scrim (hex `#rrggbb`). Defaults to brand primary. */
+    textBoostColor?: string
+    /** Scrim opacity, 0..1. Applied to the color stop(s). */
+    textBoostOpacity?: number
+    /** Where this preset came from — auto-inferred from brand DNA, or user-locked. */
+    textBoostSource?: 'auto' | 'manual'
 }
 
 export type GenerativeImageLayer = BaseLayer & {
@@ -329,12 +397,433 @@ export type GenerativeImageLayer = BaseLayer & {
     variationResults?: string[]
 }
 
-export type Layer = ImageLayer | TextLayer | GenerativeImageLayer | FillLayer
+/**
+ * Mask layer — clips the visibility of some target layer(s) beneath it.
+ *
+ * Masks are not visible themselves at export time; they only affect the alpha
+ * of their target(s). The renderer wraps the target layer(s) in a container
+ * whose `mask-image` is built from the mask's `shape` / gradient fields. In
+ * the editor canvas we also paint a dashed rectangle so the user can see and
+ * manipulate the mask's extent.
+ *
+ * Target semantics:
+ *   - 'below_one'  → clips only the single layer immediately beneath this mask
+ *                    in the z-stack (most common — e.g. a soft vignette on the
+ *                    hero photo).
+ *   - 'below_all'  → clips every layer beneath this mask.
+ *   - 'group'      → clips all members of {@link groupId}.
+ */
+export type MaskLayer = BaseLayer & {
+    type: 'mask'
+    shape: 'rect' | 'ellipse' | 'rounded_rect' | 'gradient_linear' | 'gradient_radial'
+    /** For 'rounded_rect' shapes — corner radius in px. */
+    radius?: number
+    /** For gradient shapes — alpha stops. `offset` ∈ 0..1, `alpha` ∈ 0..1. */
+    gradientStops?: Array<{ offset: number; alpha: number }>
+    /** For 'gradient_linear' — angle in degrees, 0 = to top. */
+    gradientAngle?: number
+    /** Soft edge on non-gradient shapes in px. */
+    featherPx?: number
+    /** When true, mask the outside instead of the inside. */
+    invert?: boolean
+    target: 'below_one' | 'below_all' | 'group'
+    /** Required when `target === 'group'` — references {@link Group.id}. */
+    groupId?: string
+}
 
-const ALLOWED_LAYER_TYPES = new Set(['image', 'text', 'generative_image', 'fill'])
+export type Layer = ImageLayer | TextLayer | GenerativeImageLayer | FillLayer | MaskLayer
+
+const ALLOWED_LAYER_TYPES = new Set(['image', 'text', 'generative_image', 'fill', 'mask'])
 
 export function isFillLayer(l: Layer): l is FillLayer {
     return l.type === 'fill'
+}
+
+export function isMaskLayer(l: Layer): l is MaskLayer {
+    return l.type === 'mask'
+}
+
+/**
+ * Compute the concrete set of mask layers that apply to a given target layer.
+ *
+ * Rules:
+ *   - 'below_one' masks apply to the non-mask layer directly under them in
+ *     the z-stack (the first non-mask layer scanning downward from the
+ *     mask's z value).
+ *   - 'below_all' masks apply to every non-mask layer with z < mask.z.
+ *   - 'group' masks apply to every layer whose `groupId` matches the mask's
+ *     `groupId`.
+ *
+ * A target can be affected by multiple masks — we return them in z-order so
+ * the renderer can compose them (bottom mask applied first). Hidden masks
+ * are skipped.
+ */
+export function masksAffectingLayer(layer: Layer, allLayers: Layer[]): MaskLayer[] {
+    if (layer.type === 'mask') return []
+    const masks = allLayers.filter((l): l is MaskLayer => isMaskLayer(l) && l.visible)
+    if (masks.length === 0) return []
+    // Sort all layers by z asc so we can scan downward from each mask's z.
+    const byZ = [...allLayers].sort((a, b) => (Number(a.z) || 0) - (Number(b.z) || 0))
+    const result: MaskLayer[] = []
+    for (const m of masks) {
+        if (m.target === 'below_one') {
+            // Find the non-mask layer directly beneath this mask in z.
+            // `byZ` is ascending, so look at the entry immediately before the
+            // mask and walk down to the first non-mask.
+            const idx = byZ.findIndex((l) => l.id === m.id)
+            for (let i = idx - 1; i >= 0; i--) {
+                const candidate = byZ[i]
+                if (candidate.type === 'mask') continue
+                if (candidate.id === layer.id) {
+                    result.push(m)
+                }
+                break
+            }
+        } else if (m.target === 'below_all') {
+            const mZ = Number(m.z) || 0
+            const lZ = Number(layer.z) || 0
+            if (lZ < mZ) result.push(m)
+        } else if (m.target === 'group') {
+            if (m.groupId && layer.groupId === m.groupId) {
+                result.push(m)
+            }
+        }
+    }
+    // Sort by mask z ascending so the topmost mask applies last (deepest
+    // blending). In CSS `mask-image` with multiple values, the later values
+    // are applied last — we build the stacking in that order.
+    result.sort((a, b) => (Number(a.z) || 0) - (Number(b.z) || 0))
+    return result
+}
+
+/**
+ * Build a CSS `mask-image` data URL for a single mask clipping a given
+ * target rect. The SVG is sized to the target's bounding box so it can be
+ * placed with `maskSize: 100% 100%; maskPosition: 0 0`.
+ *
+ * Keep this deterministic & side-effect free — html-to-image serializes
+ * styles at export time and needs the same CSS to reproduce the masked
+ * rendering. SVG data URLs are preserved by html-to-image (unlike CSS
+ * `mask: paint(...)` or `backdrop-filter`).
+ */
+export function buildMaskDataUrlForTarget(
+    mask: MaskLayer,
+    target: { x: number; y: number; width: number; height: number }
+): string {
+    const w = Math.max(1, target.width)
+    const h = Math.max(1, target.height)
+    const mx = mask.transform.x - target.x
+    const my = mask.transform.y - target.y
+    const mw = Math.max(1, mask.transform.width)
+    const mh = Math.max(1, mask.transform.height)
+    const feather = Math.max(0, mask.featherPx ?? 0)
+    const filterId = 'mf'
+    const filterAttr = feather > 0 ? ` filter="url(#${filterId})"` : ''
+    const bgFill = mask.invert ? 'white' : 'black'
+    const fgFill = mask.invert ? 'black' : 'white'
+
+    let shapeNode = ''
+    switch (mask.shape) {
+        case 'rect':
+            shapeNode = `<rect x="${mx}" y="${my}" width="${mw}" height="${mh}" fill="${fgFill}"${filterAttr} />`
+            break
+        case 'rounded_rect': {
+            const r = Math.max(0, mask.radius ?? 12)
+            shapeNode = `<rect x="${mx}" y="${my}" width="${mw}" height="${mh}" rx="${r}" ry="${r}" fill="${fgFill}"${filterAttr} />`
+            break
+        }
+        case 'ellipse': {
+            const cx = mx + mw / 2
+            const cy = my + mh / 2
+            const rx = mw / 2
+            const ry = mh / 2
+            shapeNode = `<ellipse cx="${cx}" cy="${cy}" rx="${rx}" ry="${ry}" fill="${fgFill}"${filterAttr} />`
+            break
+        }
+        case 'gradient_linear': {
+            // Build a linear gradient mapping alpha stops onto the mask rect.
+            // The angle is degrees clockwise from up. We approximate by
+            // rotating the gradient within the rect's viewbox.
+            const stops = (mask.gradientStops ?? [
+                { offset: 0, alpha: 1 },
+                { offset: 1, alpha: 0 },
+            ])
+                .map((s) => `<stop offset="${clamp01(s.offset) * 100}%" stop-color="${fgFill}" stop-opacity="${mask.invert ? 1 - clamp01(s.alpha) : clamp01(s.alpha)}" />`)
+                .join('')
+            const angle = ((mask.gradientAngle ?? 0) % 360 + 360) % 360
+            // SVG gradients use x1/y1→x2/y2. Convert angle (0=up) to endpoints.
+            const rad = (angle - 90) * (Math.PI / 180)
+            const x1 = 0.5 - 0.5 * Math.cos(rad)
+            const y1 = 0.5 - 0.5 * Math.sin(rad)
+            const x2 = 0.5 + 0.5 * Math.cos(rad)
+            const y2 = 0.5 + 0.5 * Math.sin(rad)
+            shapeNode = `<defs><linearGradient id="mg" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}">${stops}</linearGradient></defs><rect x="${mx}" y="${my}" width="${mw}" height="${mh}" fill="url(#mg)"${filterAttr} />`
+            break
+        }
+        case 'gradient_radial': {
+            const stops = (mask.gradientStops ?? [
+                { offset: 0, alpha: 1 },
+                { offset: 1, alpha: 0 },
+            ])
+                .map((s) => `<stop offset="${clamp01(s.offset) * 100}%" stop-color="${fgFill}" stop-opacity="${mask.invert ? 1 - clamp01(s.alpha) : clamp01(s.alpha)}" />`)
+                .join('')
+            shapeNode = `<defs><radialGradient id="mg" cx="0.5" cy="0.5" r="0.5">${stops}</radialGradient></defs><rect x="${mx}" y="${my}" width="${mw}" height="${mh}" fill="url(#mg)"${filterAttr} />`
+            break
+        }
+    }
+
+    const filterDef = feather > 0
+        ? `<defs><filter id="${filterId}" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="${feather}" /></filter></defs>`
+        : ''
+
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">${filterDef}<rect width="${w}" height="${h}" fill="${bgFill}" />${shapeNode}</svg>`
+    return `url("data:image/svg+xml;utf8,${encodeURIComponent(svg)}")`
+}
+
+function clamp01(n: number): number {
+    if (!isFinite(n)) return 0
+    return Math.max(0, Math.min(1, n))
+}
+
+/**
+ * Build the full style object (including vendor prefixes) to apply a stack
+ * of masks to a target layer. Returns an empty object when no masks apply.
+ */
+export function buildMaskStyleForLayer(
+    layer: Layer,
+    allLayers: Layer[]
+): Partial<{
+    maskImage: string
+    WebkitMaskImage: string
+    maskRepeat: string
+    WebkitMaskRepeat: string
+    maskSize: string
+    WebkitMaskSize: string
+    maskPosition: string
+    WebkitMaskPosition: string
+    maskComposite: string
+    WebkitMaskComposite: string
+}> {
+    const masks = masksAffectingLayer(layer, allLayers)
+    if (masks.length === 0) return {}
+    const target = {
+        x: layer.transform.x,
+        y: layer.transform.y,
+        width: layer.transform.width,
+        height: layer.transform.height,
+    }
+    const urls = masks.map((m) => buildMaskDataUrlForTarget(m, target))
+    const maskImage = urls.join(', ')
+    return {
+        maskImage,
+        WebkitMaskImage: maskImage,
+        maskRepeat: masks.map(() => 'no-repeat').join(', '),
+        WebkitMaskRepeat: masks.map(() => 'no-repeat').join(', '),
+        maskSize: masks.map(() => '100% 100%').join(', '),
+        WebkitMaskSize: masks.map(() => '100% 100%').join(', '),
+        maskPosition: masks.map(() => '0 0').join(', '),
+        WebkitMaskPosition: masks.map(() => '0 0').join(', '),
+        // Multiple masks intersect (AND). When a layer has multiple masks we
+        // want "opacity where every mask says opaque" → `intersect`.
+        maskComposite: masks.length > 1 ? 'intersect' : 'add',
+        WebkitMaskComposite: masks.length > 1 ? 'source-in' : 'source-over',
+    }
+}
+
+/**
+ * Normalize a document loaded from the API / disk into the current shape.
+ * Handles schema drift so old drafts don't crash when read by newer code:
+ *   - `groups` defaults to [].
+ *   - `Layer.groupId` is left undefined if absent (no migration needed).
+ *   - Text-boost fill layers with no `textBoost*` fields get sane auto defaults
+ *     so the properties panel controls have values to render.
+ *
+ * Non-mutating — returns a new DocumentModel. Call on load only; don't run in
+ * hot paths.
+ */
+export function migrateDocumentIfNeeded(doc: DocumentModel): DocumentModel {
+    let mutated = false
+    const nextGroups = Array.isArray(doc.groups) ? doc.groups : []
+    if (!Array.isArray(doc.groups)) {
+        mutated = true
+    }
+
+    const nextLayers = doc.layers.map((layer) => {
+        if (isFillLayer(layer) && layer.kind === 'text_boost') {
+            if (layer.textBoostStyle && typeof layer.textBoostOpacity === 'number' && layer.textBoostSource) {
+                return layer
+            }
+            mutated = true
+            return {
+                ...layer,
+                textBoostStyle: layer.textBoostStyle ?? 'gradient_bottom',
+                textBoostColor: layer.textBoostColor ?? '#000000',
+                textBoostOpacity: typeof layer.textBoostOpacity === 'number' ? layer.textBoostOpacity : 0.7,
+                textBoostSource: layer.textBoostSource ?? 'auto',
+            } as FillLayer
+        }
+        return layer
+    })
+
+    if (!mutated) return doc
+    return {
+        ...doc,
+        layers: nextLayers as Layer[],
+        groups: nextGroups,
+    }
+}
+
+/**
+ * Group helpers. Kept in documentModel.ts (alongside the type) so every call
+ * site imports the same canonical logic — selection handlers, layer panel UI,
+ * and persistence all go through these.
+ */
+export function findGroupForLayer(doc: DocumentModel, layerId: string): Group | null {
+    const layer = doc.layers.find((l) => l.id === layerId)
+    if (!layer?.groupId) return null
+    return doc.groups?.find((g) => g.id === layer.groupId) ?? null
+}
+
+export function groupMemberLayers(doc: DocumentModel, groupId: string): Layer[] {
+    const g = doc.groups?.find((x) => x.id === groupId)
+    if (!g) return []
+    const memberSet = new Set(g.memberIds)
+    return doc.layers.filter((l) => memberSet.has(l.id))
+}
+
+/**
+ * Create a new group from the given member layer ids. Returns the updated
+ * document and the new group id. Only layers that aren't already in a group
+ * are eligible — trying to group across existing groups is a no-op because
+ * v1 groups are flat.
+ */
+export function createGroup(
+    doc: DocumentModel,
+    memberIds: string[],
+    name?: string
+): { doc: DocumentModel; groupId: string | null } {
+    const existing = new Set(doc.layers.filter((l) => !!l.groupId).map((l) => l.id))
+    const eligible = memberIds.filter((id) => !existing.has(id) && doc.layers.some((l) => l.id === id))
+    if (eligible.length < 2) {
+        return { doc, groupId: null }
+    }
+    const groupId = generateId()
+    const newGroup: Group = {
+        id: groupId,
+        name: name ?? `Group ${((doc.groups?.length ?? 0) + 1)}`,
+        memberIds: eligible,
+        locked: false,
+        collapsed: false,
+    }
+    const memberSet = new Set(eligible)
+    return {
+        doc: {
+            ...doc,
+            groups: [...(doc.groups ?? []), newGroup],
+            layers: doc.layers.map((l) => (memberSet.has(l.id) ? { ...l, groupId } : l)),
+            updated_at: new Date().toISOString(),
+        },
+        groupId,
+    }
+}
+
+/**
+ * Dissolve a group: removes the {@link Group} entry and strips `groupId`
+ * from every member. Layers retain all other properties (z, transform, …).
+ */
+export function ungroup(doc: DocumentModel, groupId: string): DocumentModel {
+    if (!doc.groups?.some((g) => g.id === groupId)) {
+        return doc
+    }
+    return {
+        ...doc,
+        groups: (doc.groups ?? []).filter((g) => g.id !== groupId),
+        layers: doc.layers.map((l) => (l.groupId === groupId ? { ...l, groupId: undefined } : l)),
+        updated_at: new Date().toISOString(),
+    }
+}
+
+/** Patch the group's name/collapsed/locked fields. No-op if group missing. */
+export function updateGroup(
+    doc: DocumentModel,
+    groupId: string,
+    patch: Partial<Pick<Group, 'name' | 'collapsed' | 'locked'>>
+): DocumentModel {
+    const groups = doc.groups ?? []
+    if (!groups.some((g) => g.id === groupId)) return doc
+    return {
+        ...doc,
+        groups: groups.map((g) => (g.id === groupId ? { ...g, ...patch } : g)),
+        updated_at: new Date().toISOString(),
+    }
+}
+
+/**
+ * Add a layer to a group (or move it between groups). If the layer is already
+ * in another group, it's removed from that group first.
+ */
+export function addLayerToGroup(doc: DocumentModel, layerId: string, groupId: string): DocumentModel {
+    const groups = doc.groups ?? []
+    if (!groups.some((g) => g.id === groupId)) return doc
+    return {
+        ...doc,
+        groups: groups.map((g) => {
+            if (g.id === groupId) {
+                return g.memberIds.includes(layerId) ? g : { ...g, memberIds: [...g.memberIds, layerId] }
+            }
+            return { ...g, memberIds: g.memberIds.filter((id) => id !== layerId) }
+        }),
+        layers: doc.layers.map((l) => (l.id === layerId ? { ...l, groupId } : l)),
+        updated_at: new Date().toISOString(),
+    }
+}
+
+/** Remove a layer from its current group. No-op if ungrouped. */
+export function removeLayerFromGroup(doc: DocumentModel, layerId: string): DocumentModel {
+    const layer = doc.layers.find((l) => l.id === layerId)
+    if (!layer?.groupId) return doc
+    const gid = layer.groupId
+    const groups = (doc.groups ?? []).map((g) =>
+        g.id === gid ? { ...g, memberIds: g.memberIds.filter((id) => id !== layerId) } : g
+    )
+    // Prune groups that end up with fewer than 2 members — a group of one
+    // is meaningless and just pollutes the panel.
+    const prunedGroups = groups.filter((g) => g.memberIds.length >= 2)
+    const droppedGroupIds = new Set(
+        groups.filter((g) => g.memberIds.length < 2).map((g) => g.id)
+    )
+    return {
+        ...doc,
+        groups: prunedGroups,
+        layers: doc.layers.map((l) => {
+            if (l.id === layerId) return { ...l, groupId: undefined }
+            if (l.groupId && droppedGroupIds.has(l.groupId)) return { ...l, groupId: undefined }
+            return l
+        }),
+        updated_at: new Date().toISOString(),
+    }
+}
+
+/**
+ * Rect enclosing every member of the given group. Used by snap (subject rect)
+ * and by drag/resize math. Returns null if the group has no visible members.
+ */
+export function unionRectForGroup(doc: DocumentModel, groupId: string): { x: number; y: number; width: number; height: number } | null {
+    const members = groupMemberLayers(doc, groupId)
+    if (members.length === 0) return null
+    let minX = Infinity
+    let minY = Infinity
+    let maxX = -Infinity
+    let maxY = -Infinity
+    for (const m of members) {
+        const { x, y, width, height } = m.transform
+        if (x < minX) minX = x
+        if (y < minY) minY = y
+        if (x + width > maxX) maxX = x + width
+        if (y + height > maxY) maxY = y + height
+    }
+    if (!isFinite(minX) || !isFinite(minY)) return null
+    return { x: minX, y: minY, width: maxX - minX, height: maxY - minY }
 }
 
 /** Inline SVG placeholder — no network request. */
@@ -375,6 +864,7 @@ export function createInitialDocument(): DocumentModel {
         height: 1080,
         preset: 'instagram_post',
         layers: [],
+        groups: [],
         created_at: now,
         updated_at: now,
     }
@@ -467,7 +957,21 @@ export function parseDocumentFromApi(raw: unknown): DocumentModel {
             return typeof t === 'string' && ALLOWED_LAYER_TYPES.has(t)
         }) as Layer[]
     ).map(normalizeImageLayerSrcAfterApiLoad)
-    return {
+    // Parse groups[] defensively — old documents won't have this field, and
+    // we don't want a stray string/number crashing reducers that iterate the
+    // list. Anything shaped wrong gets dropped; the rest is kept verbatim.
+    const groupsRaw = Array.isArray(o.groups) ? (o.groups as unknown[]) : []
+    const groups: Group[] = groupsRaw
+        .filter((g): g is Record<string, unknown> => !!g && typeof g === 'object')
+        .map((g) => ({
+            id: typeof g.id === 'string' ? g.id : generateId(),
+            name: typeof g.name === 'string' ? g.name : 'Group',
+            memberIds: Array.isArray(g.memberIds) ? g.memberIds.filter((x): x is string => typeof x === 'string') : [],
+            locked: !!g.locked,
+            collapsed: !!g.collapsed,
+        }))
+
+    const parsed: DocumentModel = {
         id: typeof o.id === 'string' ? o.id : generateId(),
         width: w,
         height: h,
@@ -476,9 +980,12 @@ export function parseDocumentFromApi(raw: unknown): DocumentModel {
                 ? o.preset
                 : undefined,
         layers,
+        groups,
         created_at: typeof o.created_at === 'string' ? o.created_at : undefined,
         updated_at: typeof o.updated_at === 'string' ? o.updated_at : undefined,
     }
+
+    return migrateDocumentIfNeeded(parsed)
 }
 
 /** Stable 0…n-1 z-order after any add/remove/reorder (back → front = ascending z). */
@@ -654,6 +1161,13 @@ export function createImageLayerFromDamAsset(z: number, doc: Pick<DocumentModel,
     const nw = asset.width && asset.width > 0 ? asset.width : 800
     const nh = asset.height && asset.height > 0 ? asset.height : 600
     const rect = computePlacedImageRect(doc.width, doc.height, nw, nh)
+    // Heuristic: treat obvious logo assets as `contain` so scaling the layer
+    // reveals the full mark instead of cropping it. Everything else keeps
+    // `cover` for the fill-to-frame behavior heroes and photography want.
+    // The asset's initial transform already matches its aspect ratio
+    // (via `computePlacedImageRect`) so both values render identically at
+    // creation time — this only affects subsequent user resizes.
+    const looksLikeLogo = /\blogo|mark|wordmark|brandmark\b/i.test(asset.name || '')
     return {
         id: generateId(),
         type: 'image',
@@ -671,7 +1185,7 @@ export function createImageLayerFromDamAsset(z: number, doc: Pick<DocumentModel,
         src: asset.file_url,
         naturalWidth: asset.width,
         naturalHeight: asset.height,
-        fit: 'cover',
+        fit: looksLikeLogo ? 'contain' : 'cover',
     }
 }
 
@@ -1148,6 +1662,45 @@ export function createFillLayer(
         base.gradientEndColor = opts.gradientEndColor ?? opts.color
     }
     return base
+}
+
+/**
+ * Factory for a sensible default {@link MaskLayer}. The mask is placed as a
+ * full-bleed rectangle covering the whole canvas with the `below_one` target —
+ * so dropping it directly above an image layer immediately produces a clean
+ * clipped rectangle the user can resize/move.
+ *
+ * Defaults match the plan's "most common" case:
+ *   - shape: ellipse (soft focal crop)
+ *   - target: below_one (clips just the layer directly beneath in z-order)
+ *   - feather: 16 (looks good at 1080×1080 canvases without being heavy)
+ */
+export function createDefaultMaskLayer(
+    z: number,
+    doc: Pick<DocumentModel, 'width' | 'height'>
+): MaskLayer {
+    const width = Math.round(doc.width * 0.6)
+    const height = Math.round(doc.height * 0.6)
+    const { x, y } = centerLayerInDocument(doc, width, height)
+    return {
+        id: generateId(),
+        type: 'mask',
+        name: 'Mask',
+        visible: true,
+        locked: false,
+        z,
+        transform: defaultTransform({ x, y, width, height }),
+        shape: 'ellipse',
+        radius: 24,
+        featherPx: 16,
+        invert: false,
+        target: 'below_one',
+        gradientStops: [
+            { offset: 0, alpha: 1 },
+            { offset: 1, alpha: 0 },
+        ],
+        gradientAngle: 0,
+    }
 }
 
 export function createDefaultTextLayer(
