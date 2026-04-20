@@ -1,10 +1,12 @@
 /**
- * Decorative Jackpot logo for dark cinematic footers (low contrast, non-interactive).
+ * Decorative Jackpot wordmark for dark cinematic footers (low contrast,
+ * non-interactive). Uses the inverted wordmark since it sits on dark
+ * surfaces at very low opacity.
  */
 export default function JackpotQuietFooterMark({ className = '' }) {
     return (
         <img
-            src="/jp-logo.svg"
+            src="/jp-wordmark-inverted.svg"
             alt=""
             aria-hidden
             decoding="async"

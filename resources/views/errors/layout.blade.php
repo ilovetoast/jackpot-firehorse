@@ -15,7 +15,21 @@
     <link rel="icon" type="image/png" sizes="192x192" href="/android-chrome-192x192.png">
     <link rel="icon" type="image/png" sizes="512x512" href="/android-chrome-512x512.png">
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+    {{-- Social preview (Teams, Slack, LinkedIn, iMessage, Twitter/X) --}}
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="{{ config('app.name', 'Jackpot') }}">
+    <meta property="og:title" content="{{ ($title ?? $code ?? 'Error') . ' | ' . config('app.name', 'Jackpot') }}">
+    <meta property="og:description" content="{{ $message ?? 'Brand execution, not asset management.' }}">
+    <meta property="og:url" content="{{ url()->current() }}">
     <meta property="og:image" content="{{ url('/og-image-1200x630.png') }}">
+    <meta property="og:image:type" content="image/png">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="{{ config('app.name', 'Jackpot') }}">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="{{ ($title ?? $code ?? 'Error') . ' | ' . config('app.name', 'Jackpot') }}">
+    <meta name="twitter:description" content="{{ $message ?? 'Brand execution, not asset management.' }}">
+    <meta name="twitter:image" content="{{ url('/og-image-1200x630.png') }}">
     <link rel="preconnect" href="https://fonts.bunny.net">
     <link href="https://fonts.bunny.net/css?family=figtree:400,500,600,700&display=swap" rel="stylesheet" />
     <script src="https://cdn.tailwindcss.com"></script>
@@ -38,7 +52,7 @@
         <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
             <div class="flex h-16 justify-between items-center">
                 <a href="{{ url('/') }}" class="flex items-center gap-2">
-                    <img src="{{ asset('jp-logo.svg') }}" alt="" class="h-8 w-auto" aria-hidden="true" />
+                    <img src="{{ asset('jp-icon.svg') }}" alt="" class="h-8 w-auto" aria-hidden="true" />
                     <span class="text-xl font-bold text-gray-900">Jackpot</span>
                 </a>
                 <a href="{{ url('/') }}" class="rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600">

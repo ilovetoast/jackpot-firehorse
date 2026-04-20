@@ -61,6 +61,16 @@ Route::get('/pricing', fn () => Inertia::render('Marketing/Pricing'))->name('mar
 Route::get('/contact', fn (Request $request) => Inertia::render('Contact', [
     'plan' => $request->query('plan'),
 ]))->name('contact');
+// Public inbound capture — throttled + honeypot-protected (see ContactLeadController).
+Route::post('/contact', [\App\Http\Controllers\ContactLeadController::class, 'storeContact'])
+    ->middleware(['web', 'throttle:5,1'])
+    ->name('contact.store');
+Route::post('/contact/sales', [\App\Http\Controllers\ContactLeadController::class, 'storeSalesInquiry'])
+    ->middleware(['web', 'throttle:5,1'])
+    ->name('contact.sales.store');
+Route::post('/newsletter', [\App\Http\Controllers\ContactLeadController::class, 'storeNewsletter'])
+    ->middleware(['web', 'throttle:5,1'])
+    ->name('newsletter.store');
 
 // Standalone cinematic experience (frontend-only, no auth)
 Route::get('/experience', fn () => Inertia::render('Experience/Index'));

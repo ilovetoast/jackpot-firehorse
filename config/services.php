@@ -52,6 +52,16 @@ return [
     ],
 
     /*
+    | Sales / inbound lead routing. `notify_to` is the inbox that receives
+    | new public contact form and newsletter submissions. Leave SALES_NOTIFY_EMAIL
+    | unset to fall back to MAIL_FROM_ADDRESS. Accepts a single address or
+    | comma-separated list.
+    */
+    'sales' => [
+        'notify_to' => env('SALES_NOTIFY_EMAIL'),
+    ],
+
+    /*
     | Mailtrap Email Sending API (railsware/mailtrap-php). Required when MAIL_MAILER=mailtrap-sdk.
     | The API token is passed as the Symfony Mailer DSN "user"; if empty you get IncompleteDsnException: User is not set.
     | Env: MAILTRAP_API_KEY or MAILTRAP_API_TOKEN (both supported).
