@@ -1248,7 +1248,7 @@ class ThumbnailGenerationService
         $tempPngPath = $tmpDir.'/svg_'.uniqid().'.png';
 
         $command = sprintf(
-            'rsvg-convert -w %d %s -o %s',
+            'rsvg-convert -w %d %s -o %s 2>&1',
             $targetWidth,
             escapeshellarg($sourcePath),
             escapeshellarg($tempPngPath)
@@ -1256,8 +1256,14 @@ class ThumbnailGenerationService
 
         exec($command, $output, $exitCode);
 
-        if ($exitCode !== 0 || ! file_exists($tempPngPath)) {
-            throw new \RuntimeException('rsvg-convert failed.');
+        if ($exitCode !== 0 || ! file_exists($tempPngPath) || filesize($tempPngPath) === 0) {
+            $stderr = trim(implode("\n", $output));
+            throw new \RuntimeException(sprintf(
+                'rsvg-convert failed (exit %d, width=%d): %s',
+                $exitCode,
+                $targetWidth,
+                $stderr !== '' ? $stderr : 'no output'
+            ));
         }
 
         return $tempPngPath;

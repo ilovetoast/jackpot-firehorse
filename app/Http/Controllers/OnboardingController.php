@@ -13,6 +13,7 @@ use App\Services\AssetPathGenerator;
 use App\Services\BrandDNA\BrandVersionService;
 use App\Services\BrandDNA\BrandWebsiteCrawlerService;
 use App\Services\OnboardingService;
+use App\Services\TenantBucketService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -222,60 +223,29 @@ class OnboardingController extends Controller
         ]);
 
         $brand = app('brand');
-        $tenant = $brand->tenant;
         $file = $request->file('logo');
 
         try {
             $mimeType = $file->getMimeType() ?? 'image/png';
             $ext = $file->getClientOriginalExtension() ?: 'png';
             $originalFilename = $file->getClientOriginalName() ?: 'logo.' . $ext;
-            $fileSize = $file->getSize();
-
-            $pathGenerator = app(AssetPathGenerator::class);
-            $assetId = (string) Str::uuid();
-            $path = $pathGenerator->generateOriginalPathForAssetId($tenant, $assetId, 1, $ext);
+            $fileContents = file_get_contents($file->getRealPath());
 
             $logosCategory = Category::where('brand_id', $brand->id)->where('slug', 'logos')->first();
 
-            $asset = Asset::create([
-                'tenant_id' => $brand->tenant_id,
-                'brand_id' => $brand->id,
-                'status' => AssetStatus::VISIBLE,
-                'type' => AssetType::ASSET,
-                'title' => 'Brand Logo',
-                'original_filename' => $originalFilename,
-                'mime_type' => $mimeType,
-                'size_bytes' => $fileSize,
-                'thumbnail_status' => ThumbnailStatus::PENDING,
-                'intake_state' => 'normal',
-                'source' => 'onboarding_upload',
-                'storage_root_path' => $path,
-                'metadata' => $logosCategory ? ['category_id' => $logosCategory->id] : [],
-            ]);
+            $asset = $this->persistOnboardingAsset(
+                $brand,
+                $fileContents,
+                $mimeType,
+                $ext,
+                $originalFilename,
+                [
+                    'title' => 'Brand Logo',
+                    'source' => 'onboarding_upload',
+                    'metadata' => $logosCategory ? ['category_id' => $logosCategory->id] : [],
+                ]
+            );
 
-            $fileContents = file_get_contents($file->getRealPath());
-            Storage::disk('s3')->put($path, $fileContents, 'private');
-
-            AssetVersion::create([
-                'id' => (string) Str::uuid(),
-                'asset_id' => $asset->id,
-                'version_number' => 1,
-                'file_path' => $path,
-                'file_size' => $fileSize,
-                'mime_type' => $mimeType,
-                'checksum' => hash('sha256', $fileContents),
-                'is_current' => true,
-                'pipeline_status' => 'pending',
-            ]);
-
-            // Dispatch processing for thumbnails
-            $version = $asset->fresh()->currentVersion;
-            if ($version && ! str_contains($mimeType, 'svg')) {
-                $version->update(['pipeline_status' => 'processing']);
-                \App\Jobs\ProcessAssetJob::dispatch($version->id)->onQueue(config('queue.images_queue', 'images'));
-            }
-
-            // Link as brand logo
             $brand->update(['logo_id' => $asset->id]);
 
             // Update onboarding progress
@@ -483,52 +453,20 @@ class OnboardingController extends Controller
         string $ext,
         string $title,
     ): ?Asset {
-        $tenant = $brand->tenant;
-        $pathGenerator = app(AssetPathGenerator::class);
-        $assetId = (string) Str::uuid();
-        $path = $pathGenerator->generateOriginalPathForAssetId($tenant, $assetId, 1, $ext);
-
         $logosCategory = Category::where('brand_id', $brand->id)->where('slug', 'logos')->first();
 
-        $asset = Asset::create([
-            'tenant_id' => $brand->tenant_id,
-            'brand_id' => $brand->id,
-            'status' => AssetStatus::VISIBLE,
-            'type' => AssetType::ASSET,
-            'title' => $title,
-            'original_filename' => 'logo.' . $ext,
-            'mime_type' => $mimeType,
-            'size_bytes' => strlen($content),
-            'thumbnail_status' => ThumbnailStatus::PENDING,
-            'intake_state' => 'normal',
-            'source' => 'onboarding_website_fetch',
-            'storage_root_path' => $path,
-            'metadata' => $logosCategory ? ['category_id' => $logosCategory->id] : [],
-        ]);
-
-        Storage::disk('s3')->put($path, $content, 'private');
-
-        AssetVersion::create([
-            'id' => (string) Str::uuid(),
-            'asset_id' => $asset->id,
-            'version_number' => 1,
-            'file_path' => $path,
-            'file_size' => strlen($content),
-            'mime_type' => $mimeType,
-            'checksum' => hash('sha256', $content),
-            'is_current' => true,
-            'pipeline_status' => 'pending',
-        ]);
-
-        if (! str_contains($mimeType, 'svg')) {
-            $version = $asset->fresh()->currentVersion;
-            if ($version) {
-                $version->update(['pipeline_status' => 'processing']);
-                \App\Jobs\ProcessAssetJob::dispatch($version->id)->onQueue(config('queue.images_queue', 'images'));
-            }
-        }
-
-        return $asset;
+        return $this->persistOnboardingAsset(
+            $brand,
+            $content,
+            $mimeType,
+            $ext,
+            'logo.' . $ext,
+            [
+                'title' => $title,
+                'source' => 'onboarding_website_fetch',
+                'metadata' => $logosCategory ? ['category_id' => $logosCategory->id] : [],
+            ]
+        );
     }
 
     /**
@@ -546,8 +484,6 @@ class OnboardingController extends Controller
         ]);
 
         $brand = app('brand');
-        $tenant = $brand->tenant;
-        $pathGenerator = app(AssetPathGenerator::class);
 
         $categoryMap = $this->buildCategorySlugMap($brand);
         $created = [];
@@ -557,55 +493,25 @@ class OnboardingController extends Controller
                 $mimeType = $file->getMimeType() ?? 'application/octet-stream';
                 $ext = $file->getClientOriginalExtension() ?: 'bin';
                 $originalFilename = $file->getClientOriginalName() ?: "file_{$idx}.{$ext}";
-                $fileSize = $file->getSize();
-
-                $assetId = (string) Str::uuid();
-                $path = $pathGenerator->generateOriginalPathForAssetId($tenant, $assetId, 1, $ext);
 
                 $categoryLabel = $request->input("categories.{$idx}");
                 $categoryId = $this->resolveCategoryId($categoryMap, $categoryLabel);
 
-                $metadata = $categoryId ? ['category_id' => $categoryId] : [];
-
-                $asset = Asset::create([
-                    'tenant_id' => $brand->tenant_id,
-                    'brand_id' => $brand->id,
-                    'status' => AssetStatus::VISIBLE,
-                    'type' => AssetType::ASSET,
-                    'title' => pathinfo($originalFilename, PATHINFO_FILENAME),
-                    'original_filename' => $originalFilename,
-                    'mime_type' => $mimeType,
-                    'size_bytes' => $fileSize,
-                    'thumbnail_status' => ThumbnailStatus::PENDING,
-                    'intake_state' => $categoryId ? 'normal' : 'staged',
-                    'source' => 'onboarding_upload',
-                    'storage_root_path' => $path,
-                    'metadata' => $metadata,
-                ]);
-
                 $fileContents = file_get_contents($file->getRealPath());
-                Storage::disk('s3')->put($path, $fileContents, 'private');
 
-                AssetVersion::create([
-                    'id' => (string) Str::uuid(),
-                    'asset_id' => $asset->id,
-                    'version_number' => 1,
-                    'file_path' => $path,
-                    'file_size' => $fileSize,
-                    'mime_type' => $mimeType,
-                    'checksum' => hash('sha256', $fileContents),
-                    'is_current' => true,
-                    'pipeline_status' => 'pending',
-                ]);
-
-                if (! str_contains($mimeType, 'svg')) {
-                    $version = $asset->fresh()->currentVersion;
-                    if ($version) {
-                        $version->update(['pipeline_status' => 'processing']);
-                        \App\Jobs\ProcessAssetJob::dispatch($version->id)
-                            ->onQueue(config('queue.images_queue', 'images'));
-                    }
-                }
+                $asset = $this->persistOnboardingAsset(
+                    $brand,
+                    $fileContents,
+                    $mimeType,
+                    $ext,
+                    $originalFilename,
+                    [
+                        'title' => pathinfo($originalFilename, PATHINFO_FILENAME),
+                        'source' => 'onboarding_upload',
+                        'intake_state' => $categoryId ? 'normal' : 'staged',
+                        'metadata' => $categoryId ? ['category_id' => $categoryId] : [],
+                    ]
+                );
 
                 $created[] = (string) $asset->id;
             } catch (\Throwable $e) {
@@ -636,55 +542,35 @@ class OnboardingController extends Controller
         ]);
 
         $brand = app('brand');
-        $tenant = $brand->tenant;
         $file = $request->file('guideline');
 
         try {
             $mimeType = $file->getMimeType() ?? 'application/pdf';
             $ext = 'pdf';
             $originalFilename = $file->getClientOriginalName() ?: 'brand-guidelines.pdf';
-            $fileSize = $file->getSize();
-
-            $pathGenerator = app(AssetPathGenerator::class);
-            $assetId = (string) Str::uuid();
-            $path = $pathGenerator->generateOriginalPathForAssetId($tenant, $assetId, 1, $ext);
+            $fileContents = file_get_contents($file->getRealPath());
 
             $refCategory = Category::where('brand_id', $brand->id)
                 ->where('slug', 'reference_material')
                 ->first();
 
-            $asset = Asset::create([
-                'tenant_id' => $brand->tenant_id,
-                'brand_id' => $brand->id,
-                'status' => AssetStatus::VISIBLE,
-                'type' => AssetType::REFERENCE,
-                'title' => 'Brand Guidelines',
-                'original_filename' => $originalFilename,
-                'mime_type' => $mimeType,
-                'size_bytes' => $fileSize,
-                'thumbnail_status' => ThumbnailStatus::PENDING,
-                'intake_state' => 'normal',
-                'source' => 'onboarding_guidelines',
-                'storage_root_path' => $path,
-                'builder_staged' => true,
-                'builder_context' => 'guidelines_pdf',
-                'metadata' => $refCategory ? ['category_id' => $refCategory->id] : [],
-            ]);
-
-            $fileContents = file_get_contents($file->getRealPath());
-            Storage::disk('s3')->put($path, $fileContents, 'private');
-
-            AssetVersion::create([
-                'id' => (string) Str::uuid(),
-                'asset_id' => $asset->id,
-                'version_number' => 1,
-                'file_path' => $path,
-                'file_size' => $fileSize,
-                'mime_type' => $mimeType,
-                'checksum' => hash('sha256', $fileContents),
-                'is_current' => true,
-                'pipeline_status' => 'pending',
-            ]);
+            // saveEnrichment() is responsible for dispatching PDF processing — don't double-fire here.
+            $asset = $this->persistOnboardingAsset(
+                $brand,
+                $fileContents,
+                $mimeType,
+                $ext,
+                $originalFilename,
+                [
+                    'type' => AssetType::REFERENCE,
+                    'title' => 'Brand Guidelines',
+                    'source' => 'onboarding_guidelines',
+                    'builder_staged' => true,
+                    'builder_context' => 'guidelines_pdf',
+                    'metadata' => $refCategory ? ['category_id' => $refCategory->id] : [],
+                ],
+                dispatchPipeline: false,
+            );
 
             // Link to the working brand model version as guidelines_pdf
             $versionService = app(BrandVersionService::class);
@@ -786,6 +672,83 @@ class OnboardingController extends Controller
             'progress' => $this->onboarding->getStatusPayload($brand),
             'checklist' => $this->onboarding->getChecklistItems($brand),
         ]);
+    }
+
+    /**
+     * Persist an onboarding-uploaded asset with the correct bucket, canonical path, and pipeline dispatch.
+     *
+     * All onboarding upload paths share the same structural contract:
+     *   - the asset row MUST have storage_bucket_id populated (GenerateThumbnailsJob
+     *     and PromoteAssetJob both terminally skip/fail without it);
+     *   - the S3 key MUST embed the real asset.id (PromoteAssetJob's idempotency
+     *     check compares the path against asset.id);
+     *   - ProcessAssetJob MUST be dispatched for every mime type (including SVG)
+     *     unless the caller explicitly handles dispatch later (e.g. PDFs that
+     *     flow through saveEnrichment).
+     *
+     * Consolidating this here prevents the pre-existing drift between methods
+     * where one forgot the bucket, another forgot SVGs, and a third generated
+     * a random UUID for the path that never matched the asset row.
+     *
+     * @param  array<string,mixed>  $overrides  Per-call attribute overrides (title, type, source, metadata, builder_*, intake_state, etc.)
+     */
+    private function persistOnboardingAsset(
+        \App\Models\Brand $brand,
+        string $content,
+        string $mimeType,
+        string $ext,
+        string $originalFilename,
+        array $overrides = [],
+        bool $dispatchPipeline = true,
+    ): Asset {
+        $tenant = $brand->tenant;
+        $bucket = app(TenantBucketService::class)->resolveActiveBucketOrFail($tenant);
+        $pathGenerator = app(AssetPathGenerator::class);
+
+        // Pre-generate the asset id so the S3 key and the asset row agree (HasUuids
+        // preserves an id that is already set on the model before save()).
+        $assetId = (string) Str::orderedUuid();
+        $path = $pathGenerator->generateOriginalPathForAssetId($tenant, $assetId, 1, $ext);
+
+        $attributes = array_merge([
+            'tenant_id' => $brand->tenant_id,
+            'brand_id' => $brand->id,
+            'status' => AssetStatus::VISIBLE,
+            'type' => AssetType::ASSET,
+            'original_filename' => $originalFilename,
+            'mime_type' => $mimeType,
+            'size_bytes' => strlen($content),
+            'thumbnail_status' => ThumbnailStatus::PENDING,
+            'intake_state' => 'normal',
+            'storage_root_path' => $path,
+            'metadata' => [],
+        ], $overrides);
+
+        $asset = new Asset($attributes);
+        $asset->id = $assetId;
+        $asset->storage_bucket_id = $bucket->id;
+        $asset->save();
+
+        Storage::disk('s3')->put($path, $content, 'private');
+
+        $version = AssetVersion::create([
+            'id' => (string) Str::uuid(),
+            'asset_id' => $asset->id,
+            'version_number' => 1,
+            'file_path' => $path,
+            'file_size' => strlen($content),
+            'mime_type' => $mimeType,
+            'checksum' => hash('sha256', $content),
+            'is_current' => true,
+            'pipeline_status' => $dispatchPipeline ? 'processing' : 'pending',
+        ]);
+
+        if ($dispatchPipeline) {
+            \App\Jobs\ProcessAssetJob::dispatch($version->id)
+                ->onQueue(config('queue.images_queue', 'images'));
+        }
+
+        return $asset;
     }
 
     private function buildCategorySlugMap(\App\Models\Brand $brand): array

@@ -53,6 +53,8 @@ class Brand extends Model
         'logo_filter',
         'logo_dark_path',
         'logo_dark_id',
+        'logo_light_path',
+        'logo_light_id',
         'logo_horizontal_path',
         'logo_horizontal_id',
         'settings',
@@ -113,18 +115,46 @@ class Brand extends Model
      * Logo URL for unauthenticated pages (gateway, forgot password, public portal).
      * Also used when the viewer's session tenant does not own the brand (e.g. agency listing a client's brands):
      * authenticated CDN URLs rely on cookies scoped to /tenants/{uuid}/* for the active tenant only.
-     * Manual logo_path / logo_dark_path overrides are returned as-is (may still require cookies).
+     * Manual logo_*_path overrides are returned as-is (may still require cookies).
+     *
+     * @param  bool|string  $surface  Legacy boolean: true = dark. String: 'primary' | 'light' | 'dark'.
      */
-    public function logoUrlForGuest(bool $dark = false): ?string
+    public function logoUrlForGuest(bool|string $surface = 'primary'): ?string
     {
-        $manual = $dark ? ($this->attributes['logo_dark_path'] ?? null) : ($this->attributes['logo_path'] ?? null);
+        if (is_bool($surface)) {
+            $surface = $surface ? 'dark' : 'primary';
+        }
+
+        [$pathCol, $idCol, $fallbackPathCol, $fallbackIdCol] = match ($surface) {
+            'dark' => ['logo_dark_path', 'logo_dark_id', 'logo_path', 'logo_id'],
+            'light' => ['logo_light_path', 'logo_light_id', 'logo_path', 'logo_id'],
+            default => ['logo_path', 'logo_id', 'logo_path', 'logo_id'],
+        };
+
+        $manual = $this->attributes[$pathCol] ?? null;
         if ($manual !== null && $manual !== '') {
             return $manual;
         }
 
-        $logoId = $dark ? ($this->attributes['logo_dark_id'] ?? null) : ($this->attributes['logo_id'] ?? null);
+        $logoId = $this->attributes[$idCol] ?? null;
+        $resolved = $this->deliveryUrlForLogoAssetId($logoId, DeliveryContext::GATEWAY);
+        if ($resolved !== null && $resolved !== '') {
+            return $resolved;
+        }
 
-        return $this->deliveryUrlForLogoAssetId($logoId, DeliveryContext::GATEWAY);
+        if ($fallbackPathCol !== $pathCol) {
+            $fallbackManual = $this->attributes[$fallbackPathCol] ?? null;
+            if ($fallbackManual !== null && $fallbackManual !== '') {
+                return $fallbackManual;
+            }
+
+            return $this->deliveryUrlForLogoAssetId(
+                $this->attributes[$fallbackIdCol] ?? null,
+                DeliveryContext::GATEWAY
+            );
+        }
+
+        return null;
     }
 
     /**
@@ -184,6 +214,58 @@ class Brand extends Model
         }
 
         return $this->deliveryUrlForLogoAssetId($this->attributes['logo_dark_id'] ?? null, DeliveryContext::AUTHENTICATED);
+    }
+
+    /**
+     * Resolve logo_light_path from logo_light_id when logo_light_path is null.
+     * Light variant of the logo for use on light/white backgrounds (nav bar light theme,
+     * asset library, light Brand Guidelines surfaces). Falls back to primary when unset —
+     * see {@see logoForSurface()}.
+     */
+    public function getLogoLightPathAttribute($value): ?string
+    {
+        if ($value !== null && $value !== '') {
+            return $value;
+        }
+
+        return $this->deliveryUrlForLogoAssetId($this->attributes['logo_light_id'] ?? null, DeliveryContext::AUTHENTICATED);
+    }
+
+    /**
+     * Resolve the correct logo URL for a given display surface, with fallback to primary.
+     *
+     * Call sites should prefer this over picking individual columns so variant rollout and
+     * fallback semantics live in one place. Surfaces:
+     *  - 'light'   → logo_light_path, falls back to logo_path
+     *  - 'dark'    → logo_dark_path, falls back to logo_path
+     *  - 'primary' → logo_path (source of truth; used by Studio/generative)
+     *
+     * Returns null if no logo is set at all.
+     */
+    public function logoForSurface(string $surface = 'primary'): ?string
+    {
+        $primary = $this->logo_path;
+
+        return match ($surface) {
+            'dark' => $this->logo_dark_path ?: $primary,
+            'light' => $this->logo_light_path ?: $primary,
+            default => $primary,
+        };
+    }
+
+    /**
+     * Asset-id analogue of {@see logoForSurface()}. Used when callers need to resolve
+     * thumbnail/delivery URLs through the Asset pipeline rather than a direct path.
+     */
+    public function logoAssetIdForSurface(string $surface = 'primary'): ?string
+    {
+        $primaryId = $this->attributes['logo_id'] ?? null;
+
+        return match ($surface) {
+            'dark' => ($this->attributes['logo_dark_id'] ?? null) ?: $primaryId,
+            'light' => ($this->attributes['logo_light_id'] ?? null) ?: $primaryId,
+            default => $primaryId,
+        };
     }
 
     /**

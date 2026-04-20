@@ -1633,39 +1633,66 @@ class AssetMetadataController extends Controller
 
         $this->authorize('view', $asset);
 
-        // Phase 5: Promotion failed is terminal — retry promotion only, not full pipeline
-        if (($asset->analysis_status ?? '') === 'promotion_failed') {
-            PromoteAssetJob::dispatch($asset->id)->onQueue(config('queue.images_queue', 'images'));
+        // The button must survive every known "dead asset" shape: promotion_failed,
+        // thumbnail_skipped, missing bucket, stale metadata flags. We self-heal the state
+        // then dispatch the FULL pipeline (not promote-only). The old promote-only short
+        // circuit produced infinite loops when the root cause was missing bucket.
 
-            return response()->json(['status' => 'queued']);
+        // 1) Backfill storage_bucket_id if null. Historical onboarding created assets without
+        //    one; without this, PromoteAssetJob fails permanently and thumbnails never land.
+        if (! $asset->storage_bucket_id) {
+            try {
+                $resolvedBucket = app(\App\Services\TenantBucketService::class)
+                    ->resolveActiveBucketOrFail($asset->tenant);
+                $asset->storage_bucket_id = $resolvedBucket->id;
+            } catch (\Throwable $e) {
+                Log::error('[retryProcessing] Unable to resolve storage bucket for self-heal', [
+                    'asset_id' => $asset->id,
+                    'error' => $e->getMessage(),
+                ]);
+
+                return response()->json([
+                    'message' => 'Unable to recover asset — no active storage bucket for this tenant. Contact support.',
+                ], 422);
+            }
         }
 
-        $hasRetryableIncident = SystemIncident::whereNull('resolved_at')
-            ->where(function ($q) use ($asset) {
-                $q->where('source_type', 'asset')->where('source_id', $asset->id)
-                    ->orWhere(function ($q2) use ($asset) {
-                        $q2->where('source_type', 'job')->where('source_id', $asset->id);
-                    });
-            })
-            ->where('retryable', true)
-            ->exists();
-
-        if (! $hasRetryableIncident) {
-            return response()->json(['message' => 'No retryable incident for this asset'], 422);
-        }
-
+        // 2) Clear terminal/skip metadata flags that would otherwise short-circuit the pipeline.
         $metadata = $asset->metadata ?? [];
-        unset($metadata['processing_started'], $metadata['processing_started_at']);
-        $asset->update([
+        foreach ([
+            'promotion_failed', 'promotion_failed_at', 'promotion_error',
+            'thumbnail_skip_reason', 'thumbnail_skip_message', 'thumbnail_skip_reason_at',
+            'preview_unavailable_user_message', 'missing_storage_detected_at',
+            'preview_skipped', 'preview_skipped_reason',
+            'processing_started', 'processing_started_at',
+        ] as $stale) {
+            unset($metadata[$stale]);
+        }
+
+        // 3) Reset state so pipeline guards don't short-circuit on stale enum values.
+        $asset->fill([
             'analysis_status' => 'uploading',
             'thumbnail_status' => ThumbnailStatus::PENDING,
             'thumbnail_error' => null,
+            'thumbnail_started_at' => null,
+            'thumbnail_retry_count' => 0,
             'metadata' => $metadata,
-        ]);
+        ])->save();
 
-        ProcessAssetJob::dispatch($asset->id)->onQueue(config('queue.images_queue', 'images'));
+        if ($version = $asset->currentVersion) {
+            $version->update(['pipeline_status' => 'processing']);
+        }
 
-        // P1: Reconcile after retry-processing
+        // 4) Resolve open retryable incidents — they describe the prior broken state we just cured.
+        //    Fresh failures during the new run will create fresh incidents.
+        app(SystemIncidentService::class)->resolveBySource('asset', $asset->id);
+        app(SystemIncidentService::class)->resolveBySource('job', $asset->id);
+
+        // 5) Dispatch full pipeline. Thumbnails are what the user actually needs; promote-only
+        //    never regenerates them. ProcessAssetJob chains GenerateThumbnailsJob → Promote.
+        ProcessAssetJob::dispatch($asset->id)
+            ->onQueue(\App\Support\PipelineQueueResolver::imagesQueueForAsset($asset));
+
         try {
             app(\App\Services\Assets\AssetStateReconciliationService::class)->reconcile($asset->fresh());
         } catch (\Throwable $e) {

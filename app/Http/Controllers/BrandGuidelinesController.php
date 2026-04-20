@@ -126,7 +126,12 @@ class BrandGuidelinesController extends Controller
         }
 
         $logoOnLightUrl = null;
-        if ($activeVersion) {
+        // Prefer the brand column (now canonical for the light variant slot); fall back to the
+        // DNA pivot for historical versions that only have the pivot row populated.
+        if ($brand->logo_light_path) {
+            $logoOnLightUrl = $brand->logo_light_path;
+        }
+        if (! $logoOnLightUrl && $activeVersion) {
             $lightAsset = $activeVersion->assetsForContext('logo_on_light')->first();
             if ($lightAsset) {
                 try {

@@ -2,11 +2,12 @@ import { router, usePage } from '@inertiajs/react'
 import { useState } from 'react'
 import { refreshCsrfTokenFromServer } from '../../utils/csrf'
 import BrandIconUnified from '../../Components/BrandIconUnified'
+import { getBrandLogoForSurface } from '../../utils/brandLogo'
 
 function BrandLogo({ brand, disabled }) {
     const [imgError, setImgError] = useState(false)
-    /** Primary (on-light) logo first on dark cinematic UI; reversed/on-dark asset only as fallback. */
-    const logoSrc = brand.logo_path || brand.logo_dark_path
+    /** Gateway is a dark cinematic surface — prefer the dark variant, fall back to primary. */
+    const logoSrc = getBrandLogoForSurface(brand, 'dark')
 
     if (logoSrc && !imgError) {
         return (

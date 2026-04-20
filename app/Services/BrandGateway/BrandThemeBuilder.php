@@ -32,6 +32,7 @@ class BrandThemeBuilder
         $colors = $this->resolveColors($effectiveBrand);
         $logo = $this->resolveLogo($effectiveBrand, $guestSignedLogos);
         $logoDark = $this->resolveLogoDark($effectiveBrand, $guestSignedLogos);
+        $logoLight = $this->resolveLogoLight($effectiveBrand, $guestSignedLogos);
         $name = $this->resolveName($tenant, $brand);
         $tagline = $this->resolveTagline($effectiveBrand);
 
@@ -39,6 +40,7 @@ class BrandThemeBuilder
             'mode' => $mode,
             'logo' => $logo,
             'logo_dark' => $logoDark,
+            'logo_light' => $logoLight,
             'name' => $name,
             'tagline' => $tagline,
             'colors' => $colors,
@@ -126,12 +128,36 @@ class BrandThemeBuilder
 
         try {
             if ($guestSignedLogos) {
-                return $brand->logoUrlForGuest(true);
+                return $brand->logoUrlForGuest('dark');
             }
 
             $logoDark = $brand->logo_dark_path;
 
             return ($logoDark !== null && $logoDark !== '') ? $logoDark : null;
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
+    /**
+     * Light-background variant (for pages/surfaces rendered on white/light chrome).
+     * Callers should prefer this when painting on a light surface; falls back to
+     * the primary logo downstream via Brand::logoForSurface('light').
+     */
+    private function resolveLogoLight(?Brand $brand, bool $guestSignedLogos = false): ?string
+    {
+        if (! $brand) {
+            return null;
+        }
+
+        try {
+            if ($guestSignedLogos) {
+                return $brand->logoUrlForGuest('light');
+            }
+
+            $logoLight = $brand->logo_light_path;
+
+            return ($logoLight !== null && $logoLight !== '') ? $logoLight : null;
         } catch (\Throwable) {
             return null;
         }

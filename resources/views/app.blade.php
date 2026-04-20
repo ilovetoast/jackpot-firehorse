@@ -21,9 +21,38 @@
         <link rel="icon" type="image/png" sizes="192x192" href="/android-chrome-192x192.png">
         <link rel="icon" type="image/png" sizes="512x512" href="/android-chrome-512x512.png">
         <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
-        <meta property="og:image" content="{{ url('/og-image-1200x630.png') }}">
+
+        {{--
+          Social preview / unfurl tags — consumed by Microsoft Teams, Slack,
+          LinkedIn, iMessage, Facebook, Twitter/X, Discord, etc.
+          Keep title + description in sync with the marketing hero.
+        --}}
+        @php
+            $ogTitle = trim($page['props']['meta']['og_title'] ?? '') !== ''
+                ? $page['props']['meta']['og_title']
+                : config('app.name', 'Jackpot') . ' — Brand execution, not asset management';
+            $ogDescription = trim($page['props']['meta']['og_description'] ?? '') !== ''
+                ? $page['props']['meta']['og_description']
+                : 'Not another digital asset manager — a brand asset manager built for execution. Every asset, every brand, every deliverable lined up and ready to hit.';
+            $ogImage = url('/og-image-1200x630.png');
+        @endphp
+        <meta name="description" content="{{ $ogDescription }}">
+        <meta property="og:type" content="website">
+        <meta property="og:site_name" content="{{ config('app.name', 'Jackpot') }}">
+        <meta property="og:title" content="{{ $ogTitle }}">
+        <meta property="og:description" content="{{ $ogDescription }}">
+        <meta property="og:url" content="{{ url()->current() }}">
+        <meta property="og:image" content="{{ $ogImage }}">
+        <meta property="og:image:secure_url" content="{{ $ogImage }}">
+        <meta property="og:image:type" content="image/png">
         <meta property="og:image:width" content="1200">
         <meta property="og:image:height" content="630">
+        <meta property="og:image:alt" content="{{ config('app.name', 'Jackpot') }} — Brand execution, not asset management">
+        <meta name="twitter:card" content="summary_large_image">
+        <meta name="twitter:title" content="{{ $ogTitle }}">
+        <meta name="twitter:description" content="{{ $ogDescription }}">
+        <meta name="twitter:image" content="{{ $ogImage }}">
+        <meta name="twitter:image:alt" content="{{ config('app.name', 'Jackpot') }} — Brand execution, not asset management">
 
         <title>{{ config('app.name', 'Jackpot') }}</title>
 

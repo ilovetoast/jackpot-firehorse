@@ -538,8 +538,14 @@ final class BrandLogoVariantAutomationService
             'builder_context' => $context,
         ]);
 
+        // Persist the generated variant to the matching brand column so the Settings UI
+        // sees it immediately and display call sites pick it up without extra roundtrips.
+        // Historical bug: logo_on_light previously created the asset + pivot row but never
+        // set brands.logo_light_id, so generated variants appeared "lost" in the UI.
         if ($context === 'logo_on_dark') {
             $brand->update(['logo_dark_id' => $asset->id, 'logo_dark_path' => null]);
+        } elseif ($context === 'logo_on_light') {
+            $brand->update(['logo_light_id' => $asset->id, 'logo_light_path' => null]);
         }
 
         $this->finalizeStagedVariant($asset, $brand, $context);

@@ -6,7 +6,10 @@ export const JACKPOT_WORDMARK_INVERTED_SRC = '/jp-wordmark-inverted.svg'
 export default function LogoMark({ name, logo, size = 'md', className = '' }) {
     const { theme } = usePage().props
     const resolvedName = name || theme?.name || 'Jackpot'
-    const resolvedLogo = logo ?? theme?.logo
+    // LogoMark paints inside a dark-tinted gradient pill (primary@CC → primary@55) with
+    // white text — it's a dark surface. Prefer the dark variant from the theme, then the
+    // primary as fallback. Callers may override via the explicit `logo` prop.
+    const resolvedLogo = logo ?? theme?.logo_dark ?? theme?.logo
     const primary = theme?.colors?.primary || '#6366f1'
     const letter = resolvedName.charAt(0).toUpperCase()
 

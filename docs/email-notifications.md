@@ -89,7 +89,7 @@ Configured in `config/mail.php` as `mail.automations_enabled` (boolean).
 
 Transactional HTML for password reset, invites, billing, etc. lives in `notification_templates` and is seeded by `NotificationTemplateSeeder`. Layouts use:
 
-- **System** — `App\Support\TransactionalEmailHtml::systemShell()` — dark cinematic header strip, `{{app_url}}/jp-logo.svg`, Stripe-like card on `#f4f5f7`, footer outside the card.
+- **System** — `App\Support\TransactionalEmailHtml::systemShell()` — dark cinematic header strip, `{{app_url}}/icons/jp-wordmark-email@2x.png` (also used by the `<x-email.header>` Blade component), Stripe-like card on `#f4f5f7`, footer outside the card.
 - **Tenant invite** — `tenantShell()` — same aesthetic plus optional `{{tenant_logo_block}}` (divider + default brand logo via `Brand::logoUrlForGuest()`).
 
 After updating the seeder, refresh existing environments:

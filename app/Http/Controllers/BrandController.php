@@ -256,14 +256,20 @@ class BrandController extends Controller
 
         $brand->refresh();
 
-        $result['logo_dark_preview_url'] = $brand->logo_dark_id
-            ? \App\Models\Asset::find($brand->logo_dark_id)?->deliveryUrl(\App\Support\AssetVariant::THUMB_MEDIUM, \App\Support\DeliveryContext::AUTHENTICATED)
-            : null;
+        // Preview URLs are read from brand columns (not just the automation return) so the
+        // UI immediately reflects persisted state after the bug fix in createVariantAsset.
+        $darkUrls = $this->resolveLogoPreviewUrls($brand->logo_dark_id);
+        $lightUrls = $this->resolveLogoPreviewUrls($brand->logo_light_id);
 
-        if (! empty($result['on_light_asset_id'])) {
-            $result['on_light_preview_url'] = \App\Models\Asset::find($result['on_light_asset_id'])
-                ?->deliveryUrl(\App\Support\AssetVariant::THUMB_MEDIUM, \App\Support\DeliveryContext::AUTHENTICATED);
-        }
+        $result['logo_dark_preview_url'] = $darkUrls['thumbnail'] ?? $darkUrls['original'];
+        $result['logo_dark_original_url'] = $darkUrls['original'];
+        $result['logo_dark_id'] = $brand->logo_dark_id;
+
+        $result['logo_light_preview_url'] = $lightUrls['thumbnail'] ?? $lightUrls['original'];
+        $result['logo_light_original_url'] = $lightUrls['original'];
+        $result['logo_light_id'] = $brand->logo_light_id;
+        // Retain legacy key for any in-flight client JS that still reads it.
+        $result['on_light_preview_url'] = $result['logo_light_preview_url'];
 
         $status = ($result['ok'] ?? false) ? 200 : 422;
 
@@ -560,6 +566,7 @@ class BrandController extends Controller
 
         $logoUrls = $this->resolveLogoPreviewUrls($brand->logo_id);
         $logoDarkUrls = $this->resolveLogoPreviewUrls($brand->logo_dark_id);
+        $logoLightUrls = $this->resolveLogoPreviewUrls($brand->logo_light_id);
         $logoHorizontalUrls = $this->resolveLogoPreviewUrls($brand->logo_horizontal_id);
 
         return Inertia::render('Brands/Edit', [
@@ -575,6 +582,10 @@ class BrandController extends Controller
                 'logo_dark_id' => $brand->logo_dark_id,
                 'logo_dark_thumbnail_url' => $logoDarkUrls['thumbnail'],
                 'logo_dark_original_url' => $logoDarkUrls['original'],
+                'logo_light_path' => $brand->logo_light_path,
+                'logo_light_id' => $brand->logo_light_id,
+                'logo_light_thumbnail_url' => $logoLightUrls['thumbnail'],
+                'logo_light_original_url' => $logoLightUrls['original'],
                 'logo_horizontal_path' => $brand->logo_horizontal_path,
                 'logo_horizontal_id' => $brand->logo_horizontal_id,
                 'logo_horizontal_thumbnail_url' => $logoHorizontalUrls['thumbnail'],
@@ -660,6 +671,8 @@ class BrandController extends Controller
             'clear_logo' => 'nullable|boolean',
             'logo_dark_id' => 'nullable|uuid|exists:assets,id',
             'clear_logo_dark' => 'nullable|boolean',
+            'logo_light_id' => 'nullable|uuid|exists:assets,id',
+            'clear_logo_light' => 'nullable|boolean',
             'icon_bg_color' => 'nullable|string|max:7|regex:/^#[0-9A-Fa-f]{6}$/',
             'icon_style' => 'nullable|string|in:subtle,gradient,solid',
             'show_in_selector' => 'nullable|boolean',
@@ -743,6 +756,26 @@ class BrandController extends Controller
         } else {
             $validated['logo_dark_path'] = $brand->logo_dark_path;
             $validated['logo_dark_id'] = $brand->logo_dark_id;
+        }
+
+        // Handle light logo variant: explicit clear or asset_id. Left unset it falls back
+        // to the primary logo at render time (see Brand::logoForSurface('light')).
+        if ($request->boolean('clear_logo_light')) {
+            $validated['logo_light_path'] = null;
+            $validated['logo_light_id'] = null;
+        } elseif ($request->filled('logo_light_id')) {
+            $lightLogoAsset = \App\Models\Asset::where('id', $request->input('logo_light_id'))
+                ->where('tenant_id', $tenant->id)
+                ->where('brand_id', $brand->id)
+                ->first();
+            if (! $lightLogoAsset) {
+                abort(403, 'Light logo asset does not belong to this brand.');
+            }
+            $validated['logo_light_id'] = $request->input('logo_light_id');
+            $validated['logo_light_path'] = null;
+        } else {
+            $validated['logo_light_path'] = $brand->logo_light_path;
+            $validated['logo_light_id'] = $brand->logo_light_id;
         }
 
         // Handle horizontal logo variant: explicit clear or asset_id

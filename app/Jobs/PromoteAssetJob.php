@@ -130,12 +130,26 @@ class PromoteAssetJob implements ShouldQueue
         }
 
         if (! $asset->storageBucket) {
-            Log::error('Asset promotion failed - missing storage bucket', [
-                'asset_id' => $asset->id,
-            ]);
-            $this->markPromotionFailed($asset, 'Missing storage bucket');
+            // Self-heal: historical onboarding flows created assets without storage_bucket_id.
+            // Resolve the tenant's active bucket rather than failing the asset permanently.
+            try {
+                $resolvedBucket = app(\App\Services\TenantBucketService::class)
+                    ->resolveActiveBucketOrFail($asset->tenant);
+                $asset->update(['storage_bucket_id' => $resolvedBucket->id]);
+                $asset->refresh()->load('storageBucket');
+                Log::info('[PromoteAssetJob] Auto-healed missing storage_bucket_id', [
+                    'asset_id' => $asset->id,
+                    'bucket_id' => $resolvedBucket->id,
+                ]);
+            } catch (\Throwable $e) {
+                Log::error('Asset promotion failed - missing storage bucket and tenant has no active bucket', [
+                    'asset_id' => $asset->id,
+                    'error' => $e->getMessage(),
+                ]);
+                $this->markPromotionFailed($asset, 'Missing storage bucket (no active bucket to backfill)');
 
-            return;
+                return;
+            }
         }
 
         if (! $asset->storage_root_path) {

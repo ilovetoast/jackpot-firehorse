@@ -4,6 +4,7 @@ import JackpotLogo from './JackpotLogo'
 import { usePermission } from '../hooks/usePermission'
 import BrandIconUnified from './BrandIconUnified'
 import { showWorkspaceSwitchingOverlay } from '../utils/workspaceSwitchOverlay'
+import { getBrandLogoForSurface, hasDedicatedVariantForSurface } from '../utils/brandLogo'
 
 function inertiaPathname(pageUrl) {
     if (!pageUrl) {
@@ -74,10 +75,11 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilte
         // Try to get the first active brand from valid brands array
         const firstBrand = validBrands && validBrands.length > 0 ? validBrands.find(b => b.is_active) || validBrands[0] : null
         if (firstBrand) {
-            const fallbackSrc =
-                textColor === '#ffffff' && firstBrand.logo_dark_path
-                    ? firstBrand.logo_dark_path
-                    : firstBrand.logo_path
+            // Surface-aware logo pick: white text = dark chrome; default chrome = light surface.
+            // Resolver falls back to primary when the requested variant isn't set.
+            const fallbackSurface = textColor === '#ffffff' ? 'dark' : 'light'
+            const fallbackSrc = getBrandLogoForSurface(firstBrand, fallbackSurface)
+            const fallbackHasVariant = hasDedicatedVariantForSurface(firstBrand, fallbackSurface)
             return (
                 <Link href="/app" className="flex min-w-0 max-w-full items-center gap-2.5 py-2">
                     {fallbackSrc ? (
@@ -85,7 +87,7 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilte
                             src={fallbackSrc}
                             alt={firstBrand.name || 'Brand'}
                             className="h-12 w-auto max-w-full object-contain object-left"
-                            style={textColor === '#ffffff' && firstBrand.logo_dark_path ? undefined : logoFilterStyle}
+                            style={fallbackHasVariant ? undefined : logoFilterStyle}
                         />
                     ) : (
                         <>
@@ -113,14 +115,22 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilte
     const brandName = activeBrand.name || 'Brand'
     /** Transparent / cinematic nav passes white text — avoid light gray hover (unreadable). */
     const isDarkNavChrome = textColor === '#ffffff'
-    /** Prefer light-on-dark logo asset on cinematic nav when configured (matches Brand Guidelines hero). */
-    const navLogoSrc = useMemo(() => {
-        if (isDarkNavChrome && activeBrand.logo_dark_path) {
-            return activeBrand.logo_dark_path
-        }
-        return activeBrand.logo_path
-    }, [isDarkNavChrome, activeBrand.logo_dark_path, activeBrand.logo_path])
-    const useDarkVariantLogo = Boolean(isDarkNavChrome && activeBrand.logo_dark_path)
+    /**
+     * Pick the logo variant for the current nav chrome via the surface resolver.
+     *
+     * 'dark'  → uses logo_dark_path when set, falls back to primary.
+     * 'light' → uses logo_light_path when set, falls back to primary.
+     *
+     * When a dedicated variant *is* in use, suppress logoFilterStyle — the user's
+     * designer-chosen variant already has the right colors, we shouldn't CSS-invert
+     * or recolor it on top (that was the old single-slot workaround).
+     */
+    const navSurface = isDarkNavChrome ? 'dark' : 'light'
+    const navLogoSrc = useMemo(
+        () => getBrandLogoForSurface(activeBrand, navSurface),
+        [navSurface, activeBrand.logo_path, activeBrand.logo_dark_path, activeBrand.logo_light_path]
+    )
+    const useDedicatedVariantLogo = hasDedicatedVariantForSurface(activeBrand, navSurface)
 
     useEffect(() => {
         setLogoError(false)
@@ -156,7 +166,7 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilte
                                 src={navLogoSrc}
                                 alt={brandName}
                                 className="h-12 w-auto max-w-full object-contain object-left"
-                                style={useDarkVariantLogo ? undefined : logoFilterStyle}
+                                style={useDedicatedVariantLogo ? undefined : logoFilterStyle}
                                 onError={() => setLogoError(true)}
                             />
                         ) : (
@@ -324,7 +334,7 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilte
                     src={navLogoSrc}
                     alt={brandName}
                     className="h-12 w-auto max-w-full object-contain object-left"
-                    style={useDarkVariantLogo ? undefined : logoFilterStyle}
+                    style={useDedicatedVariantLogo ? undefined : logoFilterStyle}
                     onError={() => setLogoError(true)}
                 />
             ) : (

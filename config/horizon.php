@@ -239,7 +239,8 @@ return [
             'memory' => 256,
             // Must be >= GenerateThumbnailsJob / large-asset pipeline timeouts (see assets.thumbnail.*)
             // Job $tries bounds release() deferrals; $maxExceptions stops crash loops (see heavy jobs).
-            'tries' => 1,
+            // tries=2 lets transient S3/rsvg/ffmpeg hiccups recover without permanently failing an asset.
+            'tries' => 2,
             'timeout' => (int) env('HORIZON_IMAGES_WORKER_TIMEOUT', 300),
             'nice' => 0,
         ],
@@ -257,7 +258,8 @@ return [
             'maxTime' => 3600,
             'maxJobs' => 50,
             'memory' => (int) env('HORIZON_IMAGES_HEAVY_MEMORY', 2048),
-            'tries' => 1,
+            // Heavy originals: one retry for transient OOM / S3 / rsvg failures.
+            'tries' => 2,
             'timeout' => (int) env('HORIZON_IMAGES_HEAVY_WORKER_TIMEOUT', 1800),
             'nice' => 0,
         ],
@@ -270,7 +272,8 @@ return [
             'maxTime' => 3600,
             'maxJobs' => 100,
             'memory' => 256,
-            'tries' => 1,
+            // One retry for transient Ghostscript / S3 failures; heavy jobs can still set $tries locally.
+            'tries' => 2,
             'timeout' => 600,
             'nice' => 0,
         ],
@@ -284,7 +287,8 @@ return [
             'maxTime' => 3600,
             'maxJobs' => 100,
             'memory' => (int) env('HORIZON_AI_MEMORY', 1024),
-            'tries' => 1,
+            // One retry covers transient 429/5xx from AI providers; expensive jobs should cap $tries locally.
+            'tries' => 2,
             'timeout' => (int) env('HORIZON_AI_WORKER_TIMEOUT', 960),
             'nice' => 0,
         ],
@@ -338,7 +342,6 @@ return [
             ],
             'supervisor-pdf-processing' => [
                 'maxProcesses' => 1,
-                'tries' => 1,
             ],
             'supervisor-ai' => [
                 'maxProcesses' => 1,

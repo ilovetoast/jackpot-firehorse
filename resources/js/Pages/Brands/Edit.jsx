@@ -24,6 +24,7 @@ import ConfirmDialog from '../../Components/ConfirmDialog'
 import DownloadBrandingSelector from '../../Components/branding/DownloadBrandingSelector'
 import AssetImagePickerField from '../../Components/media/AssetImagePickerField'
 import AssetImagePickerFieldMulti from '../../Components/media/AssetImagePickerFieldMulti'
+import LogoVariantCard from '../../Components/Brand/LogoVariantCard'
 import BrandMembersSection from '../../Components/brand/BrandMembersSection'
 import PublicPageTheme from '../../Components/branding/PublicPageTheme'
 import EntryExperience from '../../Components/portal/EntryExperience'
@@ -904,6 +905,9 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
         logo_dark_id: brand.logo_dark_id ?? null,
         logo_dark_preview: brand.logo_dark_thumbnail_url || brand.logo_dark_original_url || brand.logo_dark_path || '',
         clear_logo_dark: false,
+        logo_light_id: brand.logo_light_id ?? null,
+        logo_light_preview: brand.logo_light_thumbnail_url || brand.logo_light_original_url || brand.logo_light_path || '',
+        clear_logo_light: false,
         logo_horizontal_id: brand.logo_horizontal_id ?? null,
         logo_horizontal_preview: brand.logo_horizontal_thumbnail_url || brand.logo_horizontal_original_url || brand.logo_horizontal_path || '',
         clear_logo_horizontal: false,
@@ -961,6 +965,12 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
         }).then((r) => r.json())
     }, [])
 
+    /**
+     * Generate a raster logo variant (on-dark white silhouette, or on-light primary-color wash).
+     * Called from the inline "Auto-generate" button inside each variant card. Updates only
+     * the slot(s) actually returned by the server so parallel generation of both variants
+     * doesn't stomp each other.
+     */
     const runLogoVariantGeneration = async (onDark, onLight) => {
         setLogoVariantGenerating(true)
         setLogoVariantError(null)
@@ -969,11 +979,18 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                 on_dark: onDark,
                 on_light: onLight,
             })
-            if (data.logo_dark_preview_url && data.on_dark_asset_id) {
-                setData('logo_dark_id', data.on_dark_asset_id)
-                setData('logo_dark_preview', data.logo_dark_preview_url)
+
+            if (onDark && (data.logo_dark_id || data.on_dark_asset_id)) {
+                setData('logo_dark_id', data.logo_dark_id || data.on_dark_asset_id)
+                setData('logo_dark_preview', data.logo_dark_preview_url || data.logo_dark_original_url || null)
                 setData('clear_logo_dark', false)
             }
+            if (onLight && (data.logo_light_id || data.on_light_asset_id)) {
+                setData('logo_light_id', data.logo_light_id || data.on_light_asset_id)
+                setData('logo_light_preview', data.logo_light_preview_url || data.on_light_preview_url || data.logo_light_original_url || null)
+                setData('clear_logo_light', false)
+            }
+
             if (Array.isArray(data.errors) && data.errors.length > 0 && !data.ok) {
                 setLogoVariantError(data.errors.join(' '))
             }
@@ -2537,130 +2554,176 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                 <div className="mb-2">
                                     <h2 className="text-xl font-semibold text-gray-900">Brand Images</h2>
                                     <p className="mt-2 text-sm text-gray-600 leading-relaxed">
-                                        Upload your logos, pick from the asset library or {DELIVERABLES_PAGE_LABEL_SINGULAR.toLowerCase()}s, or generate raster variants from your primary logo (same options as Brand DNA → Standards).
+                                        Your primary logo is the source of truth for Studio and generative assets.
+                                        Optional display variants tell the app which version to use on light vs. dark surfaces —
+                                        leave either blank to reuse the primary automatically.
                                     </p>
                                 </div>
-                                <div className="mt-6 rounded-lg border border-indigo-100 bg-indigo-50/50 px-4 py-4">
-                                    <h3 className="text-sm font-semibold text-gray-900">Generate raster variants</h3>
-                                    <p className="mt-1 text-xs text-gray-600">
-                                        Creates PNGs from your <strong>primary</strong> logo: raster files use the original; <strong>SVG</strong> uses the processed thumbnail (same image as the grid). On-dark updates <strong>Logo (dark background)</strong> below. Primary-color variant is stored for Brand DNA guidelines.
-                                    </p>
-                                    <div className="mt-3 flex flex-wrap gap-2">
-                                        <button
-                                            type="button"
-                                            disabled={logoVariantGenerating || processing}
-                                            onClick={() => runLogoVariantGeneration(true, false)}
-                                            className="rounded-md bg-white px-3 py-2 text-xs font-semibold text-indigo-700 shadow-sm ring-1 ring-indigo-200 hover:bg-indigo-50 disabled:opacity-50"
-                                        >
-                                            {logoVariantGenerating ? 'Working…' : 'Generate on-dark logo'}
-                                        </button>
-                                        <button
-                                            type="button"
-                                            disabled={logoVariantGenerating || processing}
-                                            onClick={() => runLogoVariantGeneration(false, true)}
-                                            className="rounded-md bg-white px-3 py-2 text-xs font-semibold text-indigo-700 shadow-sm ring-1 ring-indigo-200 hover:bg-indigo-50 disabled:opacity-50"
-                                        >
-                                            {logoVariantGenerating ? 'Working…' : 'Generate primary-color variant'}
-                                        </button>
+
+                                {/* Primary Logo — required, source of truth */}
+                                <div className="mt-6">
+                                    <div className="flex items-baseline justify-between">
+                                        <label className="block text-sm font-semibold text-gray-900">Primary Logo</label>
+                                        <span className="text-xs text-gray-400">Required</span>
                                     </div>
-                                    {logoVariantError && (
-                                        <p className="mt-2 text-xs text-amber-800" role="alert">{logoVariantError}</p>
-                                    )}
+                                    <p className="text-xs text-gray-500 mb-2">
+                                        Used in Studio, generative assets, and as the fallback for display variants below.
+                                    </p>
+                                    <div className="rounded-lg border border-gray-200 bg-white p-2">
+                                        <AssetImagePickerField
+                                            value={{
+                                                preview_url: data.logo_preview ?? (data.logo_id && data.logo_id === brand.logo_id ? (brand.logo_thumbnail_url ?? brand.logo_original_url ?? brand.logo_path) : null),
+                                                asset_id: data.logo_id ?? null,
+                                            }}
+                                            onChange={(v) => {
+                                                if (v == null) {
+                                                    setData('logo_id', null)
+                                                    setData('logo_preview', null)
+                                                    setData('clear_logo', true)
+                                                } else if (v?.asset_id) {
+                                                    setData('logo_id', v.asset_id)
+                                                    setData('logo_preview', v.preview_url ?? v.thumbnail_url ?? null)
+                                                    setData('logo', null)
+                                                    setData('clear_logo', false)
+                                                } else if (v?.preview_url) {
+                                                    setData('logo_preview', v.preview_url)
+                                                }
+                                            }}
+                                            fetchAssets={(opts) => {
+                                                const params = new URLSearchParams({ format: 'json' })
+                                                if (opts?.category) params.set('category', opts.category)
+                                                return fetch(`/app/assets?${params}`, {
+                                                    credentials: 'same-origin',
+                                                    headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                                                }).then((r) => r.json())
+                                            }}
+                                            fetchDeliverables={fetchDeliverablesForPicker}
+                                            getAssetDownloadUrl={(id) => `/app/assets/${id}/download`}
+                                            title="Select logo"
+                                            defaultCategoryLabel="Logos"
+                                            contextCategory="logos"
+                                            aspectRatio={{ width: 265, height: 64 }}
+                                            minWidth={265}
+                                            minHeight={64}
+                                            placeholder="Click to choose from library or upload"
+                                            helperText="Recommended: 265×64 px or similar aspect ratio. SVG or PNG."
+                                            brandId={brand.id}
+                                        />
+                                    </div>
+                                    {errors.logo && <p className="mt-2 text-sm text-red-600">{errors.logo}</p>}
                                 </div>
-                                <div className="mt-6 space-y-6">
-                                            {/* Logo (Light) */}
-                                            <div>
-                                                <label className="block text-sm font-medium text-gray-900 mb-1">Logo</label>
-                                                <p className="text-xs text-gray-500 mb-2">Primary logo for light backgrounds.</p>
-                                                <div className="rounded-lg border border-gray-200 bg-white p-2">
-                                                    <AssetImagePickerField
-                                                        value={{
-                                                            preview_url: data.logo_preview ?? (data.logo_id && data.logo_id === brand.logo_id ? (brand.logo_thumbnail_url ?? brand.logo_original_url ?? brand.logo_path) : null),
-                                                            asset_id: data.logo_id ?? null,
-                                                        }}
-                                                        onChange={(v) => {
-                                                            if (v == null) {
-                                                                setData('logo_id', null)
-                                                                setData('logo_preview', null)
-                                                                setData('clear_logo', true)
-                                                            } else if (v?.asset_id) {
-                                                                setData('logo_id', v.asset_id)
-                                                                setData('logo_preview', v.preview_url ?? v.thumbnail_url ?? null)
-                                                                setData('logo', null)
-                                                                setData('clear_logo', false)
-                                                            } else if (v?.preview_url) {
-                                                                setData('logo_preview', v.preview_url)
-                                                            }
-                                                        }}
-                                                        fetchAssets={(opts) => {
-                                                            const params = new URLSearchParams({ format: 'json' })
-                                                            if (opts?.category) params.set('category', opts.category)
-                                                            return fetch(`/app/assets?${params}`, {
-                                                                credentials: 'same-origin',
-                                                                headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
-                                                            }).then((r) => r.json())
-                                                        }}
-                                                        fetchDeliverables={fetchDeliverablesForPicker}
-                                                        getAssetDownloadUrl={(id) => `/app/assets/${id}/download`}
-                                                        title="Select logo"
-                                                        defaultCategoryLabel="Logos"
-                                                        contextCategory="logos"
-                                                        aspectRatio={{ width: 265, height: 64 }}
-                                                        minWidth={265}
-                                                        minHeight={64}
-                                                        placeholder="Click to choose from library or upload"
-                                                        helperText="Recommended: 265×64 px or similar aspect ratio"
-                                                        brandId={brand.id}
-                                                    />
-                                                </div>
-                                                {errors.logo && <p className="mt-2 text-sm text-red-600">{errors.logo}</p>}
-                                            </div>
-                                            {/* Logo (Dark) */}
-                                            <div>
-                                                <label id="logo-dark-section" className="block text-sm font-medium text-gray-900 mb-1">Logo (Dark Background)</label>
-                                                <p className="text-xs text-gray-500 mb-2">Optional. Used on dark backgrounds like the brand overview hero.</p>
-                                                <div className="rounded-lg border border-gray-700 bg-gray-900 p-2">
-                                                    <AssetImagePickerField
-                                                        value={{
-                                                            preview_url: data.logo_dark_preview ?? (data.logo_dark_id && data.logo_dark_id === brand.logo_dark_id ? (brand.logo_dark_thumbnail_url ?? brand.logo_dark_original_url ?? brand.logo_dark_path) : null),
-                                                            asset_id: data.logo_dark_id ?? null,
-                                                        }}
-                                                        onChange={(v) => {
-                                                            if (v == null) {
-                                                                setData('logo_dark_id', null)
-                                                                setData('logo_dark_preview', null)
-                                                                setData('clear_logo_dark', true)
-                                                            } else if (v?.asset_id) {
-                                                                setData('logo_dark_id', v.asset_id)
-                                                                setData('logo_dark_preview', v.preview_url ?? v.thumbnail_url ?? null)
-                                                                setData('clear_logo_dark', false)
-                                                            } else if (v?.preview_url) {
-                                                                setData('logo_dark_preview', v.preview_url)
-                                                            }
-                                                        }}
-                                                        fetchAssets={(opts) => {
-                                                            const params = new URLSearchParams({ format: 'json' })
-                                                            if (opts?.category) params.set('category', opts.category)
-                                                            return fetch(`/app/assets?${params}`, {
-                                                                credentials: 'same-origin',
-                                                                headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
-                                                            }).then((r) => r.json())
-                                                        }}
-                                                        fetchDeliverables={fetchDeliverablesForPicker}
-                                                        getAssetDownloadUrl={(id) => `/app/assets/${id}/download`}
-                                                        title="Select dark logo"
-                                                        defaultCategoryLabel="Logos"
-                                                        contextCategory="logos"
-                                                        aspectRatio={{ width: 265, height: 64 }}
-                                                        minWidth={265}
-                                                        minHeight={64}
-                                                        placeholder="Click to choose from library or upload"
-                                                        helperText="Light-colored logo for dark backgrounds"
-                                                        theme="dark"
-                                                        brandId={brand.id}
-                                                    />
-                                                </div>
-                                            </div>
+
+                                {/* Display Variants — two side-by-side cards */}
+                                <div className="mt-8">
+                                    <div className="flex items-baseline justify-between">
+                                        <h3 className="text-sm font-semibold text-gray-900">Display Variants</h3>
+                                        <span className="text-xs text-gray-400">Optional</span>
+                                    </div>
+                                    <p className="mt-1 text-xs text-gray-500">
+                                        How your logo appears on different backgrounds across the app. Leave either variant blank to use your primary logo automatically.
+                                    </p>
+                                    {logoVariantError && (
+                                        <p className="mt-3 rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-800 ring-1 ring-amber-200" role="alert">
+                                            {logoVariantError}
+                                        </p>
+                                    )}
+
+                                    <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
+                                        {/* For Light Backgrounds */}
+                                        <LogoVariantCard
+                                            id="logo-light-section"
+                                            surface="light"
+                                            title="For Light Backgrounds"
+                                            description="Used on the asset library, light nav theme, and light-surface guidelines."
+                                            autoGenerateLabel="Auto-generate from primary"
+                                            autoGenerateHint={
+                                                brand.primary_color
+                                                    ? 'Creates a primary-color wash of your logo for visibility on white.'
+                                                    : 'Set a primary brand color below first — the wash uses it.'
+                                            }
+                                            autoGenerateDisabled={!brand.primary_color || logoVariantGenerating || processing}
+                                            isGenerating={logoVariantGenerating}
+                                            onAutoGenerate={() => runLogoVariantGeneration(false, true)}
+                                            variantId={data.logo_light_id}
+                                            variantPreview={data.logo_light_preview ?? (data.logo_light_id && data.logo_light_id === brand.logo_light_id ? (brand.logo_light_thumbnail_url ?? brand.logo_light_original_url ?? brand.logo_light_path) : null)}
+                                            primaryPreview={data.logo_preview ?? brand.logo_thumbnail_url ?? brand.logo_original_url ?? brand.logo_path ?? null}
+                                            onUsePrimary={() => {
+                                                setData('logo_light_id', null)
+                                                setData('logo_light_preview', null)
+                                                setData('clear_logo_light', true)
+                                            }}
+                                            onChange={(v) => {
+                                                if (v == null) {
+                                                    setData('logo_light_id', null)
+                                                    setData('logo_light_preview', null)
+                                                    setData('clear_logo_light', true)
+                                                } else if (v?.asset_id) {
+                                                    setData('logo_light_id', v.asset_id)
+                                                    setData('logo_light_preview', v.preview_url ?? v.thumbnail_url ?? null)
+                                                    setData('clear_logo_light', false)
+                                                } else if (v?.preview_url) {
+                                                    setData('logo_light_preview', v.preview_url)
+                                                }
+                                            }}
+                                            fetchAssets={(opts) => {
+                                                const params = new URLSearchParams({ format: 'json' })
+                                                if (opts?.category) params.set('category', opts.category)
+                                                return fetch(`/app/assets?${params}`, {
+                                                    credentials: 'same-origin',
+                                                    headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                                                }).then((r) => r.json())
+                                            }}
+                                            fetchDeliverables={fetchDeliverablesForPicker}
+                                            brandId={brand.id}
+                                        />
+
+                                        {/* For Dark Backgrounds */}
+                                        <LogoVariantCard
+                                            id="logo-dark-section"
+                                            surface="dark"
+                                            title="For Dark Backgrounds"
+                                            description="Used on the Overview cinematic hero, dark nav theme, portal, and gradient tiles."
+                                            autoGenerateLabel="Auto-generate from primary"
+                                            autoGenerateHint="Creates a white silhouette of your logo for dark surfaces."
+                                            autoGenerateDisabled={logoVariantGenerating || processing}
+                                            isGenerating={logoVariantGenerating}
+                                            onAutoGenerate={() => runLogoVariantGeneration(true, false)}
+                                            variantId={data.logo_dark_id}
+                                            variantPreview={data.logo_dark_preview ?? (data.logo_dark_id && data.logo_dark_id === brand.logo_dark_id ? (brand.logo_dark_thumbnail_url ?? brand.logo_dark_original_url ?? brand.logo_dark_path) : null)}
+                                            primaryPreview={data.logo_preview ?? brand.logo_thumbnail_url ?? brand.logo_original_url ?? brand.logo_path ?? null}
+                                            onUsePrimary={() => {
+                                                setData('logo_dark_id', null)
+                                                setData('logo_dark_preview', null)
+                                                setData('clear_logo_dark', true)
+                                            }}
+                                            onChange={(v) => {
+                                                if (v == null) {
+                                                    setData('logo_dark_id', null)
+                                                    setData('logo_dark_preview', null)
+                                                    setData('clear_logo_dark', true)
+                                                } else if (v?.asset_id) {
+                                                    setData('logo_dark_id', v.asset_id)
+                                                    setData('logo_dark_preview', v.preview_url ?? v.thumbnail_url ?? null)
+                                                    setData('clear_logo_dark', false)
+                                                } else if (v?.preview_url) {
+                                                    setData('logo_dark_preview', v.preview_url)
+                                                }
+                                            }}
+                                            fetchAssets={(opts) => {
+                                                const params = new URLSearchParams({ format: 'json' })
+                                                if (opts?.category) params.set('category', opts.category)
+                                                return fetch(`/app/assets?${params}`, {
+                                                    credentials: 'same-origin',
+                                                    headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                                                }).then((r) => r.json())
+                                            }}
+                                            fetchDeliverables={fetchDeliverablesForPicker}
+                                            brandId={brand.id}
+                                        />
+                                    </div>
+                                </div>
+
+                                <div className="mt-8 space-y-6">
                                             {/* Horizontal Logo */}
                                             <div>
                                                 <label className="block text-sm font-medium text-gray-900 mb-1">Horizontal Logo</label>
@@ -2922,13 +2985,12 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                                 }}
                                             >
                                                 {(() => {
-                                                    const lightLogoUrl = data.logo_preview ?? brand.logo_path
-                                                    const darkLogoUrl = data.logo_dark_preview ?? brand.logo_dark_path
-                                                    if (lightLogoUrl) {
-                                                        return <img src={lightLogoUrl} alt="" className="h-8 w-auto max-w-[120px] object-contain" />
-                                                    }
-                                                    if (darkLogoUrl) {
-                                                        return <img src={darkLogoUrl} alt="" className="h-8 w-auto max-w-[120px] object-contain" />
+                                                    // Overview Hero is a dark cinematic surface: prefer the dark variant, fall back to primary.
+                                                    const darkPreview = data.logo_dark_preview ?? brand.logo_dark_path
+                                                    const primaryPreview = data.logo_preview ?? brand.logo_path
+                                                    const src = darkPreview || primaryPreview
+                                                    if (src) {
+                                                        return <img src={src} alt="" className="h-8 w-auto max-w-[120px] object-contain" />
                                                     }
                                                     return (
                                                         <span className="text-lg font-bold text-white/90">{(data.name || brand.name || 'B').charAt(0).toUpperCase()}</span>
