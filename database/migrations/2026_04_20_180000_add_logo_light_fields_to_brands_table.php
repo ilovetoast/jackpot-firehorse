@@ -21,16 +21,29 @@ return new class extends Migration
 {
     public function up(): void
     {
+        // Idempotent: staging ran an earlier attempt that added logo_light_path
+        // before failing/redeploying, so the re-run tripped "Duplicate column".
+        // Guard each add so the migration can be replayed safely on any env.
         Schema::table('brands', function (Blueprint $table) {
-            $table->string('logo_light_path')->nullable()->after('logo_dark_id');
-            $table->uuid('logo_light_id')->nullable()->after('logo_light_path');
+            if (! Schema::hasColumn('brands', 'logo_light_path')) {
+                $table->string('logo_light_path')->nullable()->after('logo_dark_id');
+            }
+            if (! Schema::hasColumn('brands', 'logo_light_id')) {
+                $table->uuid('logo_light_id')->nullable()->after('logo_light_path');
+            }
         });
     }
 
     public function down(): void
     {
         Schema::table('brands', function (Blueprint $table) {
-            $table->dropColumn(['logo_light_path', 'logo_light_id']);
+            $existing = array_values(array_filter(
+                ['logo_light_id', 'logo_light_path'],
+                fn (string $col) => Schema::hasColumn('brands', $col)
+            ));
+            if ($existing !== []) {
+                $table->dropColumn($existing);
+            }
         });
     }
 };
