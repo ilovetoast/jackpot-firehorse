@@ -32,13 +32,13 @@ Ubuntu/Debian-style install examples. Adjust for your distribution.
 | **librsvg2-dev** | Only if building extensions or compiling against librsvg on bare metal |
 | **ffmpeg** | Video thumbnails and preview generation |
 | **python3-opencv** | OpenCV Python bindings (`import cv2`) for computer-vision or image-processing scripts run on workers (Sail installs this in `docker/8.5/Dockerfile`) |
-
+| **tesseract-ocr** | OCR binary used by `ImageOcrService` / `ExtractImageOcrJob` to extract text from image assets. Only needs to be installed on the queue worker — the web tier does not invoke tesseract directly. |
 
 Example:
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y imagemagick poppler-utils librsvg2-bin librsvg2-dev ffmpeg python3-opencv
+sudo apt-get install -y imagemagick poppler-utils librsvg2-bin librsvg2-dev ffmpeg python3-opencv tesseract-ocr
 ```
 
 Omit `python3-opencv` on hosts that never run Python code using OpenCV; local Sail matches `docker/8.5/Dockerfile`, which includes it.
@@ -54,8 +54,9 @@ If the web container does **not** run queue workers, it may omit heavy tools **o
 After deploy, confirm binaries are on `PATH` for the user that runs workers:
 
 ```bash
-which convert magick pdftotext rsvg-convert ffmpeg
+which convert magick pdftotext rsvg-convert ffmpeg tesseract
 ffmpeg -version
+tesseract --version
 python3 -c "import cv2; print(cv2.__version__)"
 ```
 
