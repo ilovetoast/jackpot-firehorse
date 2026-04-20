@@ -3967,7 +3967,7 @@ export default function AssetEditor() {
     }, [])
 
     return (
-        <div className="flex h-screen flex-col overflow-hidden bg-gray-50 dark:bg-gray-950">
+        <div className="flex h-screen flex-col overflow-hidden bg-neutral-950">
             {compositionBootstrapping && (
                 <div
                     className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-3 bg-gray-950/80 text-sm text-white"
@@ -3980,7 +3980,9 @@ export default function AssetEditor() {
             )}
             <AppHead title="Generative editor" />
             <div className={uiMode === 'preview' ? 'hidden' : ''}>
-                <AppNav brand={auth?.activeBrand} tenant={null} />
+                {/* Cinematic (transparent) variant so the nav chrome blends into the dark editor
+                   surface instead of creating a hard white band above it. */}
+                <AppNav brand={auth?.activeBrand} tenant={null} variant="transparent" />
             </div>
 
             {/* Top bar */}
