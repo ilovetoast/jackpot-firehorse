@@ -227,6 +227,8 @@ export default function CompanySettings({
             ai_enabled: tenant.settings?.ai_enabled ?? true,
             brand_alignment_enabled: tenant.settings?.brand_alignment_enabled ?? true,
             ai_auto_focal_point_photography: tenant.settings?.ai_auto_focal_point_photography ?? false,
+            /** AI focal: auto | product | people — steers vision prompt (workspace default). */
+            ai_focal_point_subject: tenant.settings?.ai_focal_point_subject ?? 'auto',
         },
     })
 
@@ -1845,6 +1847,81 @@ export default function CompanySettings({
                                                                     />
                                                                 </button>
                                                             </div>
+                                                        </div>
+                                                        <div className="mt-3 rounded-lg border border-indigo-100 bg-white p-3 shadow-sm">
+                                                            <label
+                                                                htmlFor="ai_focal_point_subject"
+                                                                className="block text-sm font-medium text-gray-900"
+                                                            >
+                                                                Focal point AI priority
+                                                            </label>
+                                                            <p className="mt-0.5 text-xs text-gray-500">
+                                                                Default for auto-assign and re-run. Choose{' '}
+                                                                <strong>Auto</strong> to use each asset&apos;s{' '}
+                                                                <strong>Subject</strong> and <strong>Photo Type</strong>{' '}
+                                                                when set; otherwise pick product- or people-first for the
+                                                                whole workspace.
+                                                            </p>
+                                                            <select
+                                                                id="ai_focal_point_subject"
+                                                                value={data.settings?.ai_focal_point_subject ?? 'auto'}
+                                                                disabled={
+                                                                    focalPointAiSaving ||
+                                                                    data.settings?.ai_enabled === false
+                                                                }
+                                                                onChange={(e) => {
+                                                                    const previousSubject =
+                                                                        data.settings?.ai_focal_point_subject ?? 'auto'
+                                                                    const v = e.target.value
+                                                                    const nextSettings = {
+                                                                        ...data.settings,
+                                                                        ai_focal_point_subject: v,
+                                                                    }
+                                                                    setData('settings', nextSettings)
+                                                                    setFocalPointAiSaving(true)
+                                                                    setFocalPointAiSaved(false)
+                                                                    router.put(
+                                                                        '/app/companies/settings',
+                                                                        {
+                                                                            name: data.name,
+                                                                            slug: data.slug,
+                                                                            timezone: data.timezone,
+                                                                            settings: nextSettings,
+                                                                        },
+                                                                        {
+                                                                            preserveScroll: true,
+                                                                            onSuccess: () => {
+                                                                                setFocalPointAiSaving(false)
+                                                                                setFocalPointAiSaved(true)
+                                                                                setTimeout(
+                                                                                    () => setFocalPointAiSaved(false),
+                                                                                    2500,
+                                                                                )
+                                                                            },
+                                                                            onError: () => {
+                                                                                setFocalPointAiSaving(false)
+                                                                                setData('settings', {
+                                                                                    ...nextSettings,
+                                                                                    ai_focal_point_subject:
+                                                                                        previousSubject,
+                                                                                })
+                                                                            },
+                                                                        },
+                                                                    )
+                                                                }}
+                                                                className="mt-2 block w-full rounded-md border border-gray-300 bg-white py-2 pl-3 pr-8 text-sm text-gray-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
+                                                            >
+                                                                <option value="auto">
+                                                                    Auto — use Subject / Photo Type when set, else
+                                                                    balanced
+                                                                </option>
+                                                                <option value="product">
+                                                                    Prefer product / merchandise
+                                                                </option>
+                                                                <option value="people">
+                                                                    Prefer people / faces
+                                                                </option>
+                                                            </select>
                                                         </div>
                                                         {data.settings?.ai_enabled === false && (
                                                             <div className="mt-3 rounded-md bg-amber-50 p-2.5">

@@ -83,17 +83,25 @@ final class ImageFocalPointAiService
         }
 
         $modelName = config('ai.models.gpt-4o-mini.model_name', 'gpt-4o-mini');
-        $prompt = <<<'PROMPT'
+        $subjectMode = $this->resolveFocalSubjectMode($asset, $tenant);
+        $directive = $this->focalDirectiveForMode($subjectMode);
+        $fieldsHint = $this->focalMetadataFieldsHint($asset);
+
+        $prompt = <<<PROMPT
 You are helping crop photography for a digital asset manager.
 
-The image is shown as a thumbnail. Estimate where the MAIN subject is (usually a face, product hero, or key figure).
+The image is shown as a thumbnail. Estimate where the MAIN subject should be for smart crops (object-position).
+
+{$directive}
+
+{$fieldsHint}
+
 Return JSON only with this exact shape:
 {"x":0.35,"y":0.28}
 
 Rules:
 - x and y are normalized 0.0 to 1.0 relative to the image width and height (left/top = 0, right/bottom = 1).
-- Place the point on the center of the main subject, biased toward faces when visible.
-- If uncertain, choose the visual center of mass of the important content (upper third for portraits).
+- Place the point on the visual center of the chosen main subject (not necessarily the geometric center of the frame).
 PROMPT;
 
         $agentRun = AIAgentRun::create([
@@ -115,6 +123,7 @@ PROMPT;
             'metadata' => [
                 'asset_id' => $asset->id,
                 'force' => $force,
+                'focal_subject_mode' => $subjectMode,
             ],
         ]);
 
@@ -207,5 +216,99 @@ PROMPT;
         ]);
 
         return true;
+    }
+
+    /**
+     * How to prioritize product vs people: auto (infer), product, or people.
+     * Order: per-asset metadata → tenant default → Subject / Photo Type fields → balanced.
+     */
+    private function resolveFocalSubjectMode(Asset $asset, Tenant $tenant): string
+    {
+        $meta = $asset->metadata ?? [];
+        $override = $meta['focal_point_ai_subject'] ?? null;
+        if (in_array($override, ['product', 'people'], true)) {
+            return $override;
+        }
+
+        $tenantDefault = $tenant->settings['ai_focal_point_subject'] ?? 'auto';
+        if (in_array($tenantDefault, ['product', 'people'], true)) {
+            return $tenantDefault;
+        }
+
+        $fields = $this->metadataFieldsArray($asset);
+        $subject = strtolower((string) ($this->metadataFieldString($fields, 'subject_type') ?? ''));
+        $photo = strtolower((string) ($this->metadataFieldString($fields, 'photo_type') ?? ''));
+
+        // Photo Type is usually the stronger shoot-intent signal than Subject alone.
+        if ($photo === 'portrait') {
+            return 'people';
+        }
+        if (in_array($photo, ['product', 'flat_lay', 'macro_detail'], true)) {
+            return 'product';
+        }
+
+        if ($subject === 'person') {
+            return 'people';
+        }
+        if (in_array($subject, ['product', 'food', 'object', 'texture'], true)) {
+            return 'product';
+        }
+
+        return 'balanced';
+    }
+
+    /**
+     * @return 'product'|'people'|'balanced'
+     */
+    private function focalDirectiveForMode(string $mode): string
+    {
+        return match ($mode) {
+            'product' => 'Directive: PRODUCT / MERCHANDISE FIRST. Center on the product, apparel, packaging, or key object being sold or featured. If a model is visible, prefer the product (e.g. garment, item held, worn piece) over the face unless the face alone is clearly the hero.',
+            'people' => 'Directive: PEOPLE FIRST. When faces or bodies are visible, center on the face/eyes or the primary person. If the shot is clearly portrait-style, favor the face.',
+            default => 'Directive: BALANCED. Infer the commercial hero for this image. Do not assume faces: for catalog, e-commerce, or product-on-model shots, center on the product when it is the main subject. For portraits or people-first lifestyle shots, center on people. For ambiguous mixed scenes, choose the most important center of interest for a marketing thumbnail.',
+        };
+    }
+
+    private function focalMetadataFieldsHint(Asset $asset): string
+    {
+        $fields = $this->metadataFieldsArray($asset);
+        $subject = $this->metadataFieldString($fields, 'subject_type');
+        $photo = $this->metadataFieldString($fields, 'photo_type');
+        if ($subject === null && $photo === null) {
+            return 'Catalog hints: none (no Subject / Photo Type on the asset yet).';
+        }
+        $parts = [];
+        if ($subject !== null && $subject !== '') {
+            $parts[] = 'Subject field='.$subject;
+        }
+        if ($photo !== null && $photo !== '') {
+            $parts[] = 'Photo Type field='.$photo;
+        }
+
+        return 'Catalog hints (from metadata if set): '.implode(', ', $parts).'.';
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function metadataFieldsArray(Asset $asset): array
+    {
+        $meta = $asset->metadata ?? [];
+        $fields = $meta['fields'] ?? [];
+
+        return is_array($fields) ? $fields : [];
+    }
+
+    private function metadataFieldString(array $fields, string $key): ?string
+    {
+        $val = $fields[$key] ?? null;
+        if (is_string($val) && $val !== '') {
+            return $val;
+        }
+        if (is_array($val) && isset($val['value'])) {
+            return is_string($val['value']) && $val['value'] !== '' ? $val['value'] : null;
+        }
+
+        return null;
     }
 }

@@ -496,6 +496,7 @@ class CompanyController extends Controller
             'settings.ai_enabled' => 'nullable|boolean',
             'settings.brand_alignment_enabled' => 'nullable|boolean',
             'settings.ai_auto_focal_point_photography' => 'nullable|boolean',
+            'settings.ai_focal_point_subject' => 'nullable|string|in:auto,product,people',
         ]);
 
         // Phase M-2: Handle settings separately
@@ -552,6 +553,12 @@ class CompanyController extends Controller
                 abort(403, 'You do not have permission to manage AI settings.');
             }
             $mergedSettings['ai_auto_focal_point_photography'] = (bool) $settings['ai_auto_focal_point_photography'];
+        }
+        if (array_key_exists('ai_focal_point_subject', $settings)) {
+            if (! $user->hasPermissionForTenant($tenant, 'company_settings.manage_ai_settings')) {
+                abort(403, 'You do not have permission to manage AI settings.');
+            }
+            $mergedSettings['ai_focal_point_subject'] = (string) $settings['ai_focal_point_subject'];
         }
 
         $tenant->update($validated);

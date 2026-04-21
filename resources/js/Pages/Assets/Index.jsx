@@ -1298,9 +1298,9 @@ export default function AssetsIndex({
                             </div>
                         ) : null}
                         {/* Brief feedback when an asset can't be added to the download bucket (e.g. not published) */}
-                        {/* Asset Grid Toolbar - Always visible (persists across categories) */}
+                        {/* Asset Grid Toolbar — sticky within main scroll so search/filters stay reachable */}
                         {/* Primary metadata filters are now integrated into the toolbar (between search and controls) */}
-                        <div className="mb-8">
+                        <div className="sticky top-0 z-20 -mx-4 mb-8 border-b border-gray-200/90 bg-gray-50/95 px-4 pb-4 pt-2 shadow-sm backdrop-blur-sm sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
                             <AssetGridToolbar
                                 showInfo={showInfo}
                                 onToggleInfo={() => setShowInfo(v => !v)}

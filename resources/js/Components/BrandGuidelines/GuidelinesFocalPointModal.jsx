@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Dialog, DialogPanel, DialogTitle } from '@headlessui/react'
 import axios from 'axios'
 
@@ -6,18 +6,61 @@ function clamp01(v) {
     return Math.min(1, Math.max(0, v))
 }
 
+function clamp(v, lo, hi) {
+    return Math.min(hi, Math.max(lo, v))
+}
+
 /**
- * Map click to normalized coords (matches object-fit: cover preview in this modal).
+ * Pixel layout of the bitmap inside an img with object-fit: contain.
+ * @returns {{ cw: number, ch: number, dw: number, dh: number, ox: number, oy: number }|null}
+ */
+function getObjectContainLayout(img) {
+    if (!img?.naturalWidth || !img.naturalHeight) {
+        return null
+    }
+    const rect = img.getBoundingClientRect()
+    const cw = rect.width
+    const ch = rect.height
+    const nw = img.naturalWidth
+    const nh = img.naturalHeight
+    const scale = Math.min(cw / nw, ch / nh)
+    const dw = nw * scale
+    const dh = nh * scale
+    const ox = (cw - dw) / 2
+    const oy = (ch - dh) / 2
+    return { cw, ch, dw, dh, ox, oy }
+}
+
+/**
+ * Map click to normalized coords (0–1) on the full source image — matches object-fit: contain letterboxing.
  *
  * @param {React.MouseEvent<HTMLImageElement>} e
  * @param {HTMLImageElement} img
  * @returns {{ x: number, y: number }|null}
  */
-function normalizedPointFromImageClick(e, img) {
+function normalizedPointFromContainClick(e, img) {
+    const layout = getObjectContainLayout(img)
+    if (!layout) {
+        return null
+    }
     const rect = img.getBoundingClientRect()
-    const x = (e.clientX - rect.left) / rect.width
-    const y = (e.clientY - rect.top) / rect.height
-    return { x: clamp01(x), y: clamp01(y) }
+    const relX = e.clientX - rect.left - layout.ox
+    const relY = e.clientY - rect.top - layout.oy
+    const u = clamp(relX, 0, layout.dw)
+    const v = clamp(relY, 0, layout.dh)
+    return { x: clamp01(u / layout.dw), y: clamp01(v / layout.dh) }
+}
+
+/** Position the marker dot (same coordinate space as clicks). */
+function markerPercentStyle(point, layout) {
+    if (!layout || !point) {
+        return {}
+    }
+    const { ox, oy, dw, dh, cw, ch } = layout
+    return {
+        left: `${((ox + point.x * dw) / cw) * 100}%`,
+        top: `${((oy + point.y * dh) / ch) * 100}%`,
+    }
 }
 
 /**
@@ -44,14 +87,26 @@ export default function GuidelinesFocalPointModal({
     saveMode = 'builder',
 }) {
     const imgRef = useRef(null)
+    const previewBoxRef = useRef(null)
+    const [containLayout, setContainLayout] = useState(null)
     const [point, setPoint] = useState(null)
     const [saving, setSaving] = useState(false)
     const [error, setError] = useState(null)
+
+    const measureContainLayout = useCallback(() => {
+        const img = imgRef.current
+        if (!img) {
+            return
+        }
+        const layout = getObjectContainLayout(img)
+        setContainLayout(layout)
+    }, [])
 
     useEffect(() => {
         if (!open) return undefined
         setError(null)
         setSaving(false)
+        setContainLayout(null)
         setPoint(
             initialFocal && typeof initialFocal.x === 'number' && typeof initialFocal.y === 'number'
                 ? { x: initialFocal.x, y: initialFocal.y }
@@ -60,10 +115,24 @@ export default function GuidelinesFocalPointModal({
         return undefined
     }, [open, initialFocal, imageUrl])
 
+    useLayoutEffect(() => {
+        if (!open || !imageUrl) {
+            return undefined
+        }
+        measureContainLayout()
+        const el = previewBoxRef.current
+        if (!el || typeof ResizeObserver === 'undefined') {
+            return undefined
+        }
+        const ro = new ResizeObserver(() => measureContainLayout())
+        ro.observe(el)
+        return () => ro.disconnect()
+    }, [open, imageUrl, measureContainLayout])
+
     const handleImgClick = useCallback((e) => {
         const img = imgRef.current
         if (!img) return
-        const p = normalizedPointFromImageClick(e, img)
+        const p = normalizedPointFromContainClick(e, img)
         if (p) setPoint(p)
     }, [])
 
@@ -120,29 +189,34 @@ export default function GuidelinesFocalPointModal({
                     </DialogTitle>
                     <p className="mt-1 text-sm text-white/55">
                         {saveMode === 'library'
-                            ? 'Click the important area (e.g. faces). Used for crops and brand guidelines when no separate guidelines override exists. AI auto-fill respects this lock.'
-                            : 'Click the important area (e.g. faces). Guidelines will crop toward this point when using fill layouts.'}
+                            ? 'Click the important area (e.g. faces). The full image is shown (letterboxed if needed). Used for crops and brand guidelines when no separate guidelines override exists. AI auto-fill respects this lock.'
+                            : 'Click the important area (e.g. faces). The full image is shown (letterboxed if needed). Guidelines will crop toward this point when using fill layouts.'}
                     </p>
-                    <div className="mt-4 relative rounded-xl overflow-hidden bg-black/40 border border-white/10 aspect-[4/3] cursor-crosshair">
+                    <div
+                        ref={previewBoxRef}
+                        className="relative mt-4 w-full cursor-crosshair overflow-hidden rounded-xl border border-white/10 bg-black/40"
+                        style={{ height: 'min(70vh, 520px)', minHeight: '200px' }}
+                    >
                         {imageUrl ? (
                             <img
                                 ref={imgRef}
+                                key={imageUrl}
                                 src={imageUrl}
                                 alt=""
-                                className="w-full h-full object-cover select-none"
+                                className="block h-full w-full select-none object-contain"
                                 onClick={handleImgClick}
+                                onLoad={measureContainLayout}
                                 draggable={false}
                             />
                         ) : (
-                            <div className="w-full h-full flex items-center justify-center text-white/40 text-sm">No preview</div>
+                            <div className="flex h-[min(70vh,320px)] w-full items-center justify-center text-sm text-white/40">
+                                No preview
+                            </div>
                         )}
-                        {point && (
+                        {point && containLayout && (
                             <div
-                                className="pointer-events-none absolute w-4 h-4 -ml-2 -mt-2 rounded-full border-2 border-white shadow-lg bg-cyan-400/40"
-                                style={{
-                                    left: `${point.x * 100}%`,
-                                    top: `${point.y * 100}%`,
-                                }}
+                                className="pointer-events-none absolute h-4 w-4 -ml-2 -mt-2 rounded-full border-2 border-white bg-cyan-400/40 shadow-lg"
+                                style={markerPercentStyle(point, containLayout)}
                             />
                         )}
                     </div>
