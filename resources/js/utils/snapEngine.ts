@@ -199,6 +199,70 @@ export function snapRectLineAlign(
 }
 
 /**
+ * Like {@link snapRectLineAlign}, but only the rect's **center point** is
+ * considered for grid alignment. Used when moving a **group** as a rigid
+ * body: the block aligns to the grid as a whole; internal member offsets are
+ * unaffected, and we avoid competing edge/center snap targets on a wide union.
+ */
+export function snapRectLineAlignCenterOnly(
+    rect: Rect,
+    docW: number,
+    docH: number,
+    density: GridDensity,
+    thresholdDoc: number,
+): MoveSnapResult {
+    const vLines = [0, ...gridLinePositions(docW, density), docW]
+    const hLines = [0, ...gridLinePositions(docH, density), docH]
+
+    const cx = rect.x + rect.width / 2
+    const cy = rect.y + rect.height / 2
+
+    let bestDx = 0
+    let bestDxAbs = thresholdDoc + 1
+    let bestVHit: number | null = null
+    for (const l of vLines) {
+        const d = l - cx
+        const abs = Math.abs(d)
+        if (abs < bestDxAbs) {
+            bestDxAbs = abs
+            bestDx = d
+            bestVHit = l
+        }
+    }
+    if (bestDxAbs > thresholdDoc) {
+        bestDx = 0
+        bestVHit = null
+    }
+
+    let bestDy = 0
+    let bestDyAbs = thresholdDoc + 1
+    let bestHHit: number | null = null
+    for (const l of hLines) {
+        const d = l - cy
+        const abs = Math.abs(d)
+        if (abs < bestDyAbs) {
+            bestDyAbs = abs
+            bestDy = d
+            bestHHit = l
+        }
+    }
+    if (bestDyAbs > thresholdDoc) {
+        bestDy = 0
+        bestHHit = null
+    }
+
+    const hits: SnapHit[] = []
+    if (bestVHit !== null) hits.push({ kind: 'v', at: bestVHit })
+    if (bestHHit !== null) hits.push({ kind: 'h', at: bestHHit })
+
+    return {
+        x: rect.x + bestDx,
+        y: rect.y + bestDy,
+        hits,
+    }
+}
+
+/**
  * Snap a resized rectangle's sides to the nearest grid lines. We only snap
  * the sides that actually moved (derived from `corner`), leaving the anchor
  * side alone so the opposite corner stays pinned.

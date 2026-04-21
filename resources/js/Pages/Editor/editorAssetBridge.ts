@@ -308,26 +308,30 @@ export async function promoteCompositionToAsset(
         body: fd,
     })
     const text = await res.text()
+    if (res.status === 413) {
+        throw new Error(
+            'Upload too large for the server (often a 1MB nginx limit). Try again after deploy, or ask your admin to raise client_max_body_size to match PHP upload limits.'
+        )
+    }
+    return parseEditorAssetStoreResponse(res, text)
+}
+
+function parseEditorAssetStoreResponse(res: Response, text: string): { assetId: string } {
     let data: unknown
     try {
         data = JSON.parse(text)
     } catch {
         data = null
     }
-    if (res.status === 413) {
-        throw new Error(
-            'Upload too large for the server (often a 1MB nginx limit). Try again after deploy, or ask your admin to raise client_max_body_size to match PHP upload limits.'
-        )
-    }
     if (!res.ok) {
         const msg =
-            (data && typeof data === 'object' && 'message' in data && typeof (data as { message?: string }).message === 'string'
+            data && typeof data === 'object' && 'message' in data && typeof (data as { message?: string }).message === 'string'
                 ? (data as { message: string }).message
-                : null) || text || 'Save failed'
+                : text || 'Upload failed'
         throw new Error(msg)
     }
     if (data === null || typeof data !== 'object') {
-        throw new Error(text || 'Save failed')
+        throw new Error(text || 'Upload failed')
     }
     const results = (data as { results?: Array<{ status?: string; asset_id?: number | string }> }).results
     const first = results?.[0]
@@ -339,4 +343,42 @@ export async function promoteCompositionToAsset(
         throw new Error('No asset id returned')
     }
     return { assetId: String(id) }
+}
+
+/**
+ * POST /app/api/assets — upload a raster image into the active brand library from Studio.
+ * Uses the same finalize path as composition publish (normal intake, not staged).
+ */
+export async function uploadEditorLibraryImage(
+    file: File,
+    options?: {
+        /** When omitted, server assigns first ordered library category for the brand. */
+        categoryId?: number
+        /** Display name; defaults to filename stem. */
+        name?: string
+    }
+): Promise<{ assetId: string }> {
+    const csrf = document.querySelector('meta[name="csrf-token"]')?.content
+    const stem = (options?.name ?? file.name.replace(/\.[^.]+$/i, '')).trim() || 'Image'
+    const safeName = stem.slice(0, 255)
+    const fd = new FormData()
+    fd.append('file', file, file.name)
+    fd.append('name', safeName)
+    if (options?.categoryId != null && Number.isFinite(options.categoryId) && options.categoryId > 0) {
+        fd.append('category_id', String(Math.floor(options.categoryId)))
+    }
+    fd.append('metadata', JSON.stringify({ editor_source: 'studio_picker' }))
+    const res = await fetch('/app/api/assets', {
+        method: 'POST',
+        headers: { Accept: 'application/json', 'X-CSRF-TOKEN': csrf ?? '' },
+        credentials: 'same-origin',
+        body: fd,
+    })
+    const text = await res.text()
+    if (res.status === 413) {
+        throw new Error(
+            'Upload too large for the server. Try a smaller file or ask your admin to raise upload limits.'
+        )
+    }
+    return parseEditorAssetStoreResponse(res, text)
 }

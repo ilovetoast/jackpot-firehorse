@@ -24,6 +24,7 @@ import {
     ChevronDownIcon,
     ChevronRightIcon,
     ClockIcon,
+    CloudArrowUpIcon,
     DocumentDuplicateIcon,
     DocumentIcon,
     ExclamationTriangleIcon,
@@ -106,6 +107,7 @@ import {
 import FillGradientStopField from './FillGradientStopField'
 import { TEMPLATE_CATEGORIES, allFormats, blueprintToLayers, blueprintToLayersAndGroups, buildLayersForStyle, getAllLayoutStyles, textBoostToFillFields, inferTextBoostStyle, type LayerBlueprint, type TemplateFormat, type TemplateCategory, type LayoutStyleId } from './templateConfig'
 import { FORMAT_PACKS } from './recipes'
+import { buildTestPsdFromFlattenedPng } from './studioPsdExport'
 import { applyWizardAssetDefaults, fetchWizardDefaults, type WizardDefaults } from './wizardDefaults'
 import { applyStudioBriefToBlueprints, WIZARD_POST_GOALS, defaultWizardPostGoal, type StudioBrief, type WizardPostGoalId } from './wizardBrief'
 import GridOverlay from '../../Components/Editor/GridOverlay'
@@ -113,6 +115,7 @@ import PlacementPicker from '../../Components/Editor/PlacementPicker'
 import {
     placementToXY,
     snapMove as snapEngineMove,
+    snapRectLineAlignCenterOnly,
     snapResize as snapEngineResize,
     xyToPlacement,
     type GridDensity,
@@ -125,6 +128,7 @@ import {
     confirmDamAssetDimensions,
     fetchEditorAssetById,
     fetchEditorAssets,
+    uploadEditorLibraryImage,
     fetchEditorCollectionsForPublish,
     fetchEditorPublishCategories,
     fetchEditorPublishMetadataSchema,
@@ -504,6 +508,12 @@ type DragState =
           groupMembers?: GroupMemberStart[]
           /** Union rect at drag-start — used as the snap subject for groups. */
           groupStartRect?: { x: number; y: number; width: number; height: number }
+          /**
+           * Alt-drill: moving one member inside a group — skip grid snap so
+           * relative spacing (e.g. two lines of text) is not forced to the grid;
+           * the whole group still snaps when selected without Alt.
+           */
+          skipSnap?: boolean
       }
     | {
           kind: 'resize'
@@ -522,6 +532,8 @@ type DragState =
            */
           groupMembers?: GroupMemberStart[]
           groupStartRect?: { x: number; y: number; width: number; height: number }
+          /** Same as move — Alt-drill resize of one member without grid snap. */
+          skipSnap?: boolean
       }
 
 const UNTITLED_DRAFT_NAME = 'Untitled draft'
@@ -1017,6 +1029,19 @@ function replaceUrlCompositionParam(id: string | null) {
     window.history.replaceState({}, '', url)
 }
 
+/** GET /app/api/editor/ai-credit-status JSON — shared by state + refresh helper. */
+type EditorAiCreditStatus = {
+    credits_used: number
+    credits_cap: number
+    credits_remaining: number
+    is_unlimited: boolean
+    is_exceeded: boolean
+    warning_level: string
+    generative_editor_used: number
+    /** Server-side sum when `composition_id` is passed; null for unsaved drafts. */
+    this_composition_used: number | null
+}
+
 export default function AssetEditor() {
     const page = usePage()
     const { auth } = page.props as {
@@ -1118,6 +1143,11 @@ export default function AssetEditor() {
     const [pickerSearchInput, setPickerSearchInput] = useState('')
     const [pickerSearchDebounced, setPickerSearchDebounced] = useState('')
     const [pickerListRefreshKey, setPickerListRefreshKey] = useState(0)
+    const [pickerLibraryUploading, setPickerLibraryUploading] = useState(false)
+    const [pickerLibraryUploadError, setPickerLibraryUploadError] = useState<string | null>(null)
+    const [pickerDropActive, setPickerDropActive] = useState(false)
+    const pickerDropDepthRef = useRef(0)
+    const pickerUploadInputRef = useRef<HTMLInputElement>(null)
     const [promoteSaving, setPromoteSaving] = useState(false)
     const [promoteError, setPromoteError] = useState<string | null>(null)
     const [promoteOk, setPromoteOk] = useState(false)
@@ -1400,9 +1430,21 @@ export default function AssetEditor() {
         }
     }, [])
 
-    // Load wizard defaults exactly once per open so the fetch doesn't refire
-    // on every wizard-step change. We keep any previously-loaded value while
-    // re-fetching so step 3 doesn't flash-empty between runs.
+    // Load logo + background candidates for template auto-fill. Must run on
+    // brand context (not only when the modal opens) so sidebar "quick pick"
+    // templates get the same DAM defaults as the guided wizard.
+    useEffect(() => {
+        let cancelled = false
+        void fetchWizardDefaults().then((d) => {
+            if (!cancelled) setWizardDefaults(d)
+        })
+        return () => {
+            cancelled = true
+        }
+    }, [activeBrandId])
+
+    // Refresh defaults when opening the modal so step-3 previews match newly
+    // uploaded library assets without a full page reload.
     useEffect(() => {
         if (!templateWizardOpen) return
         let cancelled = false
@@ -1417,27 +1459,24 @@ export default function AssetEditor() {
     const [aiLayoutPromptOpen, setAiLayoutPromptOpen] = useState(false)
     const [aiLayoutPrompt, setAiLayoutPrompt] = useState('')
     const [aiLayoutLoading, setAiLayoutLoading] = useState(false)
-    const [aiCreditStatus, setAiCreditStatus] = useState<{
-        credits_used: number
-        credits_cap: number
-        credits_remaining: number
-        is_unlimited: boolean
-        is_exceeded: boolean
-        warning_level: string
-        generative_editor_used: number
-        /**
-         * Credits consumed by AI runs tied to the currently loaded composition,
-         * this calendar month. Null when no composition is loaded yet (new draft)
-         * or when the backend didn't return a value (legacy response shape).
-         */
-        this_composition_used: number | null
-    } | null>(null)
+    const [aiCreditStatus, setAiCreditStatus] = useState<EditorAiCreditStatus | null>(null)
     const [aiCreditPopoverOpen, setAiCreditPopoverOpen] = useState(false)
+    /**
+     * For unsaved compositions, AI runs are not tied to a `composition_id`, so
+     * `this_composition_used` is absent. We approximate "this draft" spend by
+     * summing deltas in `credits_used` after each successful AI refresh while the
+     * document is still unsaved (same session, single editor tab assumed).
+     */
+    const [draftCompositionCreditsUsed, setDraftCompositionCreditsUsed] = useState(0)
+    const aiCreditStatusRef = useRef<EditorAiCreditStatus | null>(null)
+    useEffect(() => {
+        aiCreditStatusRef.current = aiCreditStatus
+    }, [aiCreditStatus])
 
     // Read composition id from a ref so this callback stays stable — we don't want
     // a new function identity each time compositionId flips, because that would
     // rerun the load-time effect and double-fetch on mount.
-    const refreshAiCreditStatus = useCallback(async () => {
+    const refreshAiCreditStatus = useCallback(async (): Promise<EditorAiCreditStatus | null> => {
         try {
             const cid = compositionIdRef.current
             const url = cid
@@ -1447,13 +1486,30 @@ export default function AssetEditor() {
                 headers: { Accept: 'application/json' },
                 credentials: 'same-origin',
             })
-            if (!res.ok) return
-            const data = await res.json()
+            if (!res.ok) return null
+            const data = (await res.json()) as EditorAiCreditStatus
+            aiCreditStatusRef.current = data
             setAiCreditStatus(data)
+            return data
         } catch {
             // Non-critical; fail quiet.
+            return null
         }
     }, [])
+
+    /** After AI work: refresh totals and, for unsaved drafts, bump local composition spend from global delta. */
+    const refreshAfterAiAndBumpDraftCredits = useCallback(async () => {
+        const before = aiCreditStatusRef.current?.credits_used ?? 0
+        const hadCompositionId = compositionIdRef.current != null
+        const fresh = await refreshAiCreditStatus()
+        if (hadCompositionId || !fresh || fresh.is_unlimited) {
+            return
+        }
+        const delta = Math.max(0, fresh.credits_used - before)
+        if (delta > 0) {
+            setDraftCompositionCreditsUsed((c) => c + delta)
+        }
+    }, [refreshAiCreditStatus])
 
     useEffect(() => {
         if (aiEnabled) void refreshAiCreditStatus()
@@ -1465,6 +1521,16 @@ export default function AssetEditor() {
     useEffect(() => {
         if (aiEnabled) void refreshAiCreditStatus()
     }, [aiEnabled, compositionId, refreshAiCreditStatus])
+
+    // Reset client-side draft credit accumulator whenever the loaded composition id changes.
+    const prevCompositionIdForDraftRef = useRef<string | null | undefined>(undefined)
+    useEffect(() => {
+        if (prevCompositionIdForDraftRef.current === compositionId) {
+            return
+        }
+        prevCompositionIdForDraftRef.current = compositionId
+        setDraftCompositionCreditsUsed(0)
+    }, [compositionId])
 
     const canvasContainerRef = useRef<HTMLDivElement>(null)
     const stageRef = useRef<HTMLDivElement>(null)
@@ -2651,7 +2717,7 @@ export default function AssetEditor() {
     }, [compositionId, compareLeftId, compareRightId])
 
     const downloadExport = useCallback(
-        async (kind: 'png' | 'jpeg' | 'json') => {
+        async (kind: 'png' | 'jpeg' | 'json' | 'psd') => {
             const base = (compositionName.trim() || defaultCompositionName(document)).replace(
                 /[^a-z0-9-_]+/gi,
                 '_'
@@ -2700,14 +2766,25 @@ export default function AssetEditor() {
             } as const
             try {
                 const dataUrl =
-                    kind === 'png'
-                        ? await toPng(node, opts)
-                        : await toJpeg(node, { ...opts, quality: 0.92 })
+                    kind === 'jpeg'
+                        ? await toJpeg(node, { ...opts, quality: 0.92 })
+                        : await toPng(node, opts)
+                if (kind === 'psd') {
+                    const bytes = await buildTestPsdFromFlattenedPng(dataUrl, document.width, document.height)
+                    const blob = new Blob([bytes], { type: 'application/octet-stream' })
+                    const a = window.document.createElement('a')
+                    a.href = URL.createObjectURL(blob)
+                    a.download = `${fileStem}.psd`
+                    a.click()
+                    URL.revokeObjectURL(a.href)
+                    setActivityToast('PSD exported (test)')
+                    return
+                }
                 const a = window.document.createElement('a')
                 a.href = dataUrl
                 a.download = `${fileStem}.${kind === 'png' ? 'png' : 'jpg'}`
                 a.click()
-                setActivityToast(kind === 'json' ? 'Document exported' : 'Image exported')
+                setActivityToast('Image exported')
             } finally {
                 flushSync(() => setUiMode(priorUiMode))
             }
@@ -2743,6 +2820,7 @@ export default function AssetEditor() {
             setCompareSlider(50)
             setUiMode('edit')
             setWelcomeDismissed(false)
+            setDraftCompositionCreditsUsed(0)
         })
         replaceUrlCompositionParam(null)
     }, [discardRequiresConfirmation, editorConfirm])
@@ -3066,6 +3144,10 @@ export default function AssetEditor() {
         setPickerCategoryFilterId('')
         setPickerSearchInput('')
         setPickerSearchDebounced('')
+        setPickerLibraryUploadError(null)
+        setPickerLibraryUploading(false)
+        setPickerDropActive(false)
+        pickerDropDepthRef.current = 0
     }, [])
 
     const removeReferenceAsset = useCallback(
@@ -3165,6 +3247,59 @@ export default function AssetEditor() {
             }
         },
         [pickerMode, replaceLayerId, updateLayer, document.layers]
+    )
+
+    const runPickerLibraryUpload = useCallback(
+        async (file: File) => {
+            const mime = (file.type || '').toLowerCase()
+            const extOk = /\.(png|jpe?g|webp)$/i.test(file.name)
+            const mimeOk = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp'].includes(mime)
+            if (!mimeOk && !extOk) {
+                setPickerLibraryUploadError('Use PNG, JPEG, or WebP.')
+                return
+            }
+            setPickerLibraryUploadError(null)
+            setPickerLibraryUploading(true)
+            try {
+                const cid =
+                    pickerCategoryFilterId === '' ? undefined : Math.floor(Number(pickerCategoryFilterId))
+                const { assetId } = await uploadEditorLibraryImage(file, {
+                    categoryId: cid !== undefined && cid > 0 ? cid : undefined,
+                })
+                const asset = await fetchEditorAssetById(assetId)
+                if (!asset) {
+                    throw new Error('Upload saved but the new asset could not be loaded. Try refreshing the list.')
+                }
+                if (pickerMode === 'references') {
+                    setDamAssets((prev) => {
+                        const next = prev.filter((a) => a.id !== asset.id)
+                        return [asset, ...next]
+                    })
+                    setReferenceSelectionIds((prev) => {
+                        if (prev.includes(asset.id)) {
+                            return prev
+                        }
+                        if (prev.length >= MAX_REFERENCE_ASSETS) {
+                            queueMicrotask(() =>
+                                setPickerLibraryUploadError(
+                                    `References allow up to ${MAX_REFERENCE_ASSETS} images — remove one to add this file.`
+                                )
+                            )
+                            return prev
+                        }
+                        return [...prev, asset.id]
+                    })
+                    setActivityToast('Uploaded — added to selection')
+                } else {
+                    await handlePickDamAsset(asset)
+                }
+            } catch (e) {
+                setPickerLibraryUploadError(handleAIError(e))
+            } finally {
+                setPickerLibraryUploading(false)
+            }
+        },
+        [pickerMode, pickerCategoryFilterId, handlePickDamAsset]
     )
 
     const openPublishModal = useCallback(async () => {
@@ -3481,7 +3616,7 @@ export default function AssetEditor() {
                 }
                 // Pull fresh credit totals so the top-bar pill updates live after
                 // each generation. Fire-and-forget — never block the render path.
-                void refreshAiCreditStatus()
+                void refreshAfterAiAndBumpDraftCredits()
             } catch (e) {
                 if (e instanceof DOMException && e.name === 'AbortError') {
                     if (genSeqRef.current[layerId] === seq) {
@@ -3541,7 +3676,7 @@ export default function AssetEditor() {
                 }))
             }
         },
-        [genUsage, updateLayer, brandContext, snapshotCheckpoint, compositionId, activeBrandId, refreshAiCreditStatus]
+        [genUsage, updateLayer, brandContext, snapshotCheckpoint, compositionId, activeBrandId, refreshAfterAiAndBumpDraftCredits]
     )
 
     const runImageLayerEdit = useCallback(
@@ -3697,7 +3832,7 @@ export default function AssetEditor() {
                 } catch {
                     /* ignore */
                 }
-                void refreshAiCreditStatus()
+                void refreshAfterAiAndBumpDraftCredits()
             } catch (e) {
                 if (e instanceof DOMException && e.name === 'AbortError') {
                     if (imageEditSeqRef.current[layerId] === seq) {
@@ -3755,7 +3890,7 @@ export default function AssetEditor() {
                 }))
             }
         },
-        [genUsage, updateLayer, brandContext, snapshotCheckpoint, compositionId, activeBrandId, refreshAiCreditStatus]
+        [genUsage, updateLayer, brandContext, snapshotCheckpoint, compositionId, activeBrandId, refreshAfterAiAndBumpDraftCredits]
     )
 
     const runGenerativeVariations = useCallback(
@@ -3888,7 +4023,7 @@ export default function AssetEditor() {
                 } catch {
                     /* ignore */
                 }
-                void refreshAiCreditStatus()
+                void refreshAfterAiAndBumpDraftCredits()
             } catch (e) {
                 if (e instanceof DOMException && e.name === 'AbortError') {
                     if (genSeqRef.current[layerId] === seq) {
@@ -3960,7 +4095,7 @@ export default function AssetEditor() {
                 }))
             }
         },
-        [genUsage, updateLayer, brandContext, compositionId, activeBrandId, refreshAiCreditStatus]
+        [genUsage, updateLayer, brandContext, compositionId, activeBrandId, refreshAfterAiAndBumpDraftCredits]
     )
 
     const applyVariationChoice = useCallback(
@@ -4279,7 +4414,7 @@ export default function AssetEditor() {
             })
             setAiLayoutPromptOpen(false)
             setLeftPanel('layers')
-            void refreshAiCreditStatus()
+            void refreshAfterAiAndBumpDraftCredits()
 
             // Auto-fire generation for any generative_image layer the AI
             // seeded with a prompt. "Feeling Lucky" is a one-click action —
@@ -4314,7 +4449,7 @@ export default function AssetEditor() {
         } finally {
             setAiLayoutLoading(false)
         }
-    }, [brandContext, snapshotCheckpoint, editorConfirm, refreshAiCreditStatus])
+    }, [brandContext, snapshotCheckpoint, editorConfirm, refreshAfterAiAndBumpDraftCredits])
 
     useEffect(() => {
         if (aiSuggestions.length === 0) return
@@ -4600,6 +4735,7 @@ export default function AssetEditor() {
                 }
             }
 
+            const memberAdjustInGroup = !!(layer.groupId && !groupActive)
             dragRef.current = {
                 kind: 'move',
                 layerId,
@@ -4607,6 +4743,7 @@ export default function AssetEditor() {
                 startDocY: y,
                 startLayerX: layer.transform.x,
                 startLayerY: layer.transform.y,
+                ...(memberAdjustInGroup ? { skipSnap: true } : {}),
             }
         },
         [clientToDoc]
@@ -4661,6 +4798,7 @@ export default function AssetEditor() {
             }
 
             const ar = layer.transform.width / Math.max(layer.transform.height, 0.001)
+            const memberAdjustInGroup = !!(layer.groupId && !groupActive)
             dragRef.current = {
                 kind: 'resize',
                 layerId,
@@ -4675,6 +4813,7 @@ export default function AssetEditor() {
                 },
                 aspectRatio: ar,
                 lockAspectResize: locksAspectOnResize(layer),
+                ...(memberAdjustInGroup ? { skipSnap: true } : {}),
             }
         },
         [clientToDoc]
@@ -4706,15 +4845,39 @@ export default function AssetEditor() {
                     let finalX = rawX
                     let finalY = rawY
                     let hits: SnapHit[] = []
-                    if (!altDisable && snapCfg.mode !== 'off' && startRect.width > 0 && startRect.height > 0) {
-                        const res = snapEngineMove({
-                            rect: { x: rawX, y: rawY, width: startRect.width, height: startRect.height },
-                            docW: doc.width,
-                            docH: doc.height,
-                            mode: snapCfg.mode,
-                            density: snapCfg.density,
-                            thresholdDoc,
-                        })
+                    if (
+                        !altDisable &&
+                        snapCfg.mode !== 'off' &&
+                        startRect.width > 0 &&
+                        startRect.height > 0
+                    ) {
+                        const movingRect = {
+                            x: rawX,
+                            y: rawY,
+                            width: startRect.width,
+                            height: startRect.height,
+                        }
+                        // Rigid group: align the block to the grid by its union only.
+                        // In line_align, snap the union center (not every edge/center
+                        // candidate) so internal member spacing is never "competed"
+                        // by the grid; Basic cell_center already uses center-of-rect.
+                        const res =
+                            snapCfg.mode === 'line_align'
+                                ? snapRectLineAlignCenterOnly(
+                                      movingRect,
+                                      doc.width,
+                                      doc.height,
+                                      snapCfg.density,
+                                      thresholdDoc
+                                  )
+                                : snapEngineMove({
+                                      rect: movingRect,
+                                      docW: doc.width,
+                                      docH: doc.height,
+                                      mode: snapCfg.mode,
+                                      density: snapCfg.density,
+                                      thresholdDoc,
+                                  })
                         finalX = res.x
                         finalY = res.y
                         hits = res.hits
@@ -4751,7 +4914,7 @@ export default function AssetEditor() {
                 let finalX = rawX
                 let finalY = rawY
                 let hits: SnapHit[] = []
-                if (!altDisable && snapCfg.mode !== 'off' && w > 0 && h > 0) {
+                if (!altDisable && !d.skipSnap && snapCfg.mode !== 'off' && w > 0 && h > 0) {
                     const res = snapEngineMove({
                         rect: { x: rawX, y: rawY, width: w, height: h },
                         docW: doc.width,
@@ -4800,7 +4963,7 @@ export default function AssetEditor() {
             // running it in either mode gives us the "magnet to canvas edge"
             // behavior for free while preserving the grid-line magnet when
             // the advanced grid is on.
-            if (!altDisable && snapCfg.mode !== 'off') {
+            if (!altDisable && !d.skipSnap && snapCfg.mode !== 'off') {
                 const res = snapEngineResize({
                     rect: finalRect,
                     corner: d.corner,
@@ -5076,9 +5239,8 @@ export default function AssetEditor() {
                     <div className="relative ml-auto flex items-center">
                         {(() => {
                             const s = aiCreditStatus
-                            const compUsed = s.this_composition_used
-                            const hasCompCount =
-                                compositionId != null && compUsed !== null && compUsed !== undefined
+                            const effectiveCompUsed =
+                                compositionId != null ? (s.this_composition_used ?? 0) : draftCompositionCreditsUsed
                             const pct = s.is_unlimited || s.credits_cap <= 0
                                 ? 0
                                 : Math.min(100, Math.round((s.credits_used / s.credits_cap) * 100))
@@ -5101,8 +5263,8 @@ export default function AssetEditor() {
                                         ? 'bg-amber-400'
                                         : 'bg-indigo-400'
                             const titleText = s.is_unlimited
-                                ? `AI credits: unlimited${hasCompCount ? ` · this composition used ${compUsed} credit(s)` : ''}.`
-                                : `Monthly AI credits: ${s.credits_used.toLocaleString()} / ${s.credits_cap.toLocaleString()} used (${s.credits_remaining.toLocaleString()} remaining)${hasCompCount ? ` · this composition: ${compUsed}` : ''}.`
+                                ? `AI credits: unlimited · this composition: ${effectiveCompUsed.toLocaleString()} credit(s) this month.`
+                                : `Monthly AI credits: ${s.credits_used.toLocaleString()} / ${s.credits_cap.toLocaleString()} used (${s.credits_remaining.toLocaleString()} remaining) · this composition: ${effectiveCompUsed.toLocaleString()}.`
                             return (
                                 <>
                                     <button
@@ -5115,19 +5277,28 @@ export default function AssetEditor() {
                                     >
                                         <SparklesIcon className="h-3.5 w-3.5 shrink-0" aria-hidden />
                                         {s.is_unlimited ? (
-                                            <span>AI: unlimited</span>
+                                            <>
+                                                <span
+                                                    className="rounded-sm bg-gray-900/80 px-1 text-[10px] font-semibold text-indigo-300"
+                                                    title="Credits attributed to this composition this month (draft = session estimate)"
+                                                >
+                                                    +{effectiveCompUsed.toLocaleString()}
+                                                </span>
+                                                <span>AI: unlimited</span>
+                                            </>
                                         ) : (
                                             <>
-                                                {hasCompCount && (
-                                                    // Inline "this composition" chip. Shown even at 0 so users
-                                                    // learn the counter exists and see it tick up as they work.
-                                                    <span
-                                                        className="rounded-sm bg-gray-900/80 px-1 text-[10px] font-semibold text-indigo-300"
-                                                        title="Credits used by this composition this month"
-                                                    >
-                                                        +{(compUsed ?? 0).toLocaleString()}
-                                                    </span>
-                                                )}
+                                                {/* Inline "this composition" chip — includes unsaved drafts (session estimate). */}
+                                                <span
+                                                    className="rounded-sm bg-gray-900/80 px-1 text-[10px] font-semibold text-indigo-300"
+                                                    title={
+                                                        compositionId != null
+                                                            ? 'Credits used by this composition this month'
+                                                            : 'Credits used on this unsaved draft (session estimate until you save)'
+                                                    }
+                                                >
+                                                    +{effectiveCompUsed.toLocaleString()}
+                                                </span>
                                                 <span>
                                                     {s.credits_used.toLocaleString()} / {s.credits_cap.toLocaleString()}
                                                 </span>
@@ -5163,12 +5334,13 @@ export default function AssetEditor() {
                                                 <dl className="space-y-1.5 text-xs text-gray-200">
                                                     <div className="flex items-baseline justify-between gap-2">
                                                         <dt className="text-gray-400">This composition</dt>
-                                                        <dd className="tabular-nums font-semibold text-indigo-300">
-                                                            {hasCompCount
-                                                                ? `${(compUsed ?? 0).toLocaleString()} credits`
-                                                                : compositionId == null
-                                                                    ? 'Save first'
-                                                                    : '—'}
+                                                        <dd className="text-right tabular-nums font-semibold text-indigo-300">
+                                                            <span>{`${effectiveCompUsed.toLocaleString()} credits`}</span>
+                                                            {compositionId == null && (
+                                                                <span className="mt-0.5 block text-[10px] font-normal text-gray-500">
+                                                                    Unsaved — estimate until linked by save
+                                                                </span>
+                                                            )}
                                                         </dd>
                                                     </div>
                                                     <div className="flex items-baseline justify-between gap-2">
@@ -5391,6 +5563,9 @@ export default function AssetEditor() {
                                             </button>
                                             <button type="button" onClick={() => { setLeftPanel(null); void downloadExport('jpeg') }} className="flex w-full items-center gap-2.5 rounded-md px-3 py-1.5 text-sm text-gray-200 hover:bg-gray-800">
                                                 <PhotoIcon className="h-4 w-4 shrink-0 text-gray-400" /> Export JPG
+                                            </button>
+                                            <button type="button" onClick={() => { setLeftPanel(null); void downloadExport('psd') }} className="flex w-full items-center gap-2.5 rounded-md px-3 py-1.5 text-sm text-gray-200 hover:bg-gray-800">
+                                                <DocumentIcon className="h-4 w-4 shrink-0 text-gray-400" /> Export PSD (test)
                                             </button>
                                             <button type="button" onClick={() => { setLeftPanel(null); void downloadExport('json') }} className="flex w-full items-center gap-2.5 rounded-md px-3 py-1.5 text-sm text-gray-200 hover:bg-gray-800">
                                                 <svg className="h-4 w-4 shrink-0 text-gray-400" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M17.25 6.75L22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3l-4.5 16.5" /></svg> Export JSON
@@ -5710,8 +5885,17 @@ export default function AssetEditor() {
                                                                             // wizard's toggle — users who turned it off see raw
                                                                             // blueprints from both entry points, not just one.
                                                                             const autoFillSeed = `${auth?.activeBrand?.id ?? 'no-brand'}|${fmt.id}|sidebar`
+                                                                            let defaultsForFill = wizardDefaults
+                                                                            if (wizardAutoFillEnabled && defaultsForFill === null) {
+                                                                                try {
+                                                                                    defaultsForFill = await fetchWizardDefaults()
+                                                                                    setWizardDefaults(defaultsForFill)
+                                                                                } catch {
+                                                                                    defaultsForFill = null
+                                                                                }
+                                                                            }
                                                                             const enrichedBps = wizardAutoFillEnabled
-                                                                                ? applyWizardAssetDefaults(fmt.layers, wizardDefaults, autoFillSeed)
+                                                                                ? applyWizardAssetDefaults(fmt.layers, defaultsForFill, autoFillSeed)
                                                                                 : fmt.layers
                                                                             const { layers, groups } = blueprintToLayersAndGroups(enrichedBps, fmt.width, fmt.height, brandColor)
                                                                             const fresh = {
@@ -10213,6 +10397,81 @@ export default function AssetEditor() {
                                 </a>{' '}
                                 in a new tab to upload or manage files, then return here and refresh the list.
                             </p>
+                            <input
+                                ref={pickerUploadInputRef}
+                                type="file"
+                                accept="image/png,image/jpeg,image/jpg,image/webp,.png,.jpg,.jpeg,.webp"
+                                className="hidden"
+                                onChange={(e) => {
+                                    const f = e.target.files?.[0]
+                                    e.target.value = ''
+                                    if (f) {
+                                        void runPickerLibraryUpload(f)
+                                    }
+                                }}
+                            />
+                            <div
+                                className={`mt-3 rounded-md border border-dashed px-3 py-3 transition-colors ${
+                                    pickerDropActive
+                                        ? 'border-indigo-400 bg-indigo-950/30'
+                                        : 'border-gray-600 bg-gray-800/40'
+                                } ${
+                                    pickerPickingAssetId !== null || pickerLibraryUploading
+                                        ? 'pointer-events-none opacity-50'
+                                        : ''
+                                }`}
+                                onDragEnter={(e) => {
+                                    e.preventDefault()
+                                    if (!pickerLibraryUploading && !damLoading && pickerPickingAssetId === null) {
+                                        setPickerDropActive(true)
+                                    }
+                                }}
+                                onDragLeave={() => setPickerDropActive(false)}
+                                onDragOver={(e) => {
+                                    e.preventDefault()
+                                    if (!pickerLibraryUploading && !damLoading && pickerPickingAssetId === null) {
+                                        setPickerDropActive(true)
+                                    }
+                                }}
+                                onDrop={(e) => {
+                                    e.preventDefault()
+                                    setPickerDropActive(false)
+                                    if (pickerLibraryUploading || damLoading || pickerPickingAssetId !== null) {
+                                        return
+                                    }
+                                    const f = e.dataTransfer.files?.[0]
+                                    if (f && (f.type.startsWith('image/') || /\.(png|jpe?g|webp)$/i.test(f.name))) {
+                                        void runPickerLibraryUpload(f)
+                                    }
+                                }}
+                            >
+                                <div className="flex flex-wrap items-center gap-2">
+                                    <CloudArrowUpIcon className="h-5 w-5 shrink-0 text-gray-500" aria-hidden />
+                                    <div className="min-w-0 flex-1">
+                                        <p className="text-[11px] font-medium text-gray-200">
+                                            Upload or drop an image
+                                        </p>
+                                        <p className="mt-0.5 text-[10px] leading-snug text-gray-500">
+                                            Files are finalized into the library (not staged). The{' '}
+                                            <span className="font-medium text-gray-400">Category</span> filter above sets
+                                            the upload category when chosen; otherwise the brand default category applies.
+                                        </p>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        disabled={
+                                            pickerPickingAssetId !== null || pickerLibraryUploading || damLoading
+                                        }
+                                        onClick={() => pickerUploadInputRef.current?.click()}
+                                        className="shrink-0 rounded border border-indigo-600 bg-indigo-700 px-2.5 py-1.5 text-[11px] font-semibold text-white hover:bg-indigo-600 disabled:cursor-not-allowed disabled:opacity-50"
+                                    >
+                                        {pickerLibraryUploading ? 'Uploading…' : 'Choose file'}
+                                    </button>
+                                </div>
+                                {pickerLibraryUploadError && (
+                                    <p className="mt-2 text-[10px] text-red-400">{pickerLibraryUploadError}</p>
+                                )}
+                            </div>
                         </div>
                         {pickerMode === 'references' && referenceSelectionIds.length > 0 && (
                             <div className="shrink-0 border-b border-violet-800 bg-violet-950/25 px-4 py-2.5">
@@ -11074,7 +11333,7 @@ export default function AssetEditor() {
                                                                         {wizardAutoFillEnabled && autoBgPick
                                                                             ? autoBgPick.name
                                                                             : (wizardDefaults.background_candidates.length === 0
-                                                                                ? 'No tagged background photos — add one with tag "background" or "hero"'
+                                                                                ? 'No background photos found — tag images with "photography" (or "background" / "hero") in the library'
                                                                                 : 'Disabled — generative background')}
                                                                     </p>
                                                                 </div>

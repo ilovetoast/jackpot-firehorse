@@ -266,14 +266,19 @@ class EditorGenerateLayoutController extends Controller
      *
      * Query strategy:
      *   1. Scope to tenant + brand + image mime types.
-     *   2. Union: (a) assets tagged background|hero|photo|photography|lifestyle, OR
+     *   2. Union: (a) assets tagged background|hero|photo|photography|lifestyle
+     *      (case-insensitive match on asset_tags.tag), OR
      *      (b) assets in the Photography DAM category that are not explicit product
      *      shots (subject_type product, or photo_type product/studio/flat_lay/macro_detail),
      *      OR (c) when no tag matches exist globally, legacy metadata fallbacks
      *      (lifestyle/editorial/event/hero/scene) as before.
      *   3. Order by latest brand_intelligence_score overall_score DESC, then
      *      recency, so the best photos surface first.
-     *   4. Exclude logos (category_slug='logos') defensively in case a brand
+     *   4. Merge: assets tagged "photography" (any case) for this brand are
+     *      prepended first so the template wizard always has a reference preview
+     *      when the library uses that tag; remaining slots are filled with the
+     *      scored pool (higher-scoring / hero / lifestyle picks).
+     *   5. Exclude logos (category_slug='logos') defensively in case a brand
      *      mistagged its logo as "hero".
      *
      * Each returned row matches {@see \App\Pages\Editor\documentModel.DamPickerAsset}
@@ -286,9 +291,15 @@ class EditorGenerateLayoutController extends Controller
         $matchTags = ['background', 'hero', 'photo', 'photography', 'lifestyle'];
 
         try {
-            // Pass 1: tag-matched (preferred).
+            // Pass 1: tag-matched (preferred). Case-insensitive — tags are
+            // human-entered and may be "Photography", "PHOTOGRAPHY", etc.
+            $lowerTags = array_map('strtolower', $matchTags);
             $taggedIds = DB::table('asset_tags')
-                ->whereIn('tag', $matchTags)
+                ->where(function ($q) use ($lowerTags) {
+                    foreach ($lowerTags as $lt) {
+                        $q->orWhereRaw('LOWER(tag) = ?', [$lt]);
+                    }
+                })
                 ->pluck('asset_id')
                 ->map(fn ($v) => (string) $v)
                 ->unique()
@@ -436,7 +447,7 @@ class EditorGenerateLayoutController extends Controller
                 ];
             }
 
-            return $candidates;
+            return $this->mergePhotographyFirstBackgroundCandidates($tenant, $brand, $applyPhotoOnlyFilter, $candidates);
         } catch (\Throwable $e) {
             Log::warning('editor.wizard_defaults_background_failed', [
                 'tenant_id' => $tenant->id,
@@ -445,6 +456,104 @@ class EditorGenerateLayoutController extends Controller
             ]);
             return [];
         }
+    }
+
+    /**
+     * Asset IDs for this brand whose tags match $tagLower (case-insensitive).
+     *
+     * @return list<string>
+     */
+    private function assetIdsWithTagForBrand(Tenant $tenant, Brand $brand, string $tagLower): array
+    {
+        $needle = mb_strtolower($tagLower);
+
+        return DB::table('asset_tags')
+            ->join('assets', 'assets.id', '=', 'asset_tags.asset_id')
+            ->where('assets.tenant_id', $tenant->id)
+            ->where('assets.brand_id', $brand->id)
+            ->whereNull('assets.deleted_at')
+            ->whereRaw('LOWER(asset_tags.tag) = ?', [$needle])
+            ->pluck('assets.id')
+            ->map(fn ($v) => (string) $v)
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Prepend assets tagged "photography" so the wizard preview has a real
+     * reference image when available; remaining slots keep the scored pool order.
+     *
+     * @param  \Closure(\Illuminate\Database\Eloquent\Builder): void  $applyPhotoOnlyFilter
+     * @param  list<array{id:string,name:string,file_url:?string,thumbnail_url:?string,width:?int,height:?int,tags:list<string>}>  $candidates
+     * @return list<array{id:string,name:string,file_url:?string,thumbnail_url:?string,width:?int,height:?int,tags:list<string>}>
+     */
+    private function mergePhotographyFirstBackgroundCandidates(
+        Tenant $tenant,
+        Brand $brand,
+        \Closure $applyPhotoOnlyFilter,
+        array $candidates
+    ): array {
+        $photoIds = $this->assetIdsWithTagForBrand($tenant, $brand, 'photography');
+        if ($photoIds === []) {
+            return array_slice($candidates, 0, 8);
+        }
+
+        $photoAssets = Asset::query()
+            ->where('tenant_id', $tenant->id)
+            ->where('brand_id', $brand->id)
+            ->whereNotNull('mime_type')
+            ->where('mime_type', 'like', 'image/%')
+            ->tap($applyPhotoOnlyFilter)
+            ->whereIn('id', $photoIds)
+            ->with(['latestBrandIntelligenceScore', 'category'])
+            ->get()
+            ->filter(fn (Asset $a) => $a->category?->slug !== 'logos')
+            ->sortByDesc(fn (Asset $a) => (float) ($a->latestBrandIntelligenceScore?->overall_score ?? 0))
+            ->values();
+
+        $tagsByAssetId = $this->loadTagsForAssets($photoAssets->pluck('id')->all());
+
+        $photoPayloads = [];
+        foreach ($photoAssets as $asset) {
+            $fileUrl = $asset->deliveryUrl(AssetVariant::ORIGINAL, DeliveryContext::AUTHENTICATED);
+            if (! $fileUrl) {
+                continue;
+            }
+            $thumbnailUrl = $asset->deliveryUrl(AssetVariant::THUMB_MEDIUM, DeliveryContext::AUTHENTICATED)
+                ?: $asset->deliveryUrl(AssetVariant::THUMB_SMALL, DeliveryContext::AUTHENTICATED)
+                ?: $fileUrl;
+            $photoPayloads[] = [
+                'id' => (string) $asset->id,
+                'name' => $asset->title ?? $asset->original_filename ?? 'Photo',
+                'file_url' => $fileUrl,
+                'thumbnail_url' => $thumbnailUrl,
+                'width' => $asset->width ? (int) $asset->width : null,
+                'height' => $asset->height ? (int) $asset->height : null,
+                'tags' => array_values(array_map('strval', $tagsByAssetId[(string) $asset->id] ?? [])),
+            ];
+        }
+
+        if ($photoPayloads === []) {
+            return array_slice($candidates, 0, 8);
+        }
+
+        $seen = [];
+        $merged = [];
+        foreach ($photoPayloads as $p) {
+            if (! isset($seen[$p['id']])) {
+                $seen[$p['id']] = true;
+                $merged[] = $p;
+            }
+        }
+        foreach ($candidates as $c) {
+            if (! isset($seen[$c['id']])) {
+                $seen[$c['id']] = true;
+                $merged[] = $c;
+            }
+        }
+
+        return array_slice($merged, 0, 8);
     }
 
     public function generate(Request $request): JsonResponse
