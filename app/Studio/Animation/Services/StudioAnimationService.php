@@ -502,6 +502,15 @@ final class StudioAnimationService
             return 'The snapshot image did not match your composition width and height (often a scaled-down capture vs. the document canvas). Update the app and use Retry, or confirm the live canvas matches the document size.';
         }
 
+        if ((string) $job->error_code === 'provider_submit_failed') {
+            $em = strtolower((string) ($job->error_message ?? ''));
+            if (str_contains($em, 'authentication')
+                || str_contains($em, '401')
+                || str_contains($em, 'cannot access application')) {
+                return 'The Fal / Kling API rejected this request (not authenticated). On the server, set a valid FAL_KEY (see .env.example; KLING_API_KEY is used as a fallback name), restart PHP/queue workers, then use Retry.';
+            }
+        }
+
         return match ((string) $job->error_code) {
             'render_failed' => 'We could not prepare the composition snapshot for animation.',
             'provider_submit_failed' => 'The video provider rejected the job at submission time.',
