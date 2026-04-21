@@ -497,6 +497,11 @@ final class StudioAnimationService
             return null;
         }
 
+        if ((string) $job->error_code === 'render_failed'
+            && str_contains((string) ($job->error_message ?? ''), 'Snapshot dimensions do not match')) {
+            return 'The snapshot image did not match your composition width and height (often a scaled-down capture vs. the document canvas). Update the app and use Retry, or confirm the live canvas matches the document size.';
+        }
+
         return match ((string) $job->error_code) {
             'render_failed' => 'We could not prepare the composition snapshot for animation.',
             'provider_submit_failed' => 'The video provider rejected the job at submission time.',

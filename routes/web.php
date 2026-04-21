@@ -737,6 +737,10 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
                 Route::post('/api/creative-sets/{id}/variants', [\App\Http\Controllers\Editor\EditorCreativeSetController::class, 'storeVariant'])
                     ->whereNumber('id')
                     ->name('api.editor.creative-sets.variants.store');
+                Route::delete('/api/creative-sets/{id}/variants/{variantId}', [\App\Http\Controllers\Editor\EditorCreativeSetController::class, 'destroyVariant'])
+                    ->whereNumber('id')
+                    ->whereNumber('variantId')
+                    ->name('api.editor.creative-sets.variants.destroy');
                 Route::post('/api/creative-sets/{id}/generate', [\App\Http\Controllers\Editor\EditorCreativeSetController::class, 'generate'])
                     ->whereNumber('id')
                     ->name('api.editor.creative-sets.generate');

@@ -203,8 +203,8 @@ export function StudioAnimationJobDetailDialog(props: Props) {
                             Technical details
                         </summary>
                         <p className="mt-2 border-t border-gray-800 pt-2 text-[10px] leading-snug text-gray-500">
-                            There is no dedicated Studio animation list in the site admin yet; operators can read the same
-                            fields from the database (<span className="font-mono">studio_animation_jobs</span>) and app logs.
+                            Operators: query <span className="font-mono text-gray-400">studio_animation_jobs</span> (and
+                            worker logs) for the same fields when triaging. There is no Studio animation admin index yet.
                         </p>
                         <dl className="mt-2 space-y-1.5">
                             {job.error_code ? (

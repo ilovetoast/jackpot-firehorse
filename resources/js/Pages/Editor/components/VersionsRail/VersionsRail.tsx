@@ -1,5 +1,5 @@
 import type { RefObject } from 'react'
-import { ChevronDownIcon } from '@heroicons/react/24/outline'
+import { ChevronDownIcon, TrashIcon } from '@heroicons/react/24/outline'
 import { CheckIcon, PlusIcon, StarIcon } from '@heroicons/react/24/solid'
 import { StudioVersionsHandoffBar } from './StudioVersionsHandoffBar'
 import { StudioAnimationRailChips } from './StudioAnimationRailChips'
@@ -100,6 +100,8 @@ export function VersionsRail(props: {
     compositionAnimationsLoading?: boolean
     selectedStudioAnimationJobId?: string | null
     onSelectStudioAnimationJob?: (jobId: string) => void
+    /** Remove a non-base variant from the set (parent runs confirm + API). */
+    onRequestRemoveVariant?: (variant: StudioCreativeSetVariantDto) => void
 }) {
     const {
         creativeSet,
@@ -132,6 +134,7 @@ export function VersionsRail(props: {
         compositionAnimationsLoading = false,
         selectedStudioAnimationJobId = null,
         onSelectStudioAnimationJob,
+        onRequestRemoveVariant,
     } = props
 
     const showPickChrome = applyScope === 'selected_versions'
@@ -415,23 +418,6 @@ export function VersionsRail(props: {
                     selectedJobId={selectedStudioAnimationJobId}
                     onSelectJob={(id) => onSelectStudioAnimationJob?.(id)}
                 />
-                <div className="flex w-[76px] shrink-0 flex-col items-center gap-0.5 rounded-lg border border-dashed border-gray-700 bg-gray-900/40 p-1">
-                    <button
-                        type="button"
-                        data-testid="studio-create-versions-tile"
-                        onClick={() => onCreateVersions()}
-                        disabled={!activeCompositionId}
-                        title="Create versions — formats, colors, scenes, or duplicate"
-                        className="flex w-full flex-col items-center gap-1 rounded-md p-0.5 text-left transition-colors hover:bg-gray-800/90 disabled:cursor-not-allowed disabled:opacity-40"
-                    >
-                        <div className="flex h-14 w-14 items-center justify-center rounded-md border border-gray-700 bg-gray-800/80 text-indigo-300">
-                            <PlusIcon className="h-7 w-7" aria-hidden />
-                        </div>
-                        <span className="w-full text-center text-[9px] font-semibold leading-tight text-indigo-200/90">
-                            New versions
-                        </span>
-                    </button>
-                </div>
                 {creativeSet.variants.map((v: StudioCreativeSetVariantDto) => {
                     const active = activeCompositionId === v.composition_id
                     const retryId = v.retryable_generation_job_item_id ?? null
@@ -607,9 +593,41 @@ export function VersionsRail(props: {
                                     {retryBusyItemId === retryId ? 'Retrying…' : 'Retry version'}
                                 </button>
                             )}
+                            {!isBase && onRequestRemoveVariant && !handoffMode && (
+                                <button
+                                    type="button"
+                                    data-testid={`studio-remove-variant-${v.composition_id}`}
+                                    title="Remove this version from the set…"
+                                    onClick={(e) => {
+                                        e.stopPropagation()
+                                        onRequestRemoveVariant(v)
+                                    }}
+                                    className="flex w-full items-center justify-center gap-0.5 rounded border border-gray-700/80 bg-gray-900/90 py-0.5 text-[8px] font-semibold text-gray-500 hover:border-red-900/50 hover:bg-red-950/30 hover:text-red-200"
+                                >
+                                    <TrashIcon className="h-3 w-3 shrink-0" aria-hidden />
+                                    Remove
+                                </button>
+                            )}
                         </div>
                     )
                 })}
+                <div className="flex w-[76px] shrink-0 flex-col items-center gap-0.5 rounded-lg border border-dashed border-gray-700 bg-gray-900/40 p-1">
+                    <button
+                        type="button"
+                        data-testid="studio-create-versions-tile"
+                        onClick={() => onCreateVersions()}
+                        disabled={!activeCompositionId}
+                        title="Create versions — formats, colors, scenes, or duplicate"
+                        className="flex w-full flex-col items-center gap-1 rounded-md p-0.5 text-left transition-colors hover:bg-gray-800/90 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                        <div className="flex h-14 w-14 items-center justify-center rounded-md border border-gray-700 bg-gray-800/80 text-indigo-300">
+                            <PlusIcon className="h-7 w-7" aria-hidden />
+                        </div>
+                        <span className="w-full text-center text-[9px] font-semibold leading-tight text-indigo-200/90">
+                            New versions
+                        </span>
+                    </button>
+                </div>
             </div>
         </div>
     )

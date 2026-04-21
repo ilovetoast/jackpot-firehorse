@@ -115,7 +115,11 @@ class EditorCreativeSetController extends Controller
             'name' => $set->name,
             'status' => $set->status,
             'hero_composition_id' => $set->hero_composition_id !== null ? (string) $set->hero_composition_id : null,
-            'variants' => $set->variants->map(fn (CreativeSetVariant $v) => $this->variantJson($v))->values()->all(),
+            'variants' => $set->variants
+                ->filter(fn (CreativeSetVariant $v) => $v->status !== CreativeSetVariant::STATUS_ARCHIVED)
+                ->values()
+                ->map(fn (CreativeSetVariant $v) => $this->variantJson($v))
+                ->all(),
         ];
     }
 
@@ -306,6 +310,7 @@ class EditorCreativeSetController extends Controller
             $member = CreativeSetVariant::query()
                 ->where('creative_set_id', $set->id)
                 ->where('composition_id', (int) $cid)
+                ->where('status', '!=', CreativeSetVariant::STATUS_ARCHIVED)
                 ->exists();
             if (! $member) {
                 throw ValidationException::withMessages([
@@ -339,6 +344,7 @@ class EditorCreativeSetController extends Controller
 
         $link = CreativeSetVariant::query()
             ->where('composition_id', $composition->id)
+            ->where('status', '!=', CreativeSetVariant::STATUS_ARCHIVED)
             ->with('creativeSet')
             ->first();
 
@@ -396,7 +402,10 @@ class EditorCreativeSetController extends Controller
             return response()->json(['error' => 'Composition not found'], 404);
         }
 
-        if (CreativeSetVariant::query()->where('composition_id', $composition->id)->exists()) {
+        if (CreativeSetVariant::query()
+            ->where('composition_id', $composition->id)
+            ->where('status', '!=', CreativeSetVariant::STATUS_ARCHIVED)
+            ->exists()) {
             return response()->json(['error' => 'This composition already belongs to a Versions set.'], 422);
         }
 
@@ -458,12 +467,16 @@ class EditorCreativeSetController extends Controller
         $membership = CreativeSetVariant::query()
             ->where('creative_set_id', $set->id)
             ->where('composition_id', $sourceComposition->id)
+            ->where('status', '!=', CreativeSetVariant::STATUS_ARCHIVED)
             ->first();
         if (! $membership) {
             return response()->json(['error' => 'Source composition is not in this Versions set.'], 422);
         }
 
-        $count = CreativeSetVariant::query()->where('creative_set_id', $set->id)->count();
+        $count = CreativeSetVariant::query()
+            ->where('creative_set_id', $set->id)
+            ->where('status', '!=', CreativeSetVariant::STATUS_ARCHIVED)
+            ->count();
         if ($count >= self::MAX_VARIANTS_PER_SET) {
             return response()->json([
                 'error' => 'Maximum number of versions in one set reached ('.self::MAX_VARIANTS_PER_SET.').',
@@ -490,6 +503,57 @@ class EditorCreativeSetController extends Controller
             'variant' => $this->variantJson($variant->fresh()->load('composition')),
             'creative_set' => $this->setJson($set->fresh(['variants'])),
         ], 201);
+    }
+
+    /**
+     * DELETE /app/api/creative-sets/{id}/variants/{variantId}
+     *
+     * Removes the variant membership row. Does not delete the {@link Composition} itself.
+     */
+    public function destroyVariant(Request $request, int $id, int $variantId): JsonResponse
+    {
+        $user = $request->user();
+        if (! $user) {
+            return response()->json(['error' => 'Unauthorized'], 403);
+        }
+
+        $set = $this->resolveCreativeSet($request, $id);
+        if (! $set) {
+            return response()->json(['error' => 'Not found'], 404);
+        }
+
+        $variant = CreativeSetVariant::query()
+            ->where('creative_set_id', $set->id)
+            ->where('id', $variantId)
+            ->first();
+        if (! $variant) {
+            return response()->json(['error' => 'Variant not found'], 404);
+        }
+
+        $members = CreativeSetVariant::query()
+            ->where('creative_set_id', $set->id)
+            ->orderBy('sort_order')
+            ->orderBy('id')
+            ->get();
+
+        if ($members->count() < 2) {
+            return response()->json(['error' => 'You cannot remove the only version in this set.'], 422);
+        }
+
+        $base = $members->first();
+        if ($base !== null && (int) $variant->id === (int) $base->id) {
+            return response()->json(['error' => 'You cannot remove the base version. Duplicate another version first, then remove this one if needed.'], 422);
+        }
+
+        DB::transaction(function () use ($set, $variant): void {
+            if ($set->hero_composition_id !== null && (int) $set->hero_composition_id === (int) $variant->composition_id) {
+                $set->hero_composition_id = null;
+                $set->save();
+            }
+            $variant->delete();
+        });
+
+        return response()->json(['creative_set' => $this->setJson($set->fresh(['variants']))]);
     }
 
     /**

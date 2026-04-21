@@ -128,7 +128,10 @@ final class StudioCreativeSetGenerationService
             ]);
         }
 
-        $currentVariants = CreativeSetVariant::query()->where('creative_set_id', $set->id)->count();
+        $currentVariants = CreativeSetVariant::query()
+            ->where('creative_set_id', $set->id)
+            ->where('status', '!=', CreativeSetVariant::STATUS_ARCHIVED)
+            ->count();
         if ($currentVariants + count($keys) > EditorCreativeSetController::MAX_VARIANTS_PER_SET) {
             throw ValidationException::withMessages([
                 'color_ids' => 'This generation would exceed the maximum versions per set ('.EditorCreativeSetController::MAX_VARIANTS_PER_SET.').',

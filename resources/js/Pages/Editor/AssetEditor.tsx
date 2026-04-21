@@ -169,6 +169,7 @@ import {
 } from './editorCompositionBridge'
 import type { CompositionSummaryDto, CompositionVisibility } from './editorCompositionBridge'
 import {
+    deleteCreativeSetVariant,
     fetchCreativeSetForComposition,
     fetchCreativeSetGenerationJob,
     fetchGenerationPresets,
@@ -3354,6 +3355,42 @@ export default function AssetEditor() {
             }
         },
         [studioCreativeSet]
+    )
+
+    const removeStudioVariantFromSet = useCallback(
+        async (variant: StudioCreativeSetDto['variants'][number]) => {
+            if (!studioCreativeSet) {
+                return
+            }
+            const label = (variant.label ?? '').trim() || `Version ${variant.composition_id}`
+            const ok = await editorConfirm({
+                title: 'Remove this version from the set?',
+                message: `"${label}" will disappear from the Versions rail. The composition is kept on the server; only membership in this set is removed.`,
+                variant: 'danger',
+                confirmText: 'Remove from set',
+            })
+            if (!ok) {
+                return
+            }
+            try {
+                const { creative_set } = await deleteCreativeSetVariant(studioCreativeSet.id, variant.id)
+                setStudioCreativeSet(creative_set)
+                const cid = String(variant.composition_id)
+                setStudioApplySelectedCompositionIds((prev) => prev.filter((id) => id !== cid))
+                setStudioPackNewcomerCompositionIds((prev) => prev.filter((id) => id !== cid))
+                setStudioUnviewedNewcomerCompositionIds((prev) => prev.filter((id) => id !== cid))
+                if (compositionId && String(compositionId) === cid) {
+                    const next = creative_set.variants[0]?.composition_id
+                    if (next) {
+                        await switchToSiblingComposition(next)
+                    }
+                }
+                setActivityToast('Version removed from set.')
+            } catch (e) {
+                setActivityToast(e instanceof Error ? e.message : 'Could not remove version')
+            }
+        },
+        [studioCreativeSet, compositionId, editorConfirm, switchToSiblingComposition]
     )
 
     const bumpGenerateVersionsModal = useCallback(() => {
@@ -8437,6 +8474,7 @@ export default function AssetEditor() {
                                     compositionAnimationsLoading={animationsLoading}
                                     selectedStudioAnimationJobId={studioAnimationDetailJobId}
                                     onSelectStudioAnimationJob={(jobId) => setStudioAnimationDetailJobId(jobId)}
+                                    onRequestRemoveVariant={removeStudioVariantFromSet}
                                 />
                                 <ApplyScopeBar
                                     creativeSetId={studioCreativeSet.id}

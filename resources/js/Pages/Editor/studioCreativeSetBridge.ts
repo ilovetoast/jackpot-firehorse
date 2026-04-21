@@ -87,6 +87,31 @@ export async function postCreativeSetVariant(
     return { creative_set: data.creative_set, variant: data.variant }
 }
 
+export async function deleteCreativeSetVariant(
+    creativeSetId: string,
+    variantId: string
+): Promise<{ creative_set: StudioCreativeSetDto }> {
+    const res = await fetch(
+        `/app/api/creative-sets/${encodeURIComponent(creativeSetId)}/variants/${encodeURIComponent(variantId)}`,
+        {
+            method: 'DELETE',
+            headers: csrfHeaders(),
+            credentials: 'same-origin',
+        }
+    )
+    const data = (await res.json().catch(() => ({}))) as {
+        creative_set?: StudioCreativeSetDto
+        error?: string
+    }
+    if (!res.ok) {
+        throw new Error(data.error || 'Could not remove version from set')
+    }
+    if (!data.creative_set) {
+        throw new Error('Invalid response')
+    }
+    return { creative_set: data.creative_set }
+}
+
 export async function fetchGenerationPresets(): Promise<StudioGenerationPresetsDto> {
     const res = await fetch('/app/api/creative-sets/generation-presets', {
         method: 'GET',
