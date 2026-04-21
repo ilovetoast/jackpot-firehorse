@@ -4815,12 +4815,54 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                         </div>
                     </div>
                     
-                    {/* Success overlay - shown after finalize succeeds, before auto-close */}
+                    {/* Success overlay — compact card (not full uploader width); slot-reel nod to homepage */}
                     {isFinalizeSuccess && (
-                        <div className="absolute inset-0 z-50 flex items-center justify-center rounded-lg bg-white/95 px-4">
-                            <div className="flex max-w-md flex-col items-center justify-center py-10 text-center">
-                                <div className="mb-4 rounded-full bg-green-100 p-3">
-                                    <CheckIcon className="h-6 w-6 text-green-600" aria-hidden />
+                        <div className="pointer-events-auto absolute inset-0 z-50 flex items-center justify-center rounded-lg bg-gray-900/[0.08] p-4 backdrop-blur-[1px] sm:p-6">
+                            <style>{`
+                                @keyframes jp-upload-success-reel {
+                                    0%, 100% { transform: translateY(0); }
+                                    25% { transform: translateY(-5px); }
+                                    55% { transform: translateY(3px); }
+                                }
+                                .jp-upload-success-reel-1 { animation: jp-upload-success-reel 0.65s ease-in-out; }
+                                .jp-upload-success-reel-2 { animation: jp-upload-success-reel 0.72s ease-in-out 0.08s; }
+                                .jp-upload-success-reel-3 { animation: jp-upload-success-reel 0.78s ease-in-out 0.16s; }
+                                @keyframes jp-upload-success-check {
+                                    0% { transform: scale(0.65) rotate(-5deg); opacity: 0.4; }
+                                    70% { transform: scale(1.05) rotate(0deg); opacity: 1; }
+                                    100% { transform: scale(1) rotate(0deg); opacity: 1; }
+                                }
+                                .jp-upload-success-check-pop {
+                                    animation: jp-upload-success-check 0.55s cubic-bezier(0.34, 1.45, 0.64, 1) 0.26s both;
+                                }
+                            `}</style>
+                            <div
+                                className="w-full max-w-sm rounded-2xl border border-gray-200/90 bg-white px-6 py-8 text-center shadow-2xl"
+                                role="status"
+                                aria-live="polite"
+                            >
+                                <div
+                                    className="mb-5 flex items-center justify-center gap-2 sm:gap-3"
+                                    aria-hidden="true"
+                                >
+                                    <img
+                                        src="/jp-parts/cherry-slot.svg"
+                                        alt=""
+                                        className="jp-upload-success-reel-1 h-7 w-7 opacity-75"
+                                    />
+                                    <img
+                                        src="/jp-parts/seven-slot.svg"
+                                        alt=""
+                                        className="jp-upload-success-reel-2 h-7 w-7 opacity-75"
+                                    />
+                                    <img
+                                        src="/jp-parts/diamond-slot.svg"
+                                        alt=""
+                                        className="jp-upload-success-reel-3 h-7 w-7 opacity-75"
+                                    />
+                                    <div className="jp-upload-success-check-pop flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-green-100 ring-2 ring-green-200/80">
+                                        <CheckIcon className="h-6 w-6 text-green-600" aria-hidden />
+                                    </div>
                                 </div>
                                 <h3 className="text-lg font-semibold text-gray-900">Upload complete</h3>
                                 <p className="mt-1 text-sm text-gray-500">

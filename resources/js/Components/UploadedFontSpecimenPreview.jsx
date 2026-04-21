@@ -141,7 +141,7 @@ export default function UploadedFontSpecimenPreview({
     const isLightbox = variant === 'lightbox'
     const shell = isLightbox
         ? 'flex max-h-full w-full max-w-2xl flex-col items-center justify-center rounded-xl bg-gradient-to-br from-slate-800 to-slate-900 p-8 text-center text-white'
-        : 'flex h-full min-h-[14rem] w-full flex-col items-center justify-center bg-gradient-to-br from-slate-50 to-slate-100 p-6 text-center text-zinc-800'
+        : 'flex h-full min-h-[14rem] w-full flex-col items-center justify-center rounded-xl bg-gradient-to-b from-white via-slate-50 to-sky-100/75 p-6 text-center text-zinc-800 ring-1 ring-slate-200/90 shadow-[inset_0_1px_0_rgba(255,255,255,0.85)]'
 
     const badge = isLightbox
         ? 'rounded-full bg-violet-500/25 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-violet-100'

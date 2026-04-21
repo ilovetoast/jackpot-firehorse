@@ -53,7 +53,12 @@ class OpenAIProvider implements AIProviderInterface
         'gpt-image-1',
     ];
 
-    private const OPENAI_IMAGE_SIZES = ['1024x1024', '1024x1792', '1792x1024'];
+    /**
+     * gpt-image-1 / images/generations supported `size` values (API rejects legacy 1792× buckets).
+     *
+     * @see https://platform.openai.com/docs/api-reference/images/create
+     */
+    private const OPENAI_IMAGE_SIZES = ['1024x1024', '1024x1536', '1536x1024', 'auto'];
 
     /**
      * Provider-specific pricing fallback for vision models.
@@ -87,17 +92,18 @@ class OpenAIProvider implements AIProviderInterface
     /**
      * Generate text from a prompt using OpenAI API.
      *
-     * @param string $prompt The input prompt
-     * @param array $options Additional options:
-     *   - model: Model name to use (default: gpt-3.5-turbo)
-     *   - max_tokens: Maximum tokens in response (default: 1000)
-     *   - temperature: Sampling temperature 0-2 (default: 0.7)
+     * @param  string  $prompt  The input prompt
+     * @param  array  $options  Additional options:
+     *                          - model: Model name to use (default: gpt-3.5-turbo)
+     *                          - max_tokens: Maximum tokens in response (default: 1000)
+     *                          - temperature: Sampling temperature 0-2 (default: 0.7)
      * @return array Response array with:
-     *   - text: Generated text response
-     *   - tokens_in: Number of input tokens used
-     *   - tokens_out: Number of output tokens used
-     *   - model: Actual model name used
-     *   - metadata: Provider-specific metadata
+     *               - text: Generated text response
+     *               - tokens_in: Number of input tokens used
+     *               - tokens_out: Number of output tokens used
+     *               - model: Actual model name used
+     *               - metadata: Provider-specific metadata
+     *
      * @throws \Exception If the API call fails
      */
     public function generateText(string $prompt, array $options = []): array
@@ -108,7 +114,7 @@ class OpenAIProvider implements AIProviderInterface
         $temperature = $options['temperature'] ?? 0.7;
         $responseFormat = $options['response_format'] ?? null;
 
-        if (!$this->isModelAvailable($model)) {
+        if (! $this->isModelAvailable($model)) {
             throw new \InvalidArgumentException("Model '{$model}' is not available or supported.");
         }
 
@@ -131,9 +137,9 @@ class OpenAIProvider implements AIProviderInterface
                 $error = $response->json();
                 $errorMessage = $error['error']['message'] ?? 'Unknown error from OpenAI API';
                 $errorCode = $error['error']['code'] ?? null;
-                
+
                 // Detect quota exceeded errors
-                if (stripos($errorMessage, 'quota') !== false || 
+                if (stripos($errorMessage, 'quota') !== false ||
                     stripos($errorMessage, 'exceeded') !== false ||
                     $errorCode === 'insufficient_quota' ||
                     $response->status() === 429) {
@@ -142,13 +148,13 @@ class OpenAIProvider implements AIProviderInterface
                         'OpenAI'
                     );
                 }
-                
+
                 throw new \Exception("OpenAI API error: {$errorMessage}", $response->status());
             }
 
             $data = $response->json();
 
-            if (!isset($data['choices'][0]['message']['content'])) {
+            if (! isset($data['choices'][0]['message']['content'])) {
                 throw new \Exception('Invalid response format from OpenAI API');
             }
 
@@ -198,7 +204,7 @@ class OpenAIProvider implements AIProviderInterface
                 return Http::timeout($timeoutSeconds)
                     ->connectTimeout(15)
                     ->withHeaders([
-                        'Authorization' => 'Bearer ' . $this->apiKey,
+                        'Authorization' => 'Bearer '.$this->apiKey,
                         'Content-Type' => 'application/json',
                     ])
                     ->post("{$this->baseUrl}/chat/completions", $body);
@@ -350,9 +356,9 @@ class OpenAIProvider implements AIProviderInterface
      * Edit an image via OpenAI Images API (multipart /v1/images/edits).
      *
      * @param  array<string, mixed>  $options
-     *   - image_binary: string (raw image bytes, required)
-     *   - filename: optional filename hint for multipart (e.g. source.png)
-     *   - model: e.g. gpt-image-1
+     *                                         - image_binary: string (raw image bytes, required)
+     *                                         - filename: optional filename hint for multipart (e.g. source.png)
+     *                                         - model: e.g. gpt-image-1
      * @return array{text: string, tokens_in: int, tokens_out: int, model: string, metadata: array<string, mixed>}
      */
     public function editImage(string $prompt, array $options = []): array
@@ -473,9 +479,24 @@ class OpenAIProvider implements AIProviderInterface
 
     private function normalizeOpenAiImageSize(?string $size): string
     {
-        $s = is_string($size) ? $size : '1024x1024';
+        $s = is_string($size) ? trim($size) : '1024x1024';
+        if ($s === '') {
+            $s = '1024x1024';
+        }
 
-        return in_array($s, self::OPENAI_IMAGE_SIZES, true) ? $s : '1024x1024';
+        if (in_array($s, self::OPENAI_IMAGE_SIZES, true)) {
+            return $s;
+        }
+
+        // Legacy DALL·E 3 style buckets → current gpt-image-1 sizes
+        if ($s === '1792x1024') {
+            return '1536x1024';
+        }
+        if ($s === '1024x1792') {
+            return '1024x1536';
+        }
+
+        return '1024x1024';
     }
 
     /**
@@ -505,9 +526,9 @@ class OpenAIProvider implements AIProviderInterface
      * First tries to get pricing from config/ai.php, then falls back to
      * provider-specific pricing.
      *
-     * @param int $tokensIn Number of input tokens
-     * @param int $tokensOut Number of output tokens
-     * @param string $model Model identifier (e.g., 'gpt-4-turbo')
+     * @param  int  $tokensIn  Number of input tokens
+     * @param  int  $tokensOut  Number of output tokens
+     * @param  string  $model  Model identifier (e.g., 'gpt-4-turbo')
      * @return float Estimated cost in USD
      */
     public function calculateCost(int $tokensIn, int $tokensOut, string $model): float
@@ -525,10 +546,10 @@ class OpenAIProvider implements AIProviderInterface
         }
 
         // Fall back to provider-specific pricing
-        if (!$pricing) {
+        if (! $pricing) {
             // Normalize model name (e.g., 'gpt-4-turbo-preview' -> 'gpt-4-turbo')
             $normalizedModel = $this->normalizeModelName($model);
-            
+
             // Check vision model pricing first (for gpt-4o models)
             if (isset($this->visionModelPricing[$model])) {
                 $pricing = $this->visionModelPricing[$model];
@@ -545,8 +566,6 @@ class OpenAIProvider implements AIProviderInterface
 
     /**
      * Get the provider name.
-     *
-     * @return string
      */
     public function getProviderName(): string
     {
@@ -556,7 +575,7 @@ class OpenAIProvider implements AIProviderInterface
     /**
      * Check if a model is available/supported by this provider.
      *
-     * @param string $model Model identifier
+     * @param  string  $model  Model identifier
      * @return bool True if the model is available
      */
     public function isModelAvailable(string $model): bool
@@ -590,7 +609,7 @@ class OpenAIProvider implements AIProviderInterface
      * Normalize model name for pricing lookup.
      * Handles variations like 'gpt-4-turbo-preview' -> 'gpt-4-turbo'.
      *
-     * @param string $model Model name
+     * @param  string  $model  Model name
      * @return string Normalized model name
      */
     protected function normalizeModelName(string $model): string
@@ -623,18 +642,19 @@ class OpenAIProvider implements AIProviderInterface
      * Accepts image as base64 data URL (data:image/webp;base64,...).
      * No presigned S3 URLs are passed to OpenAI; images are fetched internally via IAM.
      *
-     * @param string $imageBase64DataUrl Base64 data URL (data:image/webp;base64,{base64})
-     * @param string $prompt Text prompt describing what to analyze
-     * @param array $options Additional options:
-     *   - model: Model name to use (default: gpt-4o-mini)
-     *   - max_tokens: Maximum tokens in response (default: 1000)
-     *   - response_format: Response format (default: ['type' => 'json_object'])
+     * @param  string  $imageBase64DataUrl  Base64 data URL (data:image/webp;base64,{base64})
+     * @param  string  $prompt  Text prompt describing what to analyze
+     * @param  array  $options  Additional options:
+     *                          - model: Model name to use (default: gpt-4o-mini)
+     *                          - max_tokens: Maximum tokens in response (default: 1000)
+     *                          - response_format: Response format (default: ['type' => 'json_object'])
      * @return array Response array with:
-     *   - text: Generated text response (typically JSON string)
-     *   - tokens_in: Number of input tokens used
-     *   - tokens_out: Number of output tokens used
-     *   - model: Actual model name used
-     *   - metadata: Provider-specific metadata
+     *               - text: Generated text response (typically JSON string)
+     *               - tokens_in: Number of input tokens used
+     *               - tokens_out: Number of output tokens used
+     *               - model: Actual model name used
+     *               - metadata: Provider-specific metadata
+     *
      * @throws \Exception If the API call fails
      */
     public function analyzeImage(string $imageBase64DataUrl, string $prompt, array $options = []): array
@@ -644,7 +664,7 @@ class OpenAIProvider implements AIProviderInterface
         $maxTokens = $options['max_tokens'] ?? 1000;
         $responseFormat = $options['response_format'] ?? ['type' => 'json_object'];
 
-        if (!$this->isModelAvailable($model)) {
+        if (! $this->isModelAvailable($model)) {
             throw new \InvalidArgumentException("Model '{$model}' is not available or supported for vision analysis.");
         }
 
@@ -676,9 +696,9 @@ class OpenAIProvider implements AIProviderInterface
                 $error = $response->json();
                 $errorMessage = $error['error']['message'] ?? 'Unknown error from OpenAI API';
                 $errorCode = $error['error']['code'] ?? null;
-                
+
                 // Detect quota exceeded errors
-                if (stripos($errorMessage, 'quota') !== false || 
+                if (stripos($errorMessage, 'quota') !== false ||
                     stripos($errorMessage, 'exceeded') !== false ||
                     $errorCode === 'insufficient_quota' ||
                     $response->status() === 429) {
@@ -687,13 +707,13 @@ class OpenAIProvider implements AIProviderInterface
                         'OpenAI'
                     );
                 }
-                
+
                 throw new \Exception("OpenAI API error: {$errorMessage}", $response->status());
             }
 
             $data = $response->json();
 
-            if (!isset($data['choices'][0]['message']['content'])) {
+            if (! isset($data['choices'][0]['message']['content'])) {
                 throw new \Exception('Invalid response format from OpenAI API');
             }
 

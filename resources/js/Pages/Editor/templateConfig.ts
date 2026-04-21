@@ -1,4 +1,4 @@
-import type { Layer, TextBoostStyle } from './documentModel'
+import type { Layer, StudioSyncRole, TextBoostStyle } from './documentModel'
 import { generateId } from './documentModel'
 import { placementToXY, type Placement } from '../../utils/snapEngine'
 import { composeRecipe, deriveBrandAdStyle, getRecipeDescriptor, RECIPE_REGISTRY, type BrandAdStyleHint, type RecipeKey } from './recipes'
@@ -43,6 +43,33 @@ export type LayerBlueprint = {
      * across template loads produces distinct groups.
      */
     groupKey?: string
+}
+
+/** Maps wizard/template blueprint roles to persisted {@link Layer.studioSyncRole} when safe for cross-version sync. */
+export function studioSyncRoleFromBlueprint(bp: LayerBlueprint): StudioSyncRole | undefined {
+    switch (bp.role) {
+        case 'headline':
+            return 'headline'
+        case 'subheadline':
+            return 'subheadline'
+        case 'cta':
+        case 'cta_button':
+            return 'cta'
+        case 'logo':
+            return 'logo'
+        case 'overlay':
+            if (/\bbadge\b/i.test(bp.name)) {
+                return 'badge'
+            }
+            return undefined
+        case 'body':
+            if (/disclaimer|legal|fine\s*print/i.test(bp.name)) {
+                return 'disclaimer'
+            }
+            return undefined
+        default:
+            return undefined
+    }
 }
 
 export type TemplateFormat = {
@@ -154,7 +181,8 @@ const CTA_BG: LayerBlueprint = {
     heightRatio: 0.06,
     xRatio: 0.325,
     yRatio: 0.92,
-    defaults: { fillKind: 'solid', color: '#7c3aed', borderRadius: 8 },
+    // Color omitted — `blueprintToLayersAndGroups` uses brand primary for CTA fills.
+    defaults: { fillKind: 'solid', borderRadius: 8 },
     // CTA = a button. The fill and the text above it share `groupKey: 'cta'`
     // so `blueprintToLayers` emits them pre-grouped. Dragging either member
     // moves both; resizing scales both proportionally around the union rect.
@@ -745,6 +773,7 @@ export function blueprintToLayersAndGroups(
             membersByGroupId.get(gid)!.push(layerId)
         }
 
+        const syncRole = studioSyncRoleFromBlueprint(bp)
         const base = {
             id: layerId,
             name: bp.name,
@@ -753,6 +782,7 @@ export function blueprintToLayersAndGroups(
             z: i + 1,
             ...(groupId ? { groupId } : {}),
             transform: { x, y, width, height },
+            ...(syncRole ? { studioSyncRole: syncRole } : {}),
         }
 
         switch (bp.type) {
@@ -786,7 +816,14 @@ export function blueprintToLayersAndGroups(
 
             case 'fill': {
                 const fillKind = (bp.defaults?.fillKind as 'solid' | 'gradient') ?? 'solid'
-                const color = (bp.defaults?.color as string) ?? brandPrimaryColor ?? '#6366f1'
+                const isCtaFill = bp.role === 'cta_button'
+                const explicitColor = bp.defaults?.color as string | undefined
+                const color =
+                    explicitColor !== undefined && explicitColor !== ''
+                        ? explicitColor
+                        : isCtaFill
+                          ? (brandPrimaryColor ?? '#1f2937')
+                          : (brandPrimaryColor ?? '#6366f1')
                 // Support both the new (`gradientStartColor` / `gradientEndColor`) and legacy
                 // (`gradientTo`) blueprint shapes so older layout styles keep rendering correctly.
                 const legacyEnd = (bp.defaults?.gradientTo as string | undefined)
@@ -839,6 +876,7 @@ export function blueprintToLayersAndGroups(
                     gradientEndColor,
                     gradientAngleDeg: (bp.defaults?.gradientAngleDeg as number) ?? 180,
                     borderRadius: (bp.defaults?.borderRadius as number) ?? undefined,
+                    ...(isCtaFill ? { fillRole: 'cta_button' as const } : {}),
                     // Border fields — used by the holding-shape primitive to
                     // emit a hollow frame (transparent fill + visible border).
                     borderStrokeWidth: typeof bp.defaults?.borderStrokeWidth === 'number'

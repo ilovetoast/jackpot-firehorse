@@ -4,6 +4,12 @@
 
 export type DocumentPreset = 'instagram_post' | 'web_banner' | 'custom'
 
+/**
+ * Narrow roles for Studio "Apply to all versions" (Phase 3). Set on layers from template materialization
+ * when the blueprint maps cleanly; optional on older documents (server falls back to name heuristics).
+ */
+export type StudioSyncRole = 'headline' | 'subheadline' | 'cta' | 'logo' | 'badge' | 'disclaimer'
+
 /** CSS `mix-blend-mode` values supported in the editor (layer vs content below). */
 export type LayerBlendMode =
     | 'normal'
@@ -114,6 +120,8 @@ export type BaseLayer = {
         /** Reserved for Phase 7+ (default 1). */
         scaleY?: number
     }
+    /** When set, cross-version sync can target this layer by semantic role. */
+    studioSyncRole?: StudioSyncRole
 }
 
 export type ImageLayer = BaseLayer & {
@@ -134,6 +142,8 @@ export type ImageLayer = BaseLayer & {
         status?: 'idle' | 'editing' | 'error' | 'done'
         resultSrc?: string
         previousResults?: string[]
+        /** Last failed edit message (canvas + panel). */
+        lastError?: string
     }
 }
 
@@ -374,6 +384,11 @@ export type FillLayer = BaseLayer & {
      * Undefined / other values = ordinary fill layer; no special behavior.
      */
     kind?: 'text_boost'
+    /**
+     * CTA button / pill backgrounds from layout blueprints — used for brand-color
+     * defaults and quick swatches in the properties panel.
+     */
+    fillRole?: 'cta_button'
     /** Preset style for text-boost rendering. */
     textBoostStyle?: TextBoostStyle
     /** Accent color driving the scrim (hex `#rrggbb`). Defaults to brand primary. */
@@ -421,6 +436,8 @@ export type GenerativeImageLayer = BaseLayer & {
     variationBatchSize?: number
     /** Populated when variation batch completes; user picks one to apply to resultSrc. */
     variationResults?: string[]
+    /** Last failed generate / variation message (canvas overlay). */
+    lastError?: string
 }
 
 /**
@@ -463,6 +480,16 @@ const ALLOWED_LAYER_TYPES = new Set(['image', 'text', 'generative_image', 'fill'
 
 export function isFillLayer(l: Layer): l is FillLayer {
     return l.type === 'fill'
+}
+
+/** True for CTA pill / button fill layers (brand color defaults + quick swatches). */
+export function isCtaButtonFillLayer(layer: FillLayer): boolean {
+    if (layer.fillRole === 'cta_button') {
+        return true
+    }
+    const n = (layer.name ?? '').trim().toLowerCase()
+
+    return n === 'cta button' || n === 'cta pill'
 }
 
 export function isMaskLayer(l: Layer): l is MaskLayer {
@@ -687,6 +714,10 @@ export function migrateDocumentIfNeeded(doc: DocumentModel): DocumentModel {
                 textBoostOpacity: typeof layer.textBoostOpacity === 'number' ? layer.textBoostOpacity : 0.7,
                 textBoostSource: layer.textBoostSource ?? 'auto',
             } as FillLayer
+        }
+        if (isFillLayer(layer) && layer.fillRole !== 'cta_button' && isCtaButtonFillLayer(layer)) {
+            mutated = true
+            return { ...layer, fillRole: 'cta_button' as const }
         }
         return layer
     })
@@ -1528,17 +1559,17 @@ export function estimateBrandScore(
 }
 
 /**
- * API size bucket matching aspect ratio (landscape / portrait / square).
- * Uses the layer frame when generating so output matches the on-canvas box.
+ * OpenAI `images/generations` size for gpt-image-1: 1024×1024, 1024×1536, 1536×1024, or auto.
+ * Picks the closest aspect bucket to the layer frame (legacy 1792× sizes are rejected by the API).
  */
 export function generationSizeFromDimensions(width: number, height: number): string {
     const dw = Math.max(1, Math.round(width))
     const dh = Math.max(1, Math.round(height))
     if (dw > dh) {
-        return '1792x1024'
+        return '1536x1024'
     }
     if (dh > dw) {
-        return '1024x1792'
+        return '1024x1536'
     }
     return '1024x1024'
 }

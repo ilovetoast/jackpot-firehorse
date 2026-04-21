@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useForm } from '@inertiajs/react'
 import SalesInquiryProgressRail, { SALES_INQUIRY_STEPS } from './SalesInquiryProgressRail'
+import { JACKPOT_WORDMARK_INVERTED_SRC } from '../Brand/LogoMark'
 import { SITE_PRIMARY_HEX } from '../../utils/colorUtils'
 
 /**
@@ -78,22 +79,22 @@ const STEP_SIDE_COPY = [
     {
         title: 'Start with the basics',
         body: 'How we can reach you and your role—so the right person follows up.',
-        imageSrc: '/og-image-1200x630.png',
+        imageSrc: '/img/presentation-wall-texture.jpg',
     },
     {
         title: 'Your organization',
         body: 'Context on company size and industry helps us speak your language.',
-        imageSrc: '/og-image-1200x630.png',
+        imageSrc: '/img/presentation-desk-texture.jpg',
     },
     {
         title: 'What you need',
         body: 'Goals, timing, and brands—so we can tailor the conversation.',
-        imageSrc: '/og-image-1200x630.png',
+        imageSrc: '/img/presentation-neutral-texture.jpg',
     },
     {
         title: "You're set",
         body: 'Review your details and send. We’ll respond within one business day.',
-        imageSrc: '/og-image-1200x630.png',
+        imageSrc: '/img/presentation-wall-texture.jpg',
     },
 ]
 
@@ -243,7 +244,19 @@ export default function SalesInquiryForm({ planInterest = 'default' }) {
                                     alt=""
                                     className="absolute inset-0 w-full h-full object-cover opacity-90"
                                 />
+                                <div
+                                    className="absolute inset-x-0 top-0 h-28 bg-gradient-to-b from-black/70 via-black/25 to-transparent pointer-events-none"
+                                    aria-hidden
+                                />
                                 <div className="absolute inset-0 bg-gradient-to-t from-[#0B0B0D]/90 via-[#0B0B0D]/20 to-transparent" />
+                                <div className="absolute top-0 left-0 right-0 p-4 sm:p-5 z-[1]">
+                                    <img
+                                        src={JACKPOT_WORDMARK_INVERTED_SRC}
+                                        alt="Jackpot"
+                                        className="h-8 sm:h-9 w-auto max-w-[min(100%,14rem)] drop-shadow-[0_2px_14px_rgba(0,0,0,0.5)]"
+                                        decoding="async"
+                                    />
+                                </div>
                                 <div className="absolute bottom-0 left-0 right-0 p-4 sm:p-5">
                                     <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/45 mb-1">
                                         Preview

@@ -24,6 +24,57 @@ function stopMatchesSelected(selected: string, candidate: string): boolean {
     return normalizeHexLoose(selected) === normalizeHexLoose(candidate)
 }
 
+export type BrandColorSwatchStripProps = {
+    brandContext: BrandContext | null | undefined
+    value: string
+    onPick: (hex: string) => void
+    disabled?: boolean
+}
+
+/** Labeled brand palette chips — shared by gradient stops and CTA solid fills. */
+export function BrandColorSwatchStrip({
+    brandContext,
+    value,
+    onPick,
+    disabled = false,
+}: BrandColorSwatchStripProps) {
+    const labeled = labeledBrandPalette(brandContext)
+    if (labeled.length === 0) {
+        return null
+    }
+    const v = value.trim() || 'transparent'
+
+    return (
+        <div className="mb-1.5">
+            <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-gray-500">Brand colors</p>
+            <div className="flex flex-wrap items-end gap-2">
+                {labeled.map(({ label: lbl, color: c }) => {
+                    const active = stopMatchesSelected(v, c)
+                    return (
+                        <div key={`${lbl}-${c}`} className="flex flex-col items-center gap-0.5">
+                            <button
+                                type="button"
+                                disabled={disabled}
+                                title={`${lbl} brand color`}
+                                className={`h-7 w-7 rounded border-2 shadow-sm ${
+                                    active
+                                        ? 'border-indigo-400 ring-2 ring-indigo-700'
+                                        : 'border-gray-700'
+                                }`}
+                                style={{ backgroundColor: c }}
+                                onClick={() => onPick(c)}
+                            />
+                            <span className="max-w-[4.5rem] truncate text-center text-[9px] font-medium text-gray-400">
+                                {lbl}
+                            </span>
+                        </div>
+                    )
+                })}
+            </div>
+        </div>
+    )
+}
+
 type Props = {
     label: string
     value: string
@@ -42,7 +93,6 @@ export default function FillGradientStopField({
     allowTransparent = true,
     brandContext,
 }: Props) {
-    const labeled = labeledBrandPalette(brandContext)
     const v = value.trim() || 'transparent'
     const hexForNative = /^#[0-9a-fA-F]{6}$/i.test(v) ? v : '#6366f1'
 
@@ -51,37 +101,7 @@ export default function FillGradientStopField({
             <label className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-gray-500">
                 {label}
             </label>
-            {labeled.length > 0 && (
-                <div className="mb-1.5">
-                    <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-gray-500">
-                        Brand colors
-                    </p>
-                    <div className="flex flex-wrap items-end gap-2">
-                        {labeled.map(({ label: lbl, color: c }) => {
-                            const active = stopMatchesSelected(v, c)
-                            return (
-                                <div key={`${lbl}-${c}`} className="flex flex-col items-center gap-0.5">
-                                    <button
-                                        type="button"
-                                        disabled={disabled}
-                                        title={`${lbl} brand color`}
-                                        className={`h-7 w-7 rounded border-2 shadow-sm ${
-                                            active
-                                                ? 'border-indigo-400 ring-2 ring-indigo-700'
-                                                : 'border-gray-700'
-                                        }`}
-                                        style={{ backgroundColor: c }}
-                                        onClick={() => onChange(c)}
-                                    />
-                                    <span className="max-w-[4.5rem] truncate text-center text-[9px] font-medium text-gray-400">
-                                        {lbl}
-                                    </span>
-                                </div>
-                            )
-                        })}
-                    </div>
-                </div>
-            )}
+            <BrandColorSwatchStrip brandContext={brandContext} value={v} onPick={onChange} disabled={disabled} />
             <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-gray-500">Quick</p>
             <div className="mb-2 flex flex-wrap items-center gap-1.5">
                 {allowTransparent && (

@@ -5,11 +5,11 @@ namespace App\Http\Controllers\Editor;
 use App\Enums\AITaskType;
 use App\Exceptions\PlanLimitExceededException;
 use App\Http\Controllers\Controller;
-use App\Http\Controllers\Editor\Concerns\ResolvesGenerativeImageOutput;
 use App\Models\Composition;
 use App\Models\Tenant;
 use App\Services\AIService;
 use App\Services\AiUsageService;
+use App\Services\Editor\EditorGenerativeImageOutputFinalizer;
 use App\Services\EditorGenerativeImagePersistService;
 use App\Services\PlanService;
 use App\Support\GenerativeEditorModelNormalizer;
@@ -28,15 +28,12 @@ use Illuminate\Support\Facades\Log;
  */
 class EditorGenerateImageController extends Controller
 {
-    use ResolvesGenerativeImageOutput;
-
-    private const PROXY_CACHE_PREFIX = 'editor_gen_proxy:';
-
     public function __construct(
         protected PlanService $planService,
         protected AIService $aiService,
         protected AiUsageService $aiUsageService,
-        protected EditorGenerativeImagePersistService $generativeImagePersistService
+        protected EditorGenerativeImagePersistService $generativeImagePersistService,
+        protected EditorGenerativeImageOutputFinalizer $generativeImageOutputFinalizer,
     ) {}
 
     public function usage(Request $request): JsonResponse
@@ -243,7 +240,7 @@ class EditorGenerateImageController extends Controller
             'brand_context_applied' => ! empty($validated['brand_context']) ? true : null,
         ], static fn ($v) => $v !== null && $v !== '');
 
-        $final = $this->finalizeGenerativeImageOutput(
+        $final = $this->generativeImageOutputFinalizer->finalize(
             (string) $result['image_ref'],
             $tenant,
             $user,
@@ -280,7 +277,7 @@ class EditorGenerateImageController extends Controller
             return response()->json(['message' => 'Invalid token'], 400);
         }
 
-        $payload = Cache::get(self::PROXY_CACHE_PREFIX.$token);
+        $payload = Cache::get(EditorGenerativeImageOutputFinalizer::PROXY_CACHE_PREFIX.$token);
         if (! is_string($payload) || $payload === '') {
             return response()->json(['message' => 'Image not found or expired'], 410);
         }
@@ -412,14 +409,6 @@ SVG;
         if (! $ok) {
             throw new \InvalidArgumentException('Remote image host is not allowed.');
         }
-    }
-
-    protected function registerProxyUrl(string $urlOrDataUrl): string
-    {
-        $token = bin2hex(random_bytes(16));
-        Cache::put(self::PROXY_CACHE_PREFIX.$token, $urlOrDataUrl, now()->addMinutes(45));
-
-        return route('api.editor.generate-image.proxy', ['token' => $token], absolute: true);
     }
 
     private function usageFallbackNoTenant(Request $request): JsonResponse

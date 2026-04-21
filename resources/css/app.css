@@ -204,6 +204,24 @@
         animation: pulse-subtle 6s ease-in-out infinite;
     }
 
+    /* Studio editor AI: slot reel (duplicated strip; -50% = one full symbol cycle) */
+    @keyframes editor-slot-reel-shift {
+        from {
+            transform: translateY(0);
+        }
+        to {
+            transform: translateY(-50%);
+        }
+    }
+    .editor-slot-reel-track {
+        animation: editor-slot-reel-shift 2.2s linear infinite;
+    }
+    @media (prefers-reduced-motion: reduce) {
+        .editor-slot-reel-track {
+            animation: none;
+        }
+    }
+
     /* Cinematic Dashboard: slow floating for collage items */
     @keyframes collageFloat {
         0%, 100% { transform: translateY(0); }

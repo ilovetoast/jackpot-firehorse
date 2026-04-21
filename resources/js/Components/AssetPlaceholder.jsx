@@ -1,6 +1,5 @@
 import { PhotoIcon } from '@heroicons/react/24/outline'
 import FileTypeIcon from './FileTypeIcon'
-import { buildBrandCinematicTileBackground, hexToRgba } from '../utils/colorUtils'
 
 function isImageAsset(asset) {
   if (!asset) return false
@@ -17,55 +16,16 @@ const PHOTO_ICON_SIZE = {
   lg: 'w-12 h-12',
 }
 
-/**
- * Gradient + icon accent for “preview not available” (skipped / failed) on supported types — not a generic gray tile.
- */
-function richPlaceholderClasses(asset) {
-  const ext = (asset?.file_extension || asset?.original_filename?.split?.('.')?.pop() || '')
-    .toLowerCase()
-    .replace(/^\./, '')
-  const mime = (asset?.mime_type || '').toLowerCase()
+/** Light specimen tile — same language as {@link UploadedFontSpecimenPreview} drawer (soft white → cool slate/sky). */
+const SPECIMEN_TILE_CLASS =
+  'items-center justify-center gap-1 rounded-2xl bg-gradient-to-b from-white via-slate-50 to-sky-100/75 px-2 py-2 text-center ring-1 ring-slate-200/90 shadow-[inset_0_1px_0_rgba(255,255,255,0.85)]'
 
-  if (['psd', 'psb'].includes(ext) || mime.includes('photoshop')) {
-    return {
-      wrap: 'bg-gradient-to-br from-sky-300/35 via-blue-500/25 to-indigo-950/50',
-      ring: 'ring-1 ring-indigo-400/30',
-      icon: 'text-indigo-950 drop-shadow-sm',
-    }
-  }
-  if (['ai', 'eps'].includes(ext) || mime.includes('illustrator')) {
-    return {
-      wrap: 'bg-gradient-to-br from-orange-300/40 via-amber-500/25 to-orange-950/45',
-      ring: 'ring-1 ring-orange-400/35',
-      icon: 'text-orange-950 drop-shadow-sm',
-    }
-  }
-  if (['mp4', 'mov', 'avi', 'webm', 'mkv', 'm4v'].includes(ext) || mime.startsWith('video/')) {
-    return {
-      wrap: 'bg-gradient-to-br from-violet-300/35 via-fuchsia-500/20 to-purple-950/50',
-      ring: 'ring-1 ring-violet-400/30',
-      icon: 'text-purple-950 drop-shadow-sm',
-    }
-  }
-  if (['tiff', 'tif', 'cr2', 'nef', 'arw', 'dng'].includes(ext) || mime.includes('tiff') || mime.includes('raw')) {
-    return {
-      wrap: 'bg-gradient-to-br from-emerald-300/35 via-teal-500/25 to-emerald-950/45',
-      ring: 'ring-1 ring-teal-400/30',
-      icon: 'text-emerald-950 drop-shadow-sm',
-    }
-  }
-  if (mime.startsWith('image/') || ['jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'avif', 'bmp'].includes(ext)) {
-    return {
-      wrap: 'bg-gradient-to-br from-rose-200/50 via-pink-300/30 to-slate-700/40',
-      ring: 'ring-1 ring-rose-300/40',
-      icon: 'text-rose-950/90 drop-shadow-sm',
-    }
-  }
-  return {
-    wrap: 'bg-gradient-to-br from-slate-200/60 via-slate-300/35 to-slate-600/45',
-    ring: 'ring-1 ring-slate-400/35',
-    icon: 'text-slate-800 drop-shadow-sm',
-  }
+function extensionBadgeFromAsset(asset) {
+  const raw = asset?.file_extension || asset?.original_filename?.split?.('.')?.pop() || ''
+  const ext = String(raw)
+    .replace(/^\./, '')
+    .trim()
+  return ext ? ext.toUpperCase() : 'FILE'
 }
 
 export default function AssetPlaceholder({ asset, primaryColor = null, brand = null, size = 'lg', rich = false }) {
@@ -79,94 +39,19 @@ export default function AssetPlaceholder({ asset, primaryColor = null, brand = n
     )
   }
 
-  if (rich) {
-    const primary = brand?.primary_color || '#6366f1'
-    const secondary = brand?.secondary_color || '#8b5cf6'
-    const useBrandTile = Boolean(brand?.primary_color)
-    const cinematicBg = buildBrandCinematicTileBackground(primary, secondary, brand?.accent_color)
-
-    const iconChipClass =
-      'flex items-center justify-center w-[4.25rem] h-[4.25rem] rounded-2xl bg-white/12 backdrop-blur-md shadow-lg ring-1 ring-white/20'
-
-    if (useBrandTile) {
-      return (
-        <div
-          className="relative flex items-center justify-center w-full h-full rounded-2xl overflow-hidden ring-1 ring-inset ring-white/10"
-          style={{
-            background: cinematicBg,
-            boxShadow: `inset 0 0 1px ${hexToRgba(primary, 0.35)}`,
-          }}
-        >
-          <div className={`relative z-[1] ${iconChipClass}`}>
-            <FileTypeIcon
-              fileExtension={asset?.file_extension}
-              mimeType={asset?.mime_type}
-              size={size === 'sm' ? 'md' : 'lg'}
-              iconClassName="text-white/90 drop-shadow-md"
-            />
-          </div>
-        </div>
-      )
-    }
-
-    const { wrap } = richPlaceholderClasses(asset)
-    return (
-      <div className="relative flex items-center justify-center w-full h-full rounded-2xl overflow-hidden ring-1 ring-inset ring-white/10">
-        <div
-          className="absolute inset-0"
-          style={{ background: cinematicBg }}
-          aria-hidden
-        />
-        <div className={`absolute inset-0 opacity-[0.5] ${wrap}`} aria-hidden />
-        <div className={`relative z-[1] ${iconChipClass}`}>
-          <FileTypeIcon
-            fileExtension={asset?.file_extension}
-            mimeType={asset?.mime_type}
-            size={size === 'sm' ? 'md' : 'lg'}
-            iconClassName="text-white/90 drop-shadow-md"
-          />
-        </div>
-      </div>
-    )
-  }
-
-  // Processing / pending (no rich failure copy): brand-tinted tile — matches cinematic rich placeholders, avoids flat white video tiles.
-  const brandPrimary = primaryColor || brand?.primary_color
-  if (brandPrimary) {
-    const secondary = brand?.secondary_color || brand?.accent_color || brandPrimary
-    const cinematicBg = buildBrandCinematicTileBackground(brandPrimary, secondary, brand?.accent_color)
-    const iconChipClass =
-      'flex items-center justify-center w-[4.25rem] h-[4.25rem] rounded-2xl bg-white/12 backdrop-blur-md shadow-lg ring-1 ring-white/20'
-    return (
-      <div
-        className="relative flex items-center justify-center w-full h-full rounded-2xl overflow-hidden ring-1 ring-inset ring-white/10"
-        style={{
-          background: cinematicBg,
-          boxShadow: `inset 0 0 1px ${hexToRgba(brandPrimary, 0.35)}`,
-        }}
-      >
-        <div className={`relative z-[1] ${iconChipClass}`}>
-          <FileTypeIcon
-            fileExtension={asset?.file_extension}
-            mimeType={asset?.mime_type}
-            size={size === 'sm' ? 'md' : 'lg'}
-            iconClassName="text-white/90 drop-shadow-md"
-          />
-        </div>
-      </div>
-    )
-  }
+  const iconSize = size === 'sm' ? 'sm' : size === 'md' ? 'md' : 'lg'
 
   return (
-    <div className="relative flex items-center justify-center w-full h-full rounded-lg overflow-hidden">
-      <div className="flex items-center justify-center w-16 h-16 rounded-full bg-white/70 backdrop-blur-sm shadow-sm">
-        <FileTypeIcon
-          fileExtension={asset?.file_extension}
-          mimeType={asset?.mime_type}
-          size={size}
-          className="text-gray-500"
-        />
-      </div>
+    <div className={`relative flex h-full w-full min-h-0 flex-col ${SPECIMEN_TILE_CLASS}`}>
+      <FileTypeIcon
+        fileExtension={asset?.file_extension}
+        mimeType={asset?.mime_type}
+        size={iconSize}
+        iconClassName="text-slate-600"
+      />
+      <span className="max-w-full truncate text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-800 sm:text-[11px]">
+        {extensionBadgeFromAsset(asset)}
+      </span>
     </div>
   )
 }

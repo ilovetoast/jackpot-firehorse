@@ -1201,6 +1201,22 @@ class TenantMetadataVisibilityService
 
         // Video (and any tags_and_collection_only): system fields enabled; tenant fields limited to tags/collection
         if (in_array($categorySlug, $tagsAndCollectionOnlySlugs, true)) {
+            $hiddenForSlug = config(
+                'metadata_category_defaults.system_fields_hidden_for_category_slugs.'.strtolower($categorySlug),
+                []
+            );
+            if (is_array($hiddenForSlug)
+                && $fieldScope === 'system'
+                && in_array($fieldKey, $hiddenForSlug, true)) {
+                return [
+                    'is_hidden' => true,
+                    'is_upload_hidden' => true,
+                    'is_filter_hidden' => true,
+                    'is_primary' => null,
+                    'is_edit_hidden' => true,
+                ];
+            }
+
             $enabled = ($fieldScope === 'system') || in_array($fieldKey, ['tags', 'collection'], true);
 
             return [

@@ -88,6 +88,7 @@ import {
     nextZIndex,
     normalizeZ,
     isFillLayer,
+    isCtaButtonFillLayer,
     isMaskLayer,
     buildMaskStyleForLayer,
     findGroupForLayer,
@@ -104,13 +105,14 @@ import {
     resolvedFillGradientStops,
     editorBridgeFileUrlForAssetId,
 } from './documentModel'
-import FillGradientStopField from './FillGradientStopField'
+import FillGradientStopField, { BrandColorSwatchStrip } from './FillGradientStopField'
 import { TEMPLATE_CATEGORIES, allFormats, blueprintToLayers, blueprintToLayersAndGroups, buildLayersForStyle, getAllLayoutStyles, textBoostToFillFields, inferTextBoostStyle, type LayerBlueprint, type TemplateFormat, type TemplateCategory, type LayoutStyleId } from './templateConfig'
 import { FORMAT_PACKS } from './recipes'
 import { buildTestPsdFromFlattenedPng } from './studioPsdExport'
 import { applyWizardAssetDefaults, fetchWizardDefaults, type WizardDefaults } from './wizardDefaults'
 import { applyStudioBriefToBlueprints, WIZARD_POST_GOALS, defaultWizardPostGoal, type StudioBrief, type WizardPostGoalId } from './wizardBrief'
 import GridOverlay from '../../Components/Editor/GridOverlay'
+import EditorSlotReelLoader from '../../Components/Editor/EditorSlotReelLoader'
 import PlacementPicker from '../../Components/Editor/PlacementPicker'
 import {
     placementToXY,
@@ -163,7 +165,18 @@ import {
     postCompositionVersion,
     putComposition,
 } from './editorCompositionBridge'
-import type { CompositionSummaryDto } from './editorCompositionBridge'
+import type { CompositionSummaryDto, CompositionVisibility } from './editorCompositionBridge'
+import {
+    fetchCreativeSetForComposition,
+    fetchCreativeSetGenerationJob,
+    postCreativeSet,
+    postCreativeSetVariant,
+    postRetryGenerationJobItem,
+} from './studioCreativeSetBridge'
+import type { StudioCreativeSetDto } from './studioCreativeSetTypes'
+import { ApplyScopeBar } from './components/VersionsRail/ApplyScopeBar'
+import { GenerateStudioVersionsModal } from './components/VersionsRail/GenerateStudioVersionsModal'
+import { VersionsRail } from './components/VersionsRail/VersionsRail'
 import { areAllRequiredFieldsSatisfied } from '../../utils/metadataValidation'
 import { loadEditorBrandTypography } from './editorBrandFonts'
 import { fetchEditorBrandContext } from './editorBrandContextBridge'
@@ -202,7 +215,7 @@ const IMAGE_LAYER_QUICK_ACTIONS: ReadonlyArray<{ id: string; label: string; inst
         id: 'remove_bg',
         label: 'Remove background',
         instruction:
-            'Remove the studio or white background completely. Keep only the product or garment with a clean transparent cutout (alpha channel). Preserve true colors, fabric texture, and sharp edges. Avoid halo or gray fringe.',
+            'Remove the studio or white background completely. Keep only the product or garment with a clean transparent cutout using a real PNG alpha channel (fully transparent pixels outside the subject). Do not draw a gray-and-white checkerboard, grid, or pattern where the background was—those must be true transparency, not picture content. Preserve true colors, fabric texture, and sharp edges. Avoid halo or gray fringe.',
     },
     {
         id: 'soft_studio',
@@ -535,6 +548,9 @@ type DragState =
           /** Same as move — Alt-drill resize of one member without grid snap. */
           skipSnap?: boolean
       }
+
+/** In-canvas undo for move/resize gestures (Ctrl/Cmd+Z). Server version history stays separate. */
+const MAX_CANVAS_UNDO = 50
 
 const UNTITLED_DRAFT_NAME = 'Untitled draft'
 
@@ -1042,10 +1058,15 @@ type EditorAiCreditStatus = {
     this_composition_used: number | null
 }
 
+function compositionVisibilityFromApi(raw: string | undefined | null): CompositionVisibility {
+    return raw === 'private' ? 'private' : 'shared'
+}
+
 export default function AssetEditor() {
     const page = usePage()
-    const { auth } = page.props as {
-        auth: {
+    const { auth } = page.props as unknown as {
+        auth?: {
+            user?: { id: number } | null
             activeBrand?: { id?: number; name?: string; primary_color?: string | null }
             permissions?: { ai_enabled?: boolean }
         }
@@ -1093,6 +1114,8 @@ export default function AssetEditor() {
      * (decision doc: no marquee select in v1).
      */
     const [groupingSelection, setGroupingSelection] = useState<Set<string>>(() => new Set())
+    /** Last plain-clicked layer row in the panel — Shift+click extends a range from here (or from the current canvas selection). */
+    const layerPanelRangeAnchorIdRef = useRef<string | null>(null)
     // Mirror ref so synchronous click handlers (select → beginMove in the same
     // event) can read the selection that was just set without waiting for the
     // next render.
@@ -1181,6 +1204,20 @@ export default function AssetEditor() {
     const [lastSavedName, setLastSavedName] = useState<string>(() =>
         defaultCompositionName(createInitialDocument())
     )
+    /** New saves default to private until the author shares with the brand. */
+    const [compositionVisibility, setCompositionVisibility] = useState<CompositionVisibility>('private')
+    const [lastSavedVisibility, setLastSavedVisibility] = useState<CompositionVisibility>('private')
+    const [compositionOwnerUserId, setCompositionOwnerUserId] = useState<string | null>(null)
+    const canChangeCompositionVisibility = useMemo(() => {
+        if (!compositionId) {
+            return true
+        }
+        if (compositionOwnerUserId == null || compositionOwnerUserId === '') {
+            return true
+        }
+
+        return String(auth?.user?.id ?? '') === compositionOwnerUserId
+    }, [auth?.user?.id, compositionId, compositionOwnerUserId])
     const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
     const [saveError, setSaveError] = useState<string | null>(null)
     /** Wall-clock of the last successful save of any kind; used for "Saved Xs ago" indicator. */
@@ -1272,6 +1309,13 @@ export default function AssetEditor() {
     const [compositionListLoading, setCompositionListLoading] = useState(false)
     const [compositionListError, setCompositionListError] = useState<string | null>(null)
     const [compositionDeleteBusy, setCompositionDeleteBusy] = useState(false)
+    /** Studio "Versions" — backend Creative Set wrapping sibling compositions. */
+    const [studioCreativeSet, setStudioCreativeSet] = useState<StudioCreativeSetDto | null>(null)
+    const [studioCreativeSetDuplicateBusy, setStudioCreativeSetDuplicateBusy] = useState(false)
+    const [generateVersionsModalOpen, setGenerateVersionsModalOpen] = useState(false)
+    const [studioGenerationPollJobId, setStudioGenerationPollJobId] = useState<string | null>(null)
+    const [studioRetryGenerationItemBusy, setStudioRetryGenerationItemBusy] = useState<string | null>(null)
+    const [studioApplyScope, setStudioApplyScope] = useState<'this_version' | 'all_versions'>('this_version')
     const [pickerSearch, setPickerSearch] = useState('')
     const [pickerView, setPickerView] = useState<'grid' | 'list'>('grid')
     const [versions, setVersions] = useState<
@@ -1291,6 +1335,14 @@ export default function AssetEditor() {
     const [previewFrame, setPreviewFrame] = useState<'social' | 'banner'>('social')
     const compositionIdRef = useRef<string | null>(null)
     compositionIdRef.current = compositionId
+
+    useEffect(() => {
+        undoStackRef.current = []
+        redoStackRef.current = []
+        dragUndoBaselineRef.current = null
+    }, [compositionId])
+    const studioCreativeSetIdRef = useRef<string | null>(null)
+    studioCreativeSetIdRef.current = studioCreativeSet?.id ?? null
     /** Shown when an image URL failed; cleared when the layer’s src changes away from placeholder. */
     const [imageLoadFailedByLayerId, setImageLoadFailedByLayerId] = useState<Record<string, true>>({})
     const [genUsage, setGenUsage] = useState<{
@@ -1535,6 +1587,10 @@ export default function AssetEditor() {
     const canvasContainerRef = useRef<HTMLDivElement>(null)
     const stageRef = useRef<HTMLDivElement>(null)
     const dragRef = useRef<DragState | null>(null)
+    const undoStackRef = useRef<string[]>([])
+    const redoStackRef = useRef<string[]>([])
+    /** Full document JSON captured at move/resize pointer-down; compared on pointer-up. */
+    const dragUndoBaselineRef = useRef<string | null>(null)
 
     const layersForCanvas = useMemo(
         () =>
@@ -1606,6 +1662,46 @@ export default function AssetEditor() {
         return rows
     }, [document.groups, layersForPanel])
 
+    /** Layer ids in panel stack order (front → back), including every group member in z-order — used for Shift+range multi-select. */
+    const layerPanelOrderedLayerIds = useMemo(() => {
+        const ids: string[] = []
+        for (const row of layerPanelRows) {
+            if (row.kind === 'layer') {
+                ids.push(row.layer.id)
+            } else {
+                for (const m of row.members) {
+                    ids.push(m.id)
+                }
+            }
+        }
+        return ids
+    }, [layerPanelRows])
+
+    const applyLayerPanelShiftRange = useCallback(
+        (targetId: string) => {
+            const ordered = layerPanelOrderedLayerIds
+            const anchor = layerPanelRangeAnchorIdRef.current ?? selectedLayerId
+            const ia = anchor ? ordered.indexOf(anchor) : -1
+            const ib = ordered.indexOf(targetId)
+            if (ia === -1 || ib === -1) {
+                setGroupingSelection((prev) => {
+                    const next = new Set(prev)
+                    if (next.has(targetId)) {
+                        next.delete(targetId)
+                    } else {
+                        next.add(targetId)
+                    }
+                    return next
+                })
+                return
+            }
+            const lo = Math.min(ia, ib)
+            const hi = Math.max(ia, ib)
+            setGroupingSelection(new Set(ordered.slice(lo, hi + 1)))
+        },
+        [layerPanelOrderedLayerIds, selectedLayerId],
+    )
+
     const selectedLayer = useMemo(
         () => document.layers.find((l) => l.id === selectedLayerId) ?? null,
         [document.layers, selectedLayerId]
@@ -1662,14 +1758,17 @@ export default function AssetEditor() {
                         draggable={false}
                         className="min-w-0 flex-1 truncate text-left font-medium"
                         onClick={(e) => {
-                            // Shift-click builds the ad-hoc grouping selection.
-                            // Plain click routes through `selectLayerOrGroup`
-                            // so grouped layers still select their group.
+                            // Shift+click: range-select in stack order (anchor = last plain
+                            // panel click, else current canvas selection) so "Group selected"
+                            // works after a normal click + Shift+click — not only Shift+Shift.
                             if (e.shiftKey) {
                                 e.preventDefault()
-                                toggleGroupingSelection(layer.id)
+                                applyLayerPanelShiftRange(layer.id)
+                                selectLayerOrGroup(layer.id, { alt: e.altKey })
+                                setEditingTextLayerId(null)
                                 return
                             }
+                            layerPanelRangeAnchorIdRef.current = layer.id
                             selectLayerOrGroup(layer.id, { alt: e.altKey })
                             setEditingTextLayerId(null)
                         }}
@@ -1834,8 +1933,9 @@ export default function AssetEditor() {
     const dirty = useMemo(
         () =>
             JSON.stringify(document) !== lastSavedSerialized
-            || compositionName.trim() !== lastSavedName.trim(),
-        [document, lastSavedSerialized, compositionName, lastSavedName]
+            || compositionName.trim() !== lastSavedName.trim()
+            || compositionVisibility !== lastSavedVisibility,
+        [document, lastSavedSerialized, compositionName, lastSavedName, compositionVisibility, lastSavedVisibility]
     )
 
     /** True when there is something worth warning about before navigate / reset (not a fresh empty canvas). */
@@ -1988,6 +2088,10 @@ export default function AssetEditor() {
                     setCompositionId(c.id)
                     setCompositionName(c.name)
                     setLastSavedName(c.name ?? '')
+                    const vis = compositionVisibilityFromApi(c.visibility)
+                    setCompositionVisibility(vis)
+                    setLastSavedVisibility(vis)
+                    setCompositionOwnerUserId(c.owner_user_id ?? null)
                     setDocument(doc)
                     setLastSavedSerialized(JSON.stringify(doc))
                     setSelectedLayerId(null)
@@ -2020,6 +2124,67 @@ export default function AssetEditor() {
     }, [compositionId])
 
     useEffect(() => {
+        if (!compositionId) {
+            setStudioCreativeSet(null)
+            return
+        }
+        let cancelled = false
+        void fetchCreativeSetForComposition(compositionId)
+            .then(({ creative_set }) => {
+                if (!cancelled) {
+                    setStudioCreativeSet(creative_set)
+                }
+            })
+            .catch(() => {
+                if (!cancelled) {
+                    setStudioCreativeSet(null)
+                }
+            })
+        return () => {
+            cancelled = true
+        }
+    }, [compositionId])
+
+    useEffect(() => {
+        setStudioApplyScope('this_version')
+    }, [compositionId])
+
+    useEffect(() => {
+        if (!studioGenerationPollJobId || !studioCreativeSetIdRef.current) {
+            return
+        }
+        const creativeSetId = studioCreativeSetIdRef.current
+        const jobId = studioGenerationPollJobId
+        const tick = window.setInterval(() => {
+            void (async () => {
+                try {
+                    const { generation_job, creative_set } = await fetchCreativeSetGenerationJob(creativeSetId, jobId)
+                    setStudioCreativeSet(creative_set)
+                    const terminal =
+                        generation_job.status === 'completed' ||
+                        generation_job.status === 'failed' ||
+                        generation_job.status === 'cancelled'
+                    if (terminal) {
+                        window.clearInterval(tick)
+                        setStudioGenerationPollJobId(null)
+                        const failed = generation_job.items?.some((i) => i.status === 'failed')
+                        setActivityToast(
+                            generation_job.status === 'completed' && !failed
+                                ? 'Version generation finished'
+                                : 'Version generation finished (some versions may have failed — check the rail).'
+                        )
+                    }
+                } catch {
+                    window.clearInterval(tick)
+                    setStudioGenerationPollJobId(null)
+                    setActivityToast('Could not refresh generation status')
+                }
+            })()
+        }, 2500)
+        return () => window.clearInterval(tick)
+    }, [studioGenerationPollJobId])
+
+    useEffect(() => {
         if (!compositionId || !dirty) {
             return
         }
@@ -2043,13 +2208,17 @@ export default function AssetEditor() {
                     const changedSinceSnapshot = serialized !== lastAutosaveSnapshotSerializedRef.current
                     const shouldSnapshot = changedSinceSnapshot && elapsedSinceSnapshot >= AUTOSAVE_SNAPSHOT_MS
 
-                    await putComposition(compositionId, doc, {
+                    const updated = await putComposition(compositionId, doc, {
                         name,
                         versionLabel: null,
                         createVersion: shouldSnapshot,
                         versionKind: shouldSnapshot ? 'autosave' : undefined,
                         thumbnailPngBase64: thumb,
+                        visibility: compositionVisibility,
                     })
+                    const vis = compositionVisibilityFromApi(updated.visibility)
+                    setCompositionVisibility(vis)
+                    setLastSavedVisibility(vis)
 
                     if (shouldSnapshot) {
                         lastAutosaveSnapshotAtRef.current = Date.now()
@@ -2069,7 +2238,7 @@ export default function AssetEditor() {
             })()
         }, AUTOSAVE_MS)
         return () => window.clearTimeout(t)
-    }, [document, compositionId, dirty, compositionName, refreshVersions])
+    }, [document, compositionId, dirty, compositionName, compositionVisibility, refreshVersions])
 
     useEffect(() => {
         setVariationHoverIdx(null)
@@ -2371,6 +2540,68 @@ export default function AssetEditor() {
         }))
     }, [])
 
+    const performCanvasUndo = useCallback(() => {
+        if (dragRef.current) {
+            return
+        }
+        const stack = undoStackRef.current
+        if (stack.length === 0) {
+            return
+        }
+        const prevJson = stack.pop()!
+        redoStackRef.current.push(JSON.stringify(documentRef.current))
+        undoStackRef.current = stack
+        setDocument(parseDocumentFromApi(JSON.parse(prevJson)))
+    }, [])
+
+    const performCanvasRedo = useCallback(() => {
+        if (dragRef.current) {
+            return
+        }
+        const stack = redoStackRef.current
+        if (stack.length === 0) {
+            return
+        }
+        const nextJson = stack.pop()!
+        undoStackRef.current.push(JSON.stringify(documentRef.current))
+        redoStackRef.current = stack
+        setDocument(parseDocumentFromApi(JSON.parse(nextJson)))
+    }, [])
+
+    useEffect(() => {
+        const isTypingTarget = () => {
+            const a = globalThis.document.activeElement
+            if (!a) return false
+            const tag = a.tagName
+            if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true
+            if ((a as HTMLElement).isContentEditable) return true
+            return false
+        }
+        const onKeyDown = (e: KeyboardEvent) => {
+            if (editingTextLayerId || isTypingTarget()) {
+                return
+            }
+            const redoKey =
+                ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === 'z' || e.key === 'Z')) ||
+                (e.ctrlKey && !e.metaKey && (e.key === 'y' || e.key === 'Y'))
+            if ((e.metaKey || e.ctrlKey) && (e.key === 'z' || e.key === 'Z') && !e.shiftKey) {
+                if (undoStackRef.current.length > 0) {
+                    e.preventDefault()
+                    performCanvasUndo()
+                }
+                return
+            }
+            if (redoKey) {
+                if (redoStackRef.current.length > 0) {
+                    e.preventDefault()
+                    performCanvasRedo()
+                }
+            }
+        }
+        window.addEventListener('keydown', onKeyDown)
+        return () => window.removeEventListener('keydown', onKeyDown)
+    }, [editingTextLayerId, performCanvasRedo, performCanvasUndo])
+
     const runCopyAssist = useCallback(
         async (operation: GenerateCopyOperation) => {
             if (!aiEnabled) {
@@ -2532,25 +2763,36 @@ export default function AssetEditor() {
                 thumb = await captureCompositionThumbnailBase64(stageRef.current, documentRef.current)
             }
             if (!compositionId) {
-                const c = await postComposition(nameToSave, docSnapshot, { thumbnailPngBase64: thumb })
+                const c = await postComposition(nameToSave, docSnapshot, {
+                    thumbnailPngBase64: thumb,
+                    visibility: compositionVisibility,
+                })
                 const doc = parseDocumentFromApi(c.document)
                 setCompositionId(c.id)
                 const resolvedName = c.name?.trim() ? c.name : UNTITLED_DRAFT_NAME
                 setCompositionName(resolvedName)
                 setLastSavedName(resolvedName)
+                const vis = compositionVisibilityFromApi(c.visibility)
+                setCompositionVisibility(vis)
+                setLastSavedVisibility(vis)
+                setCompositionOwnerUserId(c.owner_user_id ?? null)
                 setDocument(doc)
                 const serialized = JSON.stringify(doc)
                 setLastSavedSerialized(serialized)
                 lastAutosaveSnapshotSerializedRef.current = serialized
                 replaceUrlCompositionParam(c.id)
             } else {
-                await putComposition(compositionId, docSnapshot, {
+                const updated = await putComposition(compositionId, docSnapshot, {
                     name: nameToSave,
                     versionLabel: null,
                     createVersion: true,
                     versionKind: 'manual',
                     thumbnailPngBase64: thumb,
+                    visibility: compositionVisibility,
                 })
+                const vis = compositionVisibilityFromApi(updated.visibility)
+                setCompositionVisibility(vis)
+                setLastSavedVisibility(vis)
                 const serialized = JSON.stringify(documentRef.current)
                 setLastSavedSerialized(serialized)
                 setLastSavedName(nameToSave)
@@ -2568,7 +2810,7 @@ export default function AssetEditor() {
             setSaveState('error')
             setSaveError(handleAIError(e))
         }
-    }, [compositionId, compositionName, refreshVersions])
+    }, [compositionId, compositionName, compositionVisibility, refreshVersions])
 
     const handleSave = useCallback(() => {
         void performManualSave()
@@ -2613,11 +2855,15 @@ export default function AssetEditor() {
             const doc = parseDocumentFromApi(v.document)
             const name = `${compositionName.trim() || defaultCompositionName(doc)} (copy)`
             try {
-                const c = await postCompositionFromDocument(name, doc)
+                const c = await postCompositionFromDocument(name, doc, { visibility: 'private' })
                 const d = parseDocumentFromApi(c.document)
                 setCompositionId(c.id)
                 setCompositionName(c.name)
                 setLastSavedName(c.name ?? '')
+                const vis = compositionVisibilityFromApi(c.visibility)
+                setCompositionVisibility(vis)
+                setLastSavedVisibility(vis)
+                setCompositionOwnerUserId(c.owner_user_id ?? null)
                 setDocument(d)
                 setLastSavedSerialized(JSON.stringify(d))
                 replaceUrlCompositionParam(c.id)
@@ -2640,6 +2886,10 @@ export default function AssetEditor() {
             setCompositionId(c.id)
             setCompositionName(c.name)
             setLastSavedName(c.name ?? '')
+            const vis = compositionVisibilityFromApi(c.visibility)
+            setCompositionVisibility(vis)
+            setLastSavedVisibility(vis)
+            setCompositionOwnerUserId(c.owner_user_id ?? null)
             setDocument(d)
             setLastSavedSerialized(JSON.stringify(d))
             replaceUrlCompositionParam(c.id)
@@ -2650,6 +2900,111 @@ export default function AssetEditor() {
             setSaveError(e instanceof Error ? e.message : 'Duplicate failed')
         }
     }, [compositionId, refreshVersions])
+
+    const switchToSiblingComposition = useCallback(
+        async (nextCompositionId: string) => {
+            if (!nextCompositionId || compositionId === nextCompositionId) {
+                return
+            }
+            if (discardRequiresConfirmation) {
+                const ok = await editorConfirm({
+                    title: 'Unsaved changes',
+                    message: 'Discard unsaved changes and open this version?',
+                    confirmText: 'Open version',
+                    variant: 'warning',
+                })
+                if (!ok) {
+                    return
+                }
+            }
+            setCompositionBootstrapping(true)
+            setCompositionLoadError(null)
+            try {
+                const c = await getComposition(nextCompositionId)
+                const doc = parseDocumentFromApi(c.document)
+                flushSync(() => {
+                    setCompositionId(c.id)
+                    setCompositionName(c.name)
+                    setLastSavedName(c.name ?? '')
+                    const vis = compositionVisibilityFromApi(c.visibility)
+                    setCompositionVisibility(vis)
+                    setLastSavedVisibility(vis)
+                    setCompositionOwnerUserId(c.owner_user_id ?? null)
+                    setDocument(doc)
+                    setLastSavedSerialized(JSON.stringify(doc))
+                    setSelectedLayerId(null)
+                    setEditingTextLayerId(null)
+                })
+                replaceUrlCompositionParam(c.id)
+                void refreshVersions()
+            } catch {
+                setCompositionLoadError('Could not load composition.')
+            } finally {
+                setCompositionBootstrapping(false)
+            }
+        },
+        [compositionId, discardRequiresConfirmation, editorConfirm, refreshVersions]
+    )
+
+    const createStudioVersionsSet = useCallback(async () => {
+        if (!compositionId) {
+            setActivityToast('Save the composition first.')
+            return
+        }
+        if (studioCreativeSet) {
+            setActivityToast('Already in a Versions set.')
+            return
+        }
+        try {
+            const { creative_set } = await postCreativeSet({ composition_id: compositionId })
+            setStudioCreativeSet(creative_set)
+            setActivityToast('Versions set created')
+        } catch (e) {
+            setActivityToast(e instanceof Error ? e.message : 'Could not create Versions set')
+        }
+    }, [compositionId, studioCreativeSet])
+
+    const duplicateStudioVariant = useCallback(async () => {
+        if (!compositionId || !studioCreativeSet) {
+            return
+        }
+        setStudioCreativeSetDuplicateBusy(true)
+        try {
+            const { creative_set, variant } = await postCreativeSetVariant(studioCreativeSet.id, {
+                source_composition_id: compositionId,
+            })
+            setStudioCreativeSet(creative_set)
+            await switchToSiblingComposition(variant.composition_id)
+            setActivityToast('Version duplicated')
+        } catch (e) {
+            setActivityToast(e instanceof Error ? e.message : 'Duplicate failed')
+        } finally {
+            setStudioCreativeSetDuplicateBusy(false)
+        }
+    }, [compositionId, studioCreativeSet, switchToSiblingComposition])
+
+    const retryStudioGenerationItem = useCallback(
+        async (itemId: string) => {
+            if (!studioCreativeSet) {
+                return
+            }
+            setStudioRetryGenerationItemBusy(itemId)
+            try {
+                const { generation_job, creative_set } = await postRetryGenerationJobItem(
+                    studioCreativeSet.id,
+                    itemId
+                )
+                setStudioCreativeSet(creative_set)
+                setStudioGenerationPollJobId(generation_job.id)
+                setActivityToast('Retrying version…')
+            } catch (e) {
+                setActivityToast(e instanceof Error ? e.message : 'Retry failed')
+            } finally {
+                setStudioRetryGenerationItemBusy(null)
+            }
+        },
+        [studioCreativeSet]
+    )
 
     const runCompareCapture = useCallback(async () => {
         if (!compositionId || !compareLeftId || !compareRightId || compareLeftId === compareRightId) {
@@ -2803,6 +3158,9 @@ export default function AssetEditor() {
             setCompositionId(null)
             setCompositionName(freshName)
             setLastSavedName(freshName)
+            setCompositionVisibility('private')
+            setLastSavedVisibility('private')
+            setCompositionOwnerUserId(null)
             setDocument(fresh)
             setLastSavedSerialized(JSON.stringify(fresh))
             setSelectedLayerId(null)
@@ -2821,6 +3179,7 @@ export default function AssetEditor() {
             setUiMode('edit')
             setWelcomeDismissed(false)
             setDraftCompositionCreditsUsed(0)
+            setStudioCreativeSet(null)
         })
         replaceUrlCompositionParam(null)
     }, [discardRequiresConfirmation, editorConfirm])
@@ -2829,7 +3188,8 @@ export default function AssetEditor() {
         async (targetId: string) => {
             const ok = await editorConfirm({
                 title: 'Delete composition',
-                message: 'Delete this composition for everyone in this brand? The saved canvas and its version history will be removed. Images in your library are not deleted.',
+                message:
+                    'Delete this saved composition and its version history? Shared compositions are removed for the whole brand; private ones only affect your workspace. Images in your library are not deleted.',
                 confirmText: 'Delete',
                 variant: 'danger',
             })
@@ -3525,6 +3885,7 @@ export default function AssetEditor() {
                           variationPending: false,
                           variationBatchSize: undefined,
                           variationResults: undefined,
+                          lastError: undefined,
                       }
                     : l
             )
@@ -3592,6 +3953,7 @@ export default function AssetEditor() {
                                       variationResults: undefined,
                                       variationPending: false,
                                       variationBatchSize: undefined,
+                                      lastError: undefined,
                                       ...(resolvedLabel
                                           ? { lastResolvedModelDisplay: resolvedLabel }
                                           : {}),
@@ -3614,9 +3976,7 @@ export default function AssetEditor() {
                 } catch {
                     /* ignore — server already counted; UI may be slightly stale until reload */
                 }
-                // Pull fresh credit totals so the top-bar pill updates live after
-                // each generation. Fire-and-forget — never block the render path.
-                void refreshAfterAiAndBumpDraftCredits()
+                await refreshAfterAiAndBumpDraftCredits()
             } catch (e) {
                 if (e instanceof DOMException && e.name === 'AbortError') {
                     if (genSeqRef.current[layerId] === seq) {
@@ -3635,16 +3995,17 @@ export default function AssetEditor() {
                 if (genSeqRef.current[layerId] !== seq) {
                     return
                 }
+                const errMsg = handleAIError(e)
                 setDocument((prev) => ({
                     ...prev,
                     layers: prev.layers.map((l) =>
                         l.id === layerId && l.type === 'generative_image'
-                            ? { ...l, status: 'error' as const }
+                            ? { ...l, status: 'error' as const, lastError: errMsg }
                             : l
                     ),
                     updated_at: new Date().toISOString(),
                 }))
-                setGenActionError(handleAIError(e))
+                setGenActionError(errMsg)
                 try {
                     const u = await fetchGenerateImageUsage()
                     setGenUsage(u)
@@ -3726,6 +4087,7 @@ export default function AssetEditor() {
                         ...l.aiEdit,
                         prompt: instruction,
                         status: 'editing',
+                        lastError: undefined,
                     },
                 }
             })
@@ -3776,6 +4138,7 @@ export default function AssetEditor() {
                                           status: 'done',
                                           resultSrc: res.image_url,
                                           previousResults,
+                                          lastError: undefined,
                                       },
                                   }
                                 : l
@@ -3813,6 +4176,7 @@ export default function AssetEditor() {
                                                   prompt: instruction,
                                                   status: 'done',
                                                   resultSrc: res.image_url,
+                                                  lastError: undefined,
                                               }
                                             : undefined,
                                     }
@@ -3832,7 +4196,7 @@ export default function AssetEditor() {
                 } catch {
                     /* ignore */
                 }
-                void refreshAfterAiAndBumpDraftCredits()
+                await refreshAfterAiAndBumpDraftCredits()
             } catch (e) {
                 if (e instanceof DOMException && e.name === 'AbortError') {
                     if (imageEditSeqRef.current[layerId] === seq) {
@@ -3842,7 +4206,7 @@ export default function AssetEditor() {
                             }
                             return {
                                 ...l,
-                                aiEdit: { ...l.aiEdit, status: 'idle' },
+                                aiEdit: { ...l.aiEdit, status: 'idle', lastError: undefined },
                             }
                         })
                     }
@@ -3851,16 +4215,17 @@ export default function AssetEditor() {
                 if (imageEditSeqRef.current[layerId] !== seq) {
                     return
                 }
+                const errMsg = handleAIError(e)
                 updateLayer(layerId, (l) => {
                     if (!isImageLayer(l)) {
                         return l
                     }
                     return {
                         ...l,
-                        aiEdit: { ...l.aiEdit, status: 'error' },
+                        aiEdit: { ...l.aiEdit, status: 'error', lastError: errMsg },
                     }
                 })
-                setImageEditActionError(handleAIError(e))
+                setImageEditActionError(errMsg)
                 try {
                     const u = await fetchGenerateImageUsage()
                     setGenUsage(u)
@@ -3941,6 +4306,7 @@ export default function AssetEditor() {
                           variationPending: true,
                           variationBatchSize: batchCount,
                           variationResults: undefined,
+                          lastError: undefined,
                       }
                     : l
             )
@@ -4009,6 +4375,7 @@ export default function AssetEditor() {
                             variationBatchSize: undefined,
                             variationResults: urls,
                             previousResults,
+                            lastError: undefined,
                             ...(varResolved ? { lastResolvedModelDisplay: varResolved } : {}),
                         }
                     }),
@@ -4023,7 +4390,7 @@ export default function AssetEditor() {
                 } catch {
                     /* ignore */
                 }
-                void refreshAfterAiAndBumpDraftCredits()
+                await refreshAfterAiAndBumpDraftCredits()
             } catch (e) {
                 if (e instanceof DOMException && e.name === 'AbortError') {
                     if (genSeqRef.current[layerId] === seq) {
@@ -4047,6 +4414,7 @@ export default function AssetEditor() {
                 if (genSeqRef.current[layerId] !== seq) {
                     return
                 }
+                const errMsg = handleAIError(e)
                 setDocument((prev) => ({
                     ...prev,
                     layers: prev.layers.map((l) =>
@@ -4057,12 +4425,13 @@ export default function AssetEditor() {
                                   variationPending: false,
                                   variationBatchSize: undefined,
                                   variationResults: undefined,
+                                  lastError: errMsg,
                               }
                             : l
                     ),
                     updated_at: new Date().toISOString(),
                 }))
-                setGenActionError(handleAIError(e))
+                setGenActionError(errMsg)
                 try {
                     const u = await fetchGenerateImageUsage()
                     setGenUsage(u)
@@ -4699,6 +5068,7 @@ export default function AssetEditor() {
             }
             e.stopPropagation()
             e.preventDefault()
+            dragUndoBaselineRef.current = JSON.stringify(documentRef.current)
             const { x, y } = clientToDoc(e.clientX, e.clientY)
 
             // If the clicked layer is in a group AND the group is currently
@@ -4760,6 +5130,7 @@ export default function AssetEditor() {
             e.preventDefault()
             setSelectedLayerId(layerId)
             setEditingTextLayerId(null)
+            dragUndoBaselineRef.current = JSON.stringify(documentRef.current)
             const { x, y } = clientToDoc(e.clientX, e.clientY)
 
             // Group resize: we treat the union rect as the subject and every
@@ -5083,8 +5454,28 @@ export default function AssetEditor() {
             }))
         }
         const onUp = () => {
+            const baseline = dragUndoBaselineRef.current
+            dragUndoBaselineRef.current = null
             dragRef.current = null
             reportSnapHits([])
+            if (baseline === null) {
+                return
+            }
+            queueMicrotask(() => {
+                try {
+                    const after = JSON.stringify(documentRef.current)
+                    if (after !== baseline) {
+                        const u = undoStackRef.current
+                        u.push(baseline)
+                        while (u.length > MAX_CANVAS_UNDO) {
+                            u.shift()
+                        }
+                        redoStackRef.current = []
+                    }
+                } catch {
+                    /* ignore */
+                }
+            })
         }
         window.addEventListener('mousemove', onMove)
         window.addEventListener('mouseup', onUp)
@@ -5099,6 +5490,8 @@ export default function AssetEditor() {
             setSelectedLayerId(null)
             setSelectedGroupId(null)
             setEditingTextLayerId(null)
+            setGroupingSelection(new Set())
+            layerPanelRangeAnchorIdRef.current = null
         }
     }, [])
 
@@ -5148,6 +5541,23 @@ export default function AssetEditor() {
                                 placeholder={defaultCompositionName(document)}
                                 aria-label="Composition name"
                             />
+                            <select
+                                value={compositionVisibility}
+                                onChange={(e) =>
+                                    setCompositionVisibility(e.target.value as CompositionVisibility)
+                                }
+                                disabled={!canChangeCompositionVisibility}
+                                title={
+                                    canChangeCompositionVisibility
+                                        ? 'Private: only you. Shared: anyone on this brand can open it from the list.'
+                                        : 'Only the creator can change visibility.'
+                                }
+                                className="max-w-[140px] shrink-0 truncate rounded-md border border-gray-700 bg-gray-800/80 px-1.5 py-1 text-[11px] font-medium text-gray-200 focus:border-gray-500 focus:ring-0 disabled:cursor-not-allowed disabled:opacity-60"
+                                aria-label="Composition visibility"
+                            >
+                                <option value="private">Private (you)</option>
+                                <option value="shared">Shared (brand)</option>
+                            </select>
                             <button
                                 type="button"
                                 onClick={handleSave}
@@ -5547,6 +5957,36 @@ export default function AssetEditor() {
                                             <button type="button" onClick={() => { setLeftPanel(null); void duplicateWholeComposition() }} disabled={!compositionId} className="flex w-full items-center gap-2.5 rounded-md px-3 py-1.5 text-sm text-gray-200 hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed">
                                                 <DocumentDuplicateIcon className="h-4 w-4 shrink-0 text-gray-400" /> Duplicate
                                             </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    setLeftPanel(null)
+                                                    void createStudioVersionsSet()
+                                                }}
+                                                disabled={!compositionId || !!studioCreativeSet}
+                                                className="flex w-full items-center gap-2.5 rounded-md px-3 py-1.5 text-sm text-gray-200 hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
+                                                title={!compositionId ? 'Save first' : studioCreativeSet ? 'Already in a Versions set' : 'Group this composition into a Versions set'}
+                                            >
+                                                <RectangleGroupIcon className="h-4 w-4 shrink-0 text-indigo-400" /> Create Versions
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    setLeftPanel(null)
+                                                    setGenerateVersionsModalOpen(true)
+                                                }}
+                                                disabled={!compositionId || !studioCreativeSet}
+                                                className="flex w-full items-center gap-2.5 rounded-md px-3 py-1.5 text-sm text-gray-200 hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
+                                                title={
+                                                    !compositionId
+                                                        ? 'Save first'
+                                                        : !studioCreativeSet
+                                                          ? 'Create a Versions set first'
+                                                          : 'Generate color and scene variants with AI'
+                                                }
+                                            >
+                                                <SparklesIcon className="h-4 w-4 shrink-0 text-amber-400" /> Generate versions…
+                                            </button>
                                             <button type="button" onClick={() => { setLeftPanel(null); compositionId && void deleteCompositionById(compositionId) }} disabled={!compositionId || compositionDeleteBusy} className="flex w-full items-center gap-2.5 rounded-md px-3 py-1.5 text-sm text-red-400 hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed">
                                                 <TrashIcon className="h-4 w-4 shrink-0" /> Delete
                                             </button>
@@ -5701,6 +6141,7 @@ export default function AssetEditor() {
                                                                                 // active.
                                                                                 const anchor = row.members[0]
                                                                                 if (anchor) {
+                                                                                    layerPanelRangeAnchorIdRef.current = anchor.id
                                                                                     selectLayerOrGroup(anchor.id)
                                                                                 }
                                                                             }}
@@ -6040,13 +6481,14 @@ export default function AssetEditor() {
                     </div>
                 )}
 
-                {/* Canvas */}
+                {/* Canvas + Studio Versions rail */}
+                <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
                 <main
                     ref={canvasContainerRef}
                     onPointerDown={onCanvasPointerDown}
                     onPointerMove={onCanvasPointerMove}
                     onPointerUp={onCanvasPointerUp}
-                    className={`relative box-border flex min-w-0 flex-1 items-center justify-center overflow-hidden ${
+                    className={`relative box-border flex min-h-0 min-w-0 flex-1 items-center justify-center overflow-hidden ${
                         uiMode === 'preview'
                             ? previewFrame === 'social'
                                 ? 'bg-gradient-to-b from-neutral-950 via-neutral-900 to-black p-8 sm:p-8 md:p-12 before:pointer-events-none before:absolute before:inset-0 before:z-[1] before:bg-black/25 before:content-[\'\']'
@@ -6582,7 +7024,12 @@ export default function AssetEditor() {
                                                         onError={() =>
                                                             updateLayer(layer.id, (l) =>
                                                                 isGenerativeImageLayer(l)
-                                                                    ? { ...l, status: 'error' }
+                                                                    ? {
+                                                                          ...l,
+                                                                          status: 'error',
+                                                                          lastError:
+                                                                              'The generated image could not be loaded.',
+                                                                      }
                                                                     : l
                                                             )
                                                         }
@@ -6595,7 +7042,7 @@ export default function AssetEditor() {
                                                 )}
                                                 {layer.status === 'generating' && (
                                                     <div
-                                                        className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-white/85 dark:bg-gray-950/85"
+                                                        className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-white/88 dark:bg-gray-950/88"
                                                         role="status"
                                                         aria-busy="true"
                                                         aria-label={
@@ -6604,12 +7051,8 @@ export default function AssetEditor() {
                                                                 : 'Generating image'
                                                         }
                                                     >
-                                                        <ArrowPathIcon
-                                                            className="h-8 w-8 shrink-0 animate-spin text-indigo-400"
-                                                            aria-hidden
-                                                        />
                                                         {layer.variationPending ? (
-                                                            <>
+                                                            <EditorSlotReelLoader label="Variations…">
                                                                 <div className="grid w-[88px] grid-cols-2 gap-1">
                                                                     {Array.from({
                                                                         length: layer.variationBatchSize ?? VARIATION_MAX,
@@ -6620,14 +7063,9 @@ export default function AssetEditor() {
                                                                         />
                                                                     ))}
                                                                 </div>
-                                                                <span className="text-xs font-medium text-gray-200">
-                                                                    Creating variations…
-                                                                </span>
-                                                            </>
+                                                            </EditorSlotReelLoader>
                                                         ) : (
-                                                            <span className="text-xs font-medium text-gray-200">
-                                                                Generating…
-                                                            </span>
+                                                            <EditorSlotReelLoader label="Generating…" />
                                                         )}
                                                     </div>
                                                 )}
@@ -6637,8 +7075,10 @@ export default function AssetEditor() {
                                                             className="h-6 w-6 text-red-400"
                                                             aria-hidden
                                                         />
-                                                        <span className="text-[10px] font-medium text-red-900 dark:text-red-100">
-                                                            Generation failed
+                                                        <span className="max-h-[4.5rem] overflow-y-auto text-[10px] font-medium leading-snug text-red-900 dark:text-red-100">
+                                                            {isGenerativeImageLayer(layer) && layer.lastError
+                                                                ? layer.lastError
+                                                                : 'Generation failed'}
                                                         </span>
                                                         <button
                                                             type="button"
@@ -6722,18 +7162,12 @@ export default function AssetEditor() {
                                                 )}
                                                 {layer.aiEdit?.status === 'editing' && (
                                                     <div
-                                                        className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-white/85 dark:bg-gray-950/85"
+                                                        className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-white/88 dark:bg-gray-950/88"
                                                         role="status"
                                                         aria-busy="true"
                                                         aria-label="Editing image"
                                                     >
-                                                        <ArrowPathIcon
-                                                            className="h-8 w-8 shrink-0 animate-spin text-indigo-400"
-                                                            aria-hidden
-                                                        />
-                                                        <span className="text-xs font-medium text-gray-200">
-                                                            Editing…
-                                                        </span>
+                                                        <EditorSlotReelLoader label="Editing…" />
                                                     </div>
                                                 )}
                                                 {layer.aiEdit?.status === 'error' && (
@@ -6742,8 +7176,8 @@ export default function AssetEditor() {
                                                             className="h-6 w-6 text-red-400"
                                                             aria-hidden
                                                         />
-                                                        <span className="text-[10px] font-medium text-red-900 dark:text-red-100">
-                                                            Edit failed
+                                                        <span className="max-h-[4.5rem] overflow-y-auto text-[10px] font-medium leading-snug text-red-900 dark:text-red-100">
+                                                            {layer.aiEdit?.lastError || 'Edit failed'}
                                                         </span>
                                                         <button
                                                             type="button"
@@ -6913,6 +7347,51 @@ export default function AssetEditor() {
                         </div>
                     )}
                 </main>
+                {uiMode === 'edit' && studioCreativeSet && compositionId && (
+                    <>
+                        <VersionsRail
+                            creativeSet={studioCreativeSet}
+                            activeCompositionId={compositionId}
+                            onSelectComposition={(id) => {
+                                void switchToSiblingComposition(id)
+                            }}
+                            onDuplicateFromCurrent={() => {
+                                void duplicateStudioVariant()
+                            }}
+                            duplicateBusy={studioCreativeSetDuplicateBusy}
+                            onRetryVersion={(itemId) => {
+                                void retryStudioGenerationItem(itemId)
+                            }}
+                            retryBusyItemId={studioRetryGenerationItemBusy}
+                        />
+                        <ApplyScopeBar
+                            creativeSetId={studioCreativeSet.id}
+                            sourceCompositionId={compositionId}
+                            applyScope={studioApplyScope}
+                            onApplyScopeChange={setStudioApplyScope}
+                            selectedLayer={selectedLayer}
+                            siblingCompositionCount={Math.max(
+                                0,
+                                studioCreativeSet.variants.filter((v) => v.composition_id !== compositionId).length
+                            )}
+                            onNotice={(msg) => setActivityToast(msg)}
+                            onCreativeSetUpdated={(cs) => setStudioCreativeSet(cs)}
+                        />
+                    </>
+                )}
+                {generateVersionsModalOpen && studioCreativeSet && compositionId && (
+                    <GenerateStudioVersionsModal
+                        open
+                        creativeSetId={studioCreativeSet.id}
+                        sourceCompositionId={compositionId}
+                        onClose={() => setGenerateVersionsModalOpen(false)}
+                        onGenerationQueued={(jobId) => {
+                            setStudioGenerationPollJobId(jobId)
+                            setActivityToast('Generating versions…')
+                        }}
+                    />
+                )}
+                </div>
 
                 {/* Properties — width is user-resizable (stored in localStorage) */}
                 <div
@@ -7769,72 +8248,108 @@ export default function AssetEditor() {
                                                 </span>
                                             </div>
                                             {(selectedLayer.borderStrokeWidth ?? 0) > 0 && (
-                                                <div className="mt-2 flex items-center gap-2">
-                                                    <input
-                                                        type="color"
-                                                        value={
-                                                            /^#[0-9a-fA-F]{6}$/.test(selectedLayer.borderStrokeColor ?? '')
-                                                                ? (selectedLayer.borderStrokeColor as string)
-                                                                : (/^#[0-9a-fA-F]{6}$/.test(selectedLayer.color) ? selectedLayer.color : '#111827')
-                                                        }
-                                                        disabled={selectedLayer.locked}
-                                                        onChange={(e) => {
-                                                            const v = e.target.value
-                                                            updateLayer(selectedLayer.id, (l) => {
-                                                                if (!isFillLayer(l)) return l
-                                                                return {
-                                                                    ...l,
-                                                                    borderStrokeColor: v,
-                                                                }
-                                                            })
-                                                        }}
-                                                        className="h-7 w-12 cursor-pointer rounded border border-gray-700"
-                                                    />
-                                                    <span className="text-[10px] text-gray-400">Border color</span>
+                                                <div className="mt-2 space-y-2">
+                                                    {isCtaButtonFillLayer(selectedLayer) && (
+                                                        <BrandColorSwatchStrip
+                                                            brandContext={brandContext}
+                                                            value={selectedLayer.borderStrokeColor ?? selectedLayer.color}
+                                                            disabled={selectedLayer.locked}
+                                                            onPick={(hex) =>
+                                                                updateLayer(selectedLayer.id, (l) => {
+                                                                    if (!isFillLayer(l)) return l
+                                                                    return { ...l, borderStrokeColor: hex }
+                                                                })
+                                                            }
+                                                        />
+                                                    )}
+                                                    <div className="flex items-center gap-2">
+                                                        <input
+                                                            type="color"
+                                                            value={
+                                                                /^#[0-9a-fA-F]{6}$/.test(selectedLayer.borderStrokeColor ?? '')
+                                                                    ? (selectedLayer.borderStrokeColor as string)
+                                                                    : /^#[0-9a-fA-F]{6}$/.test(selectedLayer.color)
+                                                                      ? selectedLayer.color
+                                                                      : (labeledBrandPalette(brandContext)[0]?.color ?? '#111827')
+                                                            }
+                                                            disabled={selectedLayer.locked}
+                                                            onChange={(e) => {
+                                                                const v = e.target.value
+                                                                updateLayer(selectedLayer.id, (l) => {
+                                                                    if (!isFillLayer(l)) return l
+                                                                    return {
+                                                                        ...l,
+                                                                        borderStrokeColor: v,
+                                                                    }
+                                                                })
+                                                            }}
+                                                            className="h-7 w-12 cursor-pointer rounded border border-gray-700"
+                                                        />
+                                                        <span className="text-[10px] text-gray-400">Border color</span>
+                                                    </div>
                                                 </div>
                                             )}
                                         </div>
 
-                                        {selectedLayer.fillKind === 'solid' && (
-                                            <div>
-                                                <label className="mb-1 block text-gray-400">
-                                                    Color
-                                                </label>
-                                                <div className="flex gap-2">
-                                                    <input
-                                                        type="color"
-                                                        value={
-                                                            /^#[0-9a-fA-F]{6}$/.test(selectedLayer.color)
-                                                                ? selectedLayer.color
-                                                                : '#6366f1'
-                                                        }
-                                                        disabled={selectedLayer.locked}
-                                                        onChange={(e) =>
-                                                            updateLayer(selectedLayer.id, (l) =>
-                                                                isFillLayer(l)
-                                                                    ? { ...l, color: e.target.value }
-                                                                    : l
-                                                            )
-                                                        }
-                                                        className="h-9 w-12 cursor-pointer rounded border border-gray-700 bg-gray-800"
-                                                    />
-                                                    <input
-                                                        type="text"
-                                                        value={selectedLayer.color}
-                                                        disabled={selectedLayer.locked}
-                                                        onChange={(e) =>
-                                                            updateLayer(selectedLayer.id, (l) =>
-                                                                isFillLayer(l)
-                                                                    ? { ...l, color: e.target.value }
-                                                                    : l
-                                                            )
-                                                        }
-                                                        className="min-w-0 flex-1 rounded border border-gray-700 bg-gray-800 px-2 py-1 font-mono text-[11px] text-gray-200"
-                                                        placeholder="#RRGGBB"
-                                                    />
+                                        {selectedLayer.fillKind === 'solid' && (() => {
+                                            const ctaBtnFill = isCtaButtonFillLayer(selectedLayer)
+                                            const brandFirst = labeledBrandPalette(brandContext)[0]?.color
+                                            const nativeHexFallback =
+                                                /^#[0-9a-fA-F]{6}$/.test(selectedLayer.color)
+                                                    ? selectedLayer.color
+                                                    : ctaBtnFill && brandFirst
+                                                      ? brandFirst
+                                                      : '#6366f1'
+
+                                            return (
+                                                <div>
+                                                    {ctaBtnFill && (
+                                                        <BrandColorSwatchStrip
+                                                            brandContext={brandContext}
+                                                            value={selectedLayer.color}
+                                                            disabled={selectedLayer.locked}
+                                                            onPick={(hex) =>
+                                                                updateLayer(selectedLayer.id, (l) =>
+                                                                    isFillLayer(l) ? { ...l, color: hex } : l
+                                                                )
+                                                            }
+                                                        />
+                                                    )}
+                                                    <label className="mb-1 block text-gray-400">
+                                                        Color
+                                                    </label>
+                                                    <div className="flex gap-2">
+                                                        <input
+                                                            type="color"
+                                                            value={nativeHexFallback}
+                                                            disabled={selectedLayer.locked}
+                                                            onChange={(e) =>
+                                                                updateLayer(selectedLayer.id, (l) =>
+                                                                    isFillLayer(l)
+                                                                        ? { ...l, color: e.target.value }
+                                                                        : l
+                                                                )
+                                                            }
+                                                            className="h-9 w-12 cursor-pointer rounded border border-gray-700 bg-gray-800"
+                                                        />
+                                                        <input
+                                                            type="text"
+                                                            value={selectedLayer.color}
+                                                            disabled={selectedLayer.locked}
+                                                            onChange={(e) =>
+                                                                updateLayer(selectedLayer.id, (l) =>
+                                                                    isFillLayer(l)
+                                                                        ? { ...l, color: e.target.value }
+                                                                        : l
+                                                                )
+                                                            }
+                                                            className="min-w-0 flex-1 rounded border border-gray-700 bg-gray-800 px-2 py-1 font-mono text-[11px] text-gray-200"
+                                                            placeholder="#RRGGBB"
+                                                        />
+                                                    </div>
                                                 </div>
-                                            </div>
-                                        )}
+                                            )
+                                        })()}
                                         {selectedLayer.fillKind === 'gradient' && (
                                             <>
                                                 <FillGradientStopField
@@ -7969,14 +8484,28 @@ export default function AssetEditor() {
                                         )}
                                         {selectedLayer.status === 'generating' && (
                                             <div
-                                                className="flex items-center gap-2 rounded-md border border-violet-600 bg-violet-950/40 px-2.5 py-2 text-[10px] font-medium text-violet-100"
+                                                className="rounded-md border border-violet-600 bg-violet-950/40 px-2.5 py-2 text-[10px] font-medium text-violet-100"
                                                 role="status"
                                                 aria-live="polite"
                                             >
-                                                <ArrowPathIcon className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
-                                                {selectedLayer.variationPending
-                                                    ? 'Creating variations…'
-                                                    : 'Generating image…'}
+                                                {selectedLayer.variationPending ? (
+                                                    <div className="flex flex-col items-center gap-2 sm:flex-row sm:justify-center">
+                                                        <EditorSlotReelLoader label="Variations…" />
+                                                        <div className="grid w-[72px] grid-cols-2 gap-1">
+                                                            {Array.from({
+                                                                length:
+                                                                    selectedLayer.variationBatchSize ?? VARIATION_MAX,
+                                                            }).map((_, i) => (
+                                                                <div
+                                                                    key={i}
+                                                                    className="aspect-square animate-pulse rounded bg-gradient-to-br from-violet-300/40 to-indigo-400/30"
+                                                                />
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                ) : (
+                                                    <EditorSlotReelLoader label="Generating…" />
+                                                )}
                                             </div>
                                         )}
                                         <div>
@@ -8554,15 +9083,25 @@ export default function AssetEditor() {
 
                                         {selectedLayer.assetId && (
                                             <div className="mt-4">
-                                                <div className="text-xs font-semibold text-gray-400 mb-2">
-                                                    Versions
+                                                <div className="mb-1 flex items-start justify-between gap-2">
+                                                    <div className="text-xs font-semibold text-gray-400">
+                                                        Version timeline
+                                                    </div>
+                                                    {selectedImageLayerVersionStrip.length > 1 && (
+                                                        <span className="text-[9px] font-medium uppercase tracking-wide text-gray-500">
+                                                            Scroll →
+                                                        </span>
+                                                    )}
                                                 </div>
                                                 <p className="mb-2 text-[10px] leading-snug text-gray-400">
-                                                    Original first, newest edits next. Click a thumbnail to swap the
-                                                    canvas.
+                                                    Oldest on the left (Original), each AI save to the right. Click a
+                                                    thumbnail to load it on the canvas.
                                                 </p>
-                                                <div className="flex gap-3 overflow-x-auto pb-1 pt-0.5">
-                                                    {selectedImageLayerVersionStrip.map((v) => {
+                                                <div
+                                                    className="flex max-w-full items-stretch gap-0 overflow-x-auto overflow-y-visible rounded-lg border border-gray-700/80 bg-gray-950/40 px-2 py-2 scroll-smooth"
+                                                    style={{ scrollbarWidth: 'thin' }}
+                                                >
+                                                    {selectedImageLayerVersionStrip.map((v, vi) => {
                                                         const active = isAssetVersionThumbnailActive(
                                                             selectedLayer,
                                                             v,
@@ -8573,31 +9112,44 @@ export default function AssetEditor() {
                                                             selectedImageLayerVersionStripMin
                                                         )
                                                         return (
-                                                            <button
-                                                                key={v.id}
-                                                                type="button"
-                                                                disabled={selectedLayer.locked}
-                                                                onClick={() =>
-                                                                    handleSwitchAssetVersion(selectedLayer.id, v)
-                                                                }
-                                                                title={v.created_at ?? label}
-                                                                className={`flex flex-col items-center gap-1 flex-shrink-0 rounded-lg p-0.5 transition-shadow disabled:cursor-not-allowed disabled:opacity-50 ${
-                                                                    active
-                                                                        ? 'ring-2 ring-indigo-500 ring-offset-2 ring-offset-gray-900'
-                                                                        : 'hover:ring-2 hover:ring-indigo-400/60 hover:ring-offset-1 hover:ring-offset-gray-900'
-                                                                }`}
-                                                            >
-                                                                <div className="h-14 w-14 overflow-hidden rounded-md border border-gray-700 bg-gray-800">
-                                                                    <img
-                                                                        src={v.url}
-                                                                        alt=""
-                                                                        className="h-full w-full object-cover"
-                                                                    />
-                                                                </div>
-                                                                <span className="max-w-[4.5rem] truncate text-center text-[10px] font-semibold tabular-nums text-gray-300">
-                                                                    {label}
-                                                                </span>
-                                                            </button>
+                                                            <div key={v.id} className="flex flex-shrink-0 items-center">
+                                                                {vi > 0 && (
+                                                                    <span
+                                                                        className="mx-1 select-none self-center text-[10px] font-medium text-gray-600"
+                                                                        aria-hidden
+                                                                    >
+                                                                        →
+                                                                    </span>
+                                                                )}
+                                                                <button
+                                                                    type="button"
+                                                                    disabled={selectedLayer.locked}
+                                                                    onClick={() =>
+                                                                        handleSwitchAssetVersion(selectedLayer.id, v)
+                                                                    }
+                                                                    title={
+                                                                        v.created_at
+                                                                            ? `${label} — ${new Date(v.created_at).toLocaleString()}`
+                                                                            : label
+                                                                    }
+                                                                    className={`flex flex-col items-center gap-1 rounded-lg p-0.5 transition-shadow disabled:cursor-not-allowed disabled:opacity-50 ${
+                                                                        active
+                                                                            ? 'ring-2 ring-indigo-500 ring-offset-2 ring-offset-gray-950'
+                                                                            : 'hover:ring-2 hover:ring-indigo-400/60 hover:ring-offset-1 hover:ring-offset-gray-950'
+                                                                    }`}
+                                                                >
+                                                                    <div className="h-14 w-14 overflow-hidden rounded-md border border-gray-700 bg-gray-800">
+                                                                        <img
+                                                                            src={v.url}
+                                                                            alt=""
+                                                                            className="h-full w-full object-cover"
+                                                                        />
+                                                                    </div>
+                                                                    <span className="max-w-[4.5rem] truncate text-center text-[10px] font-semibold tabular-nums text-gray-300">
+                                                                        {label}
+                                                                    </span>
+                                                                </button>
+                                                            </div>
                                                         )
                                                     })}
                                                 </div>
@@ -11333,7 +11885,7 @@ export default function AssetEditor() {
                                                                         {wizardAutoFillEnabled && autoBgPick
                                                                             ? autoBgPick.name
                                                                             : (wizardDefaults.background_candidates.length === 0
-                                                                                ? 'No background photos found — tag images with "photography" (or "background" / "hero") in the library'
+                                                                                ? 'No background photos found — add images to the Photography category or tag them photography, background, or hero'
                                                                                 : 'Disabled — generative background')}
                                                                     </p>
                                                                 </div>

@@ -13,19 +13,21 @@ export type EditorAssetVersionsResponse = {
 }
 
 /**
- * Original (lowest version_number) first, then newer edits first (descending version_number).
+ * Timeline order: lowest version_number first (original upload), each AI save
+ * appended with the next number — reads left → right as oldest → newest.
  */
 export function orderAssetVersionsForStrip(versions: EditorAssetVersionRow[]): EditorAssetVersionRow[] {
     if (versions.length === 0) {
         return []
     }
-    const nums = versions.map((v) => v.version_number ?? 0)
-    const minN = Math.min(...nums)
-    const originals = versions.filter((v) => (v.version_number ?? minN) === minN)
-    const edits = versions
-        .filter((v) => (v.version_number ?? minN) !== minN)
-        .sort((a, b) => (b.version_number ?? 0) - (a.version_number ?? 0))
-    return [...originals, ...edits]
+    return [...versions].sort((a, b) => {
+        const na = a.version_number ?? 0
+        const nb = b.version_number ?? 0
+        if (na !== nb) {
+            return na - nb
+        }
+        return String(a.id).localeCompare(String(b.id))
+    })
 }
 
 export function assetVersionStripLabel(v: EditorAssetVersionRow, minVersionNumber: number): string {
@@ -33,17 +35,23 @@ export function assetVersionStripLabel(v: EditorAssetVersionRow, minVersionNumbe
     if (n <= minVersionNumber) {
         return 'Original'
     }
-    return `v${n}`
+    const step = n - minVersionNumber
+    return step === 1 ? 'AI 1' : `AI ${step}`
 }
+
+const stripUrlKey = (u: string | undefined): string => (u || '').split('?')[0]
 
 /** Highlight state when {@link ImageLayer.assetVersionId} is unset (e.g. legacy layer). */
 export function isAssetVersionThumbnailActive(
-    layer: { assetVersionId?: string },
+    layer: { assetVersionId?: string; src?: string },
     v: EditorAssetVersionRow,
     orderedStrip: EditorAssetVersionRow[]
 ): boolean {
     if (layer.assetVersionId) {
         return layer.assetVersionId === v.id
+    }
+    if (layer.src && stripUrlKey(layer.src) === stripUrlKey(v.url)) {
+        return true
     }
     const current = orderedStrip.find((r) => r.is_current)
     if (current) {

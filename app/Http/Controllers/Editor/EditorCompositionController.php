@@ -9,6 +9,7 @@ use App\Models\CompositionVersion;
 use App\Models\User;
 use App\Services\CompositionAssetReferenceStateService;
 use App\Services\CompositionThumbnailAssetService;
+use App\Services\Editor\CompositionDuplicateService;
 use App\Services\GenerativeCompositionAssetCleanup;
 use App\Services\StudioUsageService;
 use Illuminate\Http\JsonResponse;
@@ -33,13 +34,15 @@ class EditorCompositionController extends Controller
         protected GenerativeCompositionAssetCleanup $generativeCompositionAssetCleanup,
         protected CompositionAssetReferenceStateService $compositionRefState,
         protected StudioUsageService $studioUsage,
+        protected CompositionDuplicateService $compositionDuplicate,
     ) {}
 
     private function resolveComposition(Request $request, int $id): ?Composition
     {
         $tenant = app('tenant');
         $brand = app('brand');
-        if (! $tenant || ! $brand) {
+        $user = $request->user();
+        if (! $tenant || ! $brand || ! $user) {
             return null;
         }
 
@@ -47,6 +50,7 @@ class EditorCompositionController extends Controller
             ->where('id', $id)
             ->where('tenant_id', $tenant->id)
             ->where('brand_id', $brand->id)
+            ->visibleToUser($user)
             ->first();
     }
 
@@ -118,14 +122,25 @@ class EditorCompositionController extends Controller
 
     private function compositionJson(Composition $c): array
     {
+        $visibility = $c->visibility ?? Composition::VISIBILITY_SHARED;
+
         return [
             'id' => (string) $c->id,
             'name' => $c->name,
+            'visibility' => $visibility,
+            'owner_user_id' => $c->user_id !== null ? (string) $c->user_id : null,
             'document' => $c->document_json ?? [],
             'thumbnail_url' => $this->resolveThumbnailUrl($c->thumbnail_asset_id),
             'created_at' => $c->created_at?->toIso8601String() ?? '',
             'updated_at' => $c->updated_at?->toIso8601String() ?? '',
         ];
+    }
+
+    private function normalizeVisibility(?string $value): string
+    {
+        return $value === Composition::VISIBILITY_SHARED
+            ? Composition::VISIBILITY_SHARED
+            : Composition::VISIBILITY_PRIVATE;
     }
 
     private function versionMetaJson(CompositionVersion $v): array
@@ -286,14 +301,16 @@ class EditorCompositionController extends Controller
         $rows = Composition::query()
             ->where('tenant_id', $tenant->id)
             ->where('brand_id', $brand->id)
+            ->visibleToUser($user)
             ->orderByDesc('updated_at')
             ->limit(100)
-            ->get(['id', 'name', 'thumbnail_asset_id', 'updated_at']);
+            ->get(['id', 'name', 'thumbnail_asset_id', 'updated_at', 'visibility']);
 
         $items = $rows->map(function (Composition $c) {
             return [
                 'id' => (string) $c->id,
                 'name' => $c->name,
+                'visibility' => $c->visibility ?? Composition::VISIBILITY_SHARED,
                 'thumbnail_url' => $this->resolveThumbnailUrl($c->thumbnail_asset_id),
                 'updated_at' => $c->updated_at?->toIso8601String() ?? '',
             ];
@@ -317,18 +334,21 @@ class EditorCompositionController extends Controller
         $validated = $request->validate([
             'name' => 'required|string|max:255',
             'document' => 'required|array',
+            'visibility' => 'nullable|string|in:private,shared',
             'thumbnail_png_base64' => 'nullable|string|max:6000000',
             'telemetry' => 'nullable|array',
             'telemetry.duration_ms' => 'nullable|integer|min:0|max:172800000',
         ]);
 
         $thumbBinary = $this->decodeThumbnailPayload($validated['thumbnail_png_base64'] ?? null);
+        $visibility = $this->normalizeVisibility($validated['visibility'] ?? null);
 
-        $composition = DB::transaction(function () use ($tenant, $brand, $user, $validated, $thumbBinary) {
+        $composition = DB::transaction(function () use ($tenant, $brand, $user, $validated, $thumbBinary, $visibility) {
             $c = Composition::query()->create([
                 'tenant_id' => $tenant->id,
                 'brand_id' => $brand->id,
                 'user_id' => $user->id,
+                'visibility' => $visibility,
                 'name' => $validated['name'],
                 'document_json' => $validated['document'],
             ]);
@@ -400,6 +420,7 @@ class EditorCompositionController extends Controller
             'compositions' => 'required|array|min:1|max:50',
             'compositions.*.name' => 'required|string|max:255',
             'compositions.*.document' => 'required|array',
+            'compositions.*.visibility' => 'nullable|string|in:private,shared',
             'telemetry' => 'nullable|array',
             'telemetry.duration_ms' => 'nullable|integer|min:0|max:172800000',
         ]);
@@ -407,10 +428,12 @@ class EditorCompositionController extends Controller
         $compositions = DB::transaction(function () use ($tenant, $brand, $user, $validated) {
             $out = [];
             foreach ($validated['compositions'] as $item) {
+                $visibility = $this->normalizeVisibility($item['visibility'] ?? null);
                 $c = Composition::query()->create([
                     'tenant_id' => $tenant->id,
                     'brand_id' => $brand->id,
                     'user_id' => $user->id,
+                    'visibility' => $visibility,
                     'name' => $item['name'],
                     'document_json' => $item['document'],
                 ]);
@@ -429,6 +452,7 @@ class EditorCompositionController extends Controller
 
                 $out[] = $c->fresh();
             }
+
             return $out;
         });
 
@@ -464,6 +488,7 @@ class EditorCompositionController extends Controller
         $validated = $request->validate([
             'name' => 'sometimes|string|max:255',
             'document' => 'required|array',
+            'visibility' => 'sometimes|string|in:private,shared',
             'version_label' => 'nullable|string|max:255',
             'version_kind' => 'nullable|string|in:manual,autosave',
             'thumbnail_png_base64' => 'nullable|string|max:6000000',
@@ -477,9 +502,20 @@ class EditorCompositionController extends Controller
 
         $oldDocument = is_array($composition->document_json) ? $composition->document_json : [];
 
+        if (array_key_exists('visibility', $validated)) {
+            $nextVisibility = $this->normalizeVisibility($validated['visibility']);
+            $currentVisibility = $composition->visibility ?? Composition::VISIBILITY_SHARED;
+            if ($nextVisibility !== $currentVisibility && (int) $composition->user_id !== (int) $user->id) {
+                return response()->json(['error' => 'Only the composition owner can change visibility.'], 403);
+            }
+        }
+
         DB::transaction(function () use ($composition, $validated, $createVersion, $versionKind, $thumbBinary, $user) {
             if (isset($validated['name'])) {
                 $composition->name = $validated['name'];
+            }
+            if (array_key_exists('visibility', $validated)) {
+                $composition->visibility = $this->normalizeVisibility($validated['visibility']);
             }
             $composition->document_json = $validated['document'];
 
@@ -676,38 +712,8 @@ class EditorCompositionController extends Controller
             'name' => 'nullable|string|max:255',
         ]);
 
-        $doc = $source->document_json ?? [];
         $name = $validated['name'] ?? ($source->name.' (copy)');
-
-        $composition = DB::transaction(function () use ($tenant, $brand, $user, $name, $doc, $source) {
-            $c = Composition::query()->create([
-                'tenant_id' => $tenant->id,
-                'brand_id' => $brand->id,
-                'user_id' => $user->id,
-                'name' => $name,
-                'document_json' => $doc,
-            ]);
-
-            CompositionVersion::query()->create([
-                'composition_id' => $c->id,
-                'document_json' => $doc,
-                'label' => 'Duplicated',
-                'kind' => CompositionVersion::KIND_MANUAL,
-                'created_at' => now(),
-            ]);
-
-            $dupThumbId = $source->thumbnail_asset_id
-                ? $this->thumbnailAssets->duplicateAsset($source->thumbnail_asset_id, $tenant, $brand, $user)
-                : null;
-            if ($dupThumbId !== null && $dupThumbId !== '') {
-                $c->thumbnail_asset_id = $dupThumbId;
-                $c->save();
-            }
-
-            $this->pruneOldVersions($c->fresh());
-
-            return $c->fresh();
-        });
+        $composition = $this->compositionDuplicate->duplicate($source, $user, $name, 'Duplicated');
 
         return response()->json(['composition' => $this->compositionJson($composition)]);
     }
@@ -732,10 +738,15 @@ class EditorCompositionController extends Controller
             ->where('id', $id)
             ->where('tenant_id', $tenant->id)
             ->where('brand_id', $brand->id)
+            ->visibleToUser($user)
             ->first();
 
         if (! $composition) {
             return response()->json(['error' => 'Not found'], 404);
+        }
+
+        if (! $composition->userCanDelete($user)) {
+            return response()->json(['error' => 'Forbidden'], 403);
         }
 
         $documentBeforeDelete = is_array($composition->document_json) ? $composition->document_json : [];

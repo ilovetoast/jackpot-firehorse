@@ -97,18 +97,20 @@ class Brand extends Model
             return null;
         }
 
-        $isSvg = $asset->mime_type === 'image/svg+xml'
-            || strtolower(pathinfo($asset->original_filename ?? '', PATHINFO_EXTENSION)) === 'svg';
-
         $thumbnailStatus = $asset->thumbnail_status instanceof \App\Enums\ThumbnailStatus
             ? $asset->thumbnail_status
             : \App\Enums\ThumbnailStatus::tryFrom($asset->thumbnail_status ?? '');
 
-        if ($isSvg && $thumbnailStatus !== \App\Enums\ThumbnailStatus::COMPLETED) {
+        // THUMB_MEDIUM URLs 404 until GenerateThumbnailsJob finishes (onboarding upload sets
+        // thumbnail_status=PENDING). Serve the original file immediately so nav / Brand
+        // essentials previews are not broken for the first seconds — not a browser CORS issue.
+        if ($thumbnailStatus !== \App\Enums\ThumbnailStatus::COMPLETED) {
             return $asset->deliveryUrl(AssetVariant::ORIGINAL, $context) ?: null;
         }
 
-        return $asset->deliveryUrl(AssetVariant::THUMB_MEDIUM, $context) ?: null;
+        $medium = $asset->deliveryUrl(AssetVariant::THUMB_MEDIUM, $context);
+
+        return $medium !== '' ? $medium : ($asset->deliveryUrl(AssetVariant::ORIGINAL, $context) ?: null);
     }
 
     /**

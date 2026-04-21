@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
-import { router } from '@inertiajs/react'
 import { arrayMove } from '@dnd-kit/sortable'
 import { ArrowPathIcon, Bars3Icon, CheckIcon, ChevronDownIcon, CloudArrowUpIcon, FunnelIcon, Squares2X2Icon, SparklesIcon, TrashIcon, XMarkIcon } from '@heroicons/react/24/outline'
 
@@ -78,6 +77,8 @@ export default function MetadataFieldModal({
     const categoryDropdownRef = useRef(null)
     const [originalEnabledCategories, setOriginalEnabledCategories] = useState([]) // Track original enabled categories when editing
     const [keyManuallyEdited, setKeyManuallyEdited] = useState(false) // When false, key syncs from display name
+    /** Avoid wiping the "new field" form when parent re-renders (e.g. Inertia) while the modal stays open. */
+    const wasModalOpenRef = useRef(false)
 
     const isEditing = !!field
     const isSystemField = field?.scope === 'system' || field?.is_system
@@ -134,6 +135,13 @@ export default function MetadataFieldModal({
 
     // Load field data when editing and initialize category selection
     useEffect(() => {
+        if (!isOpen) {
+            wasModalOpenRef.current = false
+            return
+        }
+        const modalJustOpened = !wasModalOpenRef.current
+        wasModalOpenRef.current = true
+
         if (isOpen && field) {
             setLoadingField(true)
             const isSystem = field.scope === 'system' || field.is_system
@@ -278,8 +286,8 @@ export default function MetadataFieldModal({
                     setLoadingField(false)
                 }
             }
-        } else if (isOpen && !field) {
-            // Reset form for new field
+        } else if (isOpen && !field && modalJustOpened) {
+            // Reset form for new field (only when opening — not on every categories/parent re-render)
             const initialCategories = preselectedCategoryId ? [preselectedCategoryId] : []
             setOriginalEnabledCategories([])
             setKeyManuallyEdited(false)
@@ -304,7 +312,7 @@ export default function MetadataFieldModal({
             setErrors({})
             setLoadingField(false)
         }
-    }, [isOpen, field, categories])
+    }, [isOpen, field, categories, preselectedCategoryId])
 
     if (!isOpen) return null
 
@@ -535,25 +543,49 @@ export default function MetadataFieldModal({
                     setErrors(data.errors || { error: data.error || 'Failed to save field' })
                 }
             } else {
-                // Create: use Inertia router.post for proper response handling
+                // Create: JSON fetch (not Inertia) so validation/server errors keep the modal open and preserve form state
                 const storeUrl = typeof route === 'function' ? route('tenant.metadata.fields.store') : '/app/tenant/metadata/fields'
-                router.post(storeUrl, submitData, {
-                    preserveScroll: true,
-                    preserveState: true,
-                    forceFormData: false,
-                    onSuccess: () => {
-                        onSuccess?.()
-                        onClose()
+                const response = await fetch(storeUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        Accept: 'application/json',
+                        'X-Requested-With': 'XMLHttpRequest',
+                        'X-CSRF-TOKEN': csrfToken || '',
                     },
-                    onError: (errors) => {
-                        setErrors(errors || {})
-                    },
-                    onFinish: () => {
-                        setSubmitting(false)
-                    },
+                    credentials: 'same-origin',
+                    body: JSON.stringify(submitData),
                 })
-                skipFinally = true
-                return
+                let data = {}
+                try {
+                    data = await response.json()
+                } catch {
+                    data = {}
+                }
+                if (response.ok) {
+                    onSuccess?.()
+                    onClose()
+                } else {
+                    const rawErrors = data.errors && typeof data.errors === 'object' ? data.errors : {}
+                    const bag = Object.fromEntries(
+                        Object.entries(rawErrors).map(([k, v]) => [
+                            k,
+                            Array.isArray(v) ? (v[0] ?? '') : typeof v === 'string' ? v : String(v ?? ''),
+                        ])
+                    )
+                    const firstFieldMessage =
+                        (bag.key && String(bag.key)) ||
+                        Object.entries(bag)
+                            .filter(([k]) => k !== 'error')
+                            .map(([, v]) => v)
+                            .find(Boolean)
+                    const summary =
+                        firstFieldMessage ||
+                        (typeof data.error === 'string' && data.error) ||
+                        (typeof data.message === 'string' && data.message) ||
+                        'Failed to create field'
+                    setErrors({ ...bag, error: summary })
+                }
             }
         } catch (error) {
             setErrors({ error: 'An error occurred while saving the field' })

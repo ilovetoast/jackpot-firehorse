@@ -78,6 +78,13 @@ class EditorGenerateLayoutController extends Controller
 
     private const LIFESTYLE_PHOTO_TYPES = ['lifestyle', 'editorial', 'event'];
 
+    /**
+     * Wizard background pool: "studio" is a first-class photo_type (studio lighting /
+     * set) and must not be treated as synonymous with catalog product-on-white.
+     * Deprioritize using explicit product / packshot signals instead.
+     */
+    private const BACKGROUND_DEPRIORITIZED_PHOTO_TYPES = ['product', 'flat_lay', 'macro_detail', 'macro'];
+
     public function __construct(
         protected AIService $aiService,
         protected AiUsageService $aiUsageService
@@ -182,13 +189,12 @@ class EditorGenerateLayoutController extends Controller
      * photography candidates (for `role=background|hero_image` image layers) that
      * the Create-from-Template wizard auto-applies in step 3.
      *
-     * Background candidates are drawn from assets tagged with any of:
-     *   background, hero, photo, photography, lifestyle
-     * — falling back to raw photo_type metadata (lifestyle/editorial/etc.) when
-     * the brand hasn't explicitly tagged anything, so the feature isn't dead on
-     * brand-new accounts. Ordered by brand_score DESC so the best photos come
-     * first; the wizard picks randomly from the returned set (seeded by
-     * composition id) so the output stays varied across new drafts.
+     * Background candidates prefer the Photography DAM category and scene-friendly
+     * metadata/tags; the pool also includes tag matches (background, hero, photo,
+     * photography, lifestyle) and legacy photo_type fallbacks when this brand has
+     * no tag hits. Results are ranked so lifestyle/editorial/studio (non-product)
+     * surface ahead of packshots; the wizard still picks deterministically from
+     * the returned set (seeded by composition id) so the output stays varied.
      *
      * Shape is aligned with DamPickerAsset (id / name / file_url / thumbnail_url /
      * width / height) so the wizard can feed results straight into the same
@@ -266,18 +272,18 @@ class EditorGenerateLayoutController extends Controller
      *
      * Query strategy:
      *   1. Scope to tenant + brand + image mime types.
-     *   2. Union: (a) assets tagged background|hero|photo|photography|lifestyle
-     *      (case-insensitive match on asset_tags.tag), OR
-     *      (b) assets in the Photography DAM category that are not explicit product
-     *      shots (subject_type product, or photo_type product/studio/flat_lay/macro_detail),
-     *      OR (c) when no tag matches exist globally, legacy metadata fallbacks
+     *   2. Union: (a) assets on this brand tagged background|hero|photo|photography|lifestyle
+     *      (case-insensitive), OR (b) any asset in the Photography DAM category for
+     *      this brand (so the wizard always has library photography to pick from),
+     *      OR (c) when this brand has none of those tags, legacy metadata fallbacks
      *      (lifestyle/editorial/event/hero/scene) as before.
-     *   3. Order by latest brand_intelligence_score overall_score DESC, then
-     *      recency, so the best photos surface first.
-     *   4. Merge: assets tagged "photography" (any case) for this brand are
-     *      prepended first so the template wizard always has a reference preview
-     *      when the library uses that tag; remaining slots are filled with the
-     *      scored pool (higher-scoring / hero / lifestyle picks).
+     *   3. Rank in PHP: prefer Photography category + lifestyle/editorial/event/action,
+     *      studio shots that are not catalog product, and hero/background tags;
+     *      deprioritize subject_type product, packshots (product/flat_lay/macro), and
+     *      cutout-style tags — then take the top rows for the candidate list.
+     *   4. Merge: assets tagged "photography" (any case) for this brand are merged in,
+     *      then the combined list is re-ranked so the seeded wizard pick skews toward
+     *      scene photography instead of product-on-white when both exist.
      *   5. Exclude logos (category_slug='logos') defensively in case a brand
      *      mistagged its logo as "hero".
      *
@@ -291,16 +297,20 @@ class EditorGenerateLayoutController extends Controller
         $matchTags = ['background', 'hero', 'photo', 'photography', 'lifestyle'];
 
         try {
-            // Pass 1: tag-matched (preferred). Case-insensitive — tags are
-            // human-entered and may be "Photography", "PHOTOGRAPHY", etc.
+            // Pass 1: tag-matched on this brand only (tenant-wide tag hits used to
+            // suppress the legacy metadata OR-branch incorrectly for other brands).
             $lowerTags = array_map('strtolower', $matchTags);
-            $taggedIds = DB::table('asset_tags')
+            $brandTagIds = DB::table('asset_tags')
+                ->join('assets', 'assets.id', '=', 'asset_tags.asset_id')
+                ->where('assets.tenant_id', $tenant->id)
+                ->where('assets.brand_id', $brand->id)
+                ->whereNull('assets.deleted_at')
                 ->where(function ($q) use ($lowerTags) {
                     foreach ($lowerTags as $lt) {
-                        $q->orWhereRaw('LOWER(tag) = ?', [$lt]);
+                        $q->orWhereRaw('LOWER(asset_tags.tag) = ?', [$lt]);
                     }
                 })
-                ->pluck('asset_id')
+                ->pluck('assets.id')
                 ->map(fn ($v) => (string) $v)
                 ->unique()
                 ->values()
@@ -338,34 +348,23 @@ class EditorGenerateLayoutController extends Controller
                 ->tap($applyPhotoOnlyFilter)
                 ->with(['latestBrandIntelligenceScore', 'category']);
 
-            $query->where(function ($outer) use ($taggedIds, $photographyCategory) {
-                if ($taggedIds !== []) {
-                    $outer->whereIn('id', $taggedIds);
+            $query->where(function ($outer) use ($brandTagIds, $photographyCategory) {
+                if ($brandTagIds !== []) {
+                    $outer->whereIn('id', $brandTagIds);
                 }
 
                 if ($photographyCategory !== null) {
                     $cid = (int) $photographyCategory->id;
+                    // Any image filed under Photography — ranking below deprioritizes packshots.
                     $outer->orWhere(function ($q) use ($cid) {
-                        $q->where(function ($q2) use ($cid) {
-                            $q2->where('metadata->category_id', $cid)
-                                ->orWhere('metadata->category_id', (string) $cid);
-                        })->where(function ($q2) {
-                            // Not an explicit product / catalog shot — lifestyle & untyped photography qualify.
-                            $q2->whereRaw("COALESCE(JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.fields.subject_type')), '') != 'product'")
-                                ->where(function ($q3) {
-                                    $q3->whereRaw("JSON_EXTRACT(metadata, '$.fields.photo_type') IS NULL")
-                                        ->orWhereRaw(
-                                            'JSON_UNQUOTE(JSON_EXTRACT(metadata, \'$.fields.photo_type\')) NOT IN (?, ?, ?, ?)',
-                                            self::PRODUCT_PHOTO_TYPES
-                                        );
-                                });
-                        });
+                        $q->where('metadata->category_id', $cid)
+                            ->orWhere('metadata->category_id', (string) $cid);
                     });
                 }
 
-                // When nothing matched the tag table for this tenant, keep the legacy
-                // metadata-based pool so brands without tagging still get candidates.
-                if ($taggedIds === []) {
+                // When this brand has no library hits for the wizard tag set, keep the
+                // legacy metadata-based pool so untagged brands still get candidates.
+                if ($brandTagIds === []) {
                     $outer->orWhere(function ($q) {
                         $q->whereRaw("JSON_EXTRACT(metadata, '$.fields.photo_type') IN ('\"lifestyle\"', '\"editorial\"', '\"event\"', '\"hero\"')")
                             ->orWhereRaw("JSON_EXTRACT(metadata, '$.fields.subject_type') = '\"scene\"'");
@@ -383,6 +382,7 @@ class EditorGenerateLayoutController extends Controller
             // from ever resolving to the same asset.
             $assets = $assets->filter(function (Asset $a) {
                 $slug = $a->category?->slug;
+
                 return $slug !== 'logos';
             });
 
@@ -414,16 +414,32 @@ class EditorGenerateLayoutController extends Controller
             $tagsByAssetId = $this->loadTagsForAssets($assets->pluck('id')->all());
 
             $scored = $assets->map(function (Asset $a) use ($tagsByAssetId) {
-                $score = $a->latestBrandIntelligenceScore?->overall_score ?? 0;
+                $tags = array_values(array_map('strval', $tagsByAssetId[(string) $a->id] ?? []));
+                $score = (float) ($a->latestBrandIntelligenceScore?->overall_score ?? 0);
+                $pref = $this->rankAssetForBackgroundWizard($a, $tags);
+
                 return [
                     'asset' => $a,
-                    'score' => (float) $score,
-                    'tags' => array_values(array_map('strval', $tagsByAssetId[(string) $a->id] ?? [])),
+                    'score' => $score,
+                    'pref' => $pref,
+                    'tags' => $tags,
                 ];
             })
-                ->sortByDesc('score')
-                ->take(8)
-                ->values();
+                ->sort(function ($x, $y) {
+                    if ($x['pref'] !== $y['pref']) {
+                        return $y['pref'] <=> $x['pref'];
+                    }
+                    if ($x['score'] !== $y['score']) {
+                        return $y['score'] <=> $x['score'];
+                    }
+
+                    $ta = $x['asset']->created_at?->getTimestamp() ?? 0;
+                    $tb = $y['asset']->created_at?->getTimestamp() ?? 0;
+
+                    return $tb <=> $ta;
+                })
+                ->values()
+                ->take(40);
 
             $candidates = [];
             foreach ($scored as $row) {
@@ -447,13 +463,16 @@ class EditorGenerateLayoutController extends Controller
                 ];
             }
 
-            return $this->mergePhotographyFirstBackgroundCandidates($tenant, $brand, $applyPhotoOnlyFilter, $candidates);
+            $merged = $this->mergePhotographyFirstBackgroundCandidates($tenant, $brand, $applyPhotoOnlyFilter, $candidates);
+
+            return $this->sortBackgroundCandidatePayloadsByPreference($merged);
         } catch (\Throwable $e) {
             Log::warning('editor.wizard_defaults_background_failed', [
                 'tenant_id' => $tenant->id,
                 'brand_id' => $brand->id,
                 'error' => $e->getMessage(),
             ]);
+
             return [];
         }
     }
@@ -487,6 +506,7 @@ class EditorGenerateLayoutController extends Controller
      * @param  \Closure(\Illuminate\Database\Eloquent\Builder): void  $applyPhotoOnlyFilter
      * @param  list<array{id:string,name:string,file_url:?string,thumbnail_url:?string,width:?int,height:?int,tags:list<string>}>  $candidates
      * @return list<array{id:string,name:string,file_url:?string,thumbnail_url:?string,width:?int,height:?int,tags:list<string>}>
+     *                                                                                                                            merged with photography-tagged assets first (deduped); caller sorts + trims to 8
      */
     private function mergePhotographyFirstBackgroundCandidates(
         Tenant $tenant,
@@ -496,7 +516,7 @@ class EditorGenerateLayoutController extends Controller
     ): array {
         $photoIds = $this->assetIdsWithTagForBrand($tenant, $brand, 'photography');
         if ($photoIds === []) {
-            return array_slice($candidates, 0, 8);
+            return $candidates;
         }
 
         $photoAssets = Asset::query()
@@ -535,7 +555,7 @@ class EditorGenerateLayoutController extends Controller
         }
 
         if ($photoPayloads === []) {
-            return array_slice($candidates, 0, 8);
+            return $candidates;
         }
 
         $seen = [];
@@ -553,7 +573,7 @@ class EditorGenerateLayoutController extends Controller
             }
         }
 
-        return array_slice($merged, 0, 8);
+        return $merged;
     }
 
     public function generate(Request $request): JsonResponse
@@ -826,6 +846,110 @@ class EditorGenerateLayoutController extends Controller
             ];
             $existingIds[] = (string) $assetId;
         }
+    }
+
+    /**
+     * Higher scores surface first for template wizard background auto-fill.
+     *
+     * @param  list<string>  $tagStrings
+     */
+    private function rankAssetForBackgroundWizard(Asset $a, array $tagStrings): int
+    {
+        $meta = is_array($a->metadata) ? $a->metadata : [];
+        $fields = is_array($meta['fields'] ?? null) ? $meta['fields'] : [];
+        $photoType = strtolower((string) ($this->extractFieldValue($fields, 'photo_type') ?? ''));
+        $subjectType = strtolower((string) ($this->extractFieldValue($fields, 'subject_type') ?? ''));
+        $slug = strtolower((string) ($a->category?->slug ?? ''));
+        $tags = array_map(static fn ($t) => strtolower((string) $t), $tagStrings);
+
+        $rank = 0;
+
+        if ($slug === 'photography') {
+            $rank += 700;
+        }
+
+        foreach (['lifestyle', 'editorial', 'hero', 'background', 'scene'] as $t) {
+            if (in_array($t, $tags, true)) {
+                $rank += 120;
+            }
+        }
+
+        if (in_array($photoType, ['lifestyle', 'editorial', 'event', 'action', 'hero'], true)) {
+            $rank += 520;
+        }
+
+        if ($photoType === 'studio' && $subjectType !== 'product') {
+            $rank += 380;
+        }
+
+        if (in_array($photoType, ['portrait', 'landscape'], true) && $subjectType !== 'product') {
+            $rank += 160;
+        }
+
+        if (in_array($subjectType, ['scene', 'environment', 'location'], true)) {
+            $rank += 360;
+        }
+
+        if (in_array($subjectType, ['person', 'people'], true)) {
+            $rank += 220;
+        }
+
+        if (array_intersect($tags, ['transparent', 'cutout', 'isolated', 'no-background', 'no_background', 'knockout'])) {
+            $rank -= 520;
+        }
+
+        if ($subjectType === 'product') {
+            $rank -= 620;
+        }
+
+        if (in_array($photoType, self::BACKGROUND_DEPRIORITIZED_PHOTO_TYPES, true)) {
+            $rank -= 480;
+        }
+
+        if ($photoType === 'studio' && $subjectType === 'product') {
+            $rank -= 400;
+        }
+
+        return $rank;
+    }
+
+    /**
+     * @param  list<array{id:string,name:string,file_url:?string,thumbnail_url:?string,width:?int,height:?int,tags:list<string>}>  $payloads
+     * @return list<array{id:string,name:string,file_url:?string,thumbnail_url:?string,width:?int,height:?int,tags:list<string>}>
+     */
+    private function sortBackgroundCandidatePayloadsByPreference(array $payloads): array
+    {
+        if ($payloads === []) {
+            return [];
+        }
+
+        $ids = array_values(array_unique(array_map(static fn ($p) => (int) $p['id'], $payloads)));
+        $assets = Asset::query()
+            ->whereIn('id', $ids)
+            ->with(['latestBrandIntelligenceScore', 'category'])
+            ->get()
+            ->keyBy(static fn (Asset $a) => (string) $a->id);
+
+        usort($payloads, function (array $a, array $b) use ($assets): int {
+            $assetA = $assets->get($a['id']);
+            $assetB = $assets->get($b['id']);
+            $tagsA = is_array($a['tags'] ?? null) ? $a['tags'] : [];
+            $tagsB = is_array($b['tags'] ?? null) ? $b['tags'] : [];
+            $ra = $assetA ? $this->rankAssetForBackgroundWizard($assetA, $tagsA) : 0;
+            $rb = $assetB ? $this->rankAssetForBackgroundWizard($assetB, $tagsB) : 0;
+            if ($ra !== $rb) {
+                return $rb <=> $ra;
+            }
+            $sa = (float) ($assetA?->latestBrandIntelligenceScore?->overall_score ?? 0);
+            $sb = (float) ($assetB?->latestBrandIntelligenceScore?->overall_score ?? 0);
+            if ($sa !== $sb) {
+                return $sb <=> $sa;
+            }
+
+            return strcmp($a['id'], $b['id']);
+        });
+
+        return array_slice($payloads, 0, 8);
     }
 
     /**

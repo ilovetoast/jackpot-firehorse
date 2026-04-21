@@ -6,9 +6,15 @@ export type CompositionTelemetry = {
     duration_ms?: number
 }
 
+/** Who can open from the composition list: creator only, or everyone on the brand workspace. */
+export type CompositionVisibility = 'private' | 'shared'
+
 export type CompositionDto = {
     id: string
     name: string
+    visibility: CompositionVisibility
+    /** User id of the creator; visibility changes are allowed only for this user. */
+    owner_user_id: string | null
     document: DocumentModel
     thumbnail_url?: string | null
     created_at: string
@@ -42,7 +48,11 @@ function csrfHeaders(): HeadersInit {
 export async function postComposition(
     name: string,
     document: DocumentModel,
-    opts?: { thumbnailPngBase64?: string | null; telemetry?: CompositionTelemetry }
+    opts?: {
+        thumbnailPngBase64?: string | null
+        telemetry?: CompositionTelemetry
+        visibility?: CompositionVisibility
+    }
 ): Promise<CompositionDto> {
     const res = await fetch('/app/api/compositions', {
         method: 'POST',
@@ -51,6 +61,7 @@ export async function postComposition(
         body: JSON.stringify({
             name,
             document,
+            visibility: opts?.visibility,
             thumbnail_png_base64: opts?.thumbnailPngBase64 ?? undefined,
             telemetry: opts?.telemetry,
         }),
@@ -87,6 +98,7 @@ export async function putComposition(
         versionKind?: CompositionVersionKind
         thumbnailPngBase64?: string | null
         telemetry?: CompositionTelemetry
+        visibility?: CompositionVisibility
     }
 ): Promise<CompositionDto> {
     const res = await fetch(`/app/api/compositions/${encodeURIComponent(id)}`, {
@@ -96,6 +108,7 @@ export async function putComposition(
         body: JSON.stringify({
             name: opts?.name,
             document,
+            visibility: opts?.visibility,
             version_label: opts?.versionLabel ?? null,
             version_kind: opts?.versionKind ?? undefined,
             create_version: opts?.createVersion ?? true,
@@ -143,6 +156,7 @@ export async function getComposition(id: string): Promise<CompositionDto> {
 export type CompositionSummaryDto = {
     id: string
     name: string
+    visibility?: CompositionVisibility
     thumbnail_url?: string | null
     updated_at: string
 }
@@ -293,9 +307,10 @@ export async function duplicateCompositionApi(
 
 export async function postCompositionFromDocument(
     name: string,
-    document: DocumentModel
+    document: DocumentModel,
+    opts?: { visibility?: CompositionVisibility }
 ): Promise<CompositionDto> {
-    return postComposition(name, document)
+    return postComposition(name, document, { visibility: opts?.visibility })
 }
 
 /**
@@ -313,7 +328,7 @@ export async function postCompositionFromDocument(
  * saved in Studio.
  */
 export async function postCompositionsBatch(
-    items: Array<{ name: string; document: DocumentModel }>,
+    items: Array<{ name: string; document: DocumentModel; visibility?: CompositionVisibility }>,
     opts?: { telemetry?: CompositionTelemetry },
 ): Promise<CompositionDto[]> {
     const res = await fetch('/app/api/compositions/batch', {
@@ -321,7 +336,11 @@ export async function postCompositionsBatch(
         headers: csrfHeaders(),
         credentials: 'same-origin',
         body: JSON.stringify({
-            compositions: items.map((i) => ({ name: i.name, document: i.document })),
+            compositions: items.map((i) => ({
+                name: i.name,
+                document: i.document,
+                visibility: i.visibility,
+            })),
             telemetry: opts?.telemetry,
         }),
     })

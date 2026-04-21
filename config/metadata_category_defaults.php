@@ -13,6 +13,9 @@
  * enabled for every category by default so execution assets receive computed metadata
  * without manual enablement.
  *
+ * system_fields_hidden_for_category_slugs: omit specific system fields (e.g. season on fonts)
+ * from the tags+collection+system baseline for listed category slugs.
+ *
  * Extension notes (not seeded as fields yet):
  * - campaign: prefer linking to Campaign records when that model is wired for metadata.
  * - audience, region: free text or controlled vocabulary fields — add as tenant custom
@@ -208,6 +211,14 @@ return [
     'always_hidden_fields' => ['dimensions', 'dominant_colors'],
 
     'filter_only_enforced_fields' => ['dominant_hue_group'],
+
+    /**
+     * System field keys hidden for specific category slugs (baseline: tags + collection + all system fields).
+     * Evaluated in TenantMetadataVisibilityService::computeSeededDefaultForField for tags_and_collection_only_slugs.
+     */
+    'system_fields_hidden_for_category_slugs' => [
+        'fonts' => ['season'],
+    ],
 
     'restricted_option_edit_keys' => [
         'collection',

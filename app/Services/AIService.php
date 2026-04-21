@@ -372,7 +372,7 @@ class AIService
      *
      * @param  array<string, mixed>  $options
      *                                         - model: Registry key from config/ai.php models (required)
-     *                                         - image_size: OpenAI size e.g. 1024x1024
+     *                                         - image_size: OpenAI gpt-image-1 size: 1024x1024, 1024x1536, 1536x1024, auto
      *                                         - tenant, user, brand_id, composition_id, asset_id: attribution
      * @return array<string, mixed>
      */

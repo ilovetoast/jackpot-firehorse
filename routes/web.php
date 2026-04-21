@@ -722,6 +722,35 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
                 Route::get('/api/compositions/{id}/versions', [\App\Http\Controllers\Editor\EditorCompositionController::class, 'versionsIndex'])->whereNumber('id')->name('api.editor.compositions.versions.index');
                 Route::post('/api/compositions/{id}/versions', [\App\Http\Controllers\Editor\EditorCompositionController::class, 'versionsStore'])->whereNumber('id')->name('api.editor.compositions.versions.store');
                 Route::get('/api/compositions/{id}/versions/{versionId}', [\App\Http\Controllers\Editor\EditorCompositionController::class, 'versionsShow'])->whereNumber('id')->whereNumber('versionId')->name('api.editor.compositions.versions.show');
+
+                // Studio "Versions" (Creative Sets) — static paths before /api/creative-sets/{id}
+                Route::get('/api/creative-sets/generation-presets', [\App\Http\Controllers\Editor\EditorCreativeSetController::class, 'generationPresets'])
+                    ->name('api.editor.creative-sets.generation-presets');
+                Route::get('/api/creative-sets/for-composition/{compositionId}', [\App\Http\Controllers\Editor\EditorCreativeSetController::class, 'forComposition'])
+                    ->whereNumber('compositionId')
+                    ->name('api.editor.creative-sets.for-composition');
+                Route::get('/api/creative-sets/{id}', [\App\Http\Controllers\Editor\EditorCreativeSetController::class, 'show'])
+                    ->whereNumber('id')
+                    ->name('api.editor.creative-sets.show');
+                Route::post('/api/creative-sets', [\App\Http\Controllers\Editor\EditorCreativeSetController::class, 'store'])
+                    ->name('api.editor.creative-sets.store');
+                Route::post('/api/creative-sets/{id}/variants', [\App\Http\Controllers\Editor\EditorCreativeSetController::class, 'storeVariant'])
+                    ->whereNumber('id')
+                    ->name('api.editor.creative-sets.variants.store');
+                Route::post('/api/creative-sets/{id}/generate', [\App\Http\Controllers\Editor\EditorCreativeSetController::class, 'generate'])
+                    ->whereNumber('id')
+                    ->name('api.editor.creative-sets.generate');
+                Route::post('/api/creative-sets/{id}/generation-job-items/{itemId}/retry', [\App\Http\Controllers\Editor\EditorCreativeSetController::class, 'retryGenerationJobItem'])
+                    ->whereNumber('id')
+                    ->whereNumber('itemId')
+                    ->name('api.editor.creative-sets.generation-job-items.retry');
+                Route::get('/api/creative-sets/{id}/generation-jobs/{jobId}', [\App\Http\Controllers\Editor\EditorCreativeSetController::class, 'generationJobShow'])
+                    ->whereNumber('id')
+                    ->whereNumber('jobId')
+                    ->name('api.editor.creative-sets.generation-jobs.show');
+                Route::post('/api/creative-sets/{id}/apply', [\App\Http\Controllers\Editor\EditorCreativeSetController::class, 'apply'])
+                    ->whereNumber('id')
+                    ->name('api.editor.creative-sets.apply');
             });
 
             // Phase J.2.3: Tag UX API endpoints
