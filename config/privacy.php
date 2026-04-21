@@ -1,7 +1,11 @@
 <?php
 
-use App\Services\Privacy\PrivacyRegionResolver;
-
+/**
+ * Privacy / cookie consent configuration.
+ *
+ * Country list is defined here (not loaded from a PHP class) so config can bootstrap
+ * even if optional service classes are missing on a host during a partial deploy.
+ */
 return [
     /*
     |--------------------------------------------------------------------------
@@ -19,8 +23,19 @@ return [
     | ISO 3166-1 alpha-2 codes that require opt-in consent before non-essential
     | cookies and similar technologies (EEA, UK, CH).
     |--------------------------------------------------------------------------
+    |
+    | Must match the logic in app/helpers.php (privacy_needs_strict_opt_in).
+    |
     */
-    'strict_opt_in_countries' => PrivacyRegionResolver::STRICT_OPT_IN_COUNTRY_CODES,
+    'strict_opt_in_countries' => [
+        // EU member states
+        'AT', 'BE', 'BG', 'HR', 'CY', 'CZ', 'DK', 'EE', 'FI', 'FR', 'DE', 'GR', 'HU',
+        'IE', 'IT', 'LV', 'LT', 'LU', 'MT', 'NL', 'PL', 'PT', 'RO', 'SK', 'SI', 'ES', 'SE',
+        // EEA (non-EU)
+        'IS', 'LI', 'NO',
+        // United Kingdom, Switzerland
+        'GB', 'CH',
+    ],
 
     /*
     |--------------------------------------------------------------------------

@@ -3,17 +3,12 @@
 namespace App\Http\Controllers;
 
 use App\Models\Consent;
-use App\Services\Privacy\PrivacyRegionResolver;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
 class CookieConsentController extends Controller
 {
-    public function __construct(
-        protected PrivacyRegionResolver $privacyRegionResolver
-    ) {}
-
     /**
      * Store cookie / similar-technology consent choices (Art. 6(1)(a), ePrivacy).
      */
@@ -37,7 +32,7 @@ class CookieConsentController extends Controller
         $analytics = (bool) $purposes['analytics'];
         $marketing = (bool) $purposes['marketing'];
 
-        if ($this->privacyRegionResolver->globalPrivacyControl($request)) {
+        if (privacy_global_gpc($request)) {
             $analytics = false;
             $marketing = false;
         }
@@ -77,7 +72,7 @@ class CookieConsentController extends Controller
                 'analytics' => $analytics,
                 'marketing' => $marketing,
             ],
-            'gpc_applied' => $this->privacyRegionResolver->globalPrivacyControl($request),
+            'gpc_applied' => privacy_global_gpc($request),
         ]);
     }
 }

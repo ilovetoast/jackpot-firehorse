@@ -62,14 +62,9 @@
 
         <!-- Scripts -->
         @viteReactRefresh
+        {{-- Privacy bootstrap via helpers (no container resolve — survives partial deploys). --}}
         @php
-            $privacyResolver = app(\App\Services\Privacy\PrivacyRegionResolver::class);
-            $privacyCountry = $privacyResolver->countryCodeFromRequest(request());
-            $jackpotPrivacyBootstrap = [
-                'cookie_policy_version' => config('privacy.cookie_policy_version', '1'),
-                'strict_opt_in_region' => $privacyResolver->needsStrictOptIn($privacyCountry),
-                'gpc' => $privacyResolver->globalPrivacyControl(request()),
-            ];
+            $jackpotPrivacyBootstrap = jackpot_privacy_bootstrap_array(request());
         @endphp
         <script>
             window.__performanceMetricsEnabled = @json(config('performance.client_metrics_enabled', false));

@@ -13,7 +13,6 @@ use App\Services\CreatorModuleStatusService;
 use App\Services\FeatureGate;
 use App\Services\FileTypeService;
 use App\Services\PlanService;
-use App\Services\Privacy\PrivacyRegionResolver;
 use App\Services\Prostaff\ResolveCreatorsDashboardAccess;
 use App\Support\BrandDNA\HeadlineAppearanceCatalog;
 use Illuminate\Http\Request;
@@ -744,8 +743,7 @@ class HandleInertiaRequests extends Middleware
      */
     private function buildPrivacySharedProps(Request $request): array
     {
-        $resolver = app(PrivacyRegionResolver::class);
-        $country = $resolver->countryCodeFromRequest($request);
+        $country = privacy_region_country_code($request);
         $user = $request->user();
 
         $cookieConsent = null;
@@ -763,9 +761,9 @@ class HandleInertiaRequests extends Middleware
 
         return [
             'cookie_policy_version' => config('privacy.cookie_policy_version', '1'),
-            'strict_opt_in_region' => $resolver->needsStrictOptIn($country),
+            'strict_opt_in_region' => privacy_needs_strict_opt_in($country),
             'country_code' => $country,
-            'gpc' => $resolver->globalPrivacyControl($request),
+            'gpc' => privacy_global_gpc($request),
             'gate_onesignal_behind_consent' => (bool) config('privacy.gate_onesignal_behind_consent', true),
             'cookie_consent' => $cookieConsent,
         ];
