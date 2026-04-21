@@ -17,6 +17,38 @@ const MOTION_PRESETS: ReadonlyArray<{ id: string; label: string }> = [
 const DURATIONS = [3, 4, 5, 6, 7, 8, 9, 10] as const
 const ASPECTS = ['16:9', '9:16', '1:1', '4:5', '3:4'] as const
 
+type FixedAspect = (typeof ASPECTS)[number]
+type AspectChoice = 'canvas' | FixedAspect
+
+function aspectKeyToRatio(key: string): number {
+    const parts = key.split(':').map((x) => Number(x))
+    const w = parts[0]
+    const h = parts[1]
+    if (!Number.isFinite(w) || !Number.isFinite(h) || h === 0) {
+        return 16 / 9
+    }
+    return w / h
+}
+
+/** Map document pixel size to the closest supported provider aspect label (must match server `supported_aspect_ratios`). */
+function nearestSupportedAnimationAspect(canvasWidth: number, canvasHeight: number): FixedAspect {
+    if (!Number.isFinite(canvasWidth) || !Number.isFinite(canvasHeight) || canvasWidth <= 0 || canvasHeight <= 0) {
+        return '16:9'
+    }
+    const r = canvasWidth / canvasHeight
+    let best: FixedAspect = '16:9'
+    let bestScore = Number.POSITIVE_INFINITY
+    for (const k of ASPECTS) {
+        const kr = aspectKeyToRatio(k)
+        const score = Math.abs(Math.log(r / kr))
+        if (score < bestScore) {
+            bestScore = score
+            best = k
+        }
+    }
+    return best
+}
+
 type Props = {
     open: boolean
     compositionId: string
@@ -27,16 +59,28 @@ type Props = {
     getStageEl: () => HTMLElement | null
     onClose: () => void
     onQueued: (jobId: string) => void
+    /** Fires as soon as Animate is clicked (after canvas is ready), before the network request — use to expand the Versions rail. */
+    onAnimateSubmitStart?: () => void
 }
 
 export function StudioAnimateCompositionModal(props: Props) {
-    const { open, compositionId, latestCompositionVersionId, document, textLayerCount, getStageEl, onClose, onQueued } = props
+    const {
+        open,
+        compositionId,
+        latestCompositionVersionId,
+        document,
+        textLayerCount,
+        getStageEl,
+        onClose,
+        onQueued,
+        onAnimateSubmitStart,
+    } = props
     const [provider] = useState('kling')
     const [providerModel] = useState('kling_v3_standard_image_to_video')
     const [motionPreset, setMotionPreset] = useState('cinematic_pan')
     const [prompt, setPrompt] = useState('')
     const [duration, setDuration] = useState<number>(5)
-    const [aspect, setAspect] = useState<string>('16:9')
+    const [aspect, setAspect] = useState<AspectChoice>('canvas')
     const [audio, setAudio] = useState(false)
     const [negative, setNegative] = useState('')
     const [advancedOpen, setAdvancedOpen] = useState(false)
@@ -45,6 +89,17 @@ export function StudioAnimateCompositionModal(props: Props) {
     const [preflight, setPreflight] = useState<PreflightRiskDto | null>(null)
     const [preflightErr, setPreflightErr] = useState<string | null>(null)
     const [sourceKind, setSourceKind] = useState<'full_composition' | 'selection'>('full_composition')
+
+    const canvasMatchedAspect = useMemo(
+        () => nearestSupportedAnimationAspect(document.width, document.height),
+        [document.width, document.height],
+    )
+
+    useEffect(() => {
+        if (open) {
+            setAspect('canvas')
+        }
+    }, [open])
 
     useEffect(() => {
         if (!open || !compositionId) {
@@ -90,6 +145,7 @@ export function StudioAnimateCompositionModal(props: Props) {
             setErr('Canvas is not ready. Try again in a moment.')
             return
         }
+        onAnimateSubmitStart?.()
         setBusy(true)
         setErr(null)
         try {
@@ -98,6 +154,7 @@ export function StudioAnimateCompositionModal(props: Props) {
             if (!b64) {
                 throw new Error('Could not capture the composition snapshot.')
             }
+            const resolvedAspect = aspect === 'canvas' ? canvasMatchedAspect : aspect
             const payload: PostStudioAnimationPayload = {
                 provider,
                 provider_model: providerModel,
@@ -106,7 +163,7 @@ export function StudioAnimateCompositionModal(props: Props) {
                 negative_prompt: negative.trim() || null,
                 motion_preset: motionPreset,
                 duration_seconds: duration,
-                aspect_ratio: aspect,
+                aspect_ratio: resolvedAspect,
                 generate_audio: audio,
                 composition_snapshot_png_base64: b64,
                 snapshot_width: document.width,
@@ -125,6 +182,7 @@ export function StudioAnimateCompositionModal(props: Props) {
     }, [
         aspect,
         audio,
+        canvasMatchedAspect,
         compositionId,
         document,
         duration,
@@ -132,6 +190,7 @@ export function StudioAnimateCompositionModal(props: Props) {
         latestCompositionVersionId,
         motionPreset,
         negative,
+        onAnimateSubmitStart,
         onClose,
         onQueued,
         prompt,
@@ -262,8 +321,11 @@ export function StudioAnimateCompositionModal(props: Props) {
                             <select
                                 className="mt-1 w-full rounded-md border border-gray-700 bg-gray-800 px-2 py-1.5 text-gray-100"
                                 value={aspect}
-                                onChange={(e) => setAspect(e.target.value)}
+                                onChange={(e) => setAspect(e.target.value as AspectChoice)}
                             >
+                                <option value="canvas">
+                                    Match canvas ({document.width}×{document.height} → {canvasMatchedAspect})
+                                </option>
                                 {ASPECTS.map((a) => (
                                     <option key={a} value={a}>
                                         {a}

@@ -6776,6 +6776,7 @@ export default function AssetEditor() {
                                                 type="button"
                                                 onClick={() => {
                                                     setLeftPanel(null)
+                                                    setStudioVersionsPanelOpen(true)
                                                     setStudioAnimateModalOpen(true)
                                                 }}
                                                 disabled={!compositionId || !aiEnabled}
@@ -8512,6 +8513,9 @@ export default function AssetEditor() {
                         textLayerCount={document.layers.filter((l) => l.type === 'text').length}
                         getStageEl={() => stageRef.current}
                         onClose={() => setStudioAnimateModalOpen(false)}
+                        onAnimateSubmitStart={() => {
+                            setStudioVersionsPanelOpen(true)
+                        }}
                         onQueued={(_jobId) => {
                             setActivityToast('Animation started…')
                             setStudioVersionsPanelOpen(true)

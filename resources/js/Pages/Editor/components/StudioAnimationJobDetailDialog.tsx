@@ -196,6 +196,43 @@ export function StudioAnimationJobDetailDialog(props: Props) {
                     </p>
                 ) : null}
 
+                {job.status === 'failed' &&
+                (job.error_code || job.error_message || (job.last_pipeline_event && Object.keys(job.last_pipeline_event).length > 0)) ? (
+                    <details className="mt-3 rounded-lg border border-gray-800 bg-gray-950/60 px-3 py-2 text-[11px] text-gray-400">
+                        <summary className="cursor-pointer select-none font-medium text-gray-300 hover:text-gray-200">
+                            Technical details
+                        </summary>
+                        <p className="mt-2 border-t border-gray-800 pt-2 text-[10px] leading-snug text-gray-500">
+                            There is no dedicated Studio animation list in the site admin yet; operators can read the same
+                            fields from the database (<span className="font-mono">studio_animation_jobs</span>) and app logs.
+                        </p>
+                        <dl className="mt-2 space-y-1.5">
+                            {job.error_code ? (
+                                <div>
+                                    <dt className="text-[10px] uppercase tracking-wide text-gray-600">error_code</dt>
+                                    <dd className="mt-0.5 font-mono text-xs text-amber-100/90">{job.error_code}</dd>
+                                </div>
+                            ) : null}
+                            {job.error_message ? (
+                                <div>
+                                    <dt className="text-[10px] uppercase tracking-wide text-gray-600">error_message</dt>
+                                    <dd className="mt-0.5 whitespace-pre-wrap break-words text-xs text-gray-200">{job.error_message}</dd>
+                                </div>
+                            ) : null}
+                            {job.last_pipeline_event && Object.keys(job.last_pipeline_event).length > 0 ? (
+                                <div>
+                                    <dt className="text-[10px] uppercase tracking-wide text-gray-600">last_pipeline_event</dt>
+                                    <dd className="mt-0.5">
+                                        <pre className="max-h-40 overflow-auto rounded border border-gray-800 bg-black/40 p-2 font-mono text-[10px] leading-snug text-gray-300">
+                                            {JSON.stringify(job.last_pipeline_event, null, 2)}
+                                        </pre>
+                                    </dd>
+                                </div>
+                            ) : null}
+                        </dl>
+                    </details>
+                ) : null}
+
                 {job.status === 'failed' ? (
                     <button
                         type="button"
