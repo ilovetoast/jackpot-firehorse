@@ -25,6 +25,7 @@ Use this page as the **table of contents** for engineering docs (e.g. admin “D
 
 | Document | Contents |
 |----------|----------|
+| [environments/PRODUCTION_ARCHITECTURE_AWS.md](environments/PRODUCTION_ARCHITECTURE_AWS.md) | **Production AWS** — ECS on EC2, 2×AZ, RDS Multi-AZ, ElastiCache, CloudFront+S3, worker lanes, scaling, cost, CI/CD, phases |
 | [environments/SERVER_REQUIREMENTS.md](environments/SERVER_REQUIREMENTS.md) | OS packages (ImageMagick, FFmpeg, Poppler, etc.) |
 | [environments/README.md](environments/README.md) | Environment doc index |
 | [DEV_TOOLING.md](DEV_TOOLING.md) | Local-only dev commands |
@@ -41,6 +42,7 @@ Phase-specific write-ups are **merged into** the operations guides above (see PH
 
 | Document | Contents |
 |----------|----------|
+| [operations/DATA_EXPLOSION_RUNBOOK.md](operations/DATA_EXPLOSION_RUNBOOK.md) | DB/API growth, alert caps, monitoring SQL |
 | [RUNBOOK_ALERTS_AND_TICKETS.md](RUNBOOK_ALERTS_AND_TICKETS.md) | Alerts and tickets |
 | [STAGING_MANIFEST_401.md](STAGING_MANIFEST_401.md) | Staging manifest 401 troubleshooting |
 | [DELETION_ERROR_TRACKING.md](DELETION_ERROR_TRACKING.md) | Deletion error system |

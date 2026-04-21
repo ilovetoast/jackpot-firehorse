@@ -43,6 +43,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property \Carbon\Carbon|null $last_contacted_at
  * @property \Carbon\Carbon|null $converted_at
  * @property \Carbon\Carbon|null $unsubscribed_at
+ * @property \Carbon\Carbon|null $processing_objected_at  Art. 21 objection (non-account lead rows)
  */
 class ContactLead extends Model
 {
@@ -127,6 +128,7 @@ class ContactLead extends Model
         'last_contacted_at',
         'converted_at',
         'unsubscribed_at',
+        'processing_objected_at',
     ];
 
     protected function casts(): array
@@ -139,6 +141,7 @@ class ContactLead extends Model
             'last_contacted_at' => 'datetime',
             'converted_at' => 'datetime',
             'unsubscribed_at' => 'datetime',
+            'processing_objected_at' => 'datetime',
         ];
     }
 

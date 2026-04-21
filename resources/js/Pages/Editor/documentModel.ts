@@ -47,6 +47,14 @@ export type DocumentModel = {
     width: number
     height: number
     preset?: DocumentPreset
+    /**
+     * Creative intent from the template wizard (`postGoal` id + optional `keyMessage`).
+     * See `wizardBrief.ts` for canonical goal ids. Safe to omit on legacy documents.
+     */
+    studioBrief?: {
+        postGoal: string
+        keyMessage?: string
+    }
     layers: Layer[]
     /**
      * Layer groups. Groups are flat (no nested groups in v1 — a layer can
@@ -163,6 +171,15 @@ export type TextLayer = BaseLayer & {
         verticalAlign?: 'top' | 'middle' | 'bottom'
         /** When true, font size is reduced to fit the layer box. */
         autoFit?: boolean
+        /**
+         * Outline stroke width in px. Applied via `-webkit-text-stroke` in the
+         * renderer. Undefined / 0 = no stroke. Used by the "ghost" word in a
+         * ghost+filled headline pair and anywhere else a template author wants
+         * an outlined-text effect.
+         */
+        strokeWidth?: number
+        /** Stroke color. Defaults to {@link TextLayer.style.color} when unset. */
+        strokeColor?: string
     }
 }
 
@@ -365,6 +382,15 @@ export type FillLayer = BaseLayer & {
     textBoostOpacity?: number
     /** Where this preset came from — auto-inferred from brand DNA, or user-locked. */
     textBoostSource?: 'auto' | 'manual'
+    /**
+     * Outline border width in px. Rendered as a CSS border on the fill div.
+     * Undefined / 0 = no border. Combined with {@link borderStrokeColor} and
+     * {@link borderRadius} this lets a "fill" layer act as a hollow frame
+     * (e.g. the holding-shape primitive in the recipe engine).
+     */
+    borderStrokeWidth?: number
+    /** Border color. Defaults to the fill color when unset. */
+    borderStrokeColor?: string
 }
 
 export type GenerativeImageLayer = BaseLayer & {
@@ -971,6 +997,18 @@ export function parseDocumentFromApi(raw: unknown): DocumentModel {
             collapsed: !!g.collapsed,
         }))
 
+    let studioBrief: DocumentModel['studioBrief']
+    if (o.studioBrief && typeof o.studioBrief === 'object') {
+        const sb = o.studioBrief as Record<string, unknown>
+        const postGoal = typeof sb.postGoal === 'string' ? sb.postGoal.trim() : ''
+        if (postGoal) {
+            studioBrief = {
+                postGoal,
+                keyMessage: typeof sb.keyMessage === 'string' ? sb.keyMessage : undefined,
+            }
+        }
+    }
+
     const parsed: DocumentModel = {
         id: typeof o.id === 'string' ? o.id : generateId(),
         width: w,
@@ -981,6 +1019,7 @@ export function parseDocumentFromApi(raw: unknown): DocumentModel {
                 : undefined,
         layers,
         groups,
+        studioBrief,
         created_at: typeof o.created_at === 'string' ? o.created_at : undefined,
         updated_at: typeof o.updated_at === 'string' ? o.updated_at : undefined,
     }

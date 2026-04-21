@@ -62,13 +62,28 @@
 
         <!-- Scripts -->
         @viteReactRefresh
-        <script>window.__performanceMetricsEnabled = @json(config('performance.client_metrics_enabled', false));</script>
+        @php
+            $privacyResolver = app(\App\Services\Privacy\PrivacyRegionResolver::class);
+            $privacyCountry = $privacyResolver->countryCodeFromRequest(request());
+            $jackpotPrivacyBootstrap = [
+                'cookie_policy_version' => config('privacy.cookie_policy_version', '1'),
+                'strict_opt_in_region' => $privacyResolver->needsStrictOptIn($privacyCountry),
+                'gpc' => $privacyResolver->globalPrivacyControl(request()),
+            ];
+        @endphp
+        <script>
+            window.__performanceMetricsEnabled = @json(config('performance.client_metrics_enabled', false));
+            window.__jackpotPrivacyBootstrap = @json($jackpotPrivacyBootstrap);
+        </script>
         @if(config('services.onesignal.push_enabled') && config('services.onesignal.app_id'))
-            {{-- OneSignal Web SDK v16: HTTP only with allowLocalhostAsSecureOrigin; v16 blocks plain HTTP otherwise. See pushService.js + ONESIGNAL_ALLOW_HTTP_LOCAL --}}
+            {{-- Meta always present for dynamic SDK load after functional consent (see pushService.loadOneSignalSdkIfConfigured). --}}
             <meta name="onesignal-app-id" content="{{ config('services.onesignal.app_id') }}">
             <meta name="onesignal-allow-local-http" content="@json(app()->environment(['local', 'development']) || config('services.onesignal.allow_http_local'))">
-            <script>window.OneSignalDeferred = window.OneSignalDeferred || [];</script>
-            <script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" defer></script>
+            @unless(config('privacy.gate_onesignal_behind_consent', true))
+                {{-- Legacy: load SDK immediately (not recommended for ePrivacy). --}}
+                <script>window.OneSignalDeferred = window.OneSignalDeferred || [];</script>
+                <script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" defer></script>
+            @endunless
         @endif
     @vite('resources/js/app.jsx')
     @inertiaHead

@@ -60,8 +60,8 @@ const PLANS_PREVIEW = [
 
 const STATS = [
     { value: '50+', label: 'AI-powered actions per asset' },
-    { value: '99.9%', label: 'Uptime SLA' },
-    { value: '<200ms', label: 'Edge delivery globally' },
+    { value: 'Near-zero', label: 'downtime, by design' },
+    { value: 'Global', label: 'edge delivery' },
     { value: '0', label: 'PDFs to read for brand rules' },
 ]
 

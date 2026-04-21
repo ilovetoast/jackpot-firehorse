@@ -284,19 +284,22 @@ export default function CompanyOverview({
             <AppNav brand={activeBrand} tenant={tenant} />
 
             <main className="flex-1">
-                <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-6">
-                    <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
+                    <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                         <div className="min-w-0 flex-1">
                             <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-                                <h1 className="text-2xl font-bold tracking-tight text-gray-900">Company Overview</h1>
+                                <h1 className="text-3xl font-bold text-gray-900">Company Overview</h1>
                                 {plan?.name && (
                                     <span className="inline-flex items-center rounded-full bg-indigo-50 px-2.5 py-0.5 text-xs font-semibold text-indigo-700 ring-1 ring-indigo-100">
                                         {plan.name}
                                     </span>
                                 )}
                             </div>
+                            <p className="mt-2 text-sm text-gray-600">
+                                Company-wide metrics and brands for {tenant?.name ?? 'your company'}.
+                            </p>
                         </div>
-                        <div className="flex items-center gap-3">
+                        <div className="flex flex-shrink-0 flex-wrap items-center gap-3 sm:pt-0">
                             <DashboardLinksRow
                                 links={dashLinks}
                                 variant="light"
@@ -476,7 +479,7 @@ export default function CompanyOverview({
                 </div>
             </main>
 
-            <AppFooter />
+            <AppFooter variant="settings" />
             <ConfirmDialog
                 open={deleteConfirm.open}
                 onClose={() => setDeleteConfirm({ open: false, brandId: null, brandName: '' })}

@@ -103,8 +103,10 @@ import {
     editorBridgeFileUrlForAssetId,
 } from './documentModel'
 import FillGradientStopField from './FillGradientStopField'
-import { TEMPLATE_CATEGORIES, allFormats, blueprintToLayers, blueprintToLayersAndGroups, buildLayersForStyle, LAYOUT_STYLES, textBoostToFillFields, inferTextBoostStyle, type LayerBlueprint, type TemplateFormat, type TemplateCategory, type LayoutStyleId } from './templateConfig'
+import { TEMPLATE_CATEGORIES, allFormats, blueprintToLayers, blueprintToLayersAndGroups, buildLayersForStyle, getAllLayoutStyles, textBoostToFillFields, inferTextBoostStyle, type LayerBlueprint, type TemplateFormat, type TemplateCategory, type LayoutStyleId } from './templateConfig'
+import { FORMAT_PACKS } from './recipes'
 import { applyWizardAssetDefaults, fetchWizardDefaults, type WizardDefaults } from './wizardDefaults'
+import { applyStudioBriefToBlueprints, WIZARD_POST_GOALS, defaultWizardPostGoal, type StudioBrief, type WizardPostGoalId } from './wizardBrief'
 import GridOverlay from '../../Components/Editor/GridOverlay'
 import PlacementPicker from '../../Components/Editor/PlacementPicker'
 import {
@@ -152,6 +154,7 @@ import {
     getCompositionVersion,
     postComposition,
     postCompositionFromDocument,
+    postCompositionsBatch,
     postCompositionVersion,
     putComposition,
 } from './editorCompositionBridge'
@@ -696,6 +699,17 @@ function TextLayerEditable({
         brandFontsEpoch,
     ])
 
+    // Outline-text effect. `-webkit-text-stroke` is supported in every
+    // evergreen browser we target; it plays nicely with `color` (no need to
+    // fake it with text-shadow). The ghost/filled headline recipe relies on
+    // this for the outlined ghost word.
+    const strokeWidth = (layer.style as { strokeWidth?: number }).strokeWidth
+    const strokeColor = (layer.style as { strokeColor?: string }).strokeColor
+    const webkitTextStroke =
+        typeof strokeWidth === 'number' && strokeWidth > 0
+            ? `${strokeWidth}px ${strokeColor ?? layer.style.color}`
+            : undefined
+
     const textStyle: CSSProperties = {
         fontFamily: cssFontFamilyStack,
         fontSize: layer.style.fontSize,
@@ -708,6 +722,7 @@ function TextLayerEditable({
         wordBreak: 'break-word',
         width: '100%',
         minHeight: autoFit ? '100%' : undefined,
+        WebkitTextStroke: webkitTextStroke,
     }
 
     const innerRead = (
@@ -1307,6 +1322,16 @@ export default function AssetEditor() {
      * `placement` falls back to the blueprint's xRatio/yRatio. */
     const [wizardLayerOverrides, setWizardLayerOverrides] = useState<Record<number, { enabled?: boolean; placement?: Placement }>>({})
     const [wizardSelectedLayerIdx, setWizardSelectedLayerIdx] = useState<number | null>(null)
+    /**
+     * Optional Format Pack for "batch create this layout across every size
+     * in a pack". Null = single-format (classic) flow. When set, the wizard's
+     * step 3 footer swaps the primary action for a batch-create button that
+     * hits `POST /app/api/compositions/batch` and creates one composition per
+     * size in the pack. Reset every time the wizard opens.
+     */
+    const [wizardPackId, setWizardPackId] = useState<string | null>(null)
+    const [wizardBatchSaving, setWizardBatchSaving] = useState(false)
+    const [wizardBatchError, setWizardBatchError] = useState<string | null>(null)
     const [templateWizardOpen, setTemplateWizardOpenRaw] = useState(false)
     /**
      * When the user explicitly picks "Blank canvas — I'll build it myself"
@@ -1333,11 +1358,19 @@ export default function AssetEditor() {
      * the feature is zero-config.
      */
     const [wizardAutoFillEnabled, setWizardAutoFillEnabled] = useState(true)
+    /** Step 3 — creative brief (goal + optional key message). Reset when the wizard closes. */
+    const [wizardPostGoal, setWizardPostGoal] = useState(defaultWizardPostGoal)
+    const [wizardKeyMessage, setWizardKeyMessage] = useState('')
     const setTemplateWizardOpen = useCallback((v: boolean) => {
         setTemplateWizardOpenRaw(v)
         if (!v) {
             setWizardLayerOverrides({})
             setWizardSelectedLayerIdx(null)
+            setWizardPackId(null)
+            setWizardBatchSaving(false)
+            setWizardBatchError(null)
+            setWizardPostGoal(defaultWizardPostGoal())
+            setWizardKeyMessage('')
         }
     }, [])
 
@@ -4705,7 +4738,16 @@ export default function AssetEditor() {
             )
             let finalRect = { x, y, width: w, height: h }
             let hits: SnapHit[] = []
-            if (!altDisable && snapCfg.mode === 'line_align') {
+            // Resize snap runs in BOTH basic and advanced modes. Previously we
+            // gated this on `line_align` only, which meant that in basic mode
+            // (cell-center move snap) the resize handles had *no* edge
+            // awareness — users dragging a logo's NW corner could sail right
+            // past the canvas edge with nothing to stop them. The snap
+            // engine's vLines/hLines already include 0 / docW / docH, so
+            // running it in either mode gives us the "magnet to canvas edge"
+            // behavior for free while preserving the grid-line magnet when
+            // the advanced grid is on.
+            if (!altDisable && snapCfg.mode !== 'off') {
                 const res = snapEngineResize({
                     rect: finalRect,
                     corner: d.corner,
@@ -4713,10 +4755,72 @@ export default function AssetEditor() {
                     docH: doc.height,
                     mode: snapCfg.mode,
                     density: snapCfg.density,
-                    thresholdDoc,
+                    // Bigger magnet for edge snaps — the default 8px-at-scale-1
+                    // threshold is tight for manual drags. Canvas edges in
+                    // particular want to feel sticky.
+                    thresholdDoc: thresholdDoc * 2,
                 })
                 finalRect = { x: res.x, y: res.y, width: res.width, height: res.height }
                 hits = res.hits
+            }
+
+            // Canvas-bounds clamp: if the layer started fully inside the
+            // canvas, its resized form should stay inside. This is the
+            // safety net for when a user drags well past the edge (beyond
+            // the snap threshold) — we pin the moving edge to the canvas
+            // bound instead of letting the layer bleed off. Alt disables
+            // this for intentional off-canvas / bleed designs.
+            if (!altDisable) {
+                const startedInside =
+                    d.start.x >= 0 &&
+                    d.start.y >= 0 &&
+                    d.start.x + d.start.width <= doc.width &&
+                    d.start.y + d.start.height <= doc.height
+                if (startedInside) {
+                    const movesLeft = d.corner === 'nw' || d.corner === 'sw'
+                    const movesTop = d.corner === 'nw' || d.corner === 'ne'
+
+                    // Anchor = the fixed corner opposite the drag handle.
+                    // Growth always emanates from it, so clamping means
+                    // capping the distance between anchor and the moving
+                    // edges to stay within canvas bounds.
+                    const anchorX = movesLeft ? d.start.x + d.start.width : d.start.x
+                    const anchorY = movesTop ? d.start.y + d.start.height : d.start.y
+
+                    // Per-axis max allowed size given the anchor position.
+                    const maxW = movesLeft ? anchorX : doc.width - anchorX
+                    const maxH = movesTop ? anchorY : doc.height - anchorY
+
+                    let cw = finalRect.width
+                    let ch = finalRect.height
+
+                    if (cw > maxW) cw = maxW
+                    if (ch > maxH) ch = maxH
+
+                    // Aspect-lock preservation — if the resize is aspect-
+                    // locked (e.g. logos), shrinking one dim to stay on-canvas
+                    // also shrinks the other by the same ratio so the shape
+                    // stays true. Without this, dragging a 3:1 logo to the
+                    // edge would squash it to 2:1.
+                    if ((d.lockAspectResize && !e.shiftKey) || (!d.lockAspectResize && e.shiftKey)) {
+                        const ar = d.aspectRatio > 0 ? d.aspectRatio : 1
+                        const scaleW = cw / Math.max(finalRect.width, 0.001)
+                        const scaleH = ch / Math.max(finalRect.height, 0.001)
+                        const scale = Math.min(scaleW, scaleH)
+                        cw = Math.max(min, finalRect.width * scale)
+                        ch = Math.max(min, cw / ar)
+                    } else {
+                        cw = Math.max(min, cw)
+                        ch = Math.max(min, ch)
+                    }
+
+                    finalRect = {
+                        x: movesLeft ? anchorX - cw : anchorX,
+                        y: movesTop ? anchorY - ch : anchorY,
+                        width: cw,
+                        height: ch,
+                    }
+                }
             }
             reportSnapHits(hits)
 
@@ -5540,13 +5644,33 @@ export default function AssetEditor() {
                                                                                 if (!ok) return
                                                                             }
                                                                             const brandColor = typeof auth?.activeBrand?.primary_color === 'string' ? auth.activeBrand.primary_color : undefined
-                                                                            const layers = blueprintToLayers(fmt.layers, fmt.width, fmt.height, brandColor)
+
+                                                                            // Mirror the wizard's enrichment pipeline so clicking a
+                                                                            // template from the sidebar produces the same fully-realized
+                                                                            // composition the wizard would — brand logo in `role:'logo'`
+                                                                            // slots, a seeded background photo in `role:'background'|'hero_image'`
+                                                                            // slots, and any template-authored groups preserved.
+                                                                            //
+                                                                            // Seed mirrors applyTemplate() so re-clicking the same template
+                                                                            // yields the same photo pick (stability across re-opens).
+                                                                            // Respecting `wizardAutoFillEnabled` keeps parity with the
+                                                                            // wizard's toggle — users who turned it off see raw
+                                                                            // blueprints from both entry points, not just one.
+                                                                            const autoFillSeed = `${auth?.activeBrand?.id ?? 'no-brand'}|${fmt.id}|sidebar`
+                                                                            const enrichedBps = wizardAutoFillEnabled
+                                                                                ? applyWizardAssetDefaults(fmt.layers, wizardDefaults, autoFillSeed)
+                                                                                : fmt.layers
+                                                                            const { layers, groups } = blueprintToLayersAndGroups(enrichedBps, fmt.width, fmt.height, brandColor)
                                                                             const fresh = {
                                                                                 id: generateId(),
                                                                                 width: fmt.width,
                                                                                 height: fmt.height,
                                                                                 preset: 'custom' as const,
                                                                                 layers,
+                                                                                // Preserve template-authored groupings (headline-stack,
+                                                                                // CTA fill+text, etc.) so headline and subcopy travel
+                                                                                // together when users move either one.
+                                                                                groups,
                                                                                 created_at: new Date().toISOString(),
                                                                                 updated_at: new Date().toISOString(),
                                                                             }
@@ -5690,7 +5814,13 @@ export default function AssetEditor() {
                             ? previewFrame === 'social'
                                 ? 'bg-gradient-to-b from-neutral-950 via-neutral-900 to-black p-8 sm:p-8 md:p-12 before:pointer-events-none before:absolute before:inset-0 before:z-[1] before:bg-black/25 before:content-[\'\']'
                                 : 'bg-gradient-to-br from-slate-900 via-slate-800 to-slate-950 p-8 sm:p-10 md:p-14 before:pointer-events-none before:absolute before:inset-0 before:z-[1] before:bg-black/25 before:content-[\'\']'
-                            : 'bg-neutral-200 dark:bg-neutral-900'
+                            // Editor stage stays light grey even though the chrome
+                            // (top bar, side panels) is dark. This is the standard
+                            // photo-editor workspace look — the neutral surface
+                            // lifts the canvas off the page and gives the dot grid
+                            // enough contrast to read. No `dark:` variant here so
+                            // the shell's `dark` class can't flip it to black.
+                            : 'bg-neutral-200'
                     }`}
                     style={uiMode === 'edit' ? {
                         backgroundImage: 'radial-gradient(circle, rgba(0,0,0,0.10) 1px, transparent 1px)',
@@ -5934,10 +6064,13 @@ export default function AssetEditor() {
                         }}
                         onMouseDown={uiMode === 'edit' ? clearSelection : undefined}
                     >
-                        {/* Artboard white background shadow — edit mode shows this as artboard boundary */}
+                        {/* Artboard white background shadow — the canvas itself
+                            stays white regardless of the editor shell's `dark`
+                            class so layers (photos, text, fills) render against
+                            the same surface the final PNG export will use. */}
                         {uiMode === 'edit' && (
                             <div
-                                className="absolute inset-0 shadow-2xl ring-1 ring-black/10 bg-white dark:bg-neutral-800"
+                                className="absolute inset-0 shadow-2xl ring-1 ring-black/10 bg-white"
                             />
                         )}
                         <div
@@ -5945,7 +6078,7 @@ export default function AssetEditor() {
                             role="presentation"
                             className={`isolate origin-top-left ${
                                 uiMode === 'preview'
-                                    ? 'absolute left-0 top-0 overflow-hidden bg-white dark:bg-neutral-800'
+                                    ? 'absolute left-0 top-0 overflow-hidden bg-white'
                                     : 'relative'
                             }`}
                             style={{
@@ -6395,6 +6528,14 @@ export default function AssetEditor() {
                                                 style={{
                                                     background: fillLayerBackgroundCss(layer),
                                                     borderRadius: layer.borderRadius != null ? `${layer.borderRadius}px` : undefined,
+                                                    // Optional border: holds the "frame" look for the holding-shape
+                                                    // primitive in the recipe engine. `box-sizing: border-box` keeps
+                                                    // the border inside the layer's transform so template math stays
+                                                    // consistent between editor + export.
+                                                    border: layer.borderStrokeWidth && layer.borderStrokeWidth > 0
+                                                        ? `${layer.borderStrokeWidth}px solid ${layer.borderStrokeColor ?? layer.color}`
+                                                        : undefined,
+                                                    boxSizing: 'border-box',
                                                 }}
                                             />
                                         )}
@@ -7358,6 +7499,65 @@ export default function AssetEditor() {
                                                 <option value="gradient">Gradient (two colors)</option>
                                             </select>
                                         </div>
+
+                                        {/* Border stroke — used for hollow frames (holding shape) and
+                                            outlined CTA pills. Width 0 = no border; the color input only
+                                            shows once a width is set so the panel stays compact. */}
+                                        <div>
+                                            <label className="mb-1 block text-gray-400">
+                                                Border
+                                            </label>
+                                            <div className="flex items-center gap-2">
+                                                <input
+                                                    type="range"
+                                                    min={0}
+                                                    max={12}
+                                                    step={0.5}
+                                                    value={selectedLayer.borderStrokeWidth ?? 0}
+                                                    disabled={selectedLayer.locked}
+                                                    onChange={(e) => {
+                                                        const v = Number(e.target.value)
+                                                        updateLayer(selectedLayer.id, (l) => {
+                                                            if (!isFillLayer(l)) return l
+                                                            return {
+                                                                ...l,
+                                                                borderStrokeWidth: v > 0 ? v : undefined,
+                                                            }
+                                                        })
+                                                    }}
+                                                    className="flex-1 accent-indigo-600"
+                                                />
+                                                <span className="w-10 shrink-0 text-right text-[10px] text-gray-400">
+                                                    {(selectedLayer.borderStrokeWidth ?? 0).toFixed(1)}px
+                                                </span>
+                                            </div>
+                                            {(selectedLayer.borderStrokeWidth ?? 0) > 0 && (
+                                                <div className="mt-2 flex items-center gap-2">
+                                                    <input
+                                                        type="color"
+                                                        value={
+                                                            /^#[0-9a-fA-F]{6}$/.test(selectedLayer.borderStrokeColor ?? '')
+                                                                ? (selectedLayer.borderStrokeColor as string)
+                                                                : (/^#[0-9a-fA-F]{6}$/.test(selectedLayer.color) ? selectedLayer.color : '#111827')
+                                                        }
+                                                        disabled={selectedLayer.locked}
+                                                        onChange={(e) => {
+                                                            const v = e.target.value
+                                                            updateLayer(selectedLayer.id, (l) => {
+                                                                if (!isFillLayer(l)) return l
+                                                                return {
+                                                                    ...l,
+                                                                    borderStrokeColor: v,
+                                                                }
+                                                            })
+                                                        }}
+                                                        className="h-7 w-12 cursor-pointer rounded border border-gray-700"
+                                                    />
+                                                    <span className="text-[10px] text-gray-400">Border color</span>
+                                                </div>
+                                            )}
+                                        </div>
+
                                         {selectedLayer.fillKind === 'solid' && (
                                             <div>
                                                 <label className="mb-1 block text-gray-400">
@@ -8961,6 +9161,61 @@ export default function AssetEditor() {
                                             />
                                         </div>
 
+                                        {/* Outline stroke — drives `-webkit-text-stroke` for ghost/outlined
+                                            text. Width in px; color defaults to the fill color when unset. */}
+                                        <div>
+                                            <label className="mb-1 block font-medium text-gray-300">
+                                                Outline stroke
+                                            </label>
+                                            <div className="flex items-center gap-2">
+                                                <input
+                                                    type="range"
+                                                    min={0}
+                                                    max={10}
+                                                    step={0.5}
+                                                    value={selectedLayer.style.strokeWidth ?? 0}
+                                                    onChange={(e) => {
+                                                        const v = Number(e.target.value)
+                                                        updateLayer(selectedLayer.id, (l) => {
+                                                            if (!isTextLayer(l)) return l
+                                                            return {
+                                                                ...l,
+                                                                style: { ...l.style, strokeWidth: v > 0 ? v : undefined },
+                                                            }
+                                                        })
+                                                    }}
+                                                    className="flex-1 accent-indigo-600"
+                                                />
+                                                <span className="w-10 shrink-0 text-right text-[10px] text-gray-400">
+                                                    {(selectedLayer.style.strokeWidth ?? 0).toFixed(1)}px
+                                                </span>
+                                            </div>
+                                            {(selectedLayer.style.strokeWidth ?? 0) > 0 && (
+                                                <div className="mt-2 flex items-center gap-2">
+                                                    <input
+                                                        type="color"
+                                                        value={
+                                                            /^#[0-9a-fA-F]{6}$/.test(selectedLayer.style.strokeColor ?? '')
+                                                                ? (selectedLayer.style.strokeColor as string)
+                                                                : (/^#[0-9a-fA-F]{6}$/.test(selectedLayer.style.color) ? selectedLayer.style.color : '#111827')
+                                                        }
+                                                        onChange={(e) => {
+                                                            const v = e.target.value
+                                                            updateLayer(selectedLayer.id, (l) => {
+                                                                if (!isTextLayer(l)) return l
+                                                                return {
+                                                                    ...l,
+                                                                    style: { ...l.style, strokeColor: v },
+                                                                }
+                                                            })
+                                                        }}
+                                                        className="h-7 w-12 cursor-pointer rounded border border-gray-700"
+                                                    />
+                                                    <span className="text-[10px] text-gray-400">Stroke color</span>
+                                                </div>
+                                            )}
+                                        </div>
+
                                         <div>
                                             <label className="mb-1 block font-medium text-gray-300">
                                                 Horizontal align
@@ -10010,18 +10265,24 @@ export default function AssetEditor() {
 
                 const applyTemplate = (fmt: TemplateFormat, name: string, styleId: LayoutStyleId | null) => {
                     const brandColor = typeof auth?.activeBrand?.primary_color === 'string' ? auth.activeBrand.primary_color : undefined
-                    const baseBps = styleId ? buildLayersForStyle(styleId, fmt.width, fmt.height) : fmt.layers
+                    const baseBps = styleId ? buildLayersForStyle(styleId, fmt.width, fmt.height, auth?.activeBrand ?? null, wizardDefaults) : fmt.layers
                     // Seed background randomization by format+style+brand so the wizard
                     // gives varied output across templates but is stable for a given
                     // (brand, format, style) combo. Date.now() would make every re-open
                     // reshuffle — we want users re-opening the same template to see the
-                    // same photo they just walked past.
-                    const autoFillSeed = `${auth?.activeBrand?.id ?? 'no-brand'}|${fmt.id}|${styleId ?? 'default'}`
+                    // same photo they just walked past. Include post goal so different
+                    // campaign intents can pick different photos from the same pool.
+                    const autoFillSeed = `${auth?.activeBrand?.id ?? 'no-brand'}|${fmt.id}|${styleId ?? 'default'}|brief:${wizardPostGoal}`
                     const enriched = wizardAutoFillEnabled
                         ? applyWizardAssetDefaults(baseBps, wizardDefaults, autoFillSeed)
                         : baseBps
                     const bps = applyWizardOverrides(enriched)
-                    const { layers, groups } = blueprintToLayersAndGroups(bps, fmt.width, fmt.height, brandColor)
+                    const briefDoc: StudioBrief = {
+                        postGoal: wizardPostGoal,
+                        keyMessage: wizardKeyMessage.trim() || undefined,
+                    }
+                    const bpsWithBrief = applyStudioBriefToBlueprints(bps, briefDoc)
+                    const { layers, groups } = blueprintToLayersAndGroups(bpsWithBrief, fmt.width, fmt.height, brandColor)
                     const fresh = {
                         id: generateId(),
                         width: fmt.width,
@@ -10033,6 +10294,7 @@ export default function AssetEditor() {
                         // from the layer panel — the fresh composition will
                         // still save correctly either way.
                         groups,
+                        studioBrief: briefDoc,
                         created_at: new Date().toISOString(),
                         updated_at: new Date().toISOString(),
                     }
@@ -10054,6 +10316,83 @@ export default function AssetEditor() {
                     replaceUrlCompositionParam(null)
                     setTemplateWizardOpen(false)
                     setLeftPanel('layers')
+                }
+
+                /**
+                 * Batch-create the currently configured wizard template across
+                 * every size in a Format Pack. Each pack size gets its own
+                 * composition row, materialized with the same LayoutStyle (or
+                 * format-default blueprint set), scaled to that size's canvas.
+                 *
+                 * Why size-aware rebuild and not just "resize the same doc"?
+                 *   `buildLayersForStyle` bakes in placement rules that react
+                 *   to the canvas aspect ratio (headlines stack on tall
+                 *   canvases, spread across wide ones). Calling it once per
+                 *   size gives us a natively-proportioned layout per slot,
+                 *   same as the single-format flow. A literal pixel-scale of
+                 *   one document would warp the type.
+                 */
+                const batchCreateAcrossPack = async (
+                    pack: typeof FORMAT_PACKS[number],
+                    baseName: string,
+                    styleId: LayoutStyleId | null,
+                    platformFallback: TemplateFormat,
+                ) => {
+                    setWizardBatchSaving(true)
+                    setWizardBatchError(null)
+                    try {
+                        const brandColor = typeof auth?.activeBrand?.primary_color === 'string'
+                            ? auth.activeBrand.primary_color
+                            : undefined
+
+                        const items = pack.sizes.map((size) => {
+                            const baseBps = styleId
+                                ? buildLayersForStyle(styleId, size.width, size.height, auth?.activeBrand ?? null, wizardDefaults)
+                                : platformFallback.layers
+                            // Per-size seed so each format's background pick is
+                            // deterministic but varied — re-running the batch
+                            // hands the user the same lineup they saw last time.
+                            const autoFillSeed = `${auth?.activeBrand?.id ?? 'no-brand'}|pack:${pack.id}|${size.id}|${styleId ?? 'default'}|brief:${wizardPostGoal}`
+                            const enriched = wizardAutoFillEnabled
+                                ? applyWizardAssetDefaults(baseBps, wizardDefaults, autoFillSeed)
+                                : baseBps
+                            const bps = applyWizardOverrides(enriched)
+                            const briefDoc: StudioBrief = {
+                                postGoal: wizardPostGoal,
+                                keyMessage: wizardKeyMessage.trim() || undefined,
+                            }
+                            const bpsWithBrief = applyStudioBriefToBlueprints(bps, briefDoc)
+                            const { layers, groups } = blueprintToLayersAndGroups(bpsWithBrief, size.width, size.height, brandColor)
+
+                            const now = new Date().toISOString()
+                            const doc = {
+                                id: generateId(),
+                                width: size.width,
+                                height: size.height,
+                                preset: 'custom' as const,
+                                layers,
+                                groups,
+                                studioBrief: briefDoc,
+                                created_at: now,
+                                updated_at: now,
+                            }
+                            return {
+                                name: `${baseName} — ${size.label} (${size.width}×${size.height})`,
+                                document: doc,
+                            }
+                        })
+
+                        await postCompositionsBatch(items)
+                        // Close the wizard — the user can now find the new
+                        // comps via Open. We intentionally do NOT load one
+                        // into the editor, since the point of the batch is
+                        // hand-editing each per-size comp separately later.
+                        setTemplateWizardOpen(false)
+                    } catch (err) {
+                        setWizardBatchError(err instanceof Error ? err.message : 'Batch create failed.')
+                    } finally {
+                        setWizardBatchSaving(false)
+                    }
                 }
 
                 return (
@@ -10164,7 +10503,7 @@ export default function AssetEditor() {
                                             <h3 className="mb-1 text-sm font-semibold text-gray-200">Ad Type</h3>
                                             <p className="mb-5 text-xs text-gray-500">This determines which layers are set up for your composition.</p>
                                             <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-                                                {LAYOUT_STYLES.map((style) => {
+                                                {getAllLayoutStyles().map((style) => {
                                                     const isSelected = wizardLayoutStyle === style.id
                                                     return (
                                                         <button
@@ -10216,7 +10555,7 @@ export default function AssetEditor() {
                                                 // Build blueprint list for the chosen style and merge in the wizard's
                                                 // per-index overrides (enabled + placement). `activeBps` is what both
                                                 // the layer checkbox list and the mini-preview render from.
-                                                const baseBps = buildLayersForStyle(wizardLayoutStyle, selectedFormatObj.width, selectedFormatObj.height)
+                                                const baseBps = buildLayersForStyle(wizardLayoutStyle, selectedFormatObj.width, selectedFormatObj.height, auth?.activeBrand ?? null, wizardDefaults)
                                                 const activeBps = applyWizardOverrides(baseBps)
                                                 const brandLogoUrl = (auth?.activeBrand?.logo_dark_path
                                                     || auth?.activeBrand?.logo_path
@@ -10396,7 +10735,7 @@ export default function AssetEditor() {
                                                                     <span className="font-medium text-gray-200">{selectedPlatformObj?.name} — {selectedFormatObj.name}</span>
                                                                 </p>
                                                                 <p className="text-[10px] text-gray-500">{selectedFormatObj.width} × {selectedFormatObj.height}px</p>
-                                                                <p className="mt-1 text-[10px] text-indigo-400">{LAYOUT_STYLES.find(s => s.id === wizardLayoutStyle)?.name}</p>
+                                                                <p className="mt-1 text-[10px] text-indigo-400">{getAllLayoutStyles().find(s => s.id === wizardLayoutStyle)?.name}</p>
                                                             </div>
                                                         </div>
                                                     </div>
@@ -10415,16 +10754,25 @@ export default function AssetEditor() {
 
                                 {wizardStep === 3 && selectedFormatObj && (() => {
                                     const baseLayers = wizardLayoutStyle
-                                        ? buildLayersForStyle(wizardLayoutStyle, selectedFormatObj.width, selectedFormatObj.height)
+                                        ? buildLayersForStyle(wizardLayoutStyle, selectedFormatObj.width, selectedFormatObj.height, auth?.activeBrand ?? null, wizardDefaults)
                                         : selectedFormatObj.layers
                                     // Mirror the same enrichment applyTemplate uses so the step-3
                                     // preview list accurately reflects what the user will get
                                     // (image type for background/logo slots, asset thumbnails shown
                                     // inline below).
-                                    const autoFillSeed = `${auth?.activeBrand?.id ?? 'no-brand'}|${selectedFormatObj.id}|${wizardLayoutStyle ?? 'default'}`
-                                    const previewLayers = wizardAutoFillEnabled
-                                        ? applyWizardAssetDefaults(baseLayers, wizardDefaults, autoFillSeed)
-                                        : baseLayers
+                                    const autoFillSeed = `${auth?.activeBrand?.id ?? 'no-brand'}|${selectedFormatObj.id}|${wizardLayoutStyle ?? 'default'}|brief:${wizardPostGoal}`
+                                    const briefPreview: StudioBrief = {
+                                        postGoal: wizardPostGoal,
+                                        keyMessage: wizardKeyMessage.trim() || undefined,
+                                    }
+                                    const previewLayers = applyStudioBriefToBlueprints(
+                                        applyWizardOverrides(
+                                            wizardAutoFillEnabled
+                                                ? applyWizardAssetDefaults(baseLayers, wizardDefaults, autoFillSeed)
+                                                : baseLayers,
+                                        ),
+                                        briefPreview,
+                                    )
                                     const hasLogoSlot = previewLayers.some((bp) => bp.role === 'logo')
                                     const hasBgSlot = previewLayers.some((bp) => bp.role === 'background' || bp.role === 'hero_image')
                                     const autoLogo = wizardDefaults?.logo ?? null
@@ -10452,6 +10800,79 @@ export default function AssetEditor() {
                                                     placeholder={selectedFormatObj.name}
                                                     className="w-full rounded-md border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-100 placeholder-gray-500 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
                                                 />
+                                            </div>
+                                            <div className="mb-6 grid gap-4 sm:grid-cols-2">
+                                                <div>
+                                                    <label className="mb-1.5 block text-xs font-semibold text-gray-300">
+                                                        Post goal
+                                                    </label>
+                                                    <select
+                                                        value={wizardPostGoal}
+                                                        onChange={(e) => setWizardPostGoal(e.target.value as WizardPostGoalId)}
+                                                        disabled={wizardBatchSaving}
+                                                        className="w-full rounded-md border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-100 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 disabled:opacity-60"
+                                                    >
+                                                        {WIZARD_POST_GOALS.map((g) => (
+                                                            <option key={g.id} value={g.id}>
+                                                                {g.label}
+                                                            </option>
+                                                        ))}
+                                                    </select>
+                                                    <p className="mt-1 text-[11px] text-gray-500">
+                                                        Shapes copy defaults and photo picks. Saved on the composition for later features.
+                                                    </p>
+                                                </div>
+                                                <div className="sm:col-span-2">
+                                                    <label className="mb-1.5 block text-xs font-semibold text-gray-300">
+                                                        Key message <span className="text-gray-500 font-normal">(optional)</span>
+                                                    </label>
+                                                    <textarea
+                                                        value={wizardKeyMessage}
+                                                        onChange={(e) => setWizardKeyMessage(e.target.value)}
+                                                        placeholder={'One line for the main headline. Two lines: first = headline, rest = subhead. Use "WORD | WORD" for a two-line headline pair.'}
+                                                        rows={2}
+                                                        disabled={wizardBatchSaving}
+                                                        className="w-full resize-y rounded-md border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-100 placeholder-gray-500 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 disabled:opacity-60"
+                                                    />
+                                                </div>
+                                            </div>
+                                            {/* Format Pack — opt-in batch-create. When a pack is
+                                                chosen, the footer action swaps from "Let's Go"
+                                                (create 1 composition, load it in-editor) to a
+                                                batch-create that materializes N comps across the
+                                                pack's sizes. We keep the single-size flow as the
+                                                default so the wizard's muscle memory doesn't
+                                                change — users who want the batch opt in here. */}
+                                            <div className="mb-6">
+                                                <label className="mb-1.5 block text-xs font-semibold text-gray-300">
+                                                    Format Pack <span className="text-gray-500 font-normal">(optional — batch-create across sizes)</span>
+                                                </label>
+                                                <select
+                                                    value={wizardPackId ?? ''}
+                                                    onChange={(e) => setWizardPackId(e.target.value || null)}
+                                                    disabled={wizardBatchSaving}
+                                                    className="w-full rounded-md border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-100 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 disabled:opacity-60"
+                                                >
+                                                    <option value="">Just this size ({selectedFormatObj.width}×{selectedFormatObj.height})</option>
+                                                    {FORMAT_PACKS.map((p) => (
+                                                        <option key={p.id} value={p.id}>
+                                                            {p.name} — {p.sizes.length} sizes
+                                                        </option>
+                                                    ))}
+                                                </select>
+                                                {wizardPackId && (() => {
+                                                    const pack = FORMAT_PACKS.find((p) => p.id === wizardPackId)
+                                                    if (!pack) return null
+                                                    return (
+                                                        <p className="mt-1.5 text-[11px] text-gray-500">
+                                                            Will create {pack.sizes.length} compositions, one per size. Each uses
+                                                            the same layout style, rebuilt to fit its canvas.
+                                                        </p>
+                                                    )
+                                                })()}
+                                                {wizardBatchError && (
+                                                    <p className="mt-1.5 text-[11px] text-rose-300">{wizardBatchError}</p>
+                                                )}
                                             </div>
                                             {/* Auto-fill summary — shows the brand logo + hero photo
                                                 that will be dropped into matching layers, plus a toggle
@@ -10514,7 +10935,7 @@ export default function AssetEditor() {
                                             )}
                                             <div className="mb-6">
                                                 <h4 className="mb-2 text-xs font-semibold text-gray-300">
-                                                    {wizardLayoutStyle ? `${LAYOUT_STYLES.find(s => s.id === wizardLayoutStyle)?.name} ` : ''}Layer Stack
+                                                    {wizardLayoutStyle ? `${getAllLayoutStyles().find(s => s.id === wizardLayoutStyle)?.name ?? 'Template'} ` : ''}Layer Stack
                                                 </h4>
                                                 <p className="mb-3 text-[11px] text-gray-500">These layers will be pre-populated. You can add, remove, or reorder them later.</p>
                                                 <div className="space-y-1 rounded-lg border border-gray-700 bg-gray-800/50 p-2">
@@ -10530,7 +10951,7 @@ export default function AssetEditor() {
                                                                 {bp.type === 'text' ? 'T' : bp.type === 'fill' ? '◐' : bp.type === 'generative_image' ? '✦' : bp.type === 'image' ? '□' : '·'}
                                                             </span>
                                                             <span className="flex-1 truncate">{bp.name}</span>
-                                                            <span className="text-[10px] text-gray-500 capitalize">{bp.role.replace('_', ' ')}</span>
+                                                            <span className="text-[10px] text-gray-500 capitalize">{bp.role ? bp.role.replace(/_/g, ' ') : '—'}</span>
                                                         </div>
                                                     ))}
                                                 </div>
@@ -10589,7 +11010,7 @@ export default function AssetEditor() {
                                             <p className="mt-3 text-sm font-medium text-gray-200">{selectedPlatformObj?.name} — {selectedFormatObj.name}</p>
                                             <p className="mt-1 text-xs text-gray-500">{selectedFormatObj.width} &times; {selectedFormatObj.height}px</p>
                                             {wizardLayoutStyle && (
-                                                <p className="mt-1 text-xs text-indigo-400">{LAYOUT_STYLES.find(s => s.id === wizardLayoutStyle)?.name}</p>
+                                                <p className="mt-1 text-xs text-indigo-400">{getAllLayoutStyles().find(s => s.id === wizardLayoutStyle)?.name}</p>
                                             )}
                                         </div>
                                     </div>
@@ -10610,7 +11031,8 @@ export default function AssetEditor() {
                                     type="button"
                                     disabled={
                                         (wizardStep === 1 && !wizardFormat) ||
-                                        (wizardStep === 2 && !wizardLayoutStyle)
+                                        (wizardStep === 2 && !wizardLayoutStyle) ||
+                                        (wizardStep === 3 && wizardBatchSaving)
                                     }
                                     onClick={() => {
                                         if (wizardStep === 1 && wizardFormat) {
@@ -10620,12 +11042,27 @@ export default function AssetEditor() {
                                             setWizardName('')
                                             setWizardStep(3)
                                         } else if (wizardStep === 3 && selectedFormatObj) {
-                                            applyTemplate(selectedFormatObj, wizardName, wizardLayoutStyle)
+                                            if (wizardPackId) {
+                                                const pack = FORMAT_PACKS.find((p) => p.id === wizardPackId)
+                                                if (!pack) return
+                                                const baseName = (wizardName || selectedFormatObj.name).trim() || selectedFormatObj.name
+                                                void batchCreateAcrossPack(pack, baseName, wizardLayoutStyle, selectedFormatObj)
+                                            } else {
+                                                applyTemplate(selectedFormatObj, wizardName, wizardLayoutStyle)
+                                            }
                                         }
                                     }}
                                     className="rounded-md bg-indigo-600 px-5 py-2 text-sm font-semibold text-white hover:bg-indigo-500 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                                 >
-                                    {wizardStep === 3 ? "Let's Go" : 'Next'}
+                                    {wizardStep === 3
+                                        ? wizardPackId
+                                            ? (() => {
+                                                const pack = FORMAT_PACKS.find((p) => p.id === wizardPackId)
+                                                const n = pack?.sizes.length ?? 0
+                                                return wizardBatchSaving ? `Creating ${n}…` : `Create ${n} compositions`
+                                              })()
+                                            : "Let's Go"
+                                        : 'Next'}
                                 </button>
                             </div>
                         </div>

@@ -30,6 +30,9 @@ import ProcessingProgressPanel from '../../Components/BrandGuidelines/Processing
 import BrandResearchReadyToast from '../../Components/BrandGuidelines/BrandResearchReadyToast'
 import InlineSuggestionBlock from '../../Components/BrandGuidelines/InlineSuggestionBlock'
 import ArchetypeStep from '../../Components/BrandGuidelines/ArchetypeStep'
+import AdStyleCard from '../../Components/BrandGuidelines/AdStyleCard'
+import AdReferencesCard from '../../Components/BrandGuidelines/AdReferencesCard'
+import FormatPackPanel from '../../Components/BrandGuidelines/FormatPackPanel'
 import axios from 'axios'
 import useLogoBrightness from '../../utils/useLogoBrightness'
 import useLogoWhiteBgPreview from '../../utils/useLogoWhiteBgPreview'
@@ -2545,8 +2548,16 @@ export default function BrandGuidelinesBuilder({
     pipelineStatus = {},
     isLocal = false,
     brandResearchGate = null,
+    adReferenceHints: initialAdReferenceHints = null,
 }) {
     const { auth, headlineAppearanceCatalog = [] } = usePage().props
+
+    // Live reference-hint state — seeded from Inertia props, updated when
+    // AdReferencesCard mutates the gallery (add/remove/reextract). Kept at
+    // the Builder level so both AdStyleCard's preview and FormatPackPanel's
+    // thumbnails re-derive their BrandAdStyle in lock-step after a gallery
+    // edit, without either component having to know the others exist.
+    const [adReferenceHints, setAdReferenceHints] = useState(initialAdReferenceHints)
 
     // Sync active brand to match the brand being edited — avoids confusion when nav shows a different brand
     useEffect(() => {
@@ -4171,6 +4182,38 @@ export default function BrandGuidelinesBuilder({
                                                     }} />
                                                 )}
                                             </div>
+                                            {/* Ad Style — Studio recipe overrides. Persists to `brand.settings.ad_style`
+                                                via a dedicated small endpoint, independent of the DNA draft-patch cycle
+                                                so it takes effect immediately in the Studio editor without a publish. */}
+                                            <AdStyleCard
+                                                brandId={brand.id}
+                                                initialAdStyle={brand.settings?.ad_style ?? null}
+                                                brandColors={brandColors}
+                                                logoAsset={logoRef}
+                                                referenceHints={adReferenceHints}
+                                            />
+                                            {/* Reference ads — brand-curated examples. Persists to
+                                                `brand_ad_references` (not `brand.settings`) so the
+                                                list stays lean and each row is FK-bound to the DAM
+                                                asset, cascading cleanly on delete. Also emits
+                                                aggregated hints upward so sibling previews refresh. */}
+                                            <AdReferencesCard
+                                                brandId={brand.id}
+                                                initialHints={adReferenceHints}
+                                                onHintsChange={setAdReferenceHints}
+                                            />
+                                            {/* Format Pack preview — sibling of AdStyleCard. Reads the
+                                                same persisted ad_style overrides so users can validate
+                                                their choices across every size in a pack (IAB, Social,
+                                                Comprehensive) before they spin up a campaign. Batch
+                                                export is a future phase. */}
+                                            <FormatPackPanel
+                                                brandId={brand.id}
+                                                adStyle={brand.settings?.ad_style ?? null}
+                                                brandColors={brandColors}
+                                                logoAsset={logoRef}
+                                                referenceHints={adReferenceHints}
+                                            />
                                         </div>
                                     )}
 

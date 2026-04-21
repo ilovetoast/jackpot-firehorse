@@ -7,6 +7,8 @@ import AppFooter from '../../Components/AppFooter'
 import Avatar from '../../Components/Avatar'
 import ImageCropModal from '../../Components/ImageCropModal'
 import NotificationPreferences from '../../Components/NotificationPreferences'
+import PrivacyPreferences from '../../Components/PrivacyPreferences'
+import DataSubjectRights from '../../Components/DataSubjectRights'
 import { showWorkspaceSwitchingOverlay } from '../../utils/workspaceSwitchOverlay'
 
 // Common countries list
@@ -490,6 +492,28 @@ export default function ProfileIndex({ user: userData }) {
                             </button>
                             <button
                                 type="button"
+                                onClick={() => handleSectionClick('privacy-cookies')}
+                                className={`whitespace-nowrap border-b-2 py-4 px-1 text-sm font-medium transition-colors ${
+                                    activeSection === 'privacy-cookies'
+                                        ? 'border-indigo-500 text-indigo-600'
+                                        : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
+                                }`}
+                            >
+                                Privacy & cookies
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => handleSectionClick('data-rights')}
+                                className={`whitespace-nowrap border-b-2 py-4 px-1 text-sm font-medium transition-colors ${
+                                    activeSection === 'data-rights'
+                                        ? 'border-indigo-500 text-indigo-600'
+                                        : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
+                                }`}
+                            >
+                                Data rights
+                            </button>
+                            <button
+                                type="button"
                                 onClick={() => handleSectionClick('companies')}
                                 className={`whitespace-nowrap border-b-2 py-4 px-1 text-sm font-medium transition-colors ${
                                     activeSection === 'companies'
@@ -884,6 +908,40 @@ export default function ProfileIndex({ user: userData }) {
                         </div>
                     </div>
 
+                    {/* Privacy & cookies */}
+                    <div id="privacy-cookies" className="mb-12 scroll-mt-8">
+                        <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
+                            <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+                                <div className="lg:col-span-1 px-6 py-6 border-b lg:border-b-0 lg:border-r border-gray-200">
+                                    <h2 className="text-lg font-semibold text-gray-900">Privacy & cookies</h2>
+                                    <p className="mt-1 text-sm text-gray-500">
+                                        Optional cookies and similar technologies. You can change these anytime.
+                                    </p>
+                                </div>
+                                <div className="lg:col-span-2 px-6 py-6">
+                                    <PrivacyPreferences />
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Data rights (GDPR / CCPA) */}
+                    <div id="data-rights" className="mb-12 scroll-mt-8">
+                        <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
+                            <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+                                <div className="lg:col-span-1 px-6 py-6 border-b lg:border-b-0 lg:border-r border-gray-200">
+                                    <h2 className="text-lg font-semibold text-gray-900">Data rights</h2>
+                                    <p className="mt-1 text-sm text-gray-500">
+                                        Export or request erasure of personal data tied to your account.
+                                    </p>
+                                </div>
+                                <div className="lg:col-span-2 px-6 py-6">
+                                    <DataSubjectRights />
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
                     {/* Companies */}
                     <div id="companies" className="mb-12 scroll-mt-8">
                         <CompaniesSection companies={auth.companies} />
@@ -913,7 +971,7 @@ export default function ProfileIndex({ user: userData }) {
                     </div>
                 </div>
             </main>
-            <AppFooter />
+            <AppFooter variant="settings" />
 
             {/* Image Crop Modal */}
             <ImageCropModal

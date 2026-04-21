@@ -711,7 +711,7 @@ PROMPT
     'logging' => [
         'store_prompts' => env('AI_STORE_PROMPTS', false),
         /** When true, full prompt text is stored in ai_agent_runs.metadata.generative_audit for editor generative/edit only. */
-        'log_generative_prompts' => env('AI_LOG_GENERATIVE_PROMPTS', true),
+        'log_generative_prompts' => env('AI_LOG_GENERATIVE_PROMPTS', false),
         'retention_days' => env('AI_LOG_RETENTION_DAYS', 30),
     ],
 

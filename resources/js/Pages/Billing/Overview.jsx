@@ -488,7 +488,7 @@ export default function BillingOverview({ tenant, current_plan, subscription, pa
                     </div>
                 </div>
             </main>
-            <AppFooter />
+            <AppFooter variant="settings" />
         </div>
     )
 }

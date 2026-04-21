@@ -14,9 +14,12 @@ use App\Services\AIConfigService;
 use App\Services\AICostReportingService;
 use App\Support\AssetVariant;
 use App\Support\DeliveryContext;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -1212,5 +1215,68 @@ class AIDashboardController extends Controller
             'thumbnail_url' => $thumbnailUrl,
             'admin_url' => url('/app/admin/assets/'.$asset->id),
         ];
+    }
+
+    /**
+     * GET /admin/ai/studio-usage
+     *
+     * Read-only daily rollups for Studio (composition) activity — same pattern as
+     * ai_usage: bounded rows (days × metrics × tenants), not per-save events.
+     * Query: ?days=30 (1–365). Optional ?tenant_id= for one workspace.
+     */
+    public function studioUsage(Request $request): JsonResponse
+    {
+        if (! Auth::user()->can('ai.dashboard.view')) {
+            abort(403);
+        }
+        if (! Schema::hasTable('studio_usage_daily')) {
+            return response()->json([
+                'days' => 0,
+                'rows' => [],
+                'note' => 'Table studio_usage_daily not found — run migrations.',
+            ]);
+        }
+
+        $days = min(365, max(1, (int) $request->query('days', 30)));
+        $since = now()->subDays($days - 1)->startOfDay()->toDateString();
+        $tenantId = $request->query('tenant_id');
+
+        $q = DB::table('studio_usage_daily')
+            ->where('usage_date', '>=', $since);
+        if ($tenantId !== null && $tenantId !== '' && ctype_digit((string) $tenantId)) {
+            $q->where('tenant_id', (int) $tenantId);
+        }
+
+        $rows = $q
+            ->select([
+                'usage_date',
+                'metric',
+                DB::raw('SUM(event_count) as events'),
+                DB::raw('SUM(sum_duration_ms) as sum_duration_ms'),
+                DB::raw('SUM(sum_cost_usd) as sum_cost_usd'),
+            ])
+            ->groupBy('usage_date', 'metric')
+            ->orderByDesc('usage_date')
+            ->orderBy('metric')
+            ->get()
+            ->map(function ($r) {
+                $events = (int) $r->events;
+                $sumMs = (int) $r->sum_duration_ms;
+
+                return [
+                    'usage_date' => $r->usage_date,
+                    'metric' => $r->metric,
+                    'events' => $events,
+                    'sum_duration_ms' => $sumMs,
+                    'avg_duration_ms' => $events > 0 ? (int) round($sumMs / $events) : null,
+                    'sum_cost_usd' => round((float) $r->sum_cost_usd, 6),
+                ];
+            });
+
+        return response()->json([
+            'days' => $days,
+            'since' => $since,
+            'rows' => $rows,
+        ]);
     }
 }

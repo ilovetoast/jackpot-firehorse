@@ -2100,7 +2100,7 @@ export default function CompanySettings({
                     </div>
                 </div>
             </main>
-            <AppFooter />
+            <AppFooter variant="settings" />
 
             <ConfirmDialog
                 open={showDeleteCompanyDialog}

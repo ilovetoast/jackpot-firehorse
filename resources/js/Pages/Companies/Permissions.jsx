@@ -444,7 +444,7 @@ export default function CompanyPermissions({
                     </div>
                 </div>
             </main>
-            <AppFooter />
+            <AppFooter variant="settings" />
         </div>
     )
 }

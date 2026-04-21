@@ -5,6 +5,7 @@ namespace App\Providers;
 use App\Http\Middleware\EnsureIncubationWorkspaceNotLocked;
 use App\Http\Middleware\EnsureOnboardingComplete;
 use App\Support\SentryTracesSampler;
+use Illuminate\Routing\Router;
 use App\Contracts\ImageEmbeddingServiceInterface;
 use App\Events\AssetPendingApproval;
 use App\Events\AssetUploaded;
@@ -118,6 +119,14 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        // Router middleware aliases: registered here in addition to bootstrap/app.php so a stale
+        // route:cache or release whose bootstrap/app.php is out of sync still resolves these names.
+        // Complements the container aliases set in register() (those rescue the router's fallback
+        // path through Container::make($name); this rescues the router's primary lookup path).
+        $router = $this->app->make(Router::class);
+        $router->aliasMiddleware('incubation.not_locked', EnsureIncubationWorkspaceNotLocked::class);
+        $router->aliasMiddleware('ensure.onboarding', EnsureOnboardingComplete::class);
+
         // Sentry: prevent huge transaction span explosions from inflating quota (drops the transaction only, not errors).
         if ($this->app->bound(HubInterface::class)) {
             \Sentry\configureScope(static function (Scope $scope): void {

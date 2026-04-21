@@ -446,6 +446,18 @@ export function workspaceOverviewBackdropCss(primaryHex, secondaryHex, accentHex
     return `radial-gradient(circle at 20% 20%, #${p6}${a1}, transparent), radial-gradient(circle at 80% 80%, #${s6}${a2}, transparent), #0B0B0D`
 }
 
+/** Site primary indigo — same dual-radial base as Brand Overview before a brand primary exists. */
+export const SITE_PRIMARY_HEX = '#6366f1'
+
+/**
+ * Full cinematic stack base for public legal pages (Terms, Privacy, etc.) — matches in-app Overview shell.
+ */
+export const SITE_DEFAULT_CINEMATIC_BACKDROP_CSS = workspaceOverviewBackdropCss(
+    SITE_PRIMARY_HEX,
+    SITE_PRIMARY_HEX,
+    null
+)
+
 /**
  * Resolve the cinematic accent color for dark cinematic layouts (overview, onboarding, etc.)
  * based on the brand's `settings.cinematic_accent_color_role` preference.

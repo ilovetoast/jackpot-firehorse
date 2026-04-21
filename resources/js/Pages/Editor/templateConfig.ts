@@ -1,6 +1,8 @@
 import type { Layer, TextBoostStyle } from './documentModel'
 import { generateId } from './documentModel'
 import { placementToXY, type Placement } from '../../utils/snapEngine'
+import { composeRecipe, deriveBrandAdStyle, getRecipeDescriptor, RECIPE_REGISTRY, type BrandAdStyleHint, type RecipeKey } from './recipes'
+import type { WizardDefaults } from './wizardDefaults'
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -353,7 +355,7 @@ export const TEMPLATE_CATEGORIES: TemplateCategoryDef[] = [
 
 // ── Layout Styles (Ad Types) ──────────────────────────────────────
 
-export type LayoutStyleId = 'product_focused' | 'brand_focused' | 'lifestyle' | 'special'
+export type LayoutStyleId = 'product_focused' | 'brand_focused' | 'lifestyle' | 'special' | RecipeKey
 
 export type LayoutStyle = {
     id: LayoutStyleId
@@ -463,12 +465,71 @@ export function buildLayersForStyle(
     styleId: LayoutStyleId,
     width: number,
     height: number,
+    brand?: BrandAdStyleHint | null,
+    wizardDefaults?: WizardDefaults | null,
 ): LayerBlueprint[] {
+    // Recipe keys are dispatched to the recipe engine first. Any unregistered
+    // key (recipe not yet implemented) falls through to the legacy LAYOUT_STYLES
+    // lookup so the wizard still works on old-style LAYOUT_STYLES ids.
+    const recipeDescriptor = getRecipeDescriptor(styleId as RecipeKey)
+    if (recipeDescriptor) {
+        const style = deriveBrandAdStyle(brand ?? null, wizardDefaults ?? null)
+        // Pull wizard-auto-picked hero/logo into the recipe's content slots so
+        // the first pass lands on a real-feeling composition. Per-layer edits
+        // happen in the editor after materialization.
+        const wizardHeroId = wizardDefaults?.background_candidates?.[0]?.id
+        const { blueprints } = composeRecipe(recipeDescriptor.key, {
+            style,
+            format: { width, height },
+            content: {
+                heroAssetId: wizardHeroId,
+            },
+        })
+        return blueprints
+    }
+
     const style = getLayoutStyle(styleId)
     if (!style) return [BG_LAYER]
     const isVertical = height > width * 1.3
     const isBanner = width > height * 2
     return style.buildLayers(isVertical, isBanner)
+}
+
+/**
+ * Recipe-backed LayoutStyle entries surfaced in the wizard Step 2 picker.
+ * Each wrapper's `buildLayers(isVertical, isBanner)` returns a blueprint list
+ * built from a neutral BrandAdStyle — call sites that have brand context
+ * should call {@link buildLayersForStyle} with `(brand, wizardDefaults)` to
+ * get the on-brand variant. The neutral fallback keeps the previews alive
+ * for logged-out / brand-less demos.
+ */
+export const RECIPE_LAYOUT_STYLES: LayoutStyle[] = RECIPE_REGISTRY.map((rd) => ({
+    id: rd.key as LayoutStyleId,
+    name: rd.name,
+    description: rd.description,
+    icon: rd.icon,
+    buildLayers: (_isVertical: boolean, _isBanner: boolean): LayerBlueprint[] => {
+        // Fallback neutral style — real composition runs through
+        // buildLayersForStyle once the wizard knows the brand + wizardDefaults.
+        const neutralStyle = deriveBrandAdStyle(null, null)
+        // We don't actually know width/height here; pass a square 1080 so the
+        // ratio math in primitives works. Real invocation uses the correct size.
+        const { blueprints } = composeRecipe(rd.key, {
+            style: neutralStyle,
+            format: { width: 1080, height: 1080 },
+            content: {},
+        })
+        return blueprints
+    },
+}))
+
+/**
+ * LAYOUT_STYLES merged with the recipe-backed entries. Use this in the wizard
+ * style picker so recipes appear as selectable cards alongside the classic
+ * styles.
+ */
+export function getAllLayoutStyles(): LayoutStyle[] {
+    return [...LAYOUT_STYLES, ...RECIPE_LAYOUT_STYLES]
 }
 
 // ── Helpers ────────────────────────────────────────────────────────
@@ -705,11 +766,21 @@ export function blueprintToLayersAndGroups(
                         fontWeight: (bp.defaults?.fontWeight as number) ?? 400,
                         color: (bp.defaults?.color as string) ?? '#000000',
                         fontFamily: 'inherit',
-                        textAlign: 'center' as const,
-                        lineHeight: 1.3,
-                        letterSpacing: 0,
-                        verticalAlign: 'top' as const,
+                        textAlign: (bp.defaults?.textAlign as 'left' | 'center' | 'right' | undefined) ?? 'center',
+                        lineHeight: (bp.defaults?.lineHeight as number | undefined) ?? 1.3,
+                        letterSpacing: (bp.defaults?.letterSpacing as number | undefined) ?? 0,
+                        verticalAlign: (bp.defaults?.verticalAlign as 'top' | 'middle' | 'bottom' | undefined) ?? 'top',
                         autoFit: false,
+                        // Stroke defaults from blueprints — used by the recipe
+                        // engine's ghost/filled headline primitive to emit a
+                        // proper outlined-text ghost word rather than a faded
+                        // fill approximation.
+                        strokeWidth: typeof bp.defaults?.strokeWidth === 'number'
+                            ? (bp.defaults.strokeWidth as number)
+                            : undefined,
+                        strokeColor: typeof bp.defaults?.strokeColor === 'string'
+                            ? (bp.defaults.strokeColor as string)
+                            : undefined,
                     },
                 }
 
@@ -768,6 +839,14 @@ export function blueprintToLayersAndGroups(
                     gradientEndColor,
                     gradientAngleDeg: (bp.defaults?.gradientAngleDeg as number) ?? 180,
                     borderRadius: (bp.defaults?.borderRadius as number) ?? undefined,
+                    // Border fields — used by the holding-shape primitive to
+                    // emit a hollow frame (transparent fill + visible border).
+                    borderStrokeWidth: typeof bp.defaults?.borderStrokeWidth === 'number'
+                        ? (bp.defaults.borderStrokeWidth as number)
+                        : undefined,
+                    borderStrokeColor: typeof bp.defaults?.borderStrokeColor === 'string'
+                        ? (bp.defaults.borderStrokeColor as string)
+                        : undefined,
                 }
             }
 

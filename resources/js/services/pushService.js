@@ -31,6 +31,48 @@ function logError(context, err) {
 
 let initPushInFlight = null
 
+/** Resolves once the v16 page SDK script is injected (when gated behind cookie consent). */
+let sdkInjectPromise = null
+
+/**
+ * When {@see config('privacy.gate_onesignal_behind_consent')} is true, Blade omits the OneSignal
+ * script tag until the user grants functional consent. Call this after consent to load the SDK.
+ */
+export function loadOneSignalSdkIfConfigured() {
+    if (typeof document === 'undefined') {
+        return Promise.resolve(false)
+    }
+    const appIdMeta = document.querySelector('meta[name="onesignal-app-id"]')?.getAttribute('content')?.trim()
+    if (!appIdMeta) {
+        log('loadOneSignalSdkIfConfigured: skip — no onesignal-app-id meta')
+        return Promise.resolve(false)
+    }
+    if (document.querySelector('script[src*="OneSignalSDK.page.js"]')) {
+        if (!window.OneSignalDeferred) {
+            window.OneSignalDeferred = []
+        }
+        return Promise.resolve(true)
+    }
+    if (!window.OneSignalDeferred) {
+        window.OneSignalDeferred = []
+    }
+    if (sdkInjectPromise) {
+        return sdkInjectPromise
+    }
+    sdkInjectPromise = new Promise((resolve, reject) => {
+        const s = document.createElement('script')
+        s.src = 'https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js'
+        s.defer = true
+        s.onload = () => {
+            log('loadOneSignalSdkIfConfigured: script loaded')
+            resolve(true)
+        }
+        s.onerror = () => reject(new Error('OneSignal SDK failed to load'))
+        document.head.appendChild(s)
+    })
+    return sdkInjectPromise
+}
+
 function csrfToken() {
     return document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') ?? ''
 }

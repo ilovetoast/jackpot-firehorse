@@ -67,7 +67,7 @@ export default function ManageLayout({ children, title = 'Manage', activeSection
                 </div>
             </div>
 
-            <AppFooter />
+            <AppFooter variant="settings" />
         </div>
     )
 }

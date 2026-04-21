@@ -121,6 +121,50 @@ class ContactLeadController extends Controller
     }
 
     /**
+     * POST /privacy/contact-leads/object-to-processing — GDPR Art. 21 objection for inbound
+     * marketing / contact / sales lead rows (no user account). Same honeypot + throttle pattern
+     * as other public forms; response does not disclose whether the email existed.
+     */
+    public function objectToProcessing(Request $request): RedirectResponse
+    {
+        if (filled($request->input('website'))) {
+            return back()->with(
+                'info',
+                'If your email matches our records, we will apply your objection to processing.',
+            );
+        }
+
+        $data = $request->validate([
+            'email' => ['required', 'email:rfc,dns', 'max:255'],
+        ]);
+
+        $email = strtolower(trim((string) $data['email']));
+        $now = now();
+
+        DB::transaction(function () use ($email, $now) {
+            $leads = ContactLead::query()
+                ->where('email', $email)
+                ->whereNull('processing_objected_at')
+                ->lockForUpdate()
+                ->get();
+
+            foreach ($leads as $lead) {
+                $lead->processing_objected_at = $now;
+                $lead->consent_marketing = false;
+                if ($lead->kind === ContactLead::KIND_NEWSLETTER && $lead->unsubscribed_at === null) {
+                    $lead->unsubscribed_at = $now;
+                }
+                $lead->save();
+            }
+        });
+
+        return back()->with(
+            'info',
+            'If your email matches our records, we will apply your objection to processing.',
+        );
+    }
+
+    /**
      * Upsert on (email, kind) so re-submissions refresh the row instead of
      * erroring on the unique constraint. Preserves the CRM fields if a sales
      * rep has already triaged this lead.

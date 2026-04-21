@@ -581,7 +581,7 @@ export default function BillingIndex({ tenant, current_plan, plans, subscription
                     </Link>
                 </div>
             </main>
-            <AppFooter />
+            <AppFooter variant="settings" />
         </div>
     )
 }

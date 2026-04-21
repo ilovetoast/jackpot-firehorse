@@ -3772,7 +3772,7 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                 </div>{/* end two-column layout */}
                 </div>
                     </main>
-                    <AppFooter />
+                    <AppFooter variant="settings" />
                 </div>
             )
         }

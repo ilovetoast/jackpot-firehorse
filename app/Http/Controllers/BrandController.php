@@ -277,6 +277,79 @@ class BrandController extends Controller
     }
 
     /**
+     * POST /app/brands/{brand}/ad-style
+     *
+     * Persists user-authored ad-style overrides onto `brand.settings.ad_style`.
+     * Each field is optional — omitting a field falls back to the value
+     * inferred by the Studio recipe engine from voice/colors. Unknown keys are
+     * dropped by the validator so a misbehaving client can't write garbage.
+     *
+     * Stored under `brand.settings` (existing JSON column — no migration) so
+     * the value automatically rides along on `auth.activeBrand.settings` and
+     * is picked up by `deriveBrandAdStyle()` in the Studio editor without any
+     * extra wiring.
+     *
+     * Request body: a sparse partial of `AdStyleOverrides` (see
+     * `resources/js/Pages/Editor/recipes/brandAdStyle.ts`). Sending `null` or
+     * omitting a field clears the override; sending `{ ad_style: null }`
+     * clears the whole block (back to pure inference).
+     */
+    public function updateAdStyle(Request $request, Brand $brand): JsonResponse
+    {
+        $tenant = app('tenant');
+        if ($brand->tenant_id !== $tenant->id) {
+            abort(403, 'Brand does not belong to this tenant.');
+        }
+        $this->authorize('update', $brand);
+
+        $validated = $request->validate([
+            'ad_style' => 'nullable|array',
+            'ad_style.dominantHueStrategy' => 'nullable|string|in:brand_primary,product_color,accent',
+            'ad_style.backgroundPreference' => 'nullable|string|in:solid,gradient_radial,gradient_linear,texture,photo,black,paper',
+            'ad_style.headlineStyle' => 'nullable|string|in:ghost_filled_pair,filled_single,script_plus_caps,grunge_stacked,bold_display_stack',
+            'ad_style.headlineGhostOpacity' => 'nullable|numeric|min:0|max:1',
+            'ad_style.headlineGhostStrokePx' => 'nullable|numeric|min:0|max:20',
+            'ad_style.holdingShapeStyle' => 'nullable|string|in:hairline_rect,rounded_pill,double_frame,ornamented,none',
+            'ad_style.holdingShapeStrokePx' => 'nullable|numeric|min:0|max:20',
+            'ad_style.holdingShapeCornerRadius' => 'nullable|numeric|min:0|max:200',
+            'ad_style.watermarkMode' => 'nullable|string|in:faded_bg,corner_only,both,none',
+            'ad_style.watermarkOpacity' => 'nullable|numeric|min:0|max:1',
+            'ad_style.photoTreatment' => 'nullable|string|in:duotone_primary,tone_mapped,natural,grayscale,glow',
+            'ad_style.footerStyle' => 'nullable|string|in:white_bar,dark_bar,none,logo_centered',
+            'ad_style.ctaStyle' => 'nullable|string|in:pill_filled,pill_outlined,underline,none',
+            'ad_style.voiceTone' => 'nullable|string|in:playful,bold,heritage,technical,minimal,celebratory',
+        ]);
+
+        $settings = $brand->settings ?? [];
+
+        if (! array_key_exists('ad_style', $validated)) {
+            // No-op: caller sent an empty body. Return current state.
+            return response()->json([
+                'ok' => true,
+                'ad_style' => $settings['ad_style'] ?? null,
+            ]);
+        }
+
+        $incoming = $validated['ad_style'];
+        if ($incoming === null) {
+            // Explicit clear: drop overrides entirely, back to pure inference.
+            unset($settings['ad_style']);
+        } else {
+            // Merge so callers can PATCH single fields without wiping others.
+            $current = is_array($settings['ad_style'] ?? null) ? $settings['ad_style'] : [];
+            $settings['ad_style'] = array_merge($current, $incoming);
+        }
+
+        $brand->settings = $settings;
+        $brand->save();
+
+        return response()->json([
+            'ok' => true,
+            'ad_style' => $settings['ad_style'] ?? null,
+        ]);
+    }
+
+    /**
      * Show the form for creating a new brand.
      */
     public function create(): Response|\Illuminate\Http\RedirectResponse

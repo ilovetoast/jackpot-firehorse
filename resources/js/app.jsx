@@ -45,6 +45,7 @@ import FlashMessage from './Components/FlashMessage'
 import AssetProcessingTray from './Components/AssetProcessingTray'
 import DownloadBucketBarGlobal from './Components/DownloadBucketBarGlobal'
 import PWAInstallPopover from './Components/PWAInstallPopover'
+import CookieConsentBanner from './Components/CookieConsentBanner'
 // import PushServiceInit from './Components/PushServiceInit' // off while PUSH_CLIENT_DISABLED — see pushService.js
 import { BucketProvider } from './contexts/BucketContext'
 import { SelectionProvider } from './contexts/SelectionContext'
@@ -129,6 +130,7 @@ createInertiaApp({
             return (props) => (
                 <>
                     <PageComponent {...props} />
+                    <CookieConsentBanner />
                     <GlobalErrorDialog />
                     <PermissionDeniedHost />
                 </>
@@ -142,6 +144,7 @@ createInertiaApp({
         return (props) => (
             <>
                 <PageComponent {...props} />
+                <CookieConsentBanner />
                 {props.auth?.user && <PWAInstallPopover auth={props.auth} />}
                 {/* Push / OneSignal pre-prompt: disabled — uncomment PushServiceInit import + line below when re-enabling (pushService.js PUSH_CLIENT_DISABLED). */}
                 {/* {props.auth?.user && <PushServiceInit />} */}

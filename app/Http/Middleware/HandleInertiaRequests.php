@@ -4,6 +4,7 @@ namespace App\Http\Middleware;
 
 use App\Models\Brand;
 use App\Models\Collection;
+use App\Models\Consent;
 use App\Models\Tenant;
 use App\Models\User;
 use App\Services\AgencyBrandAccessService;
@@ -12,6 +13,7 @@ use App\Services\CreatorModuleStatusService;
 use App\Services\FeatureGate;
 use App\Services\FileTypeService;
 use App\Services\PlanService;
+use App\Services\Privacy\PrivacyRegionResolver;
 use App\Services\Prostaff\ResolveCreatorsDashboardAccess;
 use App\Support\BrandDNA\HeadlineAppearanceCatalog;
 use Illuminate\Http\Request;
@@ -408,6 +410,7 @@ class HandleInertiaRequests extends Middleware
                 'is_development' => config('app.env') === 'local' || config('app.env') === 'development',
                 'app_env' => config('app.env'),
             ],
+            'privacy' => $this->buildPrivacySharedProps($request),
             'currentWorkspace' => $tenant ? [
                 'id' => (int) $tenant->id,
                 'name' => $tenant->name,
@@ -732,6 +735,40 @@ class HandleInertiaRequests extends Middleware
         ]);
 
         return $shared;
+    }
+
+    /**
+     * Cookie / GPC / region hints for consent UI (Privacy Policy §9).
+     *
+     * @return array<string, mixed>
+     */
+    private function buildPrivacySharedProps(Request $request): array
+    {
+        $resolver = app(PrivacyRegionResolver::class);
+        $country = $resolver->countryCodeFromRequest($request);
+        $user = $request->user();
+
+        $cookieConsent = null;
+        if ($user) {
+            $purposes = Consent::latestPurposesForUser($user->id);
+            $latest = Consent::latestRecordForUser($user->id);
+            if ($purposes !== null && $latest) {
+                $cookieConsent = [
+                    'purposes' => $purposes,
+                    'policy_version' => $latest->policy_version,
+                    'updated_at' => $latest->granted_at->toIso8601String(),
+                ];
+            }
+        }
+
+        return [
+            'cookie_policy_version' => config('privacy.cookie_policy_version', '1'),
+            'strict_opt_in_region' => $resolver->needsStrictOptIn($country),
+            'country_code' => $country,
+            'gpc' => $resolver->globalPrivacyControl($request),
+            'gate_onesignal_behind_consent' => (bool) config('privacy.gate_onesignal_behind_consent', true),
+            'cookie_consent' => $cookieConsent,
+        ];
     }
 
     /**

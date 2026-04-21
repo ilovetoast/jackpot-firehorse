@@ -4,6 +4,7 @@ Documentation for **where** the app runs and **what** must be installed on hosts
 
 | Document | Purpose |
 |----------|---------|
+| [PRODUCTION_ARCHITECTURE_AWS.md](PRODUCTION_ARCHITECTURE_AWS.md) | Full target architecture: ECS on EC2, worker topology, Horizon mapping, video tiers, RPO/RTO, cost bands, implementation phases — sync with internal `.docx` |
 | [SERVER_REQUIREMENTS.md](SERVER_REQUIREMENTS.md) | Third-party OS binaries (ImageMagick, FFmpeg, Poppler, etc.) by role |
 | [../DEV_TOOLING.md](../DEV_TOOLING.md) | Local-only artisan helpers and dev utilities |
 

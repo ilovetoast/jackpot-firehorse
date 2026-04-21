@@ -1,5 +1,11 @@
 import type { DocumentModel } from './documentModel'
 
+/** Optional client timing for {@link StudioUsageService} daily rollups (server accepts on create / save / batch). */
+export type CompositionTelemetry = {
+    /** Milliseconds (e.g. session open → this save); capped server-side at 48h. */
+    duration_ms?: number
+}
+
 export type CompositionDto = {
     id: string
     name: string
@@ -36,7 +42,7 @@ function csrfHeaders(): HeadersInit {
 export async function postComposition(
     name: string,
     document: DocumentModel,
-    opts?: { thumbnailPngBase64?: string | null }
+    opts?: { thumbnailPngBase64?: string | null; telemetry?: CompositionTelemetry }
 ): Promise<CompositionDto> {
     const res = await fetch('/app/api/compositions', {
         method: 'POST',
@@ -46,6 +52,7 @@ export async function postComposition(
             name,
             document,
             thumbnail_png_base64: opts?.thumbnailPngBase64 ?? undefined,
+            telemetry: opts?.telemetry,
         }),
     })
     const text = await res.text()
@@ -79,6 +86,7 @@ export async function putComposition(
          */
         versionKind?: CompositionVersionKind
         thumbnailPngBase64?: string | null
+        telemetry?: CompositionTelemetry
     }
 ): Promise<CompositionDto> {
     const res = await fetch(`/app/api/compositions/${encodeURIComponent(id)}`, {
@@ -92,6 +100,7 @@ export async function putComposition(
             version_kind: opts?.versionKind ?? undefined,
             create_version: opts?.createVersion ?? true,
             thumbnail_png_base64: opts?.thumbnailPngBase64 ?? undefined,
+            telemetry: opts?.telemetry,
         }),
     })
     const text = await res.text()
@@ -204,7 +213,8 @@ export async function postCompositionVersion(
     document: DocumentModel,
     label?: string | null,
     thumbnailPngBase64?: string | null,
-    kind?: CompositionVersionKind
+    kind?: CompositionVersionKind,
+    telemetry?: CompositionTelemetry
 ): Promise<{ composition: CompositionDto; version: CompositionVersionDto | null }> {
     const res = await fetch(`/app/api/compositions/${encodeURIComponent(compositionId)}/versions`, {
         method: 'POST',
@@ -215,6 +225,7 @@ export async function postCompositionVersion(
             label: label ?? null,
             kind: kind ?? undefined,
             thumbnail_png_base64: thumbnailPngBase64 ?? undefined,
+            telemetry,
         }),
     })
     const text = await res.text()
@@ -285,4 +296,44 @@ export async function postCompositionFromDocument(
     document: DocumentModel
 ): Promise<CompositionDto> {
     return postComposition(name, document)
+}
+
+/**
+ * Batch-create N compositions in a single request. Backed by
+ * `POST /app/api/compositions/batch` (see
+ * {@link \App\Http\Controllers\Editor\EditorCompositionController::storeBatch}).
+ *
+ * Used by the Format Pack batch-create flow: client materializes one
+ * `DocumentModel` per pack size (via `composeRecipe` + `blueprintToLayersAndGroups`)
+ * and hands the whole array off in one trip so the server can wrap the writes
+ * in a single transaction.
+ *
+ * No thumbnail data is sent — the batch endpoint intentionally rejects it.
+ * Each composition picks up a real thumbnail the first time it's opened +
+ * saved in Studio.
+ */
+export async function postCompositionsBatch(
+    items: Array<{ name: string; document: DocumentModel }>,
+    opts?: { telemetry?: CompositionTelemetry },
+): Promise<CompositionDto[]> {
+    const res = await fetch('/app/api/compositions/batch', {
+        method: 'POST',
+        headers: csrfHeaders(),
+        credentials: 'same-origin',
+        body: JSON.stringify({
+            compositions: items.map((i) => ({ name: i.name, document: i.document })),
+            telemetry: opts?.telemetry,
+        }),
+    })
+    const text = await res.text()
+    let data: { compositions?: CompositionDto[]; error?: string; message?: string }
+    try {
+        data = JSON.parse(text) as { compositions?: CompositionDto[]; error?: string; message?: string }
+    } catch {
+        throw new Error(text || 'Batch save failed')
+    }
+    if (!res.ok) {
+        throw new Error(data.error || data.message || text || 'Batch save failed')
+    }
+    return data.compositions ?? []
 }

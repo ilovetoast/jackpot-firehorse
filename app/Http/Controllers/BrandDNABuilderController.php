@@ -334,6 +334,10 @@ class BrandDNABuilderController extends Controller
                 'primary_color' => $brand->primary_color,
                 'secondary_color' => $brand->secondary_color,
                 'accent_color' => $brand->accent_color,
+                // Pass through brand.settings so the Expression step's
+                // AdStyleCard can seed its initial state from existing
+                // ad_style overrides on `brand.settings.ad_style`.
+                'settings' => $brand->settings ?? [],
             ],
             'logoAsset' => $logoAssetId ? [
                 'id' => $logoAssetId,
@@ -376,7 +380,37 @@ class BrandDNABuilderController extends Controller
             'pipelineStatus' => $finalization['pipeline_status'] ?? [],
             'isLocal' => app()->environment('local'),
             'brandResearchGate' => $this->getBrandResearchGate($tenant),
+            // Aggregated signals from the brand's reference-ad gallery.
+            // Used by the Studio recipe engine as *soft* hints layered
+            // below explicit overrides but above pure inference (see
+            // deriveBrandAdStyle in resources/js/Pages/Editor/recipes/).
+            // Shape: { sample_count, avg_brightness, avg_saturation,
+            //          dominant_hue_bucket, palette_mix, suggestions }.
+            // Null only when the service throws; an empty gallery
+            // returns a zero-sample object so the FE can distinguish
+            // "no references" from "service failed".
+            'adReferenceHints' => $this->safeAdReferenceHints($brand),
         ]);
+    }
+
+    /**
+     * Wrapped so a signal-aggregator failure never takes down the
+     * Builder page render. Returns `null` on error so the UI can gracefully
+     * degrade (AdReferencesCard just hides the "inferred from references"
+     * ribbon if hints are null).
+     */
+    private function safeAdReferenceHints(Brand $brand): ?array
+    {
+        try {
+            return app(\App\Services\BrandIntelligence\BrandAdReferenceHintsService::class)
+                ->forBrand($brand);
+        } catch (\Throwable $e) {
+            \Log::channel('pipeline')->warning('[BrandGuidelinesBuilder] hints aggregation failed', [
+                'brand_id' => $brand->id,
+                'error' => $e->getMessage(),
+            ]);
+            return null;
+        }
     }
 
     /**

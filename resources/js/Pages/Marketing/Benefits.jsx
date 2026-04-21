@@ -13,7 +13,7 @@ const BENEFITS = [
     {
         title: 'Faster execution',
         body: 'Creators spend time on craft, not hunting files or re-asking for rules. Context, assets, and checks live in the same flow.',
-        metric: { value: '<200ms', label: 'edge delivery worldwide' },
+        metric: { value: 'Edge', label: 'delivery worldwide' },
         iconPath: 'M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z',
     },
     {

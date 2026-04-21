@@ -1,4 +1,5 @@
 import { Link, usePage } from '@inertiajs/react'
+import { SITE_DEFAULT_CINEMATIC_BACKDROP_CSS, SITE_PRIMARY_HEX } from '../../utils/colorUtils'
 
 const NAV = [
     { label: 'Home', href: '/' },
@@ -12,8 +13,12 @@ const NAV = [
 /**
  * Dark marketing shell: ambient gradients, grain, nav, footer.
  * Stripe / Laravel product-page inspired: soft rings, minimal borders, indigo + violet accents.
+ *
+ * @param {{ children: import('react').ReactNode, cinematicBackdrop?: boolean }} props
+ * When `cinematicBackdrop` is true (legal pages), use the same site-primary radial stack as Brand Overview
+ * before a custom brand primary is set — not the softer marketing blobs.
  */
-export default function MarketingLayout({ children }) {
+export default function MarketingLayout({ children, cinematicBackdrop = false }) {
     const page = usePage()
     const { auth, signup_enabled } = page.props
     const u = page.url || '/'
@@ -33,10 +38,29 @@ export default function MarketingLayout({ children }) {
     return (
         <div className="bg-[#0B0B0D] text-white min-h-screen relative overflow-hidden">
             <div className="pointer-events-none fixed inset-0 z-0" aria-hidden="true">
-                <div className="absolute -top-[40%] -left-[20%] w-[80%] h-[80%] rounded-full bg-[#6366f1]/[0.12] blur-[160px]" />
-                <div className="absolute -bottom-[30%] -right-[15%] w-[60%] h-[70%] rounded-full bg-[#8b5cf6]/[0.10] blur-[140px]" />
-                <div className="absolute top-[25%] right-[5%] w-[40%] h-[45%] rounded-full bg-[#06b6d4]/[0.04] blur-[100px]" />
-                <div className="absolute inset-0 bg-gradient-to-b from-[#0B0B0D] via-transparent to-[#0B0B0D]/90" />
+                {cinematicBackdrop ? (
+                    <>
+                        <div
+                            className="absolute inset-0"
+                            style={{ background: SITE_DEFAULT_CINEMATIC_BACKDROP_CSS }}
+                        />
+                        <div
+                            className="absolute inset-0"
+                            style={{
+                                background: `radial-gradient(circle at 30% 40%, ${SITE_PRIMARY_HEX}14, transparent 60%)`,
+                            }}
+                        />
+                        <div className="absolute inset-0 bg-black/30" />
+                        <div className="absolute inset-0 bg-gradient-to-b from-black/20 via-transparent to-black/50" />
+                    </>
+                ) : (
+                    <>
+                        <div className="absolute -top-[40%] -left-[20%] w-[80%] h-[80%] rounded-full bg-[#6366f1]/[0.12] blur-[160px]" />
+                        <div className="absolute -bottom-[30%] -right-[15%] w-[60%] h-[70%] rounded-full bg-[#8b5cf6]/[0.10] blur-[140px]" />
+                        <div className="absolute top-[25%] right-[5%] w-[40%] h-[45%] rounded-full bg-[#06b6d4]/[0.04] blur-[100px]" />
+                        <div className="absolute inset-0 bg-gradient-to-b from-[#0B0B0D] via-transparent to-[#0B0B0D]/90" />
+                    </>
+                )}
             </div>
 
             <div
@@ -144,7 +168,30 @@ export default function MarketingLayout({ children }) {
                             ))}
                         </div>
                     </div>
-                    <p className="mt-10 text-center text-xs text-white/30">Jackpot — Velvetysoft</p>
+                    <div className="mt-10 flex flex-wrap justify-center gap-x-5 gap-y-2 text-xs text-white/35">
+                        <Link href="/terms" className="hover:text-white/70 transition-colors">
+                            Terms of Service
+                        </Link>
+                        <span aria-hidden className="text-white/15">·</span>
+                        <Link href="/privacy" className="hover:text-white/70 transition-colors">
+                            Privacy Policy
+                        </Link>
+                        <span aria-hidden className="text-white/15">·</span>
+                        <Link href="/dpa" className="hover:text-white/70 transition-colors">
+                            DPA
+                        </Link>
+                        <span aria-hidden className="text-white/15">·</span>
+                        <Link href="/subprocessors" className="hover:text-white/70 transition-colors">
+                            Subprocessors
+                        </Link>
+                        <span aria-hidden className="text-white/15">·</span>
+                        <Link href="/accessibility" className="hover:text-white/70 transition-colors">
+                            Accessibility
+                        </Link>
+                    </div>
+                    <p className="mt-6 text-center text-xs text-white/30">
+                        © {new Date().getFullYear()} Jackpot LLC
+                    </p>
                 </div>
             </footer>
         </div>

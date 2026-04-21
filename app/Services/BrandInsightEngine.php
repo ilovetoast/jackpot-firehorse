@@ -124,24 +124,24 @@ class BrandInsightEngine
                 }
             }
 
-            // 2. Missing Metadata (medium) — link to asset grid (never analytics)
+            // 2. Missing Metadata (medium) — link to the filtered asset library only.
+            //
+            // We intentionally do NOT append &asset={uuid}: the grid paginates and
+            // category-scopes results, so the "first" asset from SQL order is often
+            // not on page 1 — the drawer then fails to open and users see an empty
+            // state. For one or many assets, the management workflow is the same:
+            // land on ?missing_metadata=1 and work through the queue from the grid.
             if ($canActOnMetadataInsights) {
                 $assetsMissingMetadata = $scopeMetadataToUploader
                     ? $this->getAssetsMissingMetadataCountForUploader($brand, $user)
                     : $this->getAssetsMissingMetadataCount($brand);
                 if ($assetsMissingMetadata > 0) {
-                    $firstAssetId = $scopeMetadataToUploader
-                        ? $this->getFirstAssetMissingMetadataIdForUploader($brand, $user)
-                        : $this->getFirstAssetMissingMetadataId($brand);
-                    $href = $firstAssetId
-                        ? '/app/assets?missing_metadata=1&asset='.$firstAssetId
-                        : '/app/assets?missing_metadata=1';
                     $signals[] = [
                         'type' => 'action',
                         'priority' => 'medium',
                         'icon' => 'document',
                         'label' => "{$assetsMissingMetadata} assets missing metadata",
-                        'href' => $href,
+                        'href' => '/app/assets?missing_metadata=1',
                         'context' => [
                             'count' => $assetsMissingMetadata,
                             'category' => 'metadata',
@@ -275,34 +275,6 @@ class BrandInsightEngine
     }
 
     /**
-     * Get the first asset ID that has no approved metadata (for direct link to edit).
-     */
-    protected function getFirstAssetMissingMetadataId(Brand $brand): ?string
-    {
-        $tenant = $brand->tenant;
-        if (! $tenant) {
-            return null;
-        }
-
-        $asset = DB::table('assets')
-            ->where('assets.tenant_id', $tenant->id)
-            ->where('assets.brand_id', $brand->id)
-            ->whereNull('assets.deleted_at')
-            ->where('assets.status', 'visible')
-            ->whereNotExists(function ($query) {
-                $query->select(DB::raw(1))
-                    ->from('asset_metadata')
-                    ->whereColumn('asset_metadata.asset_id', 'assets.id')
-                    ->whereNotNull('asset_metadata.approved_at');
-            })
-            ->orderBy('assets.created_at', 'desc')
-            ->limit(1)
-            ->value('assets.id');
-
-        return $asset ? (string) $asset : null;
-    }
-
-    /**
      * Count of the user's own visible assets with no approved metadata (contributor scope).
      */
     protected function getAssetsMissingMetadataCountForUploader(Brand $brand, User $user): int
@@ -325,32 +297,6 @@ class BrandInsightEngine
                     ->whereNotNull('asset_metadata.approved_at');
             })
             ->count();
-    }
-
-    protected function getFirstAssetMissingMetadataIdForUploader(Brand $brand, User $user): ?string
-    {
-        $tenant = $brand->tenant;
-        if (! $tenant) {
-            return null;
-        }
-
-        $asset = DB::table('assets')
-            ->where('assets.tenant_id', $tenant->id)
-            ->where('assets.brand_id', $brand->id)
-            ->where('assets.user_id', $user->id)
-            ->whereNull('assets.deleted_at')
-            ->where('assets.status', 'visible')
-            ->whereNotExists(function ($query) {
-                $query->select(DB::raw(1))
-                    ->from('asset_metadata')
-                    ->whereColumn('asset_metadata.asset_id', 'assets.id')
-                    ->whereNotNull('asset_metadata.approved_at');
-            })
-            ->orderBy('assets.created_at', 'desc')
-            ->limit(1)
-            ->value('assets.id');
-
-        return $asset ? (string) $asset : null;
     }
 
     protected function getExpiringAssetsCount(Brand $brand): int

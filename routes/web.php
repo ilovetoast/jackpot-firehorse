@@ -57,6 +57,22 @@ Route::get('/benefits', fn () => Inertia::render('Marketing/Benefits'))->name('m
 Route::get('/agency', fn () => Inertia::render('Marketing/Agency'))->name('marketing.agency');
 Route::get('/pricing', fn () => Inertia::render('Marketing/Pricing'))->name('marketing.pricing');
 
+// Legal surface — public, unauthenticated. See docs/compliance/PATH_TO_GDPR.md.
+Route::get('/terms', fn () => Inertia::render('Legal/Terms'))->name('legal.terms');
+Route::get('/privacy', fn () => Inertia::render('Legal/Privacy'))->name('legal.privacy');
+Route::get('/dpa', fn () => Inertia::render('Legal/DPA'))->name('legal.dpa');
+Route::get('/subprocessors', fn () => Inertia::render('Legal/Subprocessors'))->name('legal.subprocessors');
+Route::get('/accessibility', fn () => Inertia::render('Legal/Accessibility'))->name('legal.accessibility');
+
+Route::post('/privacy/consent', [\App\Http\Controllers\CookieConsentController::class, 'store'])
+    ->middleware(['web', 'throttle:60,1'])
+    ->name('privacy.consent.store');
+
+Route::get('/privacy/object-lead', fn () => Inertia::render('Legal/ObjectLeadProcessing'))->name('legal.object-lead');
+Route::post('/privacy/contact-leads/object-to-processing', [\App\Http\Controllers\ContactLeadController::class, 'objectToProcessing'])
+    ->middleware(['web', 'throttle:5,1'])
+    ->name('privacy.contact-leads.object-to-processing');
+
 // Contact / sales inquiry (e.g. Enterprise plan)
 Route::get('/contact', fn (Request $request) => Inertia::render('Contact', [
     'plan' => $request->query('plan'),
@@ -333,6 +349,12 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
     Route::delete('/profile/avatar', [\App\Http\Controllers\ProfileController::class, 'removeAvatar'])->name('profile.avatar.remove');
     Route::put('/profile/password', [\App\Http\Controllers\ProfileController::class, 'updatePassword'])->name('profile.password.update');
     Route::delete('/profile', [\App\Http\Controllers\ProfileController::class, 'destroy'])->name('profile.destroy');
+    Route::get('/profile/export', [\App\Http\Controllers\ProfileController::class, 'exportData'])
+        ->middleware('throttle:10,60')
+        ->name('profile.export');
+    Route::post('/profile/erasure-request', [\App\Http\Controllers\ProfileController::class, 'requestErasure'])
+        ->middleware('throttle:5,60')
+        ->name('profile.erasure-request');
 
     Route::post('/api/user/push-preference', [\App\Http\Controllers\UserPushPreferenceController::class, 'store'])
         ->name('api.user.push-preference');
@@ -347,6 +369,9 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
 
     // Site Admin routes - Command Center
     Route::get('/admin', [\App\Http\Controllers\Admin\AdminOverviewController::class, 'index'])->name('admin.index');
+    Route::get('/admin/data-subject-requests', [\App\Http\Controllers\Admin\DataSubjectRequestController::class, 'index'])->name('admin.data-subject-requests.index');
+    Route::post('/admin/data-subject-requests/{data_subject_request}/approve-erasure', [\App\Http\Controllers\Admin\DataSubjectRequestController::class, 'approveErasure'])->name('admin.data-subject-requests.approve-erasure');
+    Route::post('/admin/data-subject-requests/{data_subject_request}/reject', [\App\Http\Controllers\Admin\DataSubjectRequestController::class, 'reject'])->name('admin.data-subject-requests.reject');
     Route::get('/admin/api/overview', [\App\Http\Controllers\Admin\AdminOverviewController::class, 'metrics'])->name('admin.api.overview');
     Route::get('/admin/organization', [\App\Http\Controllers\SiteAdminController::class, 'organization'])->name('admin.organization.index');
 
@@ -489,6 +514,7 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
     Route::get('/admin/ai/analyzed-content/video-insights/runs/{run}', [\App\Http\Controllers\Admin\AdminAnalyzedContentController::class, 'videoInsightRunDetail'])->name('admin.ai.analyzed-content.video-insight-run');
     Route::get('/admin/ai/analyzed-content/video-insights/assets/{asset}/frames', [\App\Http\Controllers\Admin\AdminAnalyzedContentController::class, 'videoInsightFrames'])->name('admin.ai.analyzed-content.video-insight-frames');
     Route::get('/admin/ai/editor-image-audit', [\App\Http\Controllers\Admin\AIDashboardController::class, 'editorImageAudit'])->name('admin.ai.editor-image-audit');
+    Route::get('/admin/ai/studio-usage', [\App\Http\Controllers\Admin\AIDashboardController::class, 'studioUsage'])->name('admin.ai.studio-usage');
     Route::get('/admin/ai/models', [\App\Http\Controllers\Admin\AIDashboardController::class, 'models'])->name('admin.ai.models');
     Route::get('/admin/ai/agents', [\App\Http\Controllers\Admin\AIDashboardController::class, 'agents'])->name('admin.ai.agents');
     Route::get('/admin/ai/automations', [\App\Http\Controllers\Admin\AIDashboardController::class, 'automations'])->name('admin.ai.automations');
@@ -569,8 +595,10 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
 
     // C12: RestrictCollectionOnlyUser gates collection-only users from dashboard/assets/collections/etc.
     Route::middleware(['tenant', \App\Http\Middleware\RestrictCollectionOnlyUser::class])->group(function () {
-        // Routes that require user to be within plan limit + onboarding completion
-        Route::middleware(['ensure.user.within.plan.limit', 'ensure.onboarding'])->group(function () {
+        // Routes that require user to be within plan limit + onboarding completion.
+        // Use FQCN (not the 'ensure.onboarding' alias) so a stale route:cache or out-of-sync
+        // bootstrap/app.php can't cause "Target class [ensure.onboarding] does not exist".
+        Route::middleware(['ensure.user.within.plan.limit', \App\Http\Middleware\EnsureOnboardingComplete::class])->group(function () {
             Route::get('/overview', [\App\Http\Controllers\DashboardController::class, 'index'])->name('overview');
             Route::get('/overview/creator-progress', [\App\Http\Controllers\Prostaff\ProstaffDashboardController::class, 'creatorSelfProgress'])->name('overview.creator-progress');
             Route::get('/overview/insights', [\App\Http\Controllers\DashboardController::class, 'insightsJson'])->name('overview.insights');
@@ -686,6 +714,7 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
                     ->name('api.editor.compositions.thumbnail-asset');
                 Route::get('/api/compositions', [\App\Http\Controllers\Editor\EditorCompositionController::class, 'index'])->name('api.editor.compositions.index');
                 Route::post('/api/compositions', [\App\Http\Controllers\Editor\EditorCompositionController::class, 'store'])->name('api.editor.compositions.store');
+                Route::post('/api/compositions/batch', [\App\Http\Controllers\Editor\EditorCompositionController::class, 'storeBatch'])->name('api.editor.compositions.store-batch');
                 Route::get('/api/compositions/{id}', [\App\Http\Controllers\Editor\EditorCompositionController::class, 'show'])->whereNumber('id')->name('api.editor.compositions.show');
                 Route::put('/api/compositions/{id}', [\App\Http\Controllers\Editor\EditorCompositionController::class, 'update'])->whereNumber('id')->name('api.editor.compositions.update');
                 Route::delete('/api/compositions/{id}', [\App\Http\Controllers\Editor\EditorCompositionController::class, 'destroy'])->whereNumber('id')->name('api.editor.compositions.destroy');
@@ -888,6 +917,15 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
             });
             Route::post('/brands/{brand}/switch', [\App\Http\Controllers\BrandController::class, 'switch'])->name('brands.switch');
             Route::post('/brands/{brand}/logo-variants/generate', [\App\Http\Controllers\BrandController::class, 'generateLogoVariants'])->name('brands.logo-variants.generate');
+            Route::post('/brands/{brand}/ad-style', [\App\Http\Controllers\BrandController::class, 'updateAdStyle'])->name('brands.ad-style.update');
+
+            Route::get('/brands/{brand}/ad-references', [\App\Http\Controllers\BrandAdReferenceController::class, 'index'])->name('brands.ad-references.index');
+            Route::get('/brands/{brand}/ad-references/hints', [\App\Http\Controllers\BrandAdReferenceController::class, 'hints'])->name('brands.ad-references.hints');
+            Route::post('/brands/{brand}/ad-references', [\App\Http\Controllers\BrandAdReferenceController::class, 'store'])->name('brands.ad-references.store');
+            Route::post('/brands/{brand}/ad-references/reorder', [\App\Http\Controllers\BrandAdReferenceController::class, 'reorder'])->name('brands.ad-references.reorder');
+            Route::post('/brands/{brand}/ad-references/{reference}/reextract', [\App\Http\Controllers\BrandAdReferenceController::class, 'reextract'])->name('brands.ad-references.reextract');
+            Route::patch('/brands/{brand}/ad-references/{reference}', [\App\Http\Controllers\BrandAdReferenceController::class, 'update'])->name('brands.ad-references.update');
+            Route::delete('/brands/{brand}/ad-references/{reference}', [\App\Http\Controllers\BrandAdReferenceController::class, 'destroy'])->name('brands.ad-references.destroy');
 
             // Brand DNA (internal settings)
             Route::get('/brands/{brand}/dna', [\App\Http\Controllers\BrandDNAController::class, 'index'])->name('brands.dna.index');

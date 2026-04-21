@@ -10,10 +10,13 @@ use App\Models\User;
 use App\Services\CompositionAssetReferenceStateService;
 use App\Services\CompositionThumbnailAssetService;
 use App\Services\GenerativeCompositionAssetCleanup;
+use App\Services\StudioUsageService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -28,7 +31,8 @@ class EditorCompositionController extends Controller
     public function __construct(
         protected CompositionThumbnailAssetService $thumbnailAssets,
         protected GenerativeCompositionAssetCleanup $generativeCompositionAssetCleanup,
-        protected CompositionAssetReferenceStateService $compositionRefState
+        protected CompositionAssetReferenceStateService $compositionRefState,
+        protected StudioUsageService $studioUsage,
     ) {}
 
     private function resolveComposition(Request $request, int $id): ?Composition
@@ -314,6 +318,8 @@ class EditorCompositionController extends Controller
             'name' => 'required|string|max:255',
             'document' => 'required|array',
             'thumbnail_png_base64' => 'nullable|string|max:6000000',
+            'telemetry' => 'nullable|array',
+            'telemetry.duration_ms' => 'nullable|integer|min:0|max:172800000',
         ]);
 
         $thumbBinary = $this->decodeThumbnailPayload($validated['thumbnail_png_base64'] ?? null);
@@ -349,7 +355,92 @@ class EditorCompositionController extends Controller
             return $c->fresh();
         });
 
+        $this->recordStudioTelemetryFromRequest($request, StudioUsageService::METRIC_COMPOSITION_CREATE, 1);
+
         return response()->json(['composition' => $this->compositionJson($composition)]);
+    }
+
+    /**
+     * POST /app/api/compositions/batch
+     *
+     * Batch-create a group of compositions from a single recipe rendered across
+     * a Format Pack on the client. Every incoming composition is created as its
+     * own row (with its own version-0 history entry), identically to `store()`,
+     * but wrapped in a single transaction so an error on composition #7 rolls
+     * back compositions #1–6 too — users either see the whole batch land or
+     * none of it.
+     *
+     * Why not call store() in a loop from the client?
+     *   1. Per-request overhead across 15+ compositions is noticeable (each
+     *      trip re-runs auth, tenant/brand resolution, middleware, CSRF).
+     *   2. Partial failures would leave orphans behind — a client-side retry
+     *      would either duplicate or silently skip.
+     *   3. Transactional atomicity matters for list UX: the "open one to start
+     *      editing" flow is simpler when the batch is all-or-nothing.
+     *
+     * Thumbnails are intentionally not accepted in this endpoint. The batch
+     * flow is meant for *scaffolding* — each composition gets a thumbnail the
+     * first time it's opened + saved in Studio, same as any other new comp.
+     * Supporting thumbnails here would mean ~15 PNG uploads per call, which
+     * would blow past request-size limits.
+     */
+    public function storeBatch(Request $request): JsonResponse
+    {
+        $tenant = app('tenant');
+        $brand = app('brand');
+        $user = $request->user();
+        if (! $tenant || ! $brand || ! $user) {
+            return response()->json(['error' => 'Unauthorized'], 403);
+        }
+
+        $validated = $request->validate([
+            // Cap the batch size at 50 so a malformed client can't flood the
+            // DB. The comprehensive Format Pack caps at ~21 today; 50 leaves
+            // runway without risking pathological payloads.
+            'compositions' => 'required|array|min:1|max:50',
+            'compositions.*.name' => 'required|string|max:255',
+            'compositions.*.document' => 'required|array',
+            'telemetry' => 'nullable|array',
+            'telemetry.duration_ms' => 'nullable|integer|min:0|max:172800000',
+        ]);
+
+        $compositions = DB::transaction(function () use ($tenant, $brand, $user, $validated) {
+            $out = [];
+            foreach ($validated['compositions'] as $item) {
+                $c = Composition::query()->create([
+                    'tenant_id' => $tenant->id,
+                    'brand_id' => $brand->id,
+                    'user_id' => $user->id,
+                    'name' => $item['name'],
+                    'document_json' => $item['document'],
+                ]);
+
+                // Seed a manual version-0 so the version history reads
+                // "created from batch" from the start. Matches store()'s
+                // behavior — opening one of these comps in Studio sees the
+                // same "one manual version" affordance as any other new comp.
+                CompositionVersion::query()->create([
+                    'composition_id' => $c->id,
+                    'document_json' => $item['document'],
+                    'label' => null,
+                    'kind' => CompositionVersion::KIND_MANUAL,
+                    'created_at' => now(),
+                ]);
+
+                $out[] = $c->fresh();
+            }
+            return $out;
+        });
+
+        $this->recordStudioTelemetryFromRequest(
+            $request,
+            StudioUsageService::METRIC_COMPOSITION_BATCH,
+            count($compositions),
+        );
+
+        return response()->json([
+            'compositions' => array_map(fn ($c) => $this->compositionJson($c), $compositions),
+        ]);
     }
 
     /**
@@ -376,6 +467,8 @@ class EditorCompositionController extends Controller
             'version_label' => 'nullable|string|max:255',
             'version_kind' => 'nullable|string|in:manual,autosave',
             'thumbnail_png_base64' => 'nullable|string|max:6000000',
+            'telemetry' => 'nullable|array',
+            'telemetry.duration_ms' => 'nullable|integer|min:0|max:172800000',
         ]);
 
         $createVersion = $request->boolean('create_version', true);
@@ -423,6 +516,10 @@ class EditorCompositionController extends Controller
                 $oldDocument,
                 is_array($validated['document']) ? $validated['document'] : []
             );
+        }
+
+        if ($createVersion && $versionKind === CompositionVersion::KIND_MANUAL) {
+            $this->recordStudioTelemetryFromRequest($request, StudioUsageService::METRIC_MANUAL_CHECKPOINT, 1);
         }
 
         return response()->json(['composition' => $this->compositionJson($composition->fresh())]);
@@ -481,6 +578,8 @@ class EditorCompositionController extends Controller
             'label' => 'nullable|string|max:255',
             'kind' => 'nullable|string|in:manual,autosave',
             'thumbnail_png_base64' => 'nullable|string|max:6000000',
+            'telemetry' => 'nullable|array',
+            'telemetry.duration_ms' => 'nullable|integer|min:0|max:172800000',
         ]);
 
         $thumbBinary = $this->decodeThumbnailPayload($validated['thumbnail_png_base64'] ?? null);
@@ -523,6 +622,10 @@ class EditorCompositionController extends Controller
         }
 
         $latest = $composition->versions()->orderByDesc('id')->first();
+
+        if ($versionKind === CompositionVersion::KIND_MANUAL) {
+            $this->recordStudioTelemetryFromRequest($request, StudioUsageService::METRIC_MANUAL_CHECKPOINT, 1);
+        }
 
         return response()->json([
             'composition' => $this->compositionJson($composition->fresh()),
@@ -659,5 +762,32 @@ class EditorCompositionController extends Controller
         );
 
         return response()->json(['ok' => true]);
+    }
+
+    /**
+     * Daily rollup (see {@link StudioUsageService}) — never throws past the save response.
+     */
+    private function recordStudioTelemetryFromRequest(Request $request, string $metric, int $count = 1): void
+    {
+        try {
+            $tenant = app('tenant');
+            if (! $tenant instanceof \App\Models\Tenant) {
+                return;
+            }
+            if (! Schema::hasTable('studio_usage_daily')) {
+                return;
+            }
+            $ms = 0;
+            $t = $request->input('telemetry');
+            if (is_array($t) && isset($t['duration_ms']) && is_numeric($t['duration_ms'])) {
+                $ms = max(0, min((int) $t['duration_ms'], 172_800_000));
+            }
+            $this->studioUsage->record($tenant, $metric, $count, $ms, 0.0);
+        } catch (\Throwable $e) {
+            Log::channel('pipeline')->warning('[EditorComposition] studio telemetry failed', [
+                'metric' => $metric,
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 }

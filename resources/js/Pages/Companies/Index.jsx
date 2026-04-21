@@ -119,7 +119,7 @@ export default function CompaniesIndex({ companies }) {
                 </div>
                 </div>
             </main>
-            <AppFooter />
+            <AppFooter variant="settings" />
         </div>
     )
 }

@@ -18,6 +18,7 @@ import {
     XCircleIcon,
     TagIcon,
     CheckCircleIcon,
+    ShieldCheckIcon,
     ExclamationTriangleIcon,
     BuildingOffice2Icon as BuildingOfficeIcon,
     UsersIcon,
@@ -147,6 +148,7 @@ export default function AdminIndex({ companies: initialCompanies, users: initial
             tools: [
                 { name: 'Support', icon: QuestionMarkCircleIcon, description: 'Manage support tickets', href: '/app/admin/support/tickets' },
                 { name: 'Billing Overview', icon: ChartBarIcon, description: 'View income, expenses, and financial reports', href: '/app/admin/billing' },
+                { name: 'Data subject requests', icon: ShieldCheckIcon, description: 'GDPR / CCPA exports and erasure queue', href: '/app/admin/data-subject-requests' },
             ],
         },
         {

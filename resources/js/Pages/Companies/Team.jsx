@@ -582,7 +582,7 @@ export default function Team({ tenant, brands = [], tenant_roles = [], current_u
                     </div>
                 )}
             </main>
-            <AppFooter />
+            <AppFooter variant="settings" />
 
             <ConfirmDialog
                 open={deleteFromCompanyConfirm.open}

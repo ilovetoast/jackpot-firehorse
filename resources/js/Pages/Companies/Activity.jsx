@@ -599,7 +599,7 @@ export default function CompanyActivity({ tenant, events, pagination, filters, f
                     </div>
                 </div>
             </main>
-            <AppFooter />
+            <AppFooter variant="settings" />
         </div>
     )
 }

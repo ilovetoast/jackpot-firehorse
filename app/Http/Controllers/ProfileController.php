@@ -3,12 +3,16 @@
 namespace App\Http\Controllers;
 
 use App\Jobs\DeleteAvatarJob;
+use App\Models\DataSubjectRequest;
 use App\Services\CloudFrontSignedUrlService;
+use App\Services\Privacy\UserPersonalDataExportService;
 use App\Services\TenantBucketService;
 use App\Traits\HandlesFlashMessages;
 use Aws\S3\S3Client;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
+use ZipArchive;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
@@ -201,6 +205,73 @@ class ProfileController extends Controller
         $request->session()->regenerateToken();
 
         return redirect('/');
+    }
+
+    /**
+     * Art. 15 + 20: download a ZIP containing JSON personal data tied to this account.
+     */
+    public function exportData(Request $request, UserPersonalDataExportService $exportService): BinaryFileResponse
+    {
+        $user = $request->user();
+        $payload = $exportService->buildPayload($user);
+        $json = json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
+        if ($json === false) {
+            abort(500, 'Could not encode export payload.');
+        }
+
+        $dir = storage_path('app/temp');
+        if (! is_dir($dir)) {
+            mkdir($dir, 0755, true);
+        }
+        $zipPath = $dir.'/export-'.$user->id.'-'.uniqid('', true).'.zip';
+
+        $zip = new ZipArchive();
+        if ($zip->open($zipPath, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== true) {
+            abort(500, 'Could not create export archive.');
+        }
+        $zip->addFromString('jackpot-user-data.json', $json);
+        $zip->addFromString('readme.txt', "Jackpot personal data export — open jackpot-user-data.json.\n");
+        $zip->close();
+
+        DataSubjectRequest::query()->create([
+            'user_id' => $user->id,
+            'type' => DataSubjectRequest::TYPE_EXPORT,
+            'status' => DataSubjectRequest::STATUS_COMPLETED,
+            'processed_at' => now(),
+        ]);
+
+        return response()->download($zipPath, 'jackpot-user-data.zip')->deleteFileAfterSend(true);
+    }
+
+    /**
+     * Art. 17: queue a manual erasure review (Privacy Policy — processed on approval).
+     */
+    public function requestErasure(Request $request)
+    {
+        $validated = $request->validate([
+            'message' => ['nullable', 'string', 'max:2000'],
+        ]);
+
+        $user = $request->user();
+
+        $pending = DataSubjectRequest::query()
+            ->where('user_id', $user->id)
+            ->where('type', DataSubjectRequest::TYPE_ERASURE)
+            ->where('status', DataSubjectRequest::STATUS_PENDING)
+            ->exists();
+
+        if ($pending) {
+            return $this->backWithError('You already have a pending erasure request.');
+        }
+
+        DataSubjectRequest::query()->create([
+            'user_id' => $user->id,
+            'type' => DataSubjectRequest::TYPE_ERASURE,
+            'status' => DataSubjectRequest::STATUS_PENDING,
+            'user_message' => $validated['message'] ?? null,
+        ]);
+
+        return $this->backWithSuccess('Your erasure request was submitted. Our team will review it without undue delay.');
     }
 
     /**
