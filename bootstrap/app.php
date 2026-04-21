@@ -1,5 +1,9 @@
 <?php
 
+// Composer "files" autoload should load this; require here so helpers always exist
+// if vendor/autoload is stale or deploy skipped composer dump-autoload (e.g. jackpot_privacy_bootstrap_array in app.blade.php).
+require_once __DIR__.'/../app/helpers.php';
+
 use App\Exceptions\AIProviderException;
 use App\Models\Asset;
 use Illuminate\Database\Eloquent\ModelNotFoundException;

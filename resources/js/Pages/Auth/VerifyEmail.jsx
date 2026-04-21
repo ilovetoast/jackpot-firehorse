@@ -139,7 +139,7 @@ export default function VerifyEmail({ email }) {
                 {/* Footer */}
                 <footer className="px-8 py-6 text-center">
                     <p className="text-[11px] text-white/20 tracking-widest uppercase">
-                        Jackpot &middot; Brand Operating System
+                        Jackpot &middot; Brand asset manager
                     </p>
                 </footer>
             </div>

@@ -38,7 +38,7 @@ export default function Splash({ onComplete }) {
                         animationFillMode: 'forwards',
                     }}
                 >
-                    Brand Operating System
+                    Brand asset manager
                 </p>
                 <div className="mt-16 w-64 h-0.5 bg-white/20 overflow-hidden rounded-full">
                     <div

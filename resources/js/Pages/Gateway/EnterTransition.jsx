@@ -151,7 +151,7 @@ export default function EnterTransition({ suppressAutoRedirect = false }) {
                     className="text-lg text-white/60 mb-2 transition-opacity duration-500 delay-100"
                     style={{ opacity: stage !== 'init' ? 1 : 0 }}
                 >
-                    {theme?.tagline || 'Brand Operating System'}
+                    {theme?.tagline || 'Brand asset manager'}
                 </p>
 
                 <p

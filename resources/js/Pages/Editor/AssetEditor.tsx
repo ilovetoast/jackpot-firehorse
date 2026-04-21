@@ -4021,6 +4021,7 @@ export default function AssetEditor() {
             const brandPrimaryFont = brandContext?.typography?.canvas_primary_font_family
                 ?? brandContext?.typography?.primary_font
                 ?? undefined
+            const brandSecondaryFont = brandContext?.typography?.secondary_font?.trim() || undefined
 
             for (const layer of layers) {
                 if (layer.type === 'text') {
@@ -4032,9 +4033,11 @@ export default function AssetEditor() {
                     } else if (textLayer.name === 'Sub-Headline') {
                         if (ai.subheadline) textLayer.content = ai.subheadline
                         if (palette.subheadline_color) textLayer.style = { ...textLayer.style, color: palette.subheadline_color }
+                        if (brandSecondaryFont) textLayer.style = { ...textLayer.style, fontFamily: brandSecondaryFont }
                     } else if (textLayer.name === 'CTA') {
                         if (ai.cta_text) textLayer.content = ai.cta_text
                         if (palette.cta_text) textLayer.style = { ...textLayer.style, color: palette.cta_text }
+                        if (brandSecondaryFont) textLayer.style = { ...textLayer.style, fontFamily: brandSecondaryFont }
                     }
                 }
 
@@ -4059,7 +4062,11 @@ export default function AssetEditor() {
                 if (layer.type === 'generative_image' || (layer.type === 'image' && looksLikeBg)) {
                     const bgLayer = layer as any
                     const bgAssignment = assignments.find(a => a.role === 'background')
-                    const wantsAsset = bgAssignment?.source === 'use_asset' && bgAssignment.asset_id
+                    // Models often omit `source: "use_asset"` even when they return a background asset_id.
+                    // Treat an explicit asset_id as photography unless the assignment clearly opts into prompt-only.
+                    const bgSource = (bgAssignment as { source?: string } | undefined)?.source?.trim() ?? ''
+                    const wantsAsset = Boolean(bgAssignment?.asset_id)
+                        && !['use_prompt', 'generate'].includes(bgSource)
                     const wantsPrompt = !wantsAsset && (ai.background_prompt || bgAssignment?.prompt)
 
                     if (wantsAsset) {

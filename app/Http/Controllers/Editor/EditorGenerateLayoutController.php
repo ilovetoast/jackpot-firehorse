@@ -1053,6 +1053,14 @@ PROMPT;
             }
         }
 
+        /** @var array<string, true> */
+        $logoAssetIds = [];
+        foreach ($assetGroups['logos'] ?? [] as $logoRow) {
+            if (! empty($logoRow['id'])) {
+                $logoAssetIds[(string) $logoRow['id']] = true;
+            }
+        }
+
         if (! empty($parsed['layer_assignments']) && is_array($parsed['layer_assignments'])) {
             $validAssetIds = $this->collectValidAssetIds($parsed['layer_assignments'], $tenant, $brand);
             $parsed['layer_assignments'] = array_values(array_filter(
@@ -1079,7 +1087,7 @@ PROMPT;
             }
             $parsed['layer_assignments'] = array_values(array_filter(
                 $parsed['layer_assignments'],
-                function (array $a) use ($bgId, $transparencyById) {
+                function (array $a) use ($bgId, $transparencyById, $logoAssetIds) {
                     if (($a['role'] ?? null) !== 'hero_image' || empty($a['asset_id'])) {
                         return true;
                     }
@@ -1091,6 +1099,13 @@ PROMPT;
                     // Guard 2: hero must be transparent-capable (if we know).
                     // If the asset isn't in our inventory map, trust the AI (validated tenant ownership already).
                     if (array_key_exists($id, $transparencyById) && $transparencyById[$id] === false) {
+                        return false;
+                    }
+
+                    // Guard 3: never treat brand logos as the hero/product layer — they are listed as
+                    // TRANSPARENT-CAPABLE and the model sometimes picks them to satisfy the "stacked hero"
+                    // rule, which renders as a cropped wordmark on the canvas.
+                    if (isset($logoAssetIds[$id])) {
                         return false;
                     }
 

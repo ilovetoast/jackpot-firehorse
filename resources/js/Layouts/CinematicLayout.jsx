@@ -1,7 +1,7 @@
 import FilmGrainOverlay from '../Components/FilmGrainOverlay'
 
 /**
- * CinematicLayout - Full viewport dark layout for Brand Operating System experience
+ * CinematicLayout - Full viewport dark layout for Jackpot cinematic / gateway-style screens
  * No sidebar, no AppLayout. Injects CSS variables for brand theming.
  */
 export default function CinematicLayout({ children, brand }) {

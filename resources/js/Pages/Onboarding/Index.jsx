@@ -277,7 +277,7 @@ export default function OnboardingIndex({ brand: initialBrand, progress: initial
 
                 <footer className="px-8 py-5 text-center">
                     <p className="text-[11px] text-white/15 tracking-widest uppercase">
-                        Jackpot &middot; Brand Operating System
+                        Jackpot &middot; Brand asset manager
                     </p>
                 </footer>
             </div>
