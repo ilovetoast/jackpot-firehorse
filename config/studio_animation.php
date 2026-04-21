@@ -1,5 +1,9 @@
 <?php
 
+/** Fal queue auth: prefer FAL_KEY; whitespace-only counts as unset so KLING_API_KEY fallback still works. */
+$falKeyForStudioAnimation = trim((string) env('FAL_KEY', ''));
+$klingApiKeyForStudioAnimationFallback = trim((string) env('KLING_API_KEY', ''));
+
 return [
     'enabled' => (bool) env('STUDIO_ANIMATION_ENABLED', true),
 
@@ -146,7 +150,7 @@ return [
             'transport' => env('STUDIO_ANIMATION_KLING_TRANSPORT', 'fal_queue'), // fal_queue|mock
             'fal' => [
                 // fal.ai queue uses a single API key (`Authorization: Key …`). Not the same as Kling’s native Access/Secret pair.
-                'api_key' => (string) (env('FAL_KEY') ?: env('KLING_API_KEY') ?: ''),
+                'api_key' => $falKeyForStudioAnimation !== '' ? $falKeyForStudioAnimation : $klingApiKeyForStudioAnimationFallback,
                 'queue_base_url' => rtrim((string) env('FAL_QUEUE_BASE_URL', 'https://queue.fal.run'), '/'),
                 'model_path' => env('FAL_KLING_I2V_MODEL', 'fal-ai/kling-video/v3/standard/image-to-video'),
             ],
