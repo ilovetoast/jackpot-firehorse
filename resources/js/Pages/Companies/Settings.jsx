@@ -11,7 +11,7 @@ import TagQuality from '../../Components/Companies/TagQuality'
 import BrandedAiCard from '../../Components/Companies/BrandedAiCard'
 import { usePermission } from '../../hooks/usePermission'
 import { ensureAccentContrastOnWhite } from '../../utils/colorUtils'
-import { SparklesIcon, ShieldCheckIcon } from '@heroicons/react/24/outline'
+import { SparklesIcon, ShieldCheckIcon, ViewfinderCircleIcon } from '@heroicons/react/24/outline'
 import { debounce } from 'lodash-es'
 
 const DEFAULT_DOWNLOAD_POLICY = {
@@ -71,6 +71,8 @@ export default function CompanySettings({
     const [aiEnabledSaved, setAiEnabledSaved] = useState(false)
     const [brandAlignmentSaving, setBrandAlignmentSaving] = useState(false)
     const [brandAlignmentSaved, setBrandAlignmentSaved] = useState(false)
+    const [focalPointAiSaving, setFocalPointAiSaving] = useState(false)
+    const [focalPointAiSaved, setFocalPointAiSaved] = useState(false)
 
     // Brand primary color for branded card treatments (Brand Alignment uses tenant's
     // actual color; Studio keeps the violet treatment). `brandPrimaryOnWhite` is the
@@ -224,6 +226,7 @@ export default function CompanySettings({
             generative_enabled: tenant.settings?.generative_enabled ?? true,
             ai_enabled: tenant.settings?.ai_enabled ?? true,
             brand_alignment_enabled: tenant.settings?.brand_alignment_enabled ?? true,
+            ai_auto_focal_point_photography: tenant.settings?.ai_auto_focal_point_photography ?? false,
         },
     })
 
@@ -483,6 +486,9 @@ export default function CompanySettings({
                 // "Generative" renamed to "Studio" to match the product nav; underlying settings key
                 // (`generative_enabled`) and route/middleware identifiers are intentionally NOT renamed.
                 ...(canManageGenerative ? [{ id: 'generative-settings', label: 'Studio', canAccess: true }] : []),
+                ...(canManageAiSettings
+                    ? [{ id: 'ai-focal-photography-settings', label: 'Photo focal point', canAccess: true }]
+                    : []),
                 { id: 'tag-quality', label: 'Insights', canAccess: canViewTagQuality },
                 { id: 'ai-usage', label: 'Usage', canAccess: canViewAiUsage },
             ],
@@ -1441,9 +1447,9 @@ export default function CompanySettings({
 
                     {/* AI Settings — top-of-section anchor for the AI side-nav. Houses the master
                         AI switch (tenant-wide kill) and the branded sub-feature cards (Studio,
-                        Brand Alignment). Ordering is: master switch FIRST, then branded feature
-                        cards that visually cascade to disabled when the master is off, then the
-                        AI Tag / Asset Field Intelligence settings block. */}
+                        Brand Alignment, photography focal point). Ordering is: master switch FIRST,
+                        then branded feature cards that visually cascade to disabled when the master
+                        is off, then the AI Tag / Asset Field Intelligence settings block. */}
                     <div id="ai-settings" className="mb-12 scroll-mt-8">
                         {canManageAiSettings ? (
                             <div className="space-y-6">
@@ -1455,7 +1461,7 @@ export default function CompanySettings({
                                             <p className="mt-1 text-sm text-gray-500">
                                                 Master switch for every AI feature in this workspace. When off, no AI
                                                 API calls are made, no credits are consumed, and every sub-feature below
-                                                (Studio, Brand Alignment, AI tag suggestions, Asset Field Intelligence)
+                                                (Studio, Brand Alignment, photo focal point, AI tag suggestions, Asset Field Intelligence)
                                                 is disabled for all users. Existing AI-generated content is preserved.
                                             </p>
                                         </div>
@@ -1730,6 +1736,121 @@ export default function CompanySettings({
                                                             <div className="mt-3 rounded-md bg-amber-50 p-2.5">
                                                                 <p className="text-xs text-amber-800">
                                                                     Brand Alignment is disabled — no new scores will be computed and the widget is hidden in asset drawers.
+                                                                </p>
+                                                            </div>
+                                                        )}
+                                                    </BrandedAiCard>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div id="ai-focal-photography-settings" className="scroll-mt-8">
+                                        <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
+                                            <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+                                                <div className="lg:col-span-1 px-6 py-6 border-b lg:border-b-0 lg:border-r border-gray-200">
+                                                    <h2 className="text-lg font-semibold text-gray-900">Photography focal point</h2>
+                                                    <p className="mt-1 text-sm text-gray-500">
+                                                        When enabled, new photography assets can receive an automatic point of
+                                                        interest after processing (for layouts and brand guidelines). You can
+                                                        still set or clear the focal point manually from any asset’s file
+                                                        details.
+                                                    </p>
+                                                </div>
+                                                <div className="lg:col-span-2 px-6 py-6">
+                                                    <BrandedAiCard
+                                                        variant="indigo"
+                                                        badgeLabel="Photography"
+                                                        title="AI focal point for photos"
+                                                        description="Runs only for eligible photography images when no focal point is set yet and the point is not locked. Uses your workspace AI settings and credits."
+                                                        icon={ViewfinderCircleIcon}
+                                                        cascadedOff={data.settings?.ai_enabled === false}
+                                                    >
+                                                        <div className="flex items-center justify-between rounded-lg border border-indigo-100 bg-white p-3 shadow-sm">
+                                                            <div className="flex-1 pr-4">
+                                                                <label
+                                                                    htmlFor="ai_auto_focal_point_photography"
+                                                                    className="block text-sm font-medium text-gray-900"
+                                                                >
+                                                                    Auto-assign focal point
+                                                                </label>
+                                                                <p className="mt-0.5 text-xs text-gray-500">
+                                                                    Suggest a point of interest on new photography uploads (category: Photography).
+                                                                </p>
+                                                            </div>
+                                                            <div className="ml-4 flex items-center gap-2">
+                                                                {focalPointAiSaving && (
+                                                                    <span className="text-xs text-gray-400">Saving…</span>
+                                                                )}
+                                                                {focalPointAiSaved && !focalPointAiSaving && (
+                                                                    <span className="text-xs text-green-600 transition-opacity duration-300">
+                                                                        Saved
+                                                                    </span>
+                                                                )}
+                                                                <button
+                                                                    type="button"
+                                                                    disabled={focalPointAiSaving}
+                                                                    onClick={() => {
+                                                                        const nextVal = !(
+                                                                            data.settings?.ai_auto_focal_point_photography === true
+                                                                        )
+                                                                        const nextSettings = {
+                                                                            ...data.settings,
+                                                                            ai_auto_focal_point_photography: nextVal,
+                                                                        }
+                                                                        setData('settings', nextSettings)
+                                                                        setFocalPointAiSaving(true)
+                                                                        setFocalPointAiSaved(false)
+                                                                        router.put(
+                                                                            '/app/companies/settings',
+                                                                            {
+                                                                                name: data.name,
+                                                                                slug: data.slug,
+                                                                                timezone: data.timezone,
+                                                                                settings: nextSettings,
+                                                                            },
+                                                                            {
+                                                                                preserveScroll: true,
+                                                                                onSuccess: () => {
+                                                                                    setFocalPointAiSaving(false)
+                                                                                    setFocalPointAiSaved(true)
+                                                                                    setTimeout(() => setFocalPointAiSaved(false), 2500)
+                                                                                },
+                                                                                onError: () => {
+                                                                                    setFocalPointAiSaving(false)
+                                                                                    setData('settings', {
+                                                                                        ...nextSettings,
+                                                                                        ai_auto_focal_point_photography: !nextVal,
+                                                                                    })
+                                                                                },
+                                                                            },
+                                                                        )
+                                                                    }}
+                                                                    className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:ring-offset-2 disabled:opacity-50 ${
+                                                                        data.settings?.ai_auto_focal_point_photography === true
+                                                                            ? 'bg-indigo-600'
+                                                                            : 'bg-gray-200'
+                                                                    }`}
+                                                                    role="switch"
+                                                                    aria-checked={
+                                                                        data.settings?.ai_auto_focal_point_photography === true
+                                                                    }
+                                                                >
+                                                                    <span
+                                                                        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                                                                            data.settings?.ai_auto_focal_point_photography === true
+                                                                                ? 'translate-x-5'
+                                                                                : 'translate-x-0'
+                                                                        }`}
+                                                                    />
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                        {data.settings?.ai_enabled === false && (
+                                                            <div className="mt-3 rounded-md bg-amber-50 p-2.5">
+                                                                <p className="text-xs text-amber-800">
+                                                                    AI features are off — automatic focal points are not
+                                                                    computed until AI is re-enabled.
                                                                 </p>
                                                             </div>
                                                         )}

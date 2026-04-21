@@ -11,6 +11,11 @@ import { useState, useEffect, useCallback } from 'react'
 import { router } from '@inertiajs/react'
 import { usePage } from '@inertiajs/react'
 import { XMarkIcon, ChevronDownIcon, ChevronUpIcon } from '@heroicons/react/24/outline'
+import {
+  effectiveFocalPointFromAsset,
+  focalPointObjectPositionStyle,
+  mergeImageStyle,
+} from '../utils/guidelinesFocalPoint'
 
 function defaultDownloadName(brandName) {
   const date = new Date().toISOString().slice(0, 10)
@@ -298,7 +303,15 @@ export default function CreateDownloadPanel({
                         className="h-12 w-12 flex-shrink-0 overflow-hidden rounded border border-gray-200 bg-gray-50"
                       >
                         {thumbUrl ? (
-                          <img src={thumbUrl} alt="" className="h-full w-full object-cover" />
+                          <img
+                            src={thumbUrl}
+                            alt=""
+                            className="h-full w-full object-cover"
+                            style={mergeImageStyle(
+                              undefined,
+                              focalPointObjectPositionStyle(effectiveFocalPointFromAsset(item)),
+                            )}
+                          />
                         ) : (
                           <span className="flex h-full w-full items-center justify-center text-xs text-gray-400">—</span>
                         )}

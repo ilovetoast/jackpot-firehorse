@@ -244,7 +244,23 @@ function SectionLabel({ children, color = '#94a3b8', bold = false, textured = fa
     )
 }
 
-function BrandGuidelinesIndexInner({ brand, brandModel, modelPayload, logoAssets = [], visualReferences = {}, hasActiveVersion, hasDraft, builderProcessing = false, researchFinalized = false, resumeStep = 'background', resumeLabel = 'Continue Brand Guidelines', resumeUrl = null, canEditBrandDna = false, canCustomize = false }) {
+function BrandGuidelinesIndexInner({
+    brand,
+    brandModel,
+    modelPayload,
+    logoAssets = [],
+    visualReferences = {},
+    guidelinesHeroLogoUrl = null,
+    hasActiveVersion,
+    hasDraft,
+    builderProcessing = false,
+    researchFinalized = false,
+    resumeStep = 'background',
+    resumeLabel = 'Continue Brand Guidelines',
+    resumeUrl = null,
+    canEditBrandDna = false,
+    canCustomize = false,
+}) {
     const sidebarCtx = useSidebarEditor()
     const { auth, headlineAppearanceCatalog = [] } = usePage().props
 
@@ -351,7 +367,7 @@ function BrandGuidelinesIndexInner({ brand, brandModel, modelPayload, logoAssets
     const { whiteBgSrc, showRiskBanner, outlineWhiteBg, loadingAnalysis } = useLogoWhiteBgPreview(logoUrl, logoOnLightUrl)
     const guidelineMeta = useMemo(() => ({ whiteBgSrc, outlineWhiteBg }), [whiteBgSrc, outlineWhiteBg])
     const logoDarkUrl = brand.logo_dark_url || null
-    const heroLogoUrl = logoDarkUrl || logoUrl
+    const heroLogoUrl = guidelinesHeroLogoUrl || logoDarkUrl || logoUrl
     const logoIsTransparent = logoUrl && /\.(png|svg|webp)(\?|$)/i.test(logoUrl)
     const archetypeDisplay = personality.archetype || personality.primary_archetype
     const heroSubheading = identity.tagline || archetypeDisplay || brand.name

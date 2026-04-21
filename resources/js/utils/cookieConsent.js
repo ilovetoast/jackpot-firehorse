@@ -73,7 +73,59 @@ export function allowsFunctionalCookies() {
     return s.purposes?.functional === true
 }
 
+/**
+ * Human-readable error for UI (avoids dumping raw JSON like `{ "message": "CSRF token mismatch." }`).
+ *
+ * @param {unknown} error
+ * @returns {string}
+ */
+export function formatConsentSaveError(error) {
+    if (!error) {
+        return 'Could not save preferences.'
+    }
+    const ax = error.response?.data
+    if (ax && typeof ax.message === 'string') {
+        return ax.message
+    }
+    const msg = typeof error.message === 'string' ? error.message : ''
+    if (msg.startsWith('{')) {
+        try {
+            const parsed = JSON.parse(msg)
+            if (parsed && typeof parsed.message === 'string') {
+                return parsed.message
+            }
+        } catch {
+            /* ignore */
+        }
+    }
+    return msg || 'Could not save preferences.'
+}
+
+/**
+ * POST /privacy/consent — uses window.axios (from bootstrap) so X-CSRF-TOKEN matches session and 419 is retried.
+ */
 export async function postConsentToServer(purposes, policyVersion) {
+    const body = {
+        purposes: {
+            functional: !!purposes.functional,
+            analytics: !!purposes.analytics,
+            marketing: !!purposes.marketing,
+        },
+        policy_version: policyVersion,
+    }
+
+    const axios = typeof window !== 'undefined' ? window.axios : null
+    if (axios) {
+        const { data } = await axios.post('/privacy/consent', body, {
+            headers: {
+                Accept: 'application/json',
+                'Content-Type': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest',
+            },
+        })
+        return data
+    }
+
     const token = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content')
     const res = await fetch('/privacy/consent', {
         method: 'POST',
@@ -84,14 +136,20 @@ export async function postConsentToServer(purposes, policyVersion) {
             'X-Requested-With': 'XMLHttpRequest',
             ...(token ? { 'X-CSRF-TOKEN': token } : {}),
         },
-        body: JSON.stringify({
-            purposes,
-            policy_version: policyVersion,
-        }),
+        body: JSON.stringify(body),
     })
     if (!res.ok) {
         const t = await res.text()
-        throw new Error(t || `Consent save failed (${res.status})`)
+        let msg = t || `Consent save failed (${res.status})`
+        try {
+            const j = JSON.parse(t)
+            if (j?.message) {
+                msg = j.message
+            }
+        } catch {
+            /* keep */
+        }
+        throw new Error(msg)
     }
     return res.json()
 }

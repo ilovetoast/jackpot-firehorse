@@ -104,6 +104,7 @@ import StudioViewModal from './execution/StudioViewModal'
 import ExecutionPresentationFrame from './execution/ExecutionPresentationFrame'
 import { getExecutionPresentationBaseImageUrl } from '../utils/executionThumbnailDisplay'
 import AssetDetailPanel from './AssetDetailPanel'
+import GuidelinesFocalPointModal from './BrandGuidelines/GuidelinesFocalPointModal'
 import {
     getPreferredExecutionThumbnailTier,
     setPreferredExecutionThumbnailTier,
@@ -395,7 +396,6 @@ export default function AssetDrawer({
     /** Lightbox raster preview failed or URL empty — show themed placeholder instead of broken <img> */
     const [lightboxImageError, setLightboxImageError] = useState(false)
     /** Lightbox raster: original vs enhanced vs presentation (thumbnail pipeline modes) */
-    const [lightboxRasterMode, setLightboxRasterMode] = useState('original')
     const [activityEvents, setActivityEvents] = useState([])
     const [activityLoading, setActivityLoading] = useState(false)
     // Track layout settling to prevent preview jump during grid reflow (grid reserves drawer width in one frame)
@@ -428,6 +428,8 @@ export default function AssetDrawer({
     const [regeneratingSystemMetadataDrawer, setRegeneratingSystemMetadataDrawer] = useState(false)
     const [regeneratingThumbnailsStylesDrawer, setRegeneratingThumbnailsStylesDrawer] = useState(false)
     const [regeneratingVideoPreviewDrawer, setRegeneratingVideoPreviewDrawer] = useState(false)
+    const [drawerFocalModalOpen, setDrawerFocalModalOpen] = useState(false)
+    const [drawerFocalAiRegenerateLoading, setDrawerFocalAiRegenerateLoading] = useState(false)
     const [videoInsightsRetryLoading, setVideoInsightsRetryLoading] = useState(false)
     const [extractAllLoading, setExtractAllLoading] = useState(false)
     const [extractAllError, setExtractAllError] = useState(null)
@@ -1175,6 +1177,11 @@ export default function AssetDrawer({
         return mimeType.startsWith('video/') || videoExtensions.includes(ext)
     }, [displayAsset])
 
+    const drawerAllowsFocalPoint = useMemo(() => {
+        const m = displayAsset?.mime_type || ''
+        return Boolean(displayAsset && !isVideo && m.startsWith('image/') && !m.includes('svg'))
+    }, [displayAsset, isVideo])
+
     /** True only when MetadataAnalysisRunningBanner actually renders (not merely pipeline eligible). */
     const drawerAnalysisBannerVisible = useMemo(() => {
         if (!pipelineBannerForRevue || !drawerPipelineBanner?.metadataHealth) {
@@ -1374,73 +1381,19 @@ export default function AssetDrawer({
         return currentCarouselAsset
     }, [currentCarouselAsset, displayAsset])
 
-    const lightboxCarouselIsRasterImage = useMemo(() => {
-        if (!currentCarouselAsset?.id || currentCarouselAsset?.is_virtual_google_font) {
-            return false
-        }
-        if (isUploadedFontFileAsset(currentCarouselAsset)) {
-            return false
-        }
-        const mime = currentCarouselAsset.mime_type || ''
-        const fn = currentCarouselAsset.original_filename || ''
-        const ext = fn.split('.').pop()?.toLowerCase() || ''
-        const videoExtensions = ['mp4', 'mov', 'avi', 'mkv', 'webm', 'm4v']
-        const isVideo = mime.startsWith('video/') || videoExtensions.includes(ext)
-        const isPdf =
-            Boolean(currentCarouselAsset?.is_pdf) || mime === 'application/pdf' || ext === 'pdf'
-        return !isVideo && !isPdf
-    }, [currentCarouselAsset])
-
+    /** Fullscreen lightbox always shows the Source (original / pipeline) preview — no Studio/AI toggle. */
     const lightboxRasterDisplayUrl = useMemo(
-        () => resolveLightboxRasterPreviewUrl(lightboxRasterSourceAsset, lightboxRasterMode),
-        [lightboxRasterSourceAsset, lightboxRasterMode],
-    )
-
-    const lightboxRasterEnhancedAvailable = useMemo(
-        () => Boolean(resolveLightboxRasterPreviewUrl(lightboxRasterSourceAsset, 'enhanced')),
+        () => resolveLightboxRasterPreviewUrl(lightboxRasterSourceAsset, 'original'),
         [lightboxRasterSourceAsset],
     )
-
-    const lightboxRasterAiAvailable = useMemo(
-        () => Boolean(resolveLightboxRasterPreviewUrl(lightboxRasterSourceAsset, 'ai')),
-        [lightboxRasterSourceAsset],
-    )
-
-    /** Raster lightbox modes: Source, Studio (enhanced), AI (presentation-mode file). */
-    const lightboxRasterPreviewOptions = useMemo(() => {
-        if (!lightboxRasterSourceAsset?.id) {
-            return []
-        }
-        const opts = []
-        if (resolveLightboxRasterPreviewUrl(lightboxRasterSourceAsset, 'original')) {
-            opts.push({ id: 'original', label: 'Source' })
-        }
-        if (lightboxRasterEnhancedAvailable) {
-            opts.push({ id: 'enhanced', label: 'Studio' })
-        }
-        if (lightboxRasterAiAvailable) {
-            opts.push({ id: 'ai', label: 'AI' })
-        }
-        return opts
-    }, [lightboxRasterSourceAsset, lightboxRasterEnhancedAvailable, lightboxRasterAiAvailable])
 
     useEffect(() => {
         setLightboxImageError(false)
     }, [currentCarouselAsset?.id, showZoomModal])
 
     useEffect(() => {
-        const ids = lightboxRasterPreviewOptions.map((o) => o.id)
-        if (ids.length === 0) {
-            return
-        }
-        setLightboxRasterMode((prev) =>
-            ids.includes(prev) ? prev : ids.includes('original') ? 'original' : ids[0],
-        )
-    }, [lightboxRasterPreviewOptions, currentCarouselAsset?.id])
-
-    useEffect(() => {
         setLightboxImageError(false)
-    }, [lightboxRasterMode, lightboxRasterDisplayUrl])
+    }, [lightboxRasterDisplayUrl])
 
     // Phase V-1: Fetch view URL for video when gallery opens
     // NOTE: Must be after currentCarouselAsset is defined
@@ -2918,12 +2871,58 @@ export default function AssetDrawer({
         return false
     }, [displayAsset, canGenerateThumbnail, canRegenerateThumbnailsAdmin, canRetryThumbnails])
 
+    const showDrawerFocalEditorControls = useMemo(
+        () =>
+            drawerAllowsFocalPoint &&
+            !externalCollectionGuest &&
+            !displayAsset?.deleted_at &&
+            can('metadata.edit_post_upload'),
+        [drawerAllowsFocalPoint, externalCollectionGuest, displayAsset?.deleted_at, can],
+    )
+
+    /** Photography DAM category — prefer asset.category.slug, fallback metadata.category.slug (editable payload). */
+    const drawerAssetIsPhotographyCategory = useMemo(() => {
+        const isPhotoSlug = (s) => String(s || '').toLowerCase() === 'photography'
+        if (isPhotoSlug(displayAsset?.category?.slug)) {
+            return true
+        }
+        return isPhotoSlug(displayAsset?.metadata?.category?.slug)
+    }, [displayAsset?.category?.slug, displayAsset?.metadata?.category?.slug])
+
+    /** Show the Processing card whenever AI focal could apply; use canRun for click + disabled state. */
+    const showDrawerFocalAiRegenerateCard = useMemo(
+        () =>
+            Boolean(
+                showDrawerFocalEditorControls &&
+                    drawerAllowsFocalPoint &&
+                    drawerAssetIsPhotographyCategory &&
+                    auth?.permissions?.ai_enabled !== false,
+            ),
+        [
+            showDrawerFocalEditorControls,
+            drawerAllowsFocalPoint,
+            drawerAssetIsPhotographyCategory,
+            auth?.permissions?.ai_enabled,
+        ],
+    )
+
+    const showDrawerFocalAiRegenerateCanRun = useMemo(
+        () =>
+            Boolean(
+                showDrawerFocalAiRegenerateCard && !displayAsset?.metadata?.focal_point_locked,
+            ),
+        [showDrawerFocalAiRegenerateCard, displayAsset?.metadata?.focal_point_locked],
+    )
+
     const showDrawerYourProcessingActions = canRegenerateAiMetadataForTroubleshooting
 
     const showProcessingAutomationSection =
         !externalCollectionGuest &&
         !displayAsset?.deleted_at &&
-        (showDrawerYourProcessingActions || isTenantAdminForProcessing || canSiteAdminPipeline)
+        (showDrawerYourProcessingActions ||
+            isTenantAdminForProcessing ||
+            canSiteAdminPipeline ||
+            showDrawerFocalAiRegenerateCard)
 
     const thumbnailStatusForPanel = String(
         processingGuardStatus?.thumbnail_status ?? thumbnailStatus ?? '—',
@@ -3310,6 +3309,30 @@ export default function AssetDrawer({
             router.reload({ only: ['assets'], preserveState: true, preserveScroll: true })
         } finally {
             setRegeneratingAiAnalysisDrawer(false)
+        }
+    }
+
+    const handleDrawerFocalAiRegenerate = async () => {
+        if (!displayAsset?.id || !showDrawerFocalAiRegenerateCanRun) return
+        setDrawerFocalAiRegenerateLoading(true)
+        try {
+            const url =
+                typeof route === 'function'
+                    ? route('assets.focal-point.ai-regenerate', { asset: displayAsset.id })
+                    : `/app/assets/${displayAsset.id}/focal-point/ai-regenerate`
+            await window.axios.post(url)
+            setToastMessage('AI focal point queued — results appear in a few seconds.')
+            setToastType('success')
+            setTimeout(() => setToastMessage(null), 3500)
+            setTimeout(() => {
+                router.reload({ only: ['assets'], preserveState: true, preserveScroll: true })
+            }, 2500)
+        } catch (err) {
+            setToastMessage(err.response?.data?.message || 'Could not queue AI focal point.')
+            setToastType('error')
+            setTimeout(() => setToastMessage(null), 5000)
+        } finally {
+            setDrawerFocalAiRegenerateLoading(false)
         }
     }
 
@@ -4409,6 +4432,51 @@ export default function AssetDrawer({
                             </span>
                             <span className="text-gray-500">downloads</span>
                         </div>
+                        {showDrawerFocalEditorControls && (() => {
+                            const m = displayAsset?.metadata || {}
+                            const fp = m.focal_point
+                            const hasFp =
+                                fp && typeof fp.x === 'number' && typeof fp.y === 'number'
+                            let statusBadge = { label: 'Not set', cls: 'bg-gray-100 text-gray-600' }
+                            let title =
+                                'Set where the image should stay centered for crops and guidelines (click).'
+                            if (hasFp) {
+                                if (m.focal_point_locked || m.focal_point_source === 'manual') {
+                                    statusBadge = {
+                                        label: 'Manual',
+                                        cls: 'bg-emerald-100 text-emerald-800',
+                                    }
+                                    title =
+                                        'Focal point saved manually (locked against AI overwrite). Click to adjust.'
+                                } else if (m.focal_point_source === 'ai') {
+                                    statusBadge = {
+                                        label: 'AI',
+                                        cls: 'bg-violet-100 text-violet-800',
+                                    }
+                                    title =
+                                        'AI suggestion — open to nudge the point; saving locks it so AI will not overwrite.'
+                                } else {
+                                    statusBadge = { label: 'Set', cls: 'bg-gray-100 text-gray-700' }
+                                    title = 'Focal point is set. Click to change.'
+                                }
+                            }
+                            return (
+                                <button
+                                    type="button"
+                                    onClick={() => setDrawerFocalModalOpen(true)}
+                                    title={title}
+                                    className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-gray-200 bg-white py-1 pl-2 pr-2 text-left text-xs font-medium text-gray-800 shadow-sm transition-colors hover:border-gray-300 hover:bg-gray-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500"
+                                >
+                                    <PhotoIcon className="h-3.5 w-3.5 shrink-0 text-gray-500" aria-hidden />
+                                    <span className="whitespace-nowrap text-gray-700">Focal point</span>
+                                    <span
+                                        className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${statusBadge.cls}`}
+                                    >
+                                        {statusBadge.label}
+                                    </span>
+                                </button>
+                            )
+                        })()}
                         {/* "Edit asset" moved into the Asset Data section header; keep discoverability alongside the fields it edits. */}
                     </div>
                     )}
@@ -5695,7 +5763,7 @@ export default function AssetDrawer({
                                             )}
                                         </div>
 
-                                        {showDrawerYourProcessingActions && (
+                                        {(showDrawerYourProcessingActions || showDrawerFocalAiRegenerateCard) && (
                                             <div className="border-t border-gray-100 pt-3">
                                                 <div className="mb-2 text-[11px] font-medium uppercase tracking-wide text-gray-400">
                                                     Your actions
@@ -5736,6 +5804,35 @@ export default function AssetDrawer({
                                                                         {lastRunFooter('ai_metadata')}
                                                                     </div>
                                                                 ) : false
+                                                            }
+                                                        />
+                                                    )}
+                                                    {showDrawerFocalAiRegenerateCard && (
+                                                        <ProcessingActionCard
+                                                            icon="photo"
+                                                            title="Re-run AI focal point"
+                                                            description="Photography raster assets. Queues gpt-4o-mini vision; uses AI credits. Locked manual focal points must be cleared first."
+                                                            onClick={() => void handleDrawerFocalAiRegenerate()}
+                                                            disabled={
+                                                                !showDrawerFocalAiRegenerateCanRun ||
+                                                                drawerFocalAiRegenerateLoading ||
+                                                                isProcessingDrawerBusy
+                                                            }
+                                                            loading={drawerFocalAiRegenerateLoading}
+                                                            buttonTitle={
+                                                                !showDrawerFocalAiRegenerateCanRun &&
+                                                                displayAsset?.metadata?.focal_point_locked
+                                                                    ? 'Clear or unlock the manual focal point (focal picker → Clear) before AI can run.'
+                                                                    : undefined
+                                                            }
+                                                            footer={
+                                                                !showDrawerFocalAiRegenerateCanRun &&
+                                                                displayAsset?.metadata?.focal_point_locked ? (
+                                                                    <div className="text-amber-700">
+                                                                        Manual focal is locked. Open Focal point → Clear,
+                                                                        or remove the lock, then re-run.
+                                                                    </div>
+                                                                ) : null
                                                             }
                                                         />
                                                     )}
@@ -6805,7 +6902,7 @@ export default function AssetDrawer({
                                 }
                                 return (
                                     <img
-                                        key={`${currentCarouselAsset.id}-${lightboxRasterMode}-${trimmedUrl.slice(0, 96)}`}
+                                        key={`${currentCarouselAsset.id}-original-${trimmedUrl.slice(0, 96)}`}
                                         src={trimmedUrl}
                                         alt={currentCarouselAsset.title || currentCarouselAsset.original_filename || 'Asset preview'}
                                         className="h-auto w-auto max-h-full max-w-full object-contain transition-all duration-300 ease-in-out"
@@ -6840,38 +6937,12 @@ export default function AssetDrawer({
                             className="order-2 flex h-[min(44vh,380px)] w-full min-h-0 shrink-0 flex-col border-t border-white/10 md:h-auto md:max-h-[100dvh] md:w-[min(440px,42vw)] md:min-w-[300px] md:border-l md:border-t-0"
                             onClick={(e) => e.stopPropagation()}
                         >
-                            {lightboxCarouselIsRasterImage && lightboxRasterPreviewOptions.length > 1 && (
-                                <div className="pointer-events-auto shrink-0 border-b border-white/10 bg-neutral-950/95 px-2 py-2 md:px-3">
-                                    <p className="mb-1.5 text-[10px] font-medium uppercase tracking-wide text-white/45">
-                                        Preview
-                                    </p>
-                                    <div className="flex gap-1">
-                                        {lightboxRasterPreviewOptions.map(({ id, label }) => {
-                                            const active = lightboxRasterMode === id
-                                            return (
-                                                <button
-                                                    key={id}
-                                                    type="button"
-                                                    onClick={() => setLightboxRasterMode(id)}
-                                                    className={`min-w-0 flex-1 rounded-md px-1.5 py-1.5 text-center text-[10px] font-semibold leading-tight transition-colors sm:px-2 ${
-                                                        active
-                                                            ? 'bg-white text-neutral-900'
-                                                            : 'bg-white/10 text-white/90 hover:bg-white/15'
-                                                    }`}
-                                                >
-                                                    {label}
-                                                </button>
-                                            )
-                                        })}
-                                    </div>
-                                </div>
-                            )}
                             <div className="min-h-0 flex-1 overflow-y-auto">
                                 <AssetDetailPanel
                                     asset={currentCarouselAsset}
                                     isOpen
                                     embeddedInLightbox
-                                    mode="readonly"
+                                    mode={can('metadata.edit_post_upload') ? 'default' : 'readonly'}
                                     onManageInDrawer={closeLightboxAndFocusDrawer}
                                     onClose={closeLightboxAndFocusDrawer}
                                     onToast={lightboxDetailOnToast}
@@ -7678,6 +7749,25 @@ export default function AssetDrawer({
             )}
             
             {/* Phase J.3.1: Replace File Modal */}
+            {showDrawerFocalEditorControls && displayAsset?.id && (
+                <GuidelinesFocalPointModal
+                    open={drawerFocalModalOpen}
+                    onClose={() => setDrawerFocalModalOpen(false)}
+                    imageUrl={
+                        displayAsset.final_thumbnail_url ||
+                        displayAsset.thumbnail_url ||
+                        displayAsset.preview_thumbnail_url ||
+                        null
+                    }
+                    initialFocal={displayAsset.metadata?.focal_point}
+                    assetId={displayAsset.id}
+                    saveMode="library"
+                    onSaved={() => {
+                        router.reload({ preserveState: true, preserveScroll: true })
+                    }}
+                />
+            )}
+
             {showReplaceFileModal && displayAsset && (
                 <ReplaceFileModal
                     asset={displayAsset}

@@ -5,6 +5,11 @@
  */
 import { useState, useEffect, useCallback } from 'react'
 import { XMarkIcon, CheckIcon } from '@heroicons/react/24/outline'
+import {
+    effectiveFocalPointFromAsset,
+    focalPointObjectPositionStyle,
+    mergeImageStyle,
+} from '../../utils/guidelinesFocalPoint'
 
 const MIN_WIDTH = 1920
 const MIN_HEIGHT = 1080
@@ -114,6 +119,7 @@ export default function MiniAssetPicker({
                             src={asset.thumbnail_url}
                             alt=""
                             className="w-full h-full object-cover"
+                            style={mergeImageStyle(undefined, focalPointObjectPositionStyle(effectiveFocalPointFromAsset(asset)))}
                           />
                         ) : (
                           <div className="w-full h-full flex items-center justify-center text-xs text-gray-400">

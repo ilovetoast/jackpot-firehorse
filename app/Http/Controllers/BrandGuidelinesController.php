@@ -105,6 +105,7 @@ class BrandGuidelinesController extends Controller
 
         $logoAssets = $this->gatherLogoAssets($brand);
         $visualReferences = $this->gatherVisualReferences($brand, $modelPayload, $activeVersion);
+        $guidelinesHeroLogoUrl = $this->resolveGuidelinesHeroLogoUrl($brand, $modelPayload);
 
         $logoDarkUrl = null;
         if ($activeVersion) {
@@ -169,6 +170,7 @@ class BrandGuidelinesController extends Controller
                 'is_enabled' => $isEnabled,
             ],
             'modelPayload' => $modelPayload,
+            'guidelinesHeroLogoUrl' => $guidelinesHeroLogoUrl,
             'hasActiveVersion' => $activeVersion !== null,
             'hasDraft' => $hasDraft,
             'builderProcessing' => $builderProcessing,
@@ -235,6 +237,30 @@ class BrandGuidelinesController extends Controller
         }
 
         return $item;
+    }
+
+    /**
+     * Optional hero logo override (presentation_overrides) — guidelines only, does not change brand settings.
+     */
+    protected function resolveGuidelinesHeroLogoUrl(Brand $brand, array $modelPayload): ?string
+    {
+        $assetId = data_get($modelPayload, 'presentation_overrides.sections.sec-hero.content.hero_logo_asset_id');
+        if (! $assetId || ! is_string($assetId)) {
+            return null;
+        }
+
+        $heroAsset = Asset::where('brand_id', $brand->id)->where('tenant_id', $brand->tenant_id)->find($assetId);
+        if (! $heroAsset) {
+            return null;
+        }
+
+        try {
+            return $heroAsset->deliveryUrl(AssetVariant::ORIGINAL, DeliveryContext::AUTHENTICATED)
+                ?: $heroAsset->deliveryUrl(AssetVariant::THUMB_LARGE, DeliveryContext::AUTHENTICATED)
+                ?: $heroAsset->deliveryUrl(AssetVariant::THUMB_MEDIUM, DeliveryContext::AUTHENTICATED);
+        } catch (\Throwable) {
+            return null;
+        }
     }
 
     protected function gatherVisualReferences(Brand $brand, array $modelPayload, $activeVersion): array

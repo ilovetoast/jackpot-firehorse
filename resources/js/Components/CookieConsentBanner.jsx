@@ -5,6 +5,7 @@ import {
     writeStoredConsent,
     consentIsCurrent,
     postConsentToServer,
+    formatConsentSaveError,
     STORAGE_KEY,
 } from '../utils/cookieConsent'
 import { retryPerformanceTrackingAfterConsent } from '../utils/performanceTracking'
@@ -101,7 +102,7 @@ export default function CookieConsentBanner() {
             }
             window.dispatchEvent(new CustomEvent('jackpot:cookie-consent-updated', { detail: { purposes } }))
         } catch (e) {
-            setError(e?.message || 'Could not save preferences.')
+            setError(formatConsentSaveError(e))
         } finally {
             setSaving(false)
         }

@@ -166,6 +166,8 @@ class FinalizeAssetJob implements ShouldQueue
                 $schedule->dispatchAfterPipelineComplete($fresh);
             }
         }
+
+        ComputeImageFocalPointJob::dispatch($this->assetId)->onQueue(config('queue.images_queue', 'images'));
     }
 
     /**

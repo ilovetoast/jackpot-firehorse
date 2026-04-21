@@ -350,7 +350,7 @@ class AiUsageService
      */
     public function getUsageStatus(Tenant $tenant): array
     {
-        $features = ['tagging', 'suggestions', 'brand_research', 'insights', 'generative_editor_images', 'generative_editor_edits', 'video_insights', 'pdf_extraction', 'presentation_preview'];
+        $features = ['tagging', 'suggestions', 'photography_focal_point', 'brand_research', 'insights', 'generative_editor_images', 'generative_editor_edits', 'video_insights', 'pdf_extraction', 'presentation_preview'];
         $perFeature = [];
         $totalCreditsUsed = 0;
 
@@ -388,7 +388,7 @@ class AiUsageService
      */
     public function getUsageStatusForPeriod(Tenant $tenant, int $year, int $month): array
     {
-        $features = ['tagging', 'suggestions', 'brand_research', 'insights', 'generative_editor_images', 'generative_editor_edits', 'video_insights', 'pdf_extraction', 'presentation_preview'];
+        $features = ['tagging', 'suggestions', 'photography_focal_point', 'brand_research', 'insights', 'generative_editor_images', 'generative_editor_edits', 'video_insights', 'pdf_extraction', 'presentation_preview'];
         $perFeature = [];
         $totalCreditsUsed = 0;
 

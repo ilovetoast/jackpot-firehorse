@@ -213,8 +213,11 @@ export default function AiUsagePanel({
         )
     }
 
-    // Check if AI is disabled at the company level
-    const isAiDisabled = usageData.status && Object.values(usageData.status).every(feature => feature?.is_disabled)
+    // Legacy shape only: unified `status.per_feature` payloads do not carry per-feature is_disabled.
+    const isAiDisabled =
+        usageData.status &&
+        !usageData.status.per_feature &&
+        Object.values(usageData.status).every((feature) => feature?.is_disabled)
 
     if (isAiDisabled) {
         return (
@@ -242,7 +245,12 @@ export default function AiUsagePanel({
     const currentMonth = usageData.current_month
     const monthStart = new Date(usageData.month_start).toLocaleDateString()
     const monthEnd = new Date(usageData.month_end).toLocaleDateString()
-    const features = ['tagging', 'suggestions']
+    const featureKeys = ['tagging', 'suggestions', 'photography_focal_point']
+    const featureLabels = {
+        tagging: 'AI tagging',
+        suggestions: 'Suggestions',
+        photography_focal_point: 'Photo focal point (AI)',
+    }
 
     return (
         <div className={`space-y-6 ${className}`}>
@@ -288,16 +296,64 @@ export default function AiUsagePanel({
                 </div>
             </div>
 
+            {/* Unified credit pool (from API) */}
+            {usageData.status?.credits_used != null && (
+                <div className="rounded-md border border-indigo-100 bg-indigo-50/50 p-4">
+                    <p className="text-sm font-medium text-gray-900">Unified AI credits (this period)</p>
+                    <p className="mt-1 text-sm text-gray-600">
+                        {usageData.status.credits_used.toLocaleString()}
+                        {usageData.status.credits_cap > 0
+                            ? ` / ${usageData.status.credits_cap.toLocaleString()}`
+                            : ' (unlimited plan)'}
+                        {usageData.status.credits_remaining != null && usageData.status.credits_cap > 0 && (
+                            <span className="text-gray-500">
+                                {' '}
+                                — {Math.max(0, usageData.status.credits_remaining).toLocaleString()} remaining
+                            </span>
+                        )}
+                    </p>
+                </div>
+            )}
+
             {/* Feature Usage */}
             <div className="space-y-4">
-                {features.map((featureKey) => {
-                    const feature = usageData.status?.[featureKey]
-                    
+                {featureKeys.map((featureKey) => {
+                    const pf = usageData.status?.per_feature?.[featureKey]
+                    const legacy = usageData.status?.[featureKey]
+
+                    if (pf) {
+                        const calls = pf.calls ?? 0
+                        const creditsUsed = pf.credits_used ?? 0
+                        const weight = pf.credit_weight ?? 1
+                        return (
+                            <div key={featureKey} className="rounded-md border border-gray-200 p-4">
+                                <div className="flex items-center mb-2">
+                                    <SparklesIcon className="h-5 w-5 text-indigo-500 mr-2" />
+                                    <h4 className="text-sm font-medium text-gray-900">
+                                        {featureLabels[featureKey] || featureKey}
+                                    </h4>
+                                </div>
+                                <div className="space-y-1 text-sm text-gray-600">
+                                    <div className="flex justify-between">
+                                        <span>API calls</span>
+                                        <span className="font-medium text-gray-900">{calls.toLocaleString()}</span>
+                                    </div>
+                                    <div className="flex justify-between">
+                                        <span>Credits charged (×{weight})</span>
+                                        <span className="font-medium text-gray-900">{creditsUsed.toLocaleString()}</span>
+                                    </div>
+                                </div>
+                            </div>
+                        )
+                    }
+
+                    const feature = legacy
                     if (!feature) {
                         return (
                             <div key={featureKey} className="rounded-md bg-gray-50 p-4">
                                 <p className="text-sm text-gray-500">
-                                    <span className="font-medium capitalize">{featureKey}:</span> No data available
+                                    <span className="font-medium">{featureLabels[featureKey] || featureKey}:</span>{' '}
+                                    No data available
                                 </p>
                             </div>
                         )
@@ -317,7 +373,8 @@ export default function AiUsagePanel({
                                 <div className="flex items-center">
                                     <div className="h-2 w-2 rounded-full bg-gray-400 mr-3" />
                                     <p className="text-sm text-gray-600">
-                                        <span className="font-medium capitalize">{featureKey}:</span> Disabled
+                                        <span className="font-medium">{featureLabels[featureKey] || featureKey}:</span>{' '}
+                                        Disabled
                                     </p>
                                 </div>
                             </div>
@@ -329,8 +386,8 @@ export default function AiUsagePanel({
                             <div className="flex items-center justify-between mb-3">
                                 <div className="flex items-center">
                                     <SparklesIcon className="h-5 w-5 text-indigo-500 mr-2" />
-                                    <h4 className="text-sm font-medium text-gray-900 capitalize">
-                                        {featureKey}
+                                    <h4 className="text-sm font-medium text-gray-900">
+                                        {featureLabels[featureKey] || featureKey}
                                     </h4>
                                 </div>
                                 <div className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
@@ -391,7 +448,11 @@ export default function AiUsagePanel({
             </div>
 
             {/* Zero Usage Message */}
-            {features.every(key => (usageData.status?.[key]?.usage || 0) === 0) && (
+            {featureKeys.every((key) => {
+                const p = usageData.status?.per_feature?.[key]
+                if (p) return (p.calls ?? 0) === 0
+                return (usageData.status?.[key]?.usage || 0) === 0
+            }) && (
                 <div className="rounded-md bg-blue-50 p-4">
                     <div className="flex">
                         <div className="flex-shrink-0">

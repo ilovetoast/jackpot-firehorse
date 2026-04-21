@@ -20,6 +20,8 @@ return [
     'weights' => [
         'tagging' => 1,
         'suggestions' => 1,
+        /** OpenAI vision (gpt-4o-mini) — photography focal point; same weight as a single tagging vision call */
+        'photography_focal_point' => 1,
         'insights' => 1,
         'brand_research' => 25,
         'pdf_extraction' => 5,

@@ -7,6 +7,11 @@
 import { useState } from 'react'
 import { XMarkIcon, PhotoIcon } from '@heroicons/react/24/outline'
 import AssetImagePicker from '../media/AssetImagePicker'
+import {
+  effectiveFocalPointFromAsset,
+  focalPointObjectPositionStyle,
+  mergeImageStyle,
+} from '../../utils/guidelinesFocalPoint'
 
 const COLOR_ROLES = [
   { role: 'primary', label: 'Primary' },
@@ -273,7 +278,15 @@ export default function DownloadBrandingSelector({
             <div key={a.id} className="relative group">
               <div className="w-16 h-16 rounded-lg border border-gray-200 overflow-hidden bg-gray-100 shadow-sm">
                 {(a.thumbnail_url || a.url) ? (
-                  <img src={a.thumbnail_url || a.url} alt="" className="w-full h-full object-cover" />
+                  <img
+                    src={a.thumbnail_url || a.url}
+                    alt=""
+                    className="w-full h-full object-cover"
+                    style={mergeImageStyle(
+                      undefined,
+                      focalPointObjectPositionStyle(effectiveFocalPointFromAsset(a)),
+                    )}
+                  />
                 ) : (
                   <span className="text-xs text-gray-400 flex items-center justify-center h-full">—</span>
                 )}

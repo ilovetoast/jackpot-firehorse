@@ -23,6 +23,11 @@ import { XMarkIcon, PhotoIcon, CloudArrowUpIcon, CheckIcon } from '@heroicons/re
 import ImageCropModal from '../ImageCropModal'
 import { getInlineImagePickerAccept, syncDamFileTypesFromPage } from '../../utils/damFileTypes'
 import { parseUploadFinalizeResult, uploadPutContentType } from '../../utils/uploadFinalize'
+import {
+    effectiveFocalPointFromAsset,
+    focalPointObjectPositionStyle,
+    mergeImageStyle,
+} from '../../utils/guidelinesFocalPoint'
 
 /**
  * Tile-sized <img> that gracefully falls through a list of candidate URLs on load error.
@@ -725,7 +730,17 @@ export default function AssetImagePicker({
                       <div className="grid grid-cols-6 gap-2">
                         {uploadedAssets.map((a, i) => (
                           <div key={`done-${a.id || i}`} className="relative rounded-lg border-2 border-green-300 bg-green-50 aspect-square overflow-hidden">
-                            {a.thumbnail_url && <img src={a.thumbnail_url} alt="" className="w-full h-full object-cover" />}
+                            {a.thumbnail_url && (
+                                <img
+                                    src={a.thumbnail_url}
+                                    alt=""
+                                    className="w-full h-full object-cover"
+                                    style={mergeImageStyle(
+                                        undefined,
+                                        focalPointObjectPositionStyle(effectiveFocalPointFromAsset(a)),
+                                    )}
+                                />
+                            )}
                             <div className="absolute top-1 right-1 rounded-full bg-green-600 p-0.5"><CheckIcon className="w-3 h-3 text-white" /></div>
                           </div>
                         ))}

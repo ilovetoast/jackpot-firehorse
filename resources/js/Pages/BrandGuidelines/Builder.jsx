@@ -39,7 +39,7 @@ import useLogoBrightness from '../../utils/useLogoBrightness'
 import useLogoWhiteBgPreview from '../../utils/useLogoWhiteBgPreview'
 import { generateWhiteVariant, generatePrimaryColorWashVariant, detectLogoComplexity } from '../../utils/imageUtils'
 import ImageCropModal from '../../Components/ImageCropModal'
-import { guidelinesFocalPointStyle } from '../../utils/guidelinesFocalPoint'
+import { effectiveFocalPointFromAsset, guidelinesFocalPointStyle } from '../../utils/guidelinesFocalPoint'
 
 import { ARCHETYPES, ARCHETYPE_RECOMMENDED_TRAITS } from '../../constants/brandOptions'
 import PoweredByJackpot from '../../Components/PoweredByJackpot'
@@ -3825,7 +3825,14 @@ export default function BrandGuidelinesBuilder({
                                                                 <div key={a.id} className="rounded-xl border border-white/20 bg-white/5 p-2 flex flex-col">
                                                                     <div className="aspect-square rounded-lg bg-white/10 overflow-hidden mb-2">
                                                                         {(a.thumbnail_url || a.signed_url) ? (
-                                                                            <img src={a.thumbnail_url || a.signed_url} alt="" className="w-full h-full object-cover" />
+                                                                            <img
+                                                                                src={a.thumbnail_url || a.signed_url}
+                                                                                alt=""
+                                                                                className="w-full h-full object-cover"
+                                                                                style={guidelinesFocalPointStyle(
+                                                                                    effectiveFocalPointFromAsset(a),
+                                                                                )}
+                                                                            />
                                                                         ) : (
                                                                             <div className="w-full h-full flex items-center justify-center text-white/40 text-2xl">◇</div>
                                                                         )}

@@ -495,6 +495,7 @@ class CompanyController extends Controller
             'settings.generative_enabled' => 'nullable|boolean',
             'settings.ai_enabled' => 'nullable|boolean',
             'settings.brand_alignment_enabled' => 'nullable|boolean',
+            'settings.ai_auto_focal_point_photography' => 'nullable|boolean',
         ]);
 
         // Phase M-2: Handle settings separately
@@ -545,6 +546,12 @@ class CompanyController extends Controller
                 abort(403, 'You do not have permission to manage AI settings.');
             }
             $mergedSettings['brand_alignment_enabled'] = (bool) $settings['brand_alignment_enabled'];
+        }
+        if (array_key_exists('ai_auto_focal_point_photography', $settings)) {
+            if (! $user->hasPermissionForTenant($tenant, 'company_settings.manage_ai_settings')) {
+                abort(403, 'You do not have permission to manage AI settings.');
+            }
+            $mergedSettings['ai_auto_focal_point_photography'] = (bool) $settings['ai_auto_focal_point_photography'];
         }
 
         $tenant->update($validated);
@@ -1479,7 +1486,7 @@ class CompanyController extends Controller
                 }
                 $usageStatus = $this->aiUsageService->getUsageStatusForPeriod($tenant, $year, $month);
                 $breakdown = [];
-                foreach (['tagging', 'suggestions'] as $feature) {
+                foreach (['tagging', 'suggestions', 'photography_focal_point'] as $feature) {
                     $breakdown[$feature] = $this->aiUsageService->getUsageBreakdownForPeriod($tenant, $feature, $year, $month);
                 }
                 $dt = \Carbon\Carbon::createFromDate($year, $month, 1);
@@ -1489,7 +1496,7 @@ class CompanyController extends Controller
             } else {
                 $usageStatus = $this->aiUsageService->getUsageStatus($tenant);
                 $breakdown = [];
-                foreach (['tagging', 'suggestions'] as $feature) {
+                foreach (['tagging', 'suggestions', 'photography_focal_point'] as $feature) {
                     $breakdown[$feature] = $this->aiUsageService->getUsageBreakdown($tenant, $feature);
                 }
                 $currentMonth = now()->format('Y-m');

@@ -42,6 +42,9 @@ class AITaskType
 
     public const ASSET_METADATA_GENERATION = 'asset_metadata_generation';
 
+    /** Vision: normalized focal point (0–1) for photography smart crops — gpt-4o-mini */
+    public const PHOTOGRAPHY_FOCAL_POINT = 'photography_focal_point';
+
     /** Async video frame + optional transcript + vision insights (tags, summary, structured hints) */
     public const VIDEO_INSIGHTS = 'video_insights';
 
@@ -113,6 +116,7 @@ class AITaskType
             self::SYSTEM_RELIABILITY_ANALYSIS,
             self::ASSET_TAG_SUGGESTION,
             self::ASSET_METADATA_GENERATION,
+            self::PHOTOGRAPHY_FOCAL_POINT,
             self::VIDEO_INSIGHTS,
             self::APPROVAL_FEEDBACK_SUMMARY,
             self::ALERT_SUMMARY,
@@ -159,7 +163,7 @@ class AITaskType
             ],
             'engineering' => [self::ERROR_PATTERN_ANALYSIS],
             'audit' => [self::AUDIT_REPORT_GENERATION, self::PERFORMANCE_ANALYSIS, self::SYSTEM_RELIABILITY_ANALYSIS],
-            'asset' => [self::ASSET_TAG_SUGGESTION, self::ASSET_METADATA_GENERATION, self::VIDEO_INSIGHTS, self::APPROVAL_FEEDBACK_SUMMARY, self::THUMBNAIL_ENHANCEMENT, self::THUMBNAIL_PRESENTATION_PREVIEW],
+            'asset' => [self::ASSET_TAG_SUGGESTION, self::ASSET_METADATA_GENERATION, self::PHOTOGRAPHY_FOCAL_POINT, self::VIDEO_INSIGHTS, self::APPROVAL_FEEDBACK_SUMMARY, self::THUMBNAIL_ENHANCEMENT, self::THUMBNAIL_PRESENTATION_PREVIEW],
         ];
 
         return $mapping[$category] ?? [];

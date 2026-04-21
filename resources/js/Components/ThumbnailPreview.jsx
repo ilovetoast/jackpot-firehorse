@@ -38,12 +38,18 @@
  * @param {boolean} props.preferLargeForVector - When true, use 'large' style (4096px) for SVG/vector assets in detail view for crisp rendering
  * @param {string|null} props.forcedImageUrl - When set, render this URL instead of locked final/preview (drawer preview mode)
  * @param {boolean} props.forcedImageSpinnerOverlay - Full-area spinner overlay on forced image (e.g. preferred pipeline processing)
+ * @param {boolean} [props.useFocalPoint=true] — When true, `object-fit: cover` uses asset focal point (`metadata`) for `object-position`. Ignored for contain / masonry / small thumbs.
  */
 import { useState, useEffect, useRef, useMemo } from 'react'
 import { usePage } from '@inertiajs/react'
 import { getThumbnailState, supportsThumbnail } from '../utils/thumbnailUtils'
 import { trackImageLoad } from '../utils/performanceTracking'
 import { analyzeLogoLightOnWhiteRisk } from '../utils/imageUtils'
+import {
+    effectiveFocalPointFromAsset,
+    focalPointObjectPositionStyle,
+    mergeImageStyle,
+} from '../utils/guidelinesFocalPoint'
 import FileTypeIcon from './FileTypeIcon'
 import AssetPlaceholder from './AssetPlaceholder'
 
@@ -78,6 +84,7 @@ export default function ThumbnailPreview({
     preferLargeForVector = false,
     forcedImageUrl = null,
     forcedImageSpinnerOverlay = false,
+    useFocalPoint = true,
 }) {
     const { auth } = usePage().props
     // Use current brand's primary color, fallback to default if not provided
@@ -258,6 +265,25 @@ export default function ThumbnailPreview({
     }, [forceObjectFit, isSmallThumbnail, asset?.category?.slug])
 
     const isMasonryHeight = masonryMaxHeight != null && Number(masonryMaxHeight) > 0
+
+    /** `object-fit: cover` + optional POI — not for contain, masonry letterboxing, or tiny thumbs */
+    const coverFocalStyle = useMemo(() => {
+        if (!useFocalPoint || !asset) return undefined
+        if (isMasonryHeight) return undefined
+        if (isSmallThumbnail) return undefined
+        if (asset?.category?.slug === 'logos' || asset?.category?.slug === 'graphics') return undefined
+        const isCover =
+            objectFitClass.includes('object-cover') || String(forceObjectFit || '').toLowerCase() === 'cover'
+        if (!isCover) return undefined
+        return focalPointObjectPositionStyle(effectiveFocalPointFromAsset(asset))
+    }, [
+        useFocalPoint,
+        asset,
+        isMasonryHeight,
+        isSmallThumbnail,
+        objectFitClass,
+        forceObjectFit,
+    ])
     const effectiveMasonryMinHeightPx = useMemo(() => {
         if (!isMasonryHeight) return 120
         const maxH = Number(masonryMaxHeight)
@@ -491,11 +517,14 @@ export default function ThumbnailPreview({
                         onDragStart={(e) => e.preventDefault()}
                         className={imgFitClasses}
                         loading="eager"
-                        style={{
-                            opacity: 1,
-                            transition:
-                                isAnimating && forcedStableUrl ? 'opacity 500ms ease-out' : 'none',
-                        }}
+                        style={mergeImageStyle(
+                            {
+                                opacity: 1,
+                                transition:
+                                    isAnimating && forcedStableUrl ? 'opacity 500ms ease-out' : 'none',
+                            },
+                            coverFocalStyle,
+                        )}
                         onLoad={handleForcedStableLoad}
                         onError={handleForcedStableError}
                     />
@@ -510,6 +539,7 @@ export default function ThumbnailPreview({
                         onDragStart={(e) => e.preventDefault()}
                         className={`${imgFitClasses} absolute inset-0 opacity-0 pointer-events-none`}
                         loading="eager"
+                        style={mergeImageStyle(undefined, coverFocalStyle)}
                         onLoad={handleForcedPendingLoad}
                         onError={handleForcedPendingError}
                     />
@@ -598,12 +628,15 @@ export default function ThumbnailPreview({
                     onDragStart={(e) => e.preventDefault()}
                     className={imgFitClasses}
                     loading="eager"
-                    style={{
-                        opacity: imageLoaded ? 1 : 0,
-                        transition: isAnimating && imageLoaded
-                            ? 'opacity 500ms ease-out'
-                            : 'none',
-                    }}
+                    style={mergeImageStyle(
+                        {
+                            opacity: imageLoaded ? 1 : 0,
+                            transition: isAnimating && imageLoaded
+                                ? 'opacity 500ms ease-out'
+                                : 'none',
+                        },
+                        coverFocalStyle,
+                    )}
                     onLoad={handleImageLoad}
                     onError={handleImageError}
                 />
@@ -652,14 +685,17 @@ export default function ThumbnailPreview({
                     onDragStart={(e) => e.preventDefault()}
                     className={imgFitClasses}
                     loading="eager"
-                    style={{
-                        opacity: imageLoaded ? 1 : 0.5,
-                        imageRendering: isPreview ? 'pixelated' : 'auto',
-                        transform: isPreview ? 'scale(1.03)' : 'none',
-                        transition: isAnimating && imageLoaded
-                            ? 'opacity 500ms ease-out'
-                            : 'none',
-                    }}
+                    style={mergeImageStyle(
+                        {
+                            opacity: imageLoaded ? 1 : 0.5,
+                            imageRendering: isPreview ? 'pixelated' : 'auto',
+                            transform: isPreview ? 'scale(1.03)' : 'none',
+                            transition: isAnimating && imageLoaded
+                                ? 'opacity 500ms ease-out'
+                                : 'none',
+                        },
+                        coverFocalStyle,
+                    )}
                     onLoad={handleImageLoad}
                     onError={handleImageError}
                 />
@@ -730,14 +766,17 @@ export default function ThumbnailPreview({
                     onDragStart={(e) => e.preventDefault()}
                     className={imgFitClasses}
                     loading="eager"
-                    style={{
-                        opacity: imageLoaded ? 1 : 0.5,
-                        imageRendering: isPreview ? 'pixelated' : 'auto',
-                        transform: isPreview ? 'scale(1.03)' : 'none',
-                        transition: isAnimating && imageLoaded
-                            ? 'opacity 500ms ease-out'
-                            : 'none',
-                    }}
+                    style={mergeImageStyle(
+                        {
+                            opacity: imageLoaded ? 1 : 0.5,
+                            imageRendering: isPreview ? 'pixelated' : 'auto',
+                            transform: isPreview ? 'scale(1.03)' : 'none',
+                            transition: isAnimating && imageLoaded
+                                ? 'opacity 500ms ease-out'
+                                : 'none',
+                        },
+                        coverFocalStyle,
+                    )}
                     onLoad={handleImageLoad}
                     onError={handleImageError}
                 />

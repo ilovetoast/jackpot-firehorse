@@ -5,6 +5,7 @@ import {
     writeStoredConsent,
     consentIsCurrent,
     postConsentToServer,
+    formatConsentSaveError,
 } from '../utils/cookieConsent'
 import { retryPerformanceTrackingAfterConsent } from '../utils/performanceTracking'
 
@@ -58,7 +59,7 @@ export default function PrivacyPreferences() {
             setSavedFlash(true)
             setTimeout(() => setSavedFlash(false), 2500)
         } catch (e) {
-            setError(e?.message || 'Could not save.')
+            setError(formatConsentSaveError(e))
         } finally {
             setSaving(false)
         }

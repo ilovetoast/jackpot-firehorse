@@ -3,6 +3,11 @@ import { usePage, Head, Link } from '@inertiajs/react'
 import PortalLayout from './PortalLayout'
 import LogoMark from '@/Components/Brand/LogoMark'
 import AssetLightbox from './AssetLightbox'
+import {
+    effectiveFocalPointFromAsset,
+    focalPointObjectPositionStyle,
+    mergeImageStyle,
+} from '../../utils/guidelinesFocalPoint'
 
 export default function PublicPortalIndex() {
     const { brand, theme, collections, recentAssets, portalConfig } = usePage().props
@@ -136,6 +141,10 @@ export default function PublicPortalIndex() {
                                             alt={asset.title}
                                             className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                                             loading="lazy"
+                                            style={mergeImageStyle(
+                                                undefined,
+                                                focalPointObjectPositionStyle(effectiveFocalPointFromAsset(asset)),
+                                            )}
                                         />
                                     </div>
                                 ) : (

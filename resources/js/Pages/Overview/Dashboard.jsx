@@ -28,6 +28,11 @@ import {
     ArrowLeftIcon,
     ExclamationTriangleIcon,
 } from '@heroicons/react/24/outline'
+import {
+    effectiveFocalPointFromAsset,
+    focalPointObjectPositionStyle,
+    mergeImageStyle,
+} from '../../utils/guidelinesFocalPoint'
 
 export default function Dashboard({
     auth,
@@ -116,7 +121,15 @@ export default function Dashboard({
             <div className="flex items-center gap-3 py-3 border-b border-gray-100 last:border-0">
                 <div className="w-10 h-10 rounded-lg bg-gray-100 overflow-hidden flex-shrink-0">
                     {thumb ? (
-                        <img src={thumb} alt={asset.title} className="w-full h-full object-cover" />
+                        <img
+                            src={thumb}
+                            alt={asset.title}
+                            className="w-full h-full object-cover"
+                            style={mergeImageStyle(
+                                undefined,
+                                focalPointObjectPositionStyle(effectiveFocalPointFromAsset(asset)),
+                            )}
+                        />
                     ) : (
                         <div className="w-full h-full flex items-center justify-center text-gray-400">
                             <FolderIcon className="w-5 h-5" />

@@ -15,6 +15,11 @@ import { router, Link, usePage } from '@inertiajs/react'
 import { ChevronDownIcon, ChevronUpIcon, XMarkIcon } from '@heroicons/react/24/outline'
 import ConfirmDialog from './ConfirmDialog'
 import CreateDownloadPanel from './CreateDownloadPanel'
+import {
+  effectiveFocalPointFromAsset,
+  focalPointObjectPositionStyle,
+  mergeImageStyle,
+} from '../utils/guidelinesFocalPoint'
 
 const csrfToken = () => document.querySelector('meta[name="csrf-token"]')?.content || ''
 
@@ -220,6 +225,10 @@ export default function DownloadBucketBar({
                               src={thumbUrl}
                               alt=""
                               className="h-full w-full object-cover"
+                              style={mergeImageStyle(
+                                undefined,
+                                focalPointObjectPositionStyle(effectiveFocalPointFromAsset(item)),
+                              )}
                             />
                           ) : (
                             <span className="flex h-full w-full items-center justify-center text-xs text-gray-400">

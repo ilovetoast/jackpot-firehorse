@@ -34,6 +34,7 @@ import DominantColorsSwatches from './DominantColorsSwatches'
 import AssetTagManager from './AssetTagManager'
 import AssetTimeline from './AssetTimeline'
 import CollapsibleSection from './CollapsibleSection'
+import GuidelinesFocalPointModal from './BrandGuidelines/GuidelinesFocalPointModal'
 import AssetEmbeddedMetadataPanel from './AssetEmbeddedMetadataPanel'
 import PermissionGate from './PermissionGate'
 import StarRating from './StarRating'
@@ -160,6 +161,8 @@ export default function AssetDetailPanel({
     const [filenameEditValue, setFilenameEditValue] = useState('')
     const [quickDownloadLoading, setQuickDownloadLoading] = useState(false)
     const [bucketToggleLoading, setBucketToggleLoading] = useState(false)
+    const [focalModalOpen, setFocalModalOpen] = useState(false)
+    const [focalAiRegenerateLoading, setFocalAiRegenerateLoading] = useState(false)
 
     const isVideo = useMemo(() => {
         if (!asset) return false
@@ -169,6 +172,13 @@ export default function AssetDetailPanel({
         const ext = filename.split('.').pop()?.toLowerCase() || ''
         return mimeType.startsWith('video/') || videoExtensions.includes(ext)
     }, [asset])
+
+    const allowsFocalPoint = useMemo(() => {
+        const m = asset?.mime_type || ''
+        return !isVideo && m.startsWith('image/') && !m.includes('svg')
+    }, [asset?.mime_type, isVideo])
+
+    const aiEnabled = auth?.permissions?.ai_enabled !== false
 
     useEffect(() => {
         if (isOpen && asset?.id) {
@@ -1661,6 +1671,81 @@ export default function AssetDetailPanel({
                                                 </dd>
                                             </>
                                         )}
+                                        {allowsFocalPoint && !readonlyMode && canEditMetadata && (
+                                            <>
+                                                <dt className={lb ? 'sr-only' : dtClass}>Focal point</dt>
+                                                <dd className={ddClass} title={lb ? 'Focal point' : undefined}>
+                                                    <div className="flex flex-wrap items-center gap-2">
+                                                        {(() => {
+                                                            const m = metadata ?? asset?.metadata ?? {}
+                                                            const fp = m.focal_point
+                                                            if (!fp || typeof fp.x !== 'number' || typeof fp.y !== 'number') {
+                                                                return (
+                                                                    <span className={`text-xs ${lb ? 'text-neutral-400' : 'text-gray-500'}`}>
+                                                                        Not set — optional for crops
+                                                                    </span>
+                                                                )
+                                                            }
+                                                            return (
+                                                                <span className={`text-xs ${lb ? 'text-neutral-300' : 'text-gray-600'}`}>
+                                                                    {Math.round(fp.x * 100)}% × {Math.round(fp.y * 100)}%
+                                                                    {m.focal_point_source === 'ai' && !m.focal_point_locked ? ' · AI' : ''}
+                                                                    {m.focal_point_locked ? ' · locked' : ''}
+                                                                </span>
+                                                            )
+                                                        })()}
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setFocalModalOpen(true)}
+                                                            className={`text-xs font-medium ${lb ? 'text-cyan-400 hover:text-cyan-300' : 'text-indigo-600 hover:text-indigo-500'}`}
+                                                        >
+                                                            Set on image…
+                                                        </button>
+                                                        {aiEnabled &&
+                                                            asset?.category?.slug === 'photography' &&
+                                                            !(metadata ?? asset?.metadata ?? {}).focal_point_locked && (
+                                                                <button
+                                                                    type="button"
+                                                                    disabled={focalAiRegenerateLoading}
+                                                                    onClick={async () => {
+                                                                        if (!asset?.id) return
+                                                                        setFocalAiRegenerateLoading(true)
+                                                                        try {
+                                                                            const url =
+                                                                                typeof route === 'function'
+                                                                                    ? route('assets.focal-point.ai-regenerate', {
+                                                                                          asset: asset.id,
+                                                                                      })
+                                                                                    : `/app/assets/${asset.id}/focal-point/ai-regenerate`
+                                                                            await window.axios.post(url)
+                                                                            onToast?.(
+                                                                                'AI focal point queued — results appear in a few seconds.',
+                                                                                'success',
+                                                                            )
+                                                                            setTimeout(() => fetchMetadata(), 2500)
+                                                                        } catch (err) {
+                                                                            onToast?.(
+                                                                                err.response?.data?.message ||
+                                                                                    'Could not queue AI focal point.',
+                                                                                'error',
+                                                                            )
+                                                                        } finally {
+                                                                            setFocalAiRegenerateLoading(false)
+                                                                        }
+                                                                    }}
+                                                                    className={`text-xs font-medium disabled:opacity-50 ${lb ? 'text-violet-300 hover:text-violet-200' : 'text-violet-700 hover:text-violet-600'}`}
+                                                                >
+                                                                    {focalAiRegenerateLoading ? 'Queuing…' : 'Re-run AI focal'}
+                                                                </button>
+                                                            )}
+                                                    </div>
+                                                    <p className={`mt-1 text-[10px] ${lb ? 'text-neutral-500' : 'text-gray-400'}`}>
+                                                        Used for smart crops and brand guidelines. Company setting can auto-fill with AI for photography
+                                                        (gpt-4o-mini; uses AI credits). Manual “Set on image” locks the point so AI will not overwrite it.
+                                                    </p>
+                                                </dd>
+                                            </>
+                                        )}
                                         <dt className={lb ? 'sr-only' : dtClass}>Thumbnail status</dt>
                                         <dd className={ddClass} title={lb ? 'Thumbnail status' : undefined}>
                                             {asset?.thumbnail_status ?? '—'}
@@ -1984,6 +2069,23 @@ export default function AssetDetailPanel({
                             </section>
                         )}
                     </div>
+
+                    <GuidelinesFocalPointModal
+                        open={focalModalOpen}
+                        onClose={() => setFocalModalOpen(false)}
+                        imageUrl={
+                            asset?.final_thumbnail_url ||
+                            asset?.thumbnail_url ||
+                            asset?.preview_thumbnail_url ||
+                            null
+                        }
+                        initialFocal={metadata?.focal_point ?? asset?.metadata?.focal_point}
+                        assetId={asset?.id}
+                        saveMode="library"
+                        onSaved={() => {
+                            fetchMetadata()
+                        }}
+                    />
 
                     {/* Phase 5C: Restore Version Modal */}
                     {showRestoreModal && restoreVersion && (

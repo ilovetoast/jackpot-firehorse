@@ -21,7 +21,7 @@ const PLAN_CONTEXTS = {
         title: 'Get in touch',
         subtitle: 'Have questions about Jackpot? We read every message.',
         prompts: ['Your workspace or brand name', 'What you\'re looking to accomplish', 'Any specific features you want to discuss'],
-        defaultTab: 'quick',
+        defaultTab: 'sales',
     },
 }
 
@@ -32,16 +32,16 @@ export default function Contact({ plan }) {
     const planKey = PLAN_KEY(plan)
     const ctx = PLAN_CONTEXTS[planKey]
 
-    // `sales` tab = qualified demo-request form (longer), `quick` = lightweight
-    // contact form. Enterprise/agency plan routes land on sales by default
-    // because those visitors are already self-qualifying by picking that plan.
+    // `sales` tab = qualified multi-step inquiry, `quick` = lightweight message.
+    // All plan contexts default to sales so "Talk to sales" is the primary path;
+    // enterprise/agency routes were already aligned.
     const [tab, setTab] = useState(ctx.defaultTab)
 
     const backHref = auth?.user ? '/app/billing' : '/'
     const backLabel = auth?.user ? 'Back to billing' : 'Back to home'
 
     return (
-        <MarketingLayout>
+        <MarketingLayout cinematicBackdrop>
             <section className="px-6 pt-16 pb-8 lg:px-8">
                 <div className="mx-auto max-w-3xl text-center">
                     <p className="text-sm font-semibold uppercase tracking-[0.2em] text-violet-400/90">Contact</p>
@@ -53,7 +53,7 @@ export default function Contact({ plan }) {
             </section>
 
             <section className="border-t border-white/[0.06] py-16 sm:py-20">
-                <div className="mx-auto max-w-3xl px-6 lg:px-8">
+                <div className="mx-auto max-w-6xl px-6 lg:px-8">
                     {flash?.info && (
                         <div
                             className="mb-8 rounded-2xl border border-emerald-400/25 bg-emerald-500/10 px-5 py-4 text-sm text-emerald-100/90"
@@ -64,29 +64,32 @@ export default function Contact({ plan }) {
                     )}
 
                     <div className="mb-6 flex gap-1 rounded-xl bg-white/[0.03] p-1 ring-1 ring-white/[0.06] w-full sm:w-fit">
-                        <TabButton active={tab === 'quick'} onClick={() => setTab('quick')}>
-                            Quick message
-                        </TabButton>
                         <TabButton active={tab === 'sales'} onClick={() => setTab('sales')}>
                             Talk to sales
                         </TabButton>
+                        <TabButton active={tab === 'quick'} onClick={() => setTab('quick')}>
+                            Quick message
+                        </TabButton>
                     </div>
 
-                    <div className="rounded-2xl bg-white/[0.02] p-8 sm:p-10 ring-1 ring-white/[0.06]">
-                        {tab === 'quick' ? (
+                    {tab === 'quick' ? (
+                        <div className="rounded-2xl bg-white/[0.02] p-8 sm:p-10 ring-1 ring-white/[0.06]">
                             <QuickContactForm planKey={planKey} prompts={ctx.prompts} />
-                        ) : (
-                            <div>
-                                <div className="mb-6">
-                                    <h2 className="font-display text-xl font-semibold text-white">Request a demo</h2>
-                                    <p className="mt-1 text-sm text-white/45">
-                                        Tell us a bit about your team and we'll set up a walk-through tailored to your workflow.
-                                    </p>
-                                </div>
-                                <SalesInquiryForm planInterest={planKey} />
+                        </div>
+                    ) : (
+                        <div>
+                            <div className="mb-6 max-w-2xl">
+                                <h2 className="font-display text-xl font-semibold text-white sm:text-2xl">
+                                    Connect with our team
+                                </h2>
+                                <p className="mt-2 text-sm text-white/45 leading-relaxed">
+                                    Share a few details and we&apos;ll tailor the conversation—whether you&apos;re exploring,
+                                    comparing options, or ready for a guided walkthrough.
+                                </p>
                             </div>
-                        )}
-                    </div>
+                            <SalesInquiryForm planInterest={planKey} />
+                        </div>
+                    )}
 
                     <div className="mt-10 rounded-2xl bg-white/[0.02] p-8 ring-1 ring-white/[0.06]">
                         <div className="mb-4">

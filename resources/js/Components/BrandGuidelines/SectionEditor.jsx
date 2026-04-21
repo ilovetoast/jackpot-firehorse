@@ -3,6 +3,7 @@ import { useSidebarEditor } from './SidebarEditorContext'
 import ToggleControl from './controls/ToggleControl'
 import BackgroundControl from './controls/BackgroundControl'
 import SelectControl from './controls/SelectControl'
+import HeroLogoOverridePicker from './HeroLogoOverridePicker'
 import ColorPickerControl from './controls/ColorPickerControl'
 import WysiwygField from './WysiwygField'
 
@@ -248,6 +249,7 @@ const SECTION_CONFIGS = {
             { key: 'show_color_dots', label: 'Show Color Dots', default: true },
         ],
         textControls: true,
+        extraControls: () => <HeroLogoOverridePicker />,
         editableFields: [],
     },
     'sec-purpose': {

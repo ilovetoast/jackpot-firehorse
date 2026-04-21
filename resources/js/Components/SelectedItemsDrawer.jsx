@@ -8,6 +8,11 @@ import { useEffect, useState } from 'react'
 import { XMarkIcon, ArrowDownTrayIcon } from '@heroicons/react/24/outline'
 import { useSelection } from '../contexts/SelectionContext'
 import FileTypeIcon from './FileTypeIcon'
+import {
+    effectiveFocalPointFromAsset,
+    focalPointObjectPositionStyle,
+    mergeImageStyle,
+} from '../utils/guidelinesFocalPoint'
 
 const TYPE_LABELS = {
     asset: 'Asset',
@@ -127,6 +132,10 @@ export default function SelectedItemsDrawer({
                                         src={item.thumbnail_url}
                                         alt=""
                                         className="w-full h-full object-cover"
+                                        style={mergeImageStyle(
+                                            undefined,
+                                            focalPointObjectPositionStyle(effectiveFocalPointFromAsset(item)),
+                                        )}
                                     />
                                 ) : (
                                     <div className="w-full h-full flex items-center justify-center">
