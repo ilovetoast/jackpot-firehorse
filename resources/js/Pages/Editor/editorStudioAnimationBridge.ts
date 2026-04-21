@@ -206,9 +206,19 @@ export async function postStudioAnimation(
     try {
         data = JSON.parse(text)
     } catch {
+        if (res.status === 413) {
+            throw new Error(
+                'The snapshot is larger than this server accepts (HTTP 413). An admin should raise nginx client_max_body_size and PHP post_max_size (try 32m+). If you already raised limits, try a smaller canvas for this composition.'
+            )
+        }
         throw new Error(text || 'Animation request failed')
     }
     if (!res.ok) {
+        if (res.status === 413) {
+            throw new Error(
+                'The snapshot is larger than this server accepts (HTTP 413). An admin should raise nginx client_max_body_size and PHP post_max_size (try 32m+). If you already raised limits, try a smaller canvas for this composition.'
+            )
+        }
         const msg = (data as { message?: string })?.message || text
         throw new Error(msg)
     }

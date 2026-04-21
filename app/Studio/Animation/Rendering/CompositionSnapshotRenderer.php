@@ -51,6 +51,17 @@ final class CompositionSnapshotRenderer implements CompositionAnimationRendererI
         $dims = @getimagesizefromstring($clientBinary);
         $width = isset($dims[0]) ? (int) $dims[0] : null;
         $height = isset($dims[1]) ? (int) $dims[1] : null;
+        $imageType = isset($dims[2]) ? (int) $dims[2] : \IMAGETYPE_PNG;
+        $mimeType = @image_type_to_mime_type($imageType) ?: 'image/png';
+        if (! is_string($mimeType) || ! str_starts_with($mimeType, 'image/')) {
+            $mimeType = 'image/png';
+        }
+        $pathExt = match (true) {
+            str_contains($mimeType, 'jpeg') => 'jpg',
+            str_contains($mimeType, 'png') => 'png',
+            str_contains($mimeType, 'webp') => 'webp',
+            default => 'img',
+        };
 
         $expectedW = (int) ($settings['snapshot_width'] ?? 0);
         $expectedH = (int) ($settings['snapshot_height'] ?? 0);
@@ -64,7 +75,7 @@ final class CompositionSnapshotRenderer implements CompositionAnimationRendererI
         $disk = (string) config('studio_animation.render_disk', 'local');
         $tenant = $job->tenant;
         $uuid = $tenant?->uuid ?? 'unknown-tenant';
-        $path = "studio-animation/{$uuid}/{$job->id}/start_frame_".Str::random(8).'.png';
+        $path = "studio-animation/{$uuid}/{$job->id}/start_frame_".Str::random(8).'.'.$pathExt;
 
         $lockedDoc = $this->lockedCompositionDocument($settings);
         $highFidelity = (bool) ($settings['high_fidelity_submit'] ?? false);
@@ -147,7 +158,7 @@ final class CompositionSnapshotRenderer implements CompositionAnimationRendererI
 
         $auxPath = null;
         if ($canonicalOrigin === 'server_locked_state' && $serverBinary !== null) {
-            $auxPath = "studio-animation/{$uuid}/{$job->id}/client_aux_".Str::random(6).'.png';
+            $auxPath = "studio-animation/{$uuid}/{$job->id}/client_aux_".Str::random(6).'.'.$pathExt;
             Storage::disk($disk)->put($auxPath, $clientBinary);
         }
 
@@ -183,7 +194,7 @@ final class CompositionSnapshotRenderer implements CompositionAnimationRendererI
             role: StudioAnimationRenderRole::StartFrame,
             disk: $disk,
             path: $path,
-            mimeType: 'image/png',
+            mimeType: $mimeType,
             width: $width,
             height: $height,
             sha256: $sha256,

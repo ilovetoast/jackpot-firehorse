@@ -10,6 +10,75 @@ type CaptureThumbnailOptions = {
     pixelRatio?: number
 }
 
+/**
+ * Re-draw a full-size PNG data URL to a canvas and export JPEG base64 (no data URL prefix).
+ * Keeps pixel dimensions identical to reduce POST size (avoids nginx 413) while satisfying server dimension checks.
+ */
+function reencodePngDataUrlAsJpegBase64(
+    pngDataUrl: string,
+    width: number,
+    height: number,
+    quality: number
+): Promise<string | null> {
+    return new Promise((resolve) => {
+        const img = new Image()
+        img.crossOrigin = 'anonymous'
+        img.onload = () => {
+            try {
+                const canvas = document.createElement('canvas')
+                canvas.width = width
+                canvas.height = height
+                const ctx = canvas.getContext('2d')
+                if (!ctx) {
+                    resolve(null)
+                    return
+                }
+                ctx.fillStyle = '#ffffff'
+                ctx.fillRect(0, 0, width, height)
+                ctx.drawImage(img, 0, 0, width, height)
+                const dataUrl = canvas.toDataURL('image/jpeg', quality)
+                resolve(dataUrl.replace(/^data:image\/jpeg;base64,/, ''))
+            } catch {
+                resolve(null)
+            }
+        }
+        img.onerror = () => resolve(null)
+        img.src = pngDataUrl
+    })
+}
+
+/**
+ * Full-resolution snapshot for Studio Animate: same pixel size as the document, JPEG-compressed for smaller uploads.
+ */
+export async function captureCompositionStudioAnimationSnapshotBase64(
+    stageEl: HTMLElement,
+    doc: DocumentModel
+): Promise<string | null> {
+    try {
+        const pngDataUrl = await toPng(stageEl, {
+            cacheBust: true,
+            skipFonts: true,
+            pixelRatio: 1,
+            width: doc.width,
+            height: doc.height,
+            backgroundColor: '#ffffff',
+            fetchRequestInit: editorHtmlToImageFetchRequestInit,
+            style: {
+                transform: 'none',
+                width: `${doc.width}px`,
+                height: `${doc.height}px`,
+            },
+        })
+        const jpeg = await reencodePngDataUrlAsJpegBase64(pngDataUrl, doc.width, doc.height, 0.87)
+        if (jpeg) {
+            return jpeg
+        }
+        return pngDataUrl.replace(/^data:image\/png;base64,/, '')
+    } catch {
+        return null
+    }
+}
+
 /** PNG base64 (no data URL prefix) for API `thumbnail_png_base64`. */
 export async function captureCompositionThumbnailBase64(
     stageEl: HTMLElement,

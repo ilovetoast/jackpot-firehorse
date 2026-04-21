@@ -149,8 +149,8 @@ export function StudioAnimateCompositionModal(props: Props) {
         setBusy(true)
         setErr(null)
         try {
-            const { captureCompositionThumbnailBase64 } = await import('../editorCompositionThumbnail')
-            const b64 = await captureCompositionThumbnailBase64(stage, document, { pixelRatio: 1 })
+            const { captureCompositionStudioAnimationSnapshotBase64 } = await import('../editorCompositionThumbnail')
+            const b64 = await captureCompositionStudioAnimationSnapshotBase64(stage, document)
             if (!b64) {
                 throw new Error('Could not capture the composition snapshot.')
             }
