@@ -25,6 +25,7 @@ import FontListbox from '../../Components/BrandGuidelines/FontListbox'
 import FontManager from '../../Components/BrandGuidelines/FontManager'
 import HeadlineAppearancePicker from '../../Components/BrandGuidelines/HeadlineAppearancePicker'
 import BuilderAssetSelectorModal from '../../Components/BrandGuidelines/BuilderAssetSelectorModal'
+import GuidelinesFocalPointModal from '../../Components/BrandGuidelines/GuidelinesFocalPointModal'
 import ResearchSummary, { canProceedFromResearchSummary } from '../../Components/BrandGuidelines/ResearchSummary'
 import ProcessingProgressPanel from '../../Components/BrandGuidelines/ProcessingProgressPanel'
 import BrandResearchReadyToast from '../../Components/BrandGuidelines/BrandResearchReadyToast'
@@ -38,6 +39,7 @@ import useLogoBrightness from '../../utils/useLogoBrightness'
 import useLogoWhiteBgPreview from '../../utils/useLogoWhiteBgPreview'
 import { generateWhiteVariant, generatePrimaryColorWashVariant, detectLogoComplexity } from '../../utils/imageUtils'
 import ImageCropModal from '../../Components/ImageCropModal'
+import { guidelinesFocalPointStyle } from '../../utils/guidelinesFocalPoint'
 
 import { ARCHETYPES, ARCHETYPE_RECOMMENDED_TRAITS } from '../../constants/brandOptions'
 import PoweredByJackpot from '../../Components/PoweredByJackpot'
@@ -2583,6 +2585,7 @@ export default function BrandGuidelinesBuilder({
     const [brandMaterialCount, setBrandMaterialCount] = useState(initialBrandMaterialCount)
     const [brandMaterials, setBrandMaterials] = useState(initialBrandMaterials ?? [])
     const [visualReferences, setVisualReferences] = useState(initialVisualReferences ?? [])
+    const [focalPointModalAsset, setFocalPointModalAsset] = useState(null)
     const [logoRef, setLogoRef] = useState(initialLogoAsset ?? null)
     const [logoOnDark, setLogoOnDark] = useState(initialLogoOnDark ?? null)
     const [logoOnLight, setLogoOnLight] = useState(initialLogoOnLight ?? null)
@@ -2730,7 +2733,17 @@ export default function BrandGuidelinesBuilder({
             } else if (context === 'visual_reference') {
                 setVisualReferences((prev) => {
                     if (prev.some((x) => x.id === assetId)) return prev
-                    return [...prev, { id: assetId, title: item.title, original_filename: item.original_filename, thumbnail_url: item.thumbnail_url, signed_url: item.signed_url }]
+                    return [
+                        ...prev,
+                        {
+                            id: assetId,
+                            title: item.title,
+                            original_filename: item.original_filename,
+                            thumbnail_url: item.thumbnail_url,
+                            signed_url: item.signed_url,
+                            focal_point: item.focal_point ?? null,
+                        },
+                    ]
                 })
                 setPayload((prev) => {
                     const refs = prev.visual?.approved_references || []
@@ -4676,12 +4689,24 @@ export default function BrandGuidelinesBuilder({
                                                             <div key={a.id} className="rounded-xl border border-white/20 bg-white/5 p-2 flex flex-col">
                                                                 <div className="aspect-square rounded-lg bg-white/10 overflow-hidden mb-2">
                                                                     {(a.thumbnail_url || a.signed_url) ? (
-                                                                        <img src={a.thumbnail_url || a.signed_url} alt="" className="w-full h-full object-cover" />
+                                                                        <img
+                                                                            src={a.thumbnail_url || a.signed_url}
+                                                                            alt=""
+                                                                            className="w-full h-full object-cover"
+                                                                            style={guidelinesFocalPointStyle(a.focal_point)}
+                                                                        />
                                                                     ) : (
                                                                         <div className="w-full h-full flex items-center justify-center text-white/40 text-2xl">◇</div>
                                                                     )}
                                                                 </div>
                                                                 <p className="text-xs text-white/80 truncate" title={a.original_filename}>{a.original_filename || a.title}</p>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => setFocalPointModalAsset(a)}
+                                                                    className="mt-1 text-xs text-cyan-400/90 hover:text-cyan-300 text-left"
+                                                                >
+                                                                    Set focal point…
+                                                                </button>
                                                                 <button
                                                                     type="button"
                                                                     onClick={() => handleDetachVisualRef(a.id)}
@@ -4782,6 +4807,19 @@ export default function BrandGuidelinesBuilder({
                     </div>
                 </footer>
 
+                <GuidelinesFocalPointModal
+                    open={!!focalPointModalAsset}
+                    onClose={() => setFocalPointModalAsset(null)}
+                    imageUrl={focalPointModalAsset?.signed_url || focalPointModalAsset?.thumbnail_url}
+                    initialFocal={focalPointModalAsset?.focal_point}
+                    brandId={brand?.id}
+                    assetId={focalPointModalAsset?.id}
+                    onSaved={(fp) => {
+                        const id = focalPointModalAsset?.id
+                        if (!id) return
+                        setVisualReferences((prev) => prev.map((x) => (x.id === id ? { ...x, focal_point: fp } : x)))
+                    }}
+                />
                 <BrandResearchReadyToast
                     visible={showResearchReadyToast}
                     onDismiss={() => setShowResearchReadyToast(false)}

@@ -968,6 +968,7 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
             Route::post('/brands/{brand}/brand-dna/builder/trigger-ingestion', [\App\Http\Controllers\BrandDNABuilderController::class, 'triggerIngestion'])->name('brands.brand-dna.builder.trigger-ingestion');
             Route::post('/brands/{brand}/brand-dna/builder/retry-pipeline', [\App\Http\Controllers\BrandDNABuilderController::class, 'retryPipeline'])->name('brands.brand-dna.builder.retry-pipeline');
             Route::post('/brands/{brand}/brand-dna/builder/attach-asset', [\App\Http\Controllers\BrandDNABuilderController::class, 'attachAsset'])->name('brands.brand-dna.builder.attach-asset');
+            Route::patch('/brands/{brand}/brand-dna/builder/assets/{asset}/guidelines-focal-point', [\App\Http\Controllers\BrandDNABuilderController::class, 'updateGuidelinesFocalPoint'])->name('brands.brand-dna.builder.asset-guidelines-focal-point');
             Route::post('/brands/{brand}/brand-dna/builder/detach-asset', [\App\Http\Controllers\BrandDNABuilderController::class, 'detachAsset'])->name('brands.brand-dna.builder.detach-asset');
             Route::post('/brands/{brand}/brand-dna/builder/generate-logo-guidelines', [\App\Http\Controllers\BrandDNABuilderController::class, 'generateLogoGuidelines'])->name('brands.brand-dna.builder.generate-logo-guidelines');
             Route::post('/brands/{brand}/brand-dna/builder/suggest-field', [\App\Http\Controllers\BrandDNABuilderController::class, 'suggestField'])->name('brands.brand-dna.builder.suggest-field');

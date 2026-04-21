@@ -42,6 +42,7 @@ import {
     Squares2X2Icon,
     TrashIcon,
     ViewfinderCircleIcon,
+    MagnifyingGlassIcon,
     XMarkIcon,
 } from '@heroicons/react/24/outline'
 import type {
@@ -190,6 +191,28 @@ import {
     waitForImagesToLoad,
     withAIConcurrency,
 } from './editorHardening'
+
+/** Preset instructions for Modify image (AI) — same monthly budget as custom edits. */
+const IMAGE_LAYER_QUICK_ACTIONS: ReadonlyArray<{ id: string; label: string; instruction: string }> = [
+    {
+        id: 'remove_bg',
+        label: 'Remove background',
+        instruction:
+            'Remove the studio or white background completely. Keep only the product or garment with a clean transparent cutout (alpha channel). Preserve true colors, fabric texture, and sharp edges. Avoid halo or gray fringe.',
+    },
+    {
+        id: 'soft_studio',
+        label: 'Soft studio',
+        instruction:
+            'Replace the background with a smooth neutral light-gray studio sweep. Add a subtle soft shadow under the product. Keep the product natural and catalog-ready.',
+    },
+    {
+        id: 'warmer',
+        label: 'Warmer tone',
+        instruction:
+            'Apply a subtle warmer color grade to the product—slightly richer highlights without oversaturating. Keep exposure balanced.',
+    },
+]
 
 /*
  * QA checklist (manual)
@@ -1092,6 +1115,9 @@ export default function AssetEditor() {
     /** Library (ASSET) vs executions (DELIVERABLE) in the image picker */
     const [pickerScope, setPickerScope] = useState<'library' | 'executions'>('library')
     const [pickerCategoryFilterId, setPickerCategoryFilterId] = useState<number | ''>('')
+    const [pickerSearchInput, setPickerSearchInput] = useState('')
+    const [pickerSearchDebounced, setPickerSearchDebounced] = useState('')
+    const [pickerListRefreshKey, setPickerListRefreshKey] = useState(0)
     const [promoteSaving, setPromoteSaving] = useState(false)
     const [promoteError, setPromoteError] = useState<string | null>(null)
     const [promoteOk, setPromoteOk] = useState(false)
@@ -1733,6 +1759,11 @@ export default function AssetEditor() {
             pickerScope === 'library' ? c.asset_type === 'asset' : c.asset_type === 'deliverable'
         )
     }, [pickerCategories, pickerScope])
+
+    const pickerQuickCategoryChips = useMemo(
+        () => pickerCategoriesForScope.slice(0, 12),
+        [pickerCategoriesForScope]
+    )
 
     const dirty = useMemo(
         () =>
@@ -2940,6 +2971,11 @@ export default function AssetEditor() {
     }, [pickerOpen])
 
     useEffect(() => {
+        const t = window.setTimeout(() => setPickerSearchDebounced(pickerSearchInput.trim()), 320)
+        return () => window.clearTimeout(t)
+    }, [pickerSearchInput])
+
+    useEffect(() => {
         if (!pickerOpen) {
             return
         }
@@ -2948,20 +2984,24 @@ export default function AssetEditor() {
         const assetType = pickerScope === 'executions' ? 'deliverable' : 'asset'
         const categoryId =
             pickerCategoryFilterId === '' ? undefined : Math.floor(Number(pickerCategoryFilterId))
+        const search = pickerSearchDebounced.length > 0 ? pickerSearchDebounced : undefined
         fetchEditorAssets(80, {
             assetType,
             categoryId: categoryId !== undefined && categoryId > 0 ? categoryId : undefined,
+            search,
         })
             .then((r) => setDamAssets(r.assets))
             .catch((e) => setDamError(e instanceof Error ? e.message : 'Failed to load assets'))
             .finally(() => setDamLoading(false))
-    }, [pickerOpen, pickerScope, pickerCategoryFilterId])
+    }, [pickerOpen, pickerScope, pickerCategoryFilterId, pickerSearchDebounced, pickerListRefreshKey])
 
     const openPickerForAddImage = useCallback(() => {
         setPickerMode('add')
         setReplaceLayerId(null)
         setReferencePickerLayerId(null)
         setReferenceSelectionIds([])
+        setPickerSearchInput('')
+        setPickerSearchDebounced('')
         setPickerOpen(true)
     }, [])
 
@@ -2969,6 +3009,8 @@ export default function AssetEditor() {
         setPickerMode('replace')
         setReplaceLayerId(layerId)
         setReferencePickerLayerId(null)
+        setPickerSearchInput('')
+        setPickerSearchDebounced('')
         setPickerOpen(true)
     }, [])
 
@@ -2981,6 +3023,8 @@ export default function AssetEditor() {
         setReferenceSelectionIds([...(layer.referenceAssetIds ?? [])].slice(0, MAX_REFERENCE_ASSETS))
         setPickerMode('references')
         setReplaceLayerId(null)
+        setPickerSearchInput('')
+        setPickerSearchDebounced('')
         setPickerOpen(true)
     }, [document.layers])
 
@@ -3020,6 +3064,8 @@ export default function AssetEditor() {
         setReferenceSelectionIds([])
         setPickerScope('library')
         setPickerCategoryFilterId('')
+        setPickerSearchInput('')
+        setPickerSearchDebounced('')
     }, [])
 
     const removeReferenceAsset = useCallback(
@@ -3499,12 +3545,12 @@ export default function AssetEditor() {
     )
 
     const runImageLayerEdit = useCallback(
-        async (layerId: string) => {
+        async (layerId: string, opts?: { instructionOverride?: string }) => {
             const layer = documentRef.current.layers.find((l) => l.id === layerId)
             if (!layer || !isImageLayer(layer) || layer.locked) {
                 return
             }
-            const instruction = (layer.aiEdit?.prompt ?? '').trim()
+            const instruction = (opts?.instructionOverride ?? layer.aiEdit?.prompt ?? '').trim()
             if (!instruction) {
                 setImageEditActionError('Describe what to change first.')
                 return
@@ -8396,6 +8442,31 @@ export default function AssetEditor() {
                                                 require{' '}
                                                 <span className="font-mono text-[10px]">GEMINI_API_KEY</span>.
                                             </p>
+                                            <div className="mb-2 flex flex-wrap items-center gap-1.5">
+                                                <span className="w-full text-[10px] font-medium uppercase tracking-wide text-violet-300/90">
+                                                    Quick actions
+                                                </span>
+                                                {IMAGE_LAYER_QUICK_ACTIONS.map((qa) => (
+                                                    <button
+                                                        key={qa.id}
+                                                        type="button"
+                                                        disabled={
+                                                            selectedLayer.locked ||
+                                                            selectedLayer.aiEdit?.status === 'editing' ||
+                                                            imageEditUsageBlocked
+                                                        }
+                                                        title={qa.instruction}
+                                                        onClick={() =>
+                                                            void runImageLayerEdit(selectedLayer.id, {
+                                                                instructionOverride: qa.instruction,
+                                                            })
+                                                        }
+                                                        className="rounded border border-violet-600/80 bg-violet-950/50 px-2 py-1 text-[10px] font-medium text-violet-100 hover:bg-violet-900/60 disabled:cursor-not-allowed disabled:opacity-50"
+                                                    >
+                                                        {qa.label}
+                                                    </button>
+                                                ))}
+                                            </div>
                                             <div className="mb-2">
                                                 <label className="mb-0.5 block text-[10px] font-medium text-gray-300">
                                                     Edit model
@@ -10063,6 +10134,74 @@ export default function AssetEditor() {
                                     </select>
                                 </label>
                             </div>
+                            <div className="mt-2 flex flex-col gap-2">
+                                <div className="flex gap-1.5">
+                                    <div className="relative min-w-0 flex-1">
+                                        <MagnifyingGlassIcon
+                                            className="pointer-events-none absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500"
+                                            aria-hidden
+                                        />
+                                        <input
+                                            type="search"
+                                            value={pickerSearchInput}
+                                            onChange={(e) => setPickerSearchInput(e.target.value)}
+                                            placeholder="Search by name…"
+                                            className="w-full rounded border border-gray-700 bg-gray-800 py-1.5 pl-8 pr-2 text-[11px] text-gray-100 placeholder:text-gray-500"
+                                            autoComplete="off"
+                                            disabled={pickerPickingAssetId !== null}
+                                            aria-label="Search assets"
+                                        />
+                                    </div>
+                                    <button
+                                        type="button"
+                                        onClick={() => setPickerListRefreshKey((k) => k + 1)}
+                                        disabled={damLoading || pickerPickingAssetId !== null}
+                                        title="Refresh list"
+                                        aria-label="Refresh list"
+                                        className="shrink-0 rounded border border-gray-700 bg-gray-800 px-2 py-1.5 text-gray-300 hover:bg-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
+                                    >
+                                        <ArrowPathIcon className={`h-4 w-4 ${damLoading ? 'animate-spin' : ''}`} />
+                                    </button>
+                                </div>
+                                {pickerQuickCategoryChips.length > 0 && (
+                                    <div className="flex flex-wrap items-center gap-1">
+                                        <span className="mr-0.5 text-[10px] font-medium uppercase tracking-wide text-gray-500">
+                                            Filter
+                                        </span>
+                                        <button
+                                            type="button"
+                                            disabled={pickerPickingAssetId !== null}
+                                            onClick={() => setPickerCategoryFilterId('')}
+                                            className={`rounded px-2 py-0.5 text-[10px] font-medium ${
+                                                pickerCategoryFilterId === ''
+                                                    ? 'bg-indigo-600 text-white'
+                                                    : 'border border-gray-600 bg-gray-800 text-gray-300 hover:border-gray-500'
+                                            }`}
+                                        >
+                                            All
+                                        </button>
+                                        {pickerQuickCategoryChips.map((c) => {
+                                            const active = pickerCategoryFilterId === c.id
+                                            return (
+                                                <button
+                                                    key={c.id}
+                                                    type="button"
+                                                    disabled={pickerPickingAssetId !== null}
+                                                    onClick={() => setPickerCategoryFilterId(c.id)}
+                                                    className={`max-w-[140px] truncate rounded px-2 py-0.5 text-[10px] font-medium ${
+                                                        active
+                                                            ? 'bg-indigo-600 text-white'
+                                                            : 'border border-gray-600 bg-gray-800 text-gray-300 hover:border-gray-500'
+                                                    }`}
+                                                    title={c.name}
+                                                >
+                                                    {c.name}
+                                                </button>
+                                            )
+                                        })}
+                                    </div>
+                                )}
+                            </div>
                             <p className="mt-2 text-[10px] text-gray-400">
                                 <a
                                     href={pickerScope === 'executions' ? '/app/executions' : '/app/assets'}
@@ -10155,7 +10294,11 @@ export default function AssetEditor() {
                                 <p className="text-center text-sm text-red-400">{damError}</p>
                             )}
                             {!damLoading && !damError && damAssets.length === 0 && (
-                                <p className="text-center text-sm text-gray-500">No assets available.</p>
+                                <p className="text-center text-sm text-gray-500">
+                                    {pickerSearchDebounced
+                                        ? 'No assets match your search.'
+                                        : 'No assets available.'}
+                                </p>
                             )}
                             {!damLoading && !damError && damAssets.length > 0 && (
                                 <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">

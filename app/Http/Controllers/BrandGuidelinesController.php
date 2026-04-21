@@ -11,6 +11,7 @@ use App\Services\BrandDNA\BuilderResumeStepService;
 use App\Services\BrandDNA\PipelineFinalizationService;
 use App\Support\AssetVariant;
 use App\Support\DeliveryContext;
+use App\Support\GuidelinesFocalPoint;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Log;
@@ -222,6 +223,20 @@ class BrandGuidelinesController extends Controller
         return $results;
     }
 
+    /**
+     * @param  array<string, mixed>  $item
+     * @return array<string, mixed>
+     */
+    protected function withGuidelinesFocalPoint(Asset $asset, array $item): array
+    {
+        $fp = GuidelinesFocalPoint::fromAsset($asset);
+        if ($fp !== null) {
+            $item['focal_point'] = $fp;
+        }
+
+        return $item;
+    }
+
     protected function gatherVisualReferences(Brand $brand, array $modelPayload, $activeVersion): array
     {
         $results = [];
@@ -235,13 +250,13 @@ class BrandGuidelinesController extends Controller
 
             $assets = Asset::whereIn('id', $assetIds)->get();
             foreach ($assets as $asset) {
-                $item = [
+                $item = $this->withGuidelinesFocalPoint($asset, [
                     'id' => $asset->id,
                     'title' => $asset->title,
                     'url' => $asset->deliveryUrl(AssetVariant::THUMB_LARGE, DeliveryContext::AUTHENTICATED)
                         ?: $asset->deliveryUrl(AssetVariant::THUMB_MEDIUM, DeliveryContext::AUTHENTICATED),
                     'thumbnail_url' => $asset->deliveryUrl(AssetVariant::THUMB_MEDIUM, DeliveryContext::AUTHENTICATED),
-                ];
+                ]);
                 $results[$categoryKey] = $this->appendUniqueVisualReferenceById($results[$categoryKey] ?? [], $item);
             }
         }
@@ -261,13 +276,13 @@ class BrandGuidelinesController extends Controller
             foreach ($pivotRefs as $asset) {
                 $refType = $asset->pivot->reference_type ?? 'photography_reference';
                 $catKey = $legacyMap[$refType] ?? 'photography';
-                $item = [
+                $item = $this->withGuidelinesFocalPoint($asset, [
                     'id' => $asset->id,
                     'title' => $asset->title,
                     'url' => $asset->deliveryUrl(AssetVariant::THUMB_LARGE, DeliveryContext::AUTHENTICATED)
                         ?: $asset->deliveryUrl(AssetVariant::THUMB_MEDIUM, DeliveryContext::AUTHENTICATED),
                     'thumbnail_url' => $asset->deliveryUrl(AssetVariant::THUMB_MEDIUM, DeliveryContext::AUTHENTICATED),
-                ];
+                ]);
                 $results[$catKey] = $this->appendUniqueVisualReferenceById($results[$catKey] ?? [], $item);
             }
         }

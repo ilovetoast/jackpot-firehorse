@@ -7,6 +7,7 @@ import useLogoWhiteBgPreview from '../../../utils/useLogoWhiteBgPreview'
 import HeadlineAppearanceShowcase from '../../../Components/BrandGuidelines/HeadlineAppearanceShowcase'
 import { SidebarEditorProvider, useSidebarEditor } from '../../../Components/BrandGuidelines/SidebarEditorContext'
 import SidebarEditor from '../../../Components/BrandGuidelines/SidebarEditor'
+import { guidelinesFocalPointStyle } from '../../../utils/guidelinesFocalPoint'
 
 function unwrapValue(field) {
     if (field && typeof field === 'object' && !Array.isArray(field) && 'value' in field) return field.value
@@ -373,6 +374,11 @@ function BrandGuidelinesIndexInner({ brand, brandModel, modelPayload, logoAssets
 
     const allImageRefs = [...photographyRefs, ...graphicsRefs]
     const texBg = (idx = 0) => allImageRefs[idx % allImageRefs.length]?.url || allImageRefs[idx % allImageRefs.length]?.thumbnail_url || null
+    const texRefAt = (idx = 0) => (allImageRefs.length ? allImageRefs[idx % allImageRefs.length] : null)
+    const texLayerStyle = (idx) => {
+        const fp = texRefAt(idx)?.focal_point
+        return fp ? guidelinesFocalPointStyle(fp) : undefined
+    }
     const grainSvg = "data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"
 
     const handleCopyHex = (hex, label) => {
@@ -745,7 +751,14 @@ function BrandGuidelinesIndexInner({ brand, brandModel, modelPayload, logoAssets
                                     )
                                 }
                                 if (showStyleTextureLayer('sec-hero', 0)) {
-                                    return <img src={texBg(0)} alt="" className="absolute inset-0 w-full h-full object-cover" />
+                                    return (
+                                        <img
+                                            src={texBg(0)}
+                                            alt=""
+                                            className="absolute inset-0 w-full h-full object-contain object-center"
+                                            style={texLayerStyle(0)}
+                                        />
+                                    )
                                 }
                                 return null
                             })()}
@@ -832,7 +845,12 @@ function BrandGuidelinesIndexInner({ brand, brandModel, modelPayload, logoAssets
                             })}>
                                 {showStyleTextureLayer('sec-purpose', 1) && (
                                     <>
-                                        <img src={texBg(1)} alt="" className="absolute inset-0 w-full h-full object-cover opacity-20" style={{ mixBlendMode: 'screen' }} />
+                                        <img
+                                            src={texBg(1)}
+                                            alt=""
+                                            className="absolute inset-0 w-full h-full object-contain object-center opacity-20"
+                                            style={{ mixBlendMode: 'screen', ...texLayerStyle(1) }}
+                                        />
                                         <div className="absolute inset-0 opacity-[0.04]" style={{ backgroundImage: `url("${grainSvg}")` }} />
                                     </>
                                 )}
@@ -905,7 +923,12 @@ function BrandGuidelinesIndexInner({ brand, brandModel, modelPayload, logoAssets
                             >
                                 {showStyleTextureLayer('sec-values', 2) && (
                                     <>
-                                        <img src={texBg(2)} alt="" className="absolute inset-0 w-full h-full object-cover opacity-15" style={{ mixBlendMode: 'screen' }} />
+                                        <img
+                                            src={texBg(2)}
+                                            alt=""
+                                            className="absolute inset-0 w-full h-full object-contain object-center opacity-15"
+                                            style={{ mixBlendMode: 'screen', ...texLayerStyle(2) }}
+                                        />
                                         <div className="absolute inset-0 opacity-[0.04]" style={{ backgroundImage: `url("${grainSvg}")` }} />
                                     </>
                                 )}
@@ -988,7 +1011,12 @@ function BrandGuidelinesIndexInner({ brand, brandModel, modelPayload, logoAssets
                             })}>
                                 {showStyleTextureLayer('sec-voice', 3) && (
                                     <>
-                                        <img src={texBg(3)} alt="" className="absolute inset-0 w-full h-full object-cover opacity-20" style={{ mixBlendMode: 'multiply' }} />
+                                        <img
+                                            src={texBg(3)}
+                                            alt=""
+                                            className="absolute inset-0 w-full h-full object-contain object-center opacity-20"
+                                            style={{ mixBlendMode: 'multiply', ...texLayerStyle(3) }}
+                                        />
                                         <div className="absolute inset-0 opacity-[0.05]" style={{ backgroundImage: `url("${grainSvg}")` }} />
                                     </>
                                 )}
@@ -1056,7 +1084,12 @@ function BrandGuidelinesIndexInner({ brand, brandModel, modelPayload, logoAssets
                             })}
                         >
                             {showStyleTextureLayer('sec-archetype', 4) && (
-                                <img src={texBg(4)} alt="" className="absolute inset-0 w-full h-full object-cover opacity-25" style={{ mixBlendMode: 'screen', filter: 'saturate(0.4)' }} />
+                                <img
+                                    src={texBg(4)}
+                                    alt=""
+                                    className="absolute inset-0 w-full h-full object-contain object-center opacity-25"
+                                    style={{ mixBlendMode: 'screen', filter: 'saturate(0.4)', ...texLayerStyle(4) }}
+                                />
                             )}
                             <div className={`absolute inset-0 ${isTextured ? 'opacity-[0.06]' : 'opacity-[0.04]'}`} style={{ backgroundImage: isTextured ? `url("${grainSvg}")` : `radial-gradient(circle at 1px 1px, white 1px, transparent 0)`, backgroundSize: isTextured ? undefined : '40px 40px' }} />
 
@@ -1105,7 +1138,12 @@ function BrandGuidelinesIndexInner({ brand, brandModel, modelPayload, logoAssets
                             >
                                 {showStyleTextureLayer('sec-visual', 5) && (
                                     <>
-                                        <img src={texBg(5)} alt="" className="absolute inset-0 w-full h-full object-cover opacity-15" style={{ mixBlendMode: 'screen', filter: 'saturate(0.3)' }} />
+                                        <img
+                                            src={texBg(5)}
+                                            alt=""
+                                            className="absolute inset-0 w-full h-full object-contain object-center opacity-15"
+                                            style={{ mixBlendMode: 'screen', filter: 'saturate(0.3)', ...texLayerStyle(5) }}
+                                        />
                                         <div className="absolute inset-0 opacity-[0.04]" style={{ backgroundImage: `url("${grainSvg}")` }} />
                                     </>
                                 )}
@@ -1189,6 +1227,7 @@ function BrandGuidelinesIndexInner({ brand, brandModel, modelPayload, logoAssets
                                                                 src={img.url || img.thumbnail_url}
                                                                 alt={img.title || `Reference ${i + 1}`}
                                                                 className="absolute inset-0 w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
+                                                                style={guidelinesFocalPointStyle(img.focal_point)}
                                                             />
                                                             <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
                                                             {img.title && (
@@ -1212,7 +1251,8 @@ function BrandGuidelinesIndexInner({ brand, brandModel, modelPayload, logoAssets
                                                         <img
                                                             src={img.url || img.thumbnail_url}
                                                             alt={img.title || `Graphic ${i + 1}`}
-                                                            className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
+                                                            className="w-full h-full object-contain object-center transition-transform duration-700 group-hover:scale-110"
+                                                            style={guidelinesFocalPointStyle(img.focal_point)}
                                                         />
                                                         <div className="absolute inset-0 ring-1 ring-inset ring-black/5 rounded-2xl" />
                                                     </div>
@@ -1303,7 +1343,12 @@ function BrandGuidelinesIndexInner({ brand, brandModel, modelPayload, logoAssets
                             })}>
                                 {showStyleTextureLayer('sec-typography', 6) && (
                                     <>
-                                        <img src={texBg(6)} alt="" className="absolute inset-0 w-full h-full object-cover opacity-10" style={{ mixBlendMode: 'screen', filter: 'saturate(0.2)' }} />
+                                        <img
+                                            src={texBg(6)}
+                                            alt=""
+                                            className="absolute inset-0 w-full h-full object-contain object-center opacity-10"
+                                            style={{ mixBlendMode: 'screen', filter: 'saturate(0.2)', ...texLayerStyle(6) }}
+                                        />
                                         <div className="absolute inset-0 opacity-[0.04]" style={{ backgroundImage: `url("${grainSvg}")` }} />
                                     </>
                                 )}
@@ -1423,7 +1468,12 @@ function BrandGuidelinesIndexInner({ brand, brandModel, modelPayload, logoAssets
                             >
                                 {showStyleTextureLayer('sec-logo', 7) && (
                                     <>
-                                        <img src={texBg(7)} alt="" className="absolute inset-0 w-full h-full object-cover opacity-10" style={{ mixBlendMode: 'screen', filter: 'saturate(0.2)' }} />
+                                        <img
+                                            src={texBg(7)}
+                                            alt=""
+                                            className="absolute inset-0 w-full h-full object-contain object-center opacity-10"
+                                            style={{ mixBlendMode: 'screen', filter: 'saturate(0.2)', ...texLayerStyle(7) }}
+                                        />
                                         <div className="absolute inset-0 opacity-[0.04]" style={{ backgroundImage: `url("${grainSvg}")` }} />
                                     </>
                                 )}
@@ -1579,7 +1629,12 @@ function BrandGuidelinesIndexInner({ brand, brandModel, modelPayload, logoAssets
                                 }}
                             >
                                 {showStyleTextureLayer('sec-logo-standards', 0) && (
-                                    <img src={texBg(0)} alt="" className="absolute inset-0 w-full h-full object-cover opacity-10" style={{ mixBlendMode: 'screen', filter: 'saturate(0.15)' }} />
+                                    <img
+                                        src={texBg(0)}
+                                        alt=""
+                                        className="absolute inset-0 w-full h-full object-contain object-center opacity-10"
+                                        style={{ mixBlendMode: 'screen', filter: 'saturate(0.15)', ...texLayerStyle(0) }}
+                                    />
                                 )}
                                 <div className={`absolute inset-0 ${isTextured ? 'opacity-[0.05]' : 'opacity-[0.03]'}`} style={{ backgroundImage: isTextured ? `url("${grainSvg}")` : `radial-gradient(circle at 2px 2px, white 1px, transparent 0)`, backgroundSize: isTextured ? undefined : '30px 30px' }} />
 

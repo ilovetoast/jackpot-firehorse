@@ -266,9 +266,14 @@ class EditorAssetBridgeController extends Controller
         // share this tenant/brand — eager-load tenants so pivot checks hit memory, and membership memoizes per brand.
         $user->load('tenants');
 
-        $limit = min(50, max(1, (int) $request->query('limit', 50)));
+        $limit = min(100, max(1, (int) $request->query('limit', 50)));
         $typeParam = strtolower((string) $request->query('asset_type', 'asset'));
         $assetType = $typeParam === 'deliverable' ? AssetType::DELIVERABLE : AssetType::ASSET;
+
+        $search = trim((string) $request->query('q', ''));
+        if ($search !== '') {
+            $search = mb_substr($search, 0, 200);
+        }
 
         $query = Asset::query()
             ->where('tenant_id', $tenant->id)
@@ -306,11 +311,20 @@ class EditorAssetBridgeController extends Controller
             }
         }
 
+        if ($search !== '') {
+            $escaped = addcslashes($search, '%_\\');
+            $term = '%'.$escaped.'%';
+            $query->where(function ($q) use ($term) {
+                $q->where('title', 'like', $term)
+                    ->orWhere('original_filename', 'like', $term);
+            });
+        }
+
         $this->lifecycleResolver->apply($query, null, $user, $tenant, $brand);
 
         $candidates = $query
             ->orderByDesc('updated_at')
-            ->limit(200)
+            ->limit($search !== '' ? 400 : 200)
             ->get();
 
         $assets = $candidates

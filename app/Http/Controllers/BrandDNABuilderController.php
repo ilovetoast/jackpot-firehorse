@@ -29,6 +29,7 @@ use App\Services\BrandDNA\SuggestionApplier;
 use App\Services\BrandDNA\SuggestionViewTransformer;
 use App\Support\AssetVariant;
 use App\Support\DeliveryContext;
+use App\Support\GuidelinesFocalPoint;
 use App\Support\WebsiteUrlNormalizer;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -198,13 +199,21 @@ class BrandDNABuilderController extends Controller
             ])->values()->all();
 
             $visualRefAssets = $draft->assetsForContext('visual_reference')->get();
-            $visualReferences = $visualRefAssets->map(fn (Asset $a) => [
-                'id' => $a->id,
-                'title' => $a->title,
-                'original_filename' => $a->original_filename,
-                'thumbnail_url' => $a->deliveryUrl(AssetVariant::THUMB_SMALL, DeliveryContext::AUTHENTICATED) ?: null,
-                'signed_url' => $a->deliveryUrl(AssetVariant::ORIGINAL, DeliveryContext::AUTHENTICATED) ?: null,
-            ])->values()->all();
+            $visualReferences = $visualRefAssets->map(function (Asset $a) {
+                $row = [
+                    'id' => $a->id,
+                    'title' => $a->title,
+                    'original_filename' => $a->original_filename,
+                    'thumbnail_url' => $a->deliveryUrl(AssetVariant::THUMB_SMALL, DeliveryContext::AUTHENTICATED) ?: null,
+                    'signed_url' => $a->deliveryUrl(AssetVariant::ORIGINAL, DeliveryContext::AUTHENTICATED) ?: null,
+                ];
+                $fp = GuidelinesFocalPoint::fromAsset($a);
+                if ($fp !== null) {
+                    $row['focal_point'] = $fp;
+                }
+
+                return $row;
+            })->values()->all();
 
             $guidelinesPdfAsset = $draft->assetsForContext('guidelines_pdf')->first();
             // Clean orphaned pivot rows (asset soft-deleted; pivot remains, causes 404 when frontend fetches)
@@ -716,6 +725,45 @@ class BrandDNABuilderController extends Controller
         }
 
         return response()->json(array_merge(['attached' => true, 'count' => $count], $extra));
+    }
+
+    /**
+     * PATCH /brands/{brand}/brand-dna/builder/assets/{asset}/guidelines-focal-point
+     *
+     * Stores normalized focal point in asset metadata for guidelines photography cropping.
+     */
+    public function updateGuidelinesFocalPoint(Request $request, Brand $brand, Asset $asset): JsonResponse
+    {
+        $this->authorize('update', $brand);
+        $tenant = app('tenant');
+        if ($brand->tenant_id !== $tenant->id || (string) $asset->tenant_id !== (string) $tenant->id) {
+            abort(403, 'Brand does not belong to this tenant.');
+        }
+        if ((string) $asset->brand_id !== (string) $brand->id) {
+            return response()->json(['message' => 'Asset does not belong to this brand.'], 422);
+        }
+
+        $validated = $request->validate([
+            'clear' => 'sometimes|boolean',
+            'x' => 'required_unless:clear,true|numeric|min:0|max:1',
+            'y' => 'required_unless:clear,true|numeric|min:0|max:1',
+        ]);
+
+        $meta = $asset->metadata ?? [];
+        if (! empty($validated['clear'])) {
+            unset($meta['guidelines_focal_point']);
+        } else {
+            $meta['guidelines_focal_point'] = [
+                'x' => (float) $validated['x'],
+                'y' => (float) $validated['y'],
+            ];
+        }
+        $asset->update(['metadata' => $meta]);
+        $asset->refresh();
+
+        return response()->json([
+            'focal_point' => GuidelinesFocalPoint::fromAsset($asset),
+        ]);
     }
 
     /**

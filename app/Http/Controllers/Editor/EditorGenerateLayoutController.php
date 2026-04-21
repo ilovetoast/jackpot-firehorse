@@ -266,13 +266,14 @@ class EditorGenerateLayoutController extends Controller
      *
      * Query strategy:
      *   1. Scope to tenant + brand + image mime types.
-     *   2. Prefer assets tagged background|hero|photo|photography|lifestyle.
-     *   3. Fall back to photo_type metadata (lifestyle/editorial/event) when
-     *      no tagged candidates exist, so the feature isn't a dead letter on
-     *      fresh accounts.
-     *   4. Order by latest brand_intelligence_score overall_score DESC, then
+     *   2. Union: (a) assets tagged background|hero|photo|photography|lifestyle, OR
+     *      (b) assets in the Photography DAM category that are not explicit product
+     *      shots (subject_type product, or photo_type product/studio/flat_lay/macro_detail),
+     *      OR (c) when no tag matches exist globally, legacy metadata fallbacks
+     *      (lifestyle/editorial/event/hero/scene) as before.
+     *   3. Order by latest brand_intelligence_score overall_score DESC, then
      *      recency, so the best photos surface first.
-     *   5. Exclude logos (category_slug='logos') defensively in case a brand
+     *   4. Exclude logos (category_slug='logos') defensively in case a brand
      *      mistagged its logo as "hero".
      *
      * Each returned row matches {@see \App\Pages\Editor\documentModel.DamPickerAsset}
@@ -293,6 +294,15 @@ class EditorGenerateLayoutController extends Controller
                 ->unique()
                 ->values()
                 ->all();
+
+            $photographyCategory = Category::query()
+                ->where('tenant_id', $tenant->id)
+                ->where('brand_id', $brand->id)
+                ->where('asset_type', AssetType::ASSET)
+                ->where('slug', 'photography')
+                ->active()
+                ->visible()
+                ->first();
 
             // Real-photography-only filter shared across all three passes.
             // Generative / AI-edited output is persisted back to the DAM as
@@ -317,18 +327,40 @@ class EditorGenerateLayoutController extends Controller
                 ->tap($applyPhotoOnlyFilter)
                 ->with(['latestBrandIntelligenceScore', 'category']);
 
-            if ($taggedIds !== []) {
-                $query->whereIn('id', $taggedIds);
-            } else {
-                // Pass 2: photo_type fallback. metadata->fields->photo_type is a
-                // JSON column on assets. We use whereRaw because PeerCohort code
-                // elsewhere already uses JSON_EXTRACT the same way; keeps the
-                // query portable across MySQL 8 / MariaDB.
-                $query->where(function ($q) {
-                    $q->whereRaw("JSON_EXTRACT(metadata, '$.fields.photo_type') IN ('\"lifestyle\"', '\"editorial\"', '\"event\"', '\"hero\"')")
-                        ->orWhereRaw("JSON_EXTRACT(metadata, '$.fields.subject_type') = '\"scene\"'");
-                });
-            }
+            $query->where(function ($outer) use ($taggedIds, $photographyCategory) {
+                if ($taggedIds !== []) {
+                    $outer->whereIn('id', $taggedIds);
+                }
+
+                if ($photographyCategory !== null) {
+                    $cid = (int) $photographyCategory->id;
+                    $outer->orWhere(function ($q) use ($cid) {
+                        $q->where(function ($q2) use ($cid) {
+                            $q2->where('metadata->category_id', $cid)
+                                ->orWhere('metadata->category_id', (string) $cid);
+                        })->where(function ($q2) {
+                            // Not an explicit product / catalog shot — lifestyle & untyped photography qualify.
+                            $q2->whereRaw("COALESCE(JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.fields.subject_type')), '') != 'product'")
+                                ->where(function ($q3) {
+                                    $q3->whereRaw("JSON_EXTRACT(metadata, '$.fields.photo_type') IS NULL")
+                                        ->orWhereRaw(
+                                            'JSON_UNQUOTE(JSON_EXTRACT(metadata, \'$.fields.photo_type\')) NOT IN (?, ?, ?, ?)',
+                                            self::PRODUCT_PHOTO_TYPES
+                                        );
+                                });
+                        });
+                    });
+                }
+
+                // When nothing matched the tag table for this tenant, keep the legacy
+                // metadata-based pool so brands without tagging still get candidates.
+                if ($taggedIds === []) {
+                    $outer->orWhere(function ($q) {
+                        $q->whereRaw("JSON_EXTRACT(metadata, '$.fields.photo_type') IN ('\"lifestyle\"', '\"editorial\"', '\"event\"', '\"hero\"')")
+                            ->orWhereRaw("JSON_EXTRACT(metadata, '$.fields.subject_type') = '\"scene\"'");
+                    });
+                }
+            });
 
             $assets = $query
                 ->orderByDesc('created_at')

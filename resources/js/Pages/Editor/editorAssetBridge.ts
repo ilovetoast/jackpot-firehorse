@@ -90,6 +90,8 @@ export type FetchEditorAssetsOptions = {
     assetType?: 'asset' | 'deliverable'
     /** Filter by DAM category (metadata.category_id), e.g. Photography, Print */
     categoryId?: number
+    /** Server-side match on title / original filename (Studio asset picker search) */
+    search?: string
 }
 
 export async function fetchEditorAssets(
@@ -103,6 +105,10 @@ export async function fetchEditorAssets(
     }
     if (options?.categoryId != null && Number.isFinite(options.categoryId) && options.categoryId > 0) {
         params.set('category_id', String(Math.floor(options.categoryId)))
+    }
+    const q = options?.search?.trim()
+    if (q) {
+        params.set('q', q)
     }
     const res = await fetch(`/app/api/assets?${params.toString()}`, {
         headers: { Accept: 'application/json', 'X-CSRF-TOKEN': csrf ?? '' },
