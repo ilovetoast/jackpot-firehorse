@@ -62,9 +62,32 @@
 
         <!-- Scripts -->
         @viteReactRefresh
-        {{-- Privacy bootstrap via helpers (no container resolve — survives partial deploys). --}}
+        {{-- Privacy bootstrap: prefer helpers.php (Composer "files" + bootstrap/app.php require). If both are missing on a bad deploy, require here or inline the same logic so first paint never fatals. --}}
         @php
-            $jackpotPrivacyBootstrap = jackpot_privacy_bootstrap_array(request());
+            if (! \function_exists('jackpot_privacy_bootstrap_array')) {
+                $helpersPath = base_path('app/helpers.php');
+                if (is_file($helpersPath)) {
+                    require_once $helpersPath;
+                }
+            }
+            if (\function_exists('jackpot_privacy_bootstrap_array')) {
+                $jackpotPrivacyBootstrap = jackpot_privacy_bootstrap_array(request());
+            } else {
+                $req = request();
+                $country = null;
+                $cf = $req->header('CF-IPCountry');
+                if (is_string($cf) && strlen($cf) === 2) {
+                    $country = strtoupper($cf);
+                }
+                $codes = config('privacy.strict_opt_in_countries', []);
+                $strictOptIn = $country !== null && strlen($country) === 2
+                    && \in_array(strtoupper($country), $codes, true);
+                $jackpotPrivacyBootstrap = [
+                    'cookie_policy_version' => config('privacy.cookie_policy_version', '1'),
+                    'strict_opt_in_region' => $strictOptIn,
+                    'gpc' => $req->header('Sec-GPC') === '1',
+                ];
+            }
         @endphp
         <script>
             window.__performanceMetricsEnabled = @json(config('performance.client_metrics_enabled', false));

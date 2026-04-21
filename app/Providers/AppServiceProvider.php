@@ -47,6 +47,32 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
+        // PrivacyRegionResolver: some releases / cached Blade may resolve this class. If the PSR-4 file
+        // is missing from a partial deploy, fall back to helpers so app.blade.php never fatals.
+        $this->app->singleton(\App\Services\Privacy\PrivacyRegionResolver::class, function () {
+            if (class_exists(\App\Services\Privacy\PrivacyRegionResolver::class)) {
+                return new \App\Services\Privacy\PrivacyRegionResolver;
+            }
+
+            return new class
+            {
+                public function countryCodeFromRequest(\Illuminate\Http\Request $request): ?string
+                {
+                    return privacy_region_country_code($request);
+                }
+
+                public function needsStrictOptIn(?string $iso2): bool
+                {
+                    return privacy_needs_strict_opt_in($iso2);
+                }
+
+                public function globalPrivacyControl(\Illuminate\Http\Request $request): bool
+                {
+                    return privacy_global_gpc($request);
+                }
+            };
+        });
+
         // Cached routes (route:cache) or rolling deploys may still reference these middleware by string.
         // Without a container alias, the router's fallback path treats the string as a class name and
         // Container::build throws "Target class [...] does not exist". The $middleware->alias() map in

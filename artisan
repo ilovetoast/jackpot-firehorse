@@ -9,6 +9,10 @@ define('LARAVEL_START', microtime(true));
 // Register the Composer autoloader...
 require __DIR__.'/vendor/autoload.php';
 
+if (is_file($hp = __DIR__.'/app/helpers.php')) {
+    require_once $hp;
+}
+
 // Bootstrap Laravel and handle the command...
 /** @var Application $app */
 $app = require_once __DIR__.'/bootstrap/app.php';
