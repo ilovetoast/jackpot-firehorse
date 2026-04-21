@@ -1,17 +1,22 @@
-import { postCreativeSetApply } from '../../studioCreativeSetBridge'
+import { postCreativeSetApply, postCreativeSetApplyPreview } from '../../studioCreativeSetBridge'
 import type { Layer } from '../../documentModel'
+import type { CreativeSetSemanticApplyScopeApi } from '../../studioCreativeSetTypes'
 import {
     buildSemanticApplyCommandsFromLayer,
-    describeSyncForLayer,
+    describeApplyCommandBundle,
+    formatApplyConfirmMessage,
+    formatApplyResultNotice,
 } from '../../studioSemanticApplyCommands'
 
-export type StudioApplyScope = 'this_version' | 'all_versions'
+export type StudioApplyScope = 'this_version' | 'all_versions' | 'selected_versions'
 
 type Props = {
     creativeSetId: string
     sourceCompositionId: string | null
     applyScope: StudioApplyScope
     onApplyScopeChange: (scope: StudioApplyScope) => void
+    /** Composition ids the user chose for “Selected versions” (never includes the open/source composition). */
+    selectedTargetCompositionIds: string[]
     selectedLayer: Layer | null
     /** Number of other compositions in the set (excluding the open one). */
     siblingCompositionCount: number
@@ -28,25 +33,81 @@ export function ApplyScopeBar(props: Props) {
         sourceCompositionId,
         applyScope,
         onApplyScopeChange,
+        selectedTargetCompositionIds,
         selectedLayer,
         siblingCompositionCount,
         onNotice,
         onCreativeSetUpdated,
     } = props
 
-    const syncLabel = selectedLayer ? describeSyncForLayer(selectedLayer) : null
     const commands = selectedLayer ? buildSemanticApplyCommandsFromLayer(selectedLayer) : []
+    const bundle = describeApplyCommandBundle(commands)
 
-    const canPushToAll =
+    const selectedCount = selectedTargetCompositionIds.length
+
+    const canPushAll =
         applyScope === 'all_versions' &&
         sourceCompositionId != null &&
         siblingCompositionCount > 0 &&
         commands.length > 0
 
+    const canPushSelected =
+        applyScope === 'selected_versions' &&
+        sourceCompositionId != null &&
+        selectedCount > 0 &&
+        commands.length > 0
+
+    const runPreviewApply = async (mode: CreativeSetSemanticApplyScopeApi) => {
+        if (!sourceCompositionId || !selectedLayer || commands.length === 0) {
+            return
+        }
+        const targetIds =
+            mode === 'selected_versions'
+                ? selectedTargetCompositionIds.map((id) => Number(id)).filter((n) => Number.isFinite(n) && n > 0)
+                : undefined
+        const preview = await postCreativeSetApplyPreview(creativeSetId, {
+            source_composition_id: sourceCompositionId,
+            commands,
+            scope: mode,
+            target_composition_ids: targetIds,
+        })
+        const ok = window.confirm(
+            formatApplyConfirmMessage({
+                mode,
+                primaryRoleLabel: bundle.primaryRoleLabel,
+                aspects: bundle.aspects,
+                siblingTargetCount: preview.sibling_compositions_targeted,
+                eligibleCount: preview.sibling_compositions_eligible,
+                wouldSkipCount: preview.sibling_compositions_would_skip,
+            })
+        )
+        if (!ok) {
+            return
+        }
+        const res = await postCreativeSetApply(creativeSetId, {
+            source_composition_id: sourceCompositionId,
+            commands,
+            scope: mode,
+            target_composition_ids: targetIds,
+        })
+        onCreativeSetUpdated(res.creative_set)
+        const n = res.sibling_compositions_updated ?? res.updated_composition_ids.length
+        const sk = res.skipped.length
+        onNotice(
+            formatApplyResultNotice({
+                mode,
+                primaryRoleLabel: bundle.primaryRoleLabel,
+                aspects: bundle.aspects,
+                updated: n,
+                skipped: sk,
+            })
+        )
+    }
+
     return (
         <div className="pointer-events-none absolute inset-x-0 bottom-[120px] z-30 flex justify-center px-4">
-            <div className="pointer-events-auto flex max-w-lg flex-col items-center gap-2 rounded-lg border border-gray-700/90 bg-gray-900/95 px-2 py-2 shadow-lg backdrop-blur-sm sm:flex-row sm:px-1 sm:py-1">
-                <div className="flex items-center gap-1">
+            <div className="pointer-events-auto flex max-w-xl flex-col items-center gap-2 rounded-lg border border-gray-700/90 bg-gray-900/95 px-2 py-2 shadow-lg backdrop-blur-sm sm:flex-row sm:flex-wrap sm:px-1 sm:py-1">
+                <div className="flex flex-wrap items-center gap-1">
                     <span className="hidden pl-2 text-[10px] font-semibold uppercase tracking-wide text-gray-500 sm:inline">
                         Edits
                     </span>
@@ -63,8 +124,14 @@ export function ApplyScopeBar(props: Props) {
                     </button>
                     <button
                         type="button"
+                        disabled={siblingCompositionCount < 1}
+                        title={
+                            siblingCompositionCount < 1
+                                ? 'Add another version to sync across the set'
+                                : 'Apply to every other version in this set'
+                        }
                         onClick={() => onApplyScopeChange('all_versions')}
-                        className={`rounded-md px-2.5 py-1 text-[11px] font-semibold transition-colors ${
+                        className={`rounded-md px-2.5 py-1 text-[11px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
                             applyScope === 'all_versions'
                                 ? 'bg-indigo-900/50 text-indigo-100 ring-1 ring-indigo-500/40'
                                 : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200'
@@ -72,47 +139,50 @@ export function ApplyScopeBar(props: Props) {
                     >
                         All versions
                     </button>
+                    <button
+                        type="button"
+                        disabled={siblingCompositionCount < 1}
+                        title={
+                            siblingCompositionCount < 1
+                                ? 'Add another version to pick targets'
+                                : 'Pick specific versions in the Versions strip below'
+                        }
+                        onClick={() => onApplyScopeChange('selected_versions')}
+                        className={`rounded-md px-2.5 py-1 text-[11px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+                            applyScope === 'selected_versions'
+                                ? 'bg-indigo-900/50 text-indigo-100 ring-1 ring-indigo-500/40'
+                                : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200'
+                        }`}
+                    >
+                        Selected versions
+                    </button>
                 </div>
+                {applyScope === 'selected_versions' && siblingCompositionCount > 0 && (
+                    <span className="text-[10px] font-medium text-gray-400">
+                        {selectedCount === 0 ? 'Pick targets in Versions' : `${selectedCount} selected`}
+                    </span>
+                )}
                 {applyScope === 'all_versions' && (
                     <div className="flex flex-col items-stretch gap-1 sm:flex-row sm:items-center">
                         <button
                             type="button"
-                            disabled={!canPushToAll}
+                            disabled={!canPushAll}
                             title={
                                 siblingCompositionCount < 1
                                     ? 'Add another version to sync across versions'
                                     : !selectedLayer
                                       ? 'Select a layer on the canvas'
                                       : commands.length === 0
-                                        ? 'This layer type is not supported for sync yet (e.g. product photos stay per version)'
-                                        : `Apply the current ${syncLabel ?? 'layer'} state to other versions`
+                                        ? 'Sync is limited to Headline, Subheadline, CTA, Disclaimer, Logo, and Badge — product photos and AI backgrounds stay per version.'
+                                        : `Push ${bundle.primaryRoleLabel} (${bundle.aspects}) to other versions`
                             }
                             onClick={() => {
-                                if (!sourceCompositionId || !selectedLayer || commands.length === 0) {
-                                    return
-                                }
-                                const noun = syncLabel ? `${syncLabel}` : 'this layer'
-                                const ok = window.confirm(
-                                    `Sync ${noun} across ${siblingCompositionCount} other version(s)?\n\n` +
-                                        `Only safe fields (text, alignment, placement, visibility for recognized roles) are updated.`
-                                )
-                                if (!ok) {
+                                if (!canPushAll) {
                                     return
                                 }
                                 void (async () => {
                                     try {
-                                        const res = await postCreativeSetApply(creativeSetId, {
-                                            source_composition_id: sourceCompositionId,
-                                            commands,
-                                        })
-                                        onCreativeSetUpdated(res.creative_set)
-                                        const n = res.sibling_compositions_updated ?? res.updated_composition_ids.length
-                                        const sk = res.skipped.length
-                                        onNotice(
-                                            sk
-                                                ? `Updated ${n} version(s). ${sk} skipped — some layouts may differ.`
-                                                : `Updated ${n} other version(s).`
-                                        )
+                                        await runPreviewApply('all_versions')
                                     } catch (e) {
                                         onNotice(e instanceof Error ? e.message : 'Sync failed')
                                     }
@@ -123,9 +193,51 @@ export function ApplyScopeBar(props: Props) {
                             Push to all versions
                         </button>
                         {selectedLayer && commands.length === 0 && (
-                            <p className="max-w-[220px] text-center text-[10px] leading-snug text-amber-200/90 sm:text-left">
-                                This edit stays on this version only — sync is limited to headline, subheadline, CTA,
-                                disclaimer, logo, and badge roles for now.
+                            <p className="max-w-[240px] text-center text-[10px] leading-snug text-amber-200/90 sm:text-left">
+                                This layer is not on the sync list (Headline, Subheadline, CTA, Disclaimer, Logo, Badge)
+                                — rename or use a template role, or keep edits on this version only. Product shots and
+                                generative backgrounds never sync.
+                            </p>
+                        )}
+                    </div>
+                )}
+                {applyScope === 'selected_versions' && (
+                    <div className="flex flex-col items-stretch gap-1 sm:flex-row sm:items-center">
+                        <button
+                            type="button"
+                            disabled={!canPushSelected}
+                            title={
+                                selectedCount < 1
+                                    ? 'Select one or more other versions in the Versions strip (checkboxes)'
+                                    : !selectedLayer
+                                      ? 'Select a layer on the canvas'
+                                      : commands.length === 0
+                                        ? 'Sync is limited to Headline, Subheadline, CTA, Disclaimer, Logo, and Badge — product photos and AI backgrounds stay per version.'
+                                        : `Push ${bundle.primaryRoleLabel} (${bundle.aspects}) to ${selectedCount} selected version(s)`
+                            }
+                            onClick={() => {
+                                if (!canPushSelected) {
+                                    return
+                                }
+                                void (async () => {
+                                    try {
+                                        await runPreviewApply('selected_versions')
+                                    } catch (e) {
+                                        onNotice(e instanceof Error ? e.message : 'Sync failed')
+                                    }
+                                })()
+                            }}
+                            className="rounded-md bg-indigo-600 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                            {selectedCount > 0
+                                ? `Push to selected (${selectedCount})`
+                                : 'Push to selected'}
+                        </button>
+                        {selectedLayer && commands.length === 0 && (
+                            <p className="max-w-[240px] text-center text-[10px] leading-snug text-amber-200/90 sm:text-left">
+                                This layer is not on the sync list (Headline, Subheadline, CTA, Disclaimer, Logo, Badge)
+                                — rename or use a template role, or keep edits on this version only. Product shots and
+                                generative backgrounds never sync.
                             </p>
                         )}
                     </div>

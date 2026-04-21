@@ -7,10 +7,11 @@ use App\Http\Controllers\Controller;
 use App\Http\Controllers\UploadController;
 use App\Models\Asset;
 use App\Models\Category;
+use App\Services\FreePlanImageWatermarkService;
 use App\Services\Lifecycle\LifecycleResolver;
-use App\Support\GenerativeAiProvenance;
 use App\Services\NotificationOrchestrator;
 use App\Services\UploadInitiationService;
+use App\Support\GenerativeAiProvenance;
 use Aws\S3\Exception\S3Exception;
 use Aws\S3\S3Client;
 use Illuminate\Http\JsonResponse;
@@ -32,7 +33,8 @@ class EditorAssetBridgeController extends Controller
         protected LifecycleResolver $lifecycleResolver,
         protected UploadInitiationService $uploadInitiationService,
         protected UploadController $uploadController,
-        protected NotificationOrchestrator $notificationOrchestrator
+        protected NotificationOrchestrator $notificationOrchestrator,
+        protected FreePlanImageWatermarkService $freePlanWatermark
     ) {}
 
     /**
@@ -525,13 +527,40 @@ class EditorAssetBridgeController extends Controller
             }
         }
 
+        $body = file_get_contents($file->getRealPath());
+        if ($body === false) {
+            return response()->json(['message' => 'Could not read upload file.'], 500);
+        }
+
+        $body = $this->freePlanWatermark->applyIfEligible($tenant, $body);
+
+        $detectedMime = 'application/octet-stream';
+        if (class_exists(\finfo::class)) {
+            $buf = (new \finfo(FILEINFO_MIME_TYPE))->buffer($body);
+            if (is_string($buf) && $buf !== '') {
+                $detectedMime = $buf === 'image/jpg' ? 'image/jpeg' : $buf;
+            }
+        }
+        if ($detectedMime === 'application/octet-stream') {
+            $detectedMime = $file->getMimeType() ?: 'image/png';
+        }
+
+        $ext = match ($detectedMime) {
+            'image/png' => 'png',
+            'image/webp' => 'webp',
+            'image/jpeg' => 'jpg',
+            default => strtolower((string) $file->getClientOriginalExtension()) ?: 'png',
+        };
+        $baseName = pathinfo($file->getClientOriginalName(), PATHINFO_FILENAME) ?: 'export';
+        $resolvedFilename = $baseName.'.'.$ext;
+
         try {
             $init = $this->uploadInitiationService->initiate(
                 $tenant,
                 $brand,
-                $file->getClientOriginalName(),
-                $file->getSize(),
-                $file->getMimeType()
+                $resolvedFilename,
+                strlen($body),
+                $detectedMime
             );
         } catch (\Throwable $e) {
             Log::warning('[EditorAssetBridge] initiate failed', ['error' => $e->getMessage()]);
@@ -544,10 +573,9 @@ class EditorAssetBridgeController extends Controller
             return response()->json(['message' => 'Multipart upload required for this file size; use standard uploader.'], 400);
         }
 
-        $body = file_get_contents($file->getRealPath());
         $putResponse = Http::withHeaders([
-            'Content-Type' => $file->getMimeType() ?: 'application/octet-stream',
-        ])->withBody($body, $file->getMimeType() ?: 'application/octet-stream')->put($uploadUrl);
+            'Content-Type' => $detectedMime,
+        ])->withBody($body, $detectedMime)->put($uploadUrl);
 
         if (! $putResponse->successful()) {
             Log::warning('[EditorAssetBridge] S3 PUT failed', ['status' => $putResponse->status()]);
@@ -557,10 +585,10 @@ class EditorAssetBridgeController extends Controller
 
         $manifestItem = [
             'upload_key' => $init['upload_key'],
-            'expected_size' => $file->getSize(),
+            'expected_size' => strlen($body),
             'category_id' => $category->id,
             'title' => $validated['name'],
-            'resolved_filename' => $file->getClientOriginalName(),
+            'resolved_filename' => $resolvedFilename,
             'metadata' => $metaDecoded,
         ];
 

@@ -5,6 +5,14 @@ namespace App\Support;
 /**
  * Locates layers in a Studio editor {@code document_json} for safe cross-version sync.
  * Prefers {@code studioSyncRole} when present (set during template materialization); falls back to name heuristics.
+ *
+ * Official cross-version sync roles (narrow Phase 3 allowlist):
+ * - headline — primary headline text
+ * - subheadline — secondary headline / supporting line
+ * - cta — call-to-action text and/or CTA button fill group ({@code fillRole: cta_button})
+ * - logo — brand mark (typically image)
+ * - badge — corner / promo badge (image or fill)
+ * - disclaimer — legal / fine print text
  */
 final class StudioDocumentSyncRoleFinder
 {

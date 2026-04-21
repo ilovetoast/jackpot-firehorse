@@ -8,7 +8,9 @@ use App\Models\Tenant;
 class BrandThemeBuilder
 {
     private const DEFAULT_PRIMARY = '#6366f1';
+
     private const DEFAULT_SECONDARY = '#8b5cf6';
+
     private const DEFAULT_ACCENT = '#06b6d4';
 
     /**
@@ -43,11 +45,22 @@ class BrandThemeBuilder
             'logo_light' => $logoLight,
             'name' => $name,
             'tagline' => $tagline,
+            /** True when the tenant has exactly one brand (Gateway can avoid repeating name next to logo). */
+            'single_brand_tenant' => $this->tenantHasSingleBrand($tenant),
             'colors' => $colors,
             'background' => $this->resolveBackground($colors),
             'portal' => $this->resolvePortalOverrides($effectiveBrand),
             'presentation_style' => $this->resolvePresentationStyle($effectiveBrand),
         ];
+    }
+
+    private function tenantHasSingleBrand(?Tenant $tenant): bool
+    {
+        if ($tenant === null) {
+            return false;
+        }
+
+        return Brand::query()->where('tenant_id', $tenant->id)->count() === 1;
     }
 
     /**
@@ -218,8 +231,8 @@ class BrandThemeBuilder
 
         $value = sprintf(
             'radial-gradient(circle at 20%% 20%%, %s33, transparent),'
-            . ' radial-gradient(circle at 80%% 80%%, %s33, transparent),'
-            . ' #0B0B0D',
+            .' radial-gradient(circle at 80%% 80%%, %s33, transparent),'
+            .' #0B0B0D',
             $primary,
             $secondary
         );
@@ -322,7 +335,7 @@ class BrandThemeBuilder
     {
         $hex = ltrim($hex, '#');
         if (strlen($hex) !== 6) {
-            return '#' . $hex;
+            return '#'.$hex;
         }
 
         $r = hexdec(substr($hex, 0, 2));

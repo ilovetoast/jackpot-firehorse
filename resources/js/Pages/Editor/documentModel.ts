@@ -200,6 +200,8 @@ export type EditorFontFaceSource = {
     asset_id: number | string
     weight: string
     style: string
+    /** DNA-linked faces omit this; Fonts-category uploads use `library`. */
+    source?: 'dna' | 'library'
 }
 
 export type BrandContext = {
@@ -1330,6 +1332,7 @@ export function createHeadlineTextLayer(
         id: generateId(),
         type: 'text',
         name: 'Headline',
+        studioSyncRole: 'headline',
         visible: true,
         locked: false,
         z,

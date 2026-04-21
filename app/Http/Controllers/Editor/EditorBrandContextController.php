@@ -2,8 +2,11 @@
 
 namespace App\Http\Controllers\Editor;
 
+use App\Enums\AssetType;
 use App\Http\Controllers\Controller;
+use App\Models\Asset;
 use App\Models\Brand;
+use App\Models\Category;
 use App\Support\Typography\GoogleFontStylesheetHelper;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -167,6 +170,8 @@ class EditorBrandContextController extends Controller
         $typography['stylesheet_urls'] = $this->filterStylesheetUrls($sheetMerge);
         $typography['font_urls'] = $typography['stylesheet_urls'];
 
+        $this->appendFontsCategoryLibraryFaceSources($brand, $typography);
+
         return [
             'tone' => array_values(array_filter($tone, fn ($x) => $x !== null && $x !== '')),
             'colors' => $colors,
@@ -218,6 +223,7 @@ class EditorBrandContextController extends Controller
                     'asset_id' => $assetId,
                     'weight' => $weight,
                     'style' => $style,
+                    'source' => 'dna',
                 ];
             }
         }
@@ -269,6 +275,7 @@ class EditorBrandContextController extends Controller
                 'asset_id' => $assetId,
                 'weight' => $weight,
                 'style' => $style,
+                'source' => 'dna',
             ];
             $existing[$key] = true;
         }
@@ -515,6 +522,140 @@ class EditorBrandContextController extends Controller
         }
 
         return false;
+    }
+
+    /**
+     * Fonts-category DAM uploads (not necessarily listed in Brand DNA typography.fonts) so the editor
+     * can register {@see FontFace} and offer them in the font-family picker after guideline faces.
+     */
+    private function appendFontsCategoryLibraryFaceSources(Brand $brand, array &$typography): void
+    {
+        $fontsCategory = Category::query()
+            ->where('tenant_id', $brand->tenant_id)
+            ->where('brand_id', $brand->id)
+            ->where('asset_type', AssetType::ASSET)
+            ->where('slug', 'fonts')
+            ->first();
+
+        if (! $fontsCategory) {
+            return;
+        }
+
+        $existingAssetIds = [];
+        foreach ($typography['font_face_sources'] as $row) {
+            if (isset($row['asset_id'])) {
+                $existingAssetIds[(string) $row['asset_id']] = true;
+            }
+        }
+
+        $usedFamilyKeys = [];
+        foreach ($typography['font_face_sources'] as $row) {
+            $fam = trim((string) ($row['family'] ?? ''));
+            if ($fam !== '') {
+                $usedFamilyKeys[strtolower(explode(',', $fam, 2)[0])] = true;
+            }
+        }
+
+        $assets = Asset::query()
+            ->where('tenant_id', $brand->tenant_id)
+            ->where('brand_id', $brand->id)
+            ->where('type', AssetType::ASSET)
+            ->whereNull('archived_at')
+            ->whereNull('deleted_at')
+            ->whereNotNull('metadata')
+            ->whereRaw(
+                'CAST(JSON_UNQUOTE(JSON_EXTRACT(metadata, "$.category_id")) AS UNSIGNED) = ?',
+                [$fontsCategory->id]
+            )
+            ->orderBy('title')
+            ->orderBy('original_filename')
+            ->get();
+
+        foreach ($assets as $asset) {
+            if (! $this->assetIsBinaryFontUpload($asset)) {
+                continue;
+            }
+            $aid = (string) $asset->id;
+            if (isset($existingAssetIds[$aid])) {
+                continue;
+            }
+
+            $family = $this->uniqueLibraryFontFamilyName($asset, $usedFamilyKeys);
+            $base = strtolower(basename((string) ($asset->original_filename ?? '')));
+            $style = str_contains($base, 'italic') ? 'italic' : 'normal';
+            $weight = $this->guessFontWeightFromFilename($base) ?? '400';
+
+            $typography['font_face_sources'][] = [
+                'family' => $family,
+                'asset_id' => $asset->id,
+                'weight' => $weight,
+                'style' => $style,
+                'source' => 'library',
+            ];
+            $existingAssetIds[$aid] = true;
+        }
+    }
+
+    private function assetIsBinaryFontUpload(Asset $asset): bool
+    {
+        $mime = strtolower((string) ($asset->mime_type ?? ''));
+        if (str_starts_with($mime, 'font/')) {
+            return true;
+        }
+        if (in_array($mime, [
+            'application/font-woff',
+            'application/font-woff2',
+            'application/vnd.ms-opentype',
+            'application/x-font-ttf',
+            'application/x-font-otf',
+        ], true)) {
+            return true;
+        }
+
+        $ext = strtolower(pathinfo((string) ($asset->original_filename ?? ''), PATHINFO_EXTENSION));
+        if (in_array($ext, ['woff2', 'woff', 'ttf', 'otf', 'eot'], true)) {
+            return true;
+        }
+
+        return $mime === 'application/octet-stream'
+            && in_array($ext, ['woff2', 'woff', 'ttf', 'otf', 'eot'], true);
+    }
+
+    /**
+     * @param  array<string, true>  $usedFamilyKeys  lowercase first token of family → reserved
+     */
+    private function uniqueLibraryFontFamilyName(Asset $asset, array &$usedFamilyKeys): string
+    {
+        $raw = trim((string) ($asset->title ?: ''));
+        if ($raw === '' || $raw === 'Untitled Asset' || $raw === 'Unknown') {
+            $raw = pathinfo((string) ($asset->original_filename ?? ''), PATHINFO_FILENAME);
+        }
+        $raw = preg_replace('/\s+/u', ' ', $raw) ?? '';
+        $raw = trim((string) $raw);
+        if ($raw === '') {
+            $raw = 'Uploaded font';
+        }
+
+        $idFrag = substr((string) $asset->id, 0, 8);
+        $candidates = array_values(array_unique([
+            $raw,
+            $raw.' '.$idFrag,
+            'Font '.$asset->id,
+        ]));
+
+        foreach ($candidates as $candidate) {
+            $key = strtolower(explode(',', $candidate, 2)[0]);
+            if (! isset($usedFamilyKeys[$key])) {
+                $usedFamilyKeys[$key] = true;
+
+                return $candidate;
+            }
+        }
+
+        $fallback = 'Font '.$asset->id.' '.uniqid();
+        $usedFamilyKeys[strtolower(explode(',', $fallback, 2)[0])] = true;
+
+        return $fallback;
     }
 
     private function guessFontWeightFromFilename(string $baseFilename): ?string

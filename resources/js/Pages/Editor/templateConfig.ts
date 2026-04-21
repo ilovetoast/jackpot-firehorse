@@ -45,7 +45,10 @@ export type LayerBlueprint = {
     groupKey?: string
 }
 
-/** Maps wizard/template blueprint roles to persisted {@link Layer.studioSyncRole} when safe for cross-version sync. */
+/**
+ * Maps wizard/template blueprint roles to persisted {@link Layer.studioSyncRole} when safe for cross-version sync.
+ * Official cross-version roles: headline, subheadline, cta, logo, badge, disclaimer (mirrors server `StudioDocumentSyncRoleFinder`).
+ */
 export function studioSyncRoleFromBlueprint(bp: LayerBlueprint): StudioSyncRole | undefined {
     switch (bp.role) {
         case 'headline':

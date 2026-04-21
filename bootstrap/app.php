@@ -12,6 +12,7 @@ use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 use Sentry\Laravel\Integration;
 use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
@@ -21,6 +22,10 @@ return Application::configure(basePath: dirname(__DIR__))
         web: __DIR__.'/../routes/web.php',
         commands: __DIR__.'/../routes/console.php',
         health: '/up',
+        then: static function (): void {
+            Route::middleware('web')
+                ->group(base_path('routes/e2e-studio-versions.php'));
+        },
     )
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->encryptCookies(except: [
@@ -59,6 +64,7 @@ return Application::configure(basePath: dirname(__DIR__))
         // Exclude Stripe webhook from CSRF protection
         $middleware->validateCsrfTokens(except: [
             'webhook/stripe',
+            'webhooks/studio-animation/*',
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

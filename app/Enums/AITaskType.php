@@ -98,6 +98,9 @@ class AITaskType
     /** Asset editor — AI-generated layout recommendation (template + layer structure from user prompt) */
     public const EDITOR_LAYOUT_GENERATION = 'editor_layout_generation';
 
+    /** Studio Creator — animate full composition snapshot via external video model (e.g. Kling i2v) */
+    public const STUDIO_COMPOSITION_ANIMATION = 'studio_composition_animation';
+
     /**
      * Get all task types as an array.
      *
@@ -133,6 +136,7 @@ class AITaskType
             self::EDITOR_GENERATIVE_IMAGE,
             self::EDITOR_EDIT_IMAGE,
             self::EDITOR_LAYOUT_GENERATION,
+            self::STUDIO_COMPOSITION_ANIMATION,
             self::THUMBNAIL_ENHANCEMENT,
             self::THUMBNAIL_PRESENTATION_PREVIEW,
         ];
@@ -163,7 +167,7 @@ class AITaskType
             ],
             'engineering' => [self::ERROR_PATTERN_ANALYSIS],
             'audit' => [self::AUDIT_REPORT_GENERATION, self::PERFORMANCE_ANALYSIS, self::SYSTEM_RELIABILITY_ANALYSIS],
-            'asset' => [self::ASSET_TAG_SUGGESTION, self::ASSET_METADATA_GENERATION, self::PHOTOGRAPHY_FOCAL_POINT, self::VIDEO_INSIGHTS, self::APPROVAL_FEEDBACK_SUMMARY, self::THUMBNAIL_ENHANCEMENT, self::THUMBNAIL_PRESENTATION_PREVIEW],
+            'asset' => [self::ASSET_TAG_SUGGESTION, self::ASSET_METADATA_GENERATION, self::PHOTOGRAPHY_FOCAL_POINT, self::VIDEO_INSIGHTS, self::APPROVAL_FEEDBACK_SUMMARY, self::THUMBNAIL_ENHANCEMENT, self::THUMBNAIL_PRESENTATION_PREVIEW, self::STUDIO_COMPOSITION_ANIMATION],
         ];
 
         return $mapping[$category] ?? [];

@@ -12,9 +12,11 @@ use App\Models\Download;
 use App\Services\AiUsageService;
 use App\Services\FeatureGate;
 use App\Services\Insights\BrandActivityFeedService;
+use App\Services\Insights\BrandAssetEngagementInsightsService;
 use App\Services\MetadataAnalyticsService;
 use App\Services\PlanService;
 use App\Services\Prostaff\GetProstaffInsightsData;
+use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -66,6 +68,7 @@ class AnalyticsOverviewController extends Controller
             'brand_guidelines' => $data['brand_guidelines'],
             'creator_module_enabled' => (bool) $creatorModuleEnabled,
             'creator_insights' => $creatorInsights,
+            'storage_insight' => $data['storage_insight'] ?? null,
         ]);
     }
 
@@ -160,6 +163,16 @@ class AnalyticsOverviewController extends Controller
     {
         $data = $this->getOverviewData($request, includeMetadataAnalytics: false);
 
+        $tenant = app('tenant');
+        $brand = app('brand');
+        $range = $this->resolveUsageEngagementRange($request);
+        $assetEngagement = app(BrandAssetEngagementInsightsService::class)->summarize(
+            $tenant,
+            $brand,
+            $range['start'],
+            $range['end']
+        );
+
         return Inertia::render('Insights/Usage', [
             'stats' => [
                 'total_assets' => $data['total_assets'],
@@ -171,11 +184,94 @@ class AnalyticsOverviewController extends Controller
             'ai_usage' => $data['ai_usage'],
             'ai_monthly_cap_alert' => $data['ai_monthly_cap_alert'],
             'plan' => $data['plan'],
+            'asset_engagement' => $assetEngagement,
+            'engagement_range' => [
+                'preset' => $range['preset'],
+                'start_date' => $range['start']->toDateString(),
+                'end_date' => $range['end']->toDateString(),
+                'label' => $range['label'],
+            ],
+            'storage_insight' => $data['storage_insight'] ?? null,
         ]);
     }
 
     /**
-     * @return array{total_assets: int, storage_mb: float, max_storage_mb: ?int, downloads: int, max_downloads_per_month: ?int, collections: int, executions: int, ai_usage: ?array, ai_monthly_cap_alert: ?array, metadata_overview: array, metadata_coverage: array, ai_effectiveness: array, rights_risk: array, plan: array, brand_guidelines: array}
+     * @return array{preset: string, start: CarbonImmutable, end: CarbonImmutable, label: string}
+     */
+    private function resolveUsageEngagementRange(Request $request): array
+    {
+        $tz = config('app.timezone') ?: 'UTC';
+        $now = CarbonImmutable::now($tz);
+        $preset = strtolower((string) $request->query('range', 'this_month'));
+        if (! in_array($preset, ['this_month', 'last_30', 'last_7', 'custom'], true)) {
+            $preset = 'this_month';
+        }
+
+        if ($preset === 'last_7') {
+            $start = $now->subDays(6)->startOfDay();
+            $end = $now->endOfDay();
+
+            return ['preset' => 'last_7', 'start' => $start, 'end' => $end, 'label' => 'Last 7 days'];
+        }
+
+        if ($preset === 'last_30') {
+            $start = $now->subDays(29)->startOfDay();
+            $end = $now->endOfDay();
+
+            return ['preset' => 'last_30', 'start' => $start, 'end' => $end, 'label' => 'Last 30 days'];
+        }
+
+        if ($preset === 'custom' && $request->filled('start_date') && $request->filled('end_date')) {
+            try {
+                $start = CarbonImmutable::parse((string) $request->query('start_date'), $tz)->startOfDay();
+                $end = CarbonImmutable::parse((string) $request->query('end_date'), $tz)->endOfDay();
+            } catch (\Throwable) {
+                return $this->defaultUsageEngagementThisMonth($now);
+            }
+
+            if ($end->lessThan($start)) {
+                [$start, $end] = [$end->startOfDay(), $start->endOfDay()];
+            }
+
+            if ($start->diffInDays($end) > BrandAssetEngagementInsightsService::MAX_RANGE_DAYS) {
+                $start = $end->subDays(BrandAssetEngagementInsightsService::MAX_RANGE_DAYS)->startOfDay();
+            }
+
+            $todayEnd = $now->endOfDay();
+            if ($end->greaterThan($todayEnd)) {
+                $end = $todayEnd;
+            }
+
+            if ($start->greaterThan($end)) {
+                return $this->defaultUsageEngagementThisMonth($now);
+            }
+
+            return [
+                'preset' => 'custom',
+                'start' => $start,
+                'end' => $end,
+                'label' => $start->format('M j, Y').' – '.$end->format('M j, Y'),
+            ];
+        }
+
+        return $this->defaultUsageEngagementThisMonth($now);
+    }
+
+    /**
+     * @return array{preset: string, start: CarbonImmutable, end: CarbonImmutable, label: string}
+     */
+    private function defaultUsageEngagementThisMonth(CarbonImmutable $now): array
+    {
+        return [
+            'preset' => 'this_month',
+            'start' => $now->startOfMonth()->startOfDay(),
+            'end' => $now->endOfMonth()->endOfDay(),
+            'label' => 'This month ('.$now->format('F Y').')',
+        ];
+    }
+
+    /**
+     * @return array{total_assets: int, storage_mb: float, max_storage_mb: ?int, downloads: int, max_downloads_per_month: ?int, collections: int, executions: int, ai_usage: ?array, ai_monthly_cap_alert: ?array, metadata_overview: array, metadata_coverage: array, ai_effectiveness: array, rights_risk: array, plan: array, brand_guidelines: array, storage_insight: array<string, mixed>}
      */
     private function getOverviewData(Request $request, bool $includeMetadataAnalytics = true): array
     {
@@ -203,6 +299,23 @@ class AnalyticsOverviewController extends Controller
         $totalAssets = (int) ($completedStats->completed_asset_count ?? 0);
         $storageBytes = (int) ($completedStats->bytes_sum ?? 0);
         $storageMB = round($storageBytes / 1024 / 1024, 2);
+
+        $archivedBrandBytes = (int) (Asset::query()
+            ->where('tenant_id', $tenant->id)
+            ->where('brand_id', $brand->id)
+            ->whereNotNull('archived_at')
+            ->whereNull('deleted_at')
+            ->sum('size_bytes') ?? 0);
+
+        $activeVisibleBrandBytes = (int) (Asset::query()
+            ->where('tenant_id', $tenant->id)
+            ->where('brand_id', $brand->id)
+            ->where('status', AssetStatus::VISIBLE)
+            ->whereNull('archived_at')
+            ->whereNull('deleted_at')
+            ->sum('size_bytes') ?? 0);
+
+        $storageInsight = $this->buildBrandStorageInsightPayload($archivedBrandBytes, $activeVisibleBrandBytes);
         $downloadLinksThisMonth = Download::where('tenant_id', $tenant->id)
             ->where('status', DownloadStatus::READY)
             ->whereBetween('created_at', [$startOfMonth, $endOfMonth])
@@ -286,6 +399,47 @@ class AnalyticsOverviewController extends Controller
             'ai_effectiveness' => $metadataAnalytics['ai_effectiveness'] ?? [],
             'rights_risk' => $metadataAnalytics['rights_risk'] ?? [],
             'plan' => ['name' => $planDisplayName, 'key' => $planName],
+            'storage_insight' => $storageInsight,
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function buildBrandStorageInsightPayload(int $archivedBytes, int $activeVisibleBytes): array
+    {
+        $std = (float) config('insights_storage.aws_s3_list_usd_per_gb_month.standard', 0.023);
+        $ia = (float) config('insights_storage.aws_s3_list_usd_per_gb_month.standard_ia', 0.0125);
+        $ratio = $std > 0 ? round($ia / $std, 4) : null;
+        $discountPct = $ratio !== null ? (int) round((1 - $ratio) * 100) : null;
+
+        $toGb = static fn (int $bytes): float => $bytes > 0 ? $bytes / (1024 ** 3) : 0.0;
+
+        $impliedArchivedIa = round($toGb($archivedBytes) * $ia, 4);
+        $impliedArchivedStd = round($toGb($archivedBytes) * $std, 4);
+        $impliedActiveStd = round($toGb($activeVisibleBytes) * $std, 4);
+
+        return [
+            'archived_mb' => round($archivedBytes / 1024 / 1024, 2),
+            'active_visible_mb' => round($activeVisibleBytes / 1024 / 1024, 2),
+            'archived_bytes' => $archivedBytes,
+            'active_visible_bytes' => $activeVisibleBytes,
+            'pricing' => [
+                'currency' => 'USD',
+                'standard_usd_per_gb_month' => $std,
+                'standard_ia_usd_per_gb_month' => $ia,
+                'standard_usd_per_mb_month' => round($std / 1024, 6),
+                'standard_ia_usd_per_mb_month' => round($ia / 1024, 6),
+                'ia_vs_standard_ratio' => $ratio,
+                'standard_ia_discount_percent_storage_tier' => $discountPct,
+                'disclaimer' => (string) config('insights_storage.disclaimer', ''),
+                'archive_storage_class' => (string) config('insights_storage.archive_storage_class', 'STANDARD_IA'),
+            ],
+            'implied_list_storage_tier_usd_month' => [
+                'archived_at_standard_ia_rate' => $impliedArchivedIa,
+                'archived_if_still_standard_rate' => $impliedArchivedStd,
+                'active_visible_at_standard_rate' => $impliedActiveStd,
+            ],
         ];
     }
 

@@ -167,6 +167,49 @@ class AiMetadataGenerationServiceTest extends TestCase
     }
 
     /**
+     * Vision often emits vague tags like "model" / "fashion" on packaging and sell sheets — strip at ingest.
+     */
+    public function test_blocklisted_vision_tags_model_fashion_are_not_persisted(): void
+    {
+        $this->mockProvider->shouldReceive('analyzeImage')
+            ->once()
+            ->andReturn([
+                'text' => json_encode([
+                    'tags' => [
+                        ['value' => 'model', 'confidence' => 0.95],
+                        ['value' => 'fashion', 'confidence' => 0.95],
+                        ['value' => 'bourbon bottle', 'confidence' => 0.95],
+                    ],
+                ]),
+                'tokens_in' => 100,
+                'tokens_out' => 50,
+                'model' => 'gpt-4o-mini',
+                'metadata' => [],
+            ]);
+
+        $this->mockProvider->shouldReceive('calculateCost')
+            ->once()
+            ->andReturn(0.001);
+
+        $asset = $this->createAssetWithCategory();
+        $this->createSelectField('tags', $asset->tenant_id, [
+            'type' => 'multiselect',
+            'ai_eligible' => true,
+        ]);
+
+        $results = $this->service->generateMetadata($asset);
+
+        $this->assertSame(1, $results['tags_created']);
+        $tags = DB::table('asset_tag_candidates')
+            ->where('asset_id', $asset->id)
+            ->where('producer', 'ai')
+            ->pluck('tag')
+            ->all();
+        $this->assertSame(['bourbon bottle'], $tags);
+        $this->assertSame(2, $results['tag_parse_stats']['rejected_blocklist_count'] ?? null);
+    }
+
+    /**
      * Upload-time _skip_ai_tagging must not persist tag candidates; structured field candidates still run.
      */
     public function test_skip_ai_tagging_upload_suppresses_tag_candidates_when_structured_fields_run(): void

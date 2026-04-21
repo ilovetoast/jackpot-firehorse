@@ -23,6 +23,7 @@ import {
     ChevronDoubleUpIcon,
     ChevronDownIcon,
     ChevronRightIcon,
+    ChevronUpIcon,
     ClockIcon,
     CloudArrowUpIcon,
     DocumentDuplicateIcon,
@@ -31,6 +32,7 @@ import {
     RectangleGroupIcon,
     EyeIcon,
     EyeSlashIcon,
+    FilmIcon,
     FolderOpenIcon,
     LockClosedIcon,
     LockOpenIcon,
@@ -169,14 +171,41 @@ import type { CompositionSummaryDto, CompositionVisibility } from './editorCompo
 import {
     fetchCreativeSetForComposition,
     fetchCreativeSetGenerationJob,
+    fetchGenerationPresets,
+    patchCreativeSetHero,
     postCreativeSet,
     postCreativeSetVariant,
     postRetryGenerationJobItem,
 } from './studioCreativeSetBridge'
-import type { StudioCreativeSetDto } from './studioCreativeSetTypes'
-import { ApplyScopeBar } from './components/VersionsRail/ApplyScopeBar'
-import { GenerateStudioVersionsModal } from './components/VersionsRail/GenerateStudioVersionsModal'
-import { VersionsRail } from './components/VersionsRail/VersionsRail'
+import type { StudioCreativeSetDto, StudioGenerationJobDto } from './studioCreativeSetTypes'
+import { ApplyScopeBar, type StudioApplyScope } from './components/VersionsRail/ApplyScopeBar'
+import {
+    GenerateStudioVersionsModal,
+    type GenerateStudioVersionsInitialAxes,
+} from './components/VersionsRail/GenerateStudioVersionsModal'
+import { VersionBuilderModal } from './components/VersionsRail/VersionBuilderModal'
+import { StudioAnimateCompositionModal } from './components/StudioAnimateCompositionModal'
+import { StudioAnimationJobDetailDialog } from './components/StudioAnimationJobDetailDialog'
+import {
+    fetchStudioAnimations,
+    postStudioAnimationRetry,
+    type StudioAnimationJobDto,
+} from './editorStudioAnimationBridge'
+import { VersionsRail, type StudioVersionsHandoffChrome } from './components/VersionsRail/VersionsRail'
+import {
+    firstScrollTargetCompositionId,
+    nextNewCompositionId,
+} from '../../utils/studioVersionsReviewFlow.mjs'
+import {
+    mergeHeroAndAlternatesForExport,
+    sortCompositionIdsByVariantSortOrder,
+} from '../../utils/studioVersionsHandoffHelpers.mjs'
+import { buildRasterBundleZip } from '../../utils/studioVersionsExportBundle.mjs'
+import {
+    orderExportCompositionIdsHeroFirst,
+    studioHandoffBundleZipFilename,
+    studioHandoffVersionRasterFilename,
+} from '../../utils/studioVersionsExportNaming.mjs'
 import { areAllRequiredFieldsSatisfied } from '../../utils/metadataValidation'
 import { loadEditorBrandTypography } from './editorBrandFonts'
 import { fetchEditorBrandContext } from './editorBrandContextBridge'
@@ -1062,6 +1091,8 @@ function compositionVisibilityFromApi(raw: string | undefined | null): Compositi
     return raw === 'private' ? 'private' : 'shared'
 }
 
+const STUDIO_VERSIONS_PANEL_LS_KEY = 'jackpot_editor_studio_versions_panel_open'
+
 export default function AssetEditor() {
     const page = usePage()
     const { auth } = page.props as unknown as {
@@ -1312,10 +1343,46 @@ export default function AssetEditor() {
     /** Studio "Versions" — backend Creative Set wrapping sibling compositions. */
     const [studioCreativeSet, setStudioCreativeSet] = useState<StudioCreativeSetDto | null>(null)
     const [studioCreativeSetDuplicateBusy, setStudioCreativeSetDuplicateBusy] = useState(false)
+    const [studioVersionsPanelOpen, setStudioVersionsPanelOpen] = useState(() => {
+        if (typeof window === 'undefined') {
+            return true
+        }
+        try {
+            return window.localStorage.getItem(STUDIO_VERSIONS_PANEL_LS_KEY) !== '0'
+        } catch {
+            return true
+        }
+    })
     const [generateVersionsModalOpen, setGenerateVersionsModalOpen] = useState(false)
+    const [versionBuilderOpen, setVersionBuilderOpen] = useState(false)
+    const [generateVersionsPrefill, setGenerateVersionsPrefill] = useState<GenerateStudioVersionsInitialAxes | null>(
+        null
+    )
+    /** Increment when opening Generate Versions so the modal remounts (avoids stale internal picks). */
+    const [generateVersionsModalMountKey, setGenerateVersionsModalMountKey] = useState(0)
+    const [versionBuilderPackBusy, setVersionBuilderPackBusy] = useState(false)
     const [studioGenerationPollJobId, setStudioGenerationPollJobId] = useState<string | null>(null)
     const [studioRetryGenerationItemBusy, setStudioRetryGenerationItemBusy] = useState<string | null>(null)
-    const [studioApplyScope, setStudioApplyScope] = useState<'this_version' | 'all_versions'>('this_version')
+    const [studioAnimateModalOpen, setStudioAnimateModalOpen] = useState(false)
+    const [studioAnimationDetailJobId, setStudioAnimationDetailJobId] = useState<string | null>(null)
+    const [compositionAnimations, setCompositionAnimations] = useState<StudioAnimationJobDto[]>([])
+    const [animationsLoading, setAnimationsLoading] = useState(false)
+    const [studioApplyScope, setStudioApplyScope] = useState<StudioApplyScope>('this_version')
+    const [studioVersionPickMode, setStudioVersionPickMode] = useState(false)
+    const [studioApplySelectedCompositionIds, setStudioApplySelectedCompositionIds] = useState<string[]>([])
+    /** Session-ish UX: versions from the latest generate pack (or duplicate) for badges + review. */
+    const [studioPackNewcomerCompositionIds, setStudioPackNewcomerCompositionIds] = useState<string[]>([])
+    const [studioUnviewedNewcomerCompositionIds, setStudioUnviewedNewcomerCompositionIds] = useState<string[]>([])
+    const [studioPostCreateBannerDismissed, setStudioPostCreateBannerDismissed] = useState(false)
+    const [studioHeroPatchBusy, setStudioHeroPatchBusy] = useState(false)
+    /** Export / handoff: explicit multi-version selection (separate from semantic-apply targets). */
+    const [studioHandoffSelectionMode, setStudioHandoffSelectionMode] = useState(false)
+    const [studioHandoffSelectedCompositionIds, setStudioHandoffSelectedCompositionIds] = useState<string[]>([])
+    const [studioHandoffExportBusy, setStudioHandoffExportBusy] = useState(false)
+    const [studioHandoffExportPhase, setStudioHandoffExportPhase] = useState<
+        'idle' | 'capturing' | 'zipping' | 'downloading'
+    >('idle')
+    const [studioHandoffExportDetail, setStudioHandoffExportDetail] = useState('')
     const [pickerSearch, setPickerSearch] = useState('')
     const [pickerView, setPickerView] = useState<'grid' | 'list'>('grid')
     const [versions, setVersions] = useState<
@@ -1335,6 +1402,19 @@ export default function AssetEditor() {
     const [previewFrame, setPreviewFrame] = useState<'social' | 'banner'>('social')
     const compositionIdRef = useRef<string | null>(null)
     compositionIdRef.current = compositionId
+    const compositionNameRef = useRef(compositionName)
+    compositionNameRef.current = compositionName
+    const studioCreativeSetRef = useRef<StudioCreativeSetDto | null>(null)
+    useLayoutEffect(() => {
+        studioCreativeSetRef.current = studioCreativeSet
+    }, [studioCreativeSet])
+    /** Variant composition ids before the current generation poll (diff at job completion → “new”). */
+    const studioGenerationBaselineCompositionIdsRef = useRef<Set<string> | null>(null)
+    /** Prevents overlapping poll ticks when responses are slower than the interval. */
+    const studioGenerationPollLockRef = useRef(false)
+    const studioVersionsRailScrollRef = useRef<HTMLDivElement | null>(null)
+    const studioPackNewcomerPrevLenRef = useRef(0)
+    const studioCreativeSetIdForNewcomerUxRef = useRef<string | null>(null)
 
     useEffect(() => {
         undoStackRef.current = []
@@ -1343,6 +1423,14 @@ export default function AssetEditor() {
     }, [compositionId])
     const studioCreativeSetIdRef = useRef<string | null>(null)
     studioCreativeSetIdRef.current = studioCreativeSet?.id ?? null
+
+    useEffect(() => {
+        try {
+            window.localStorage.setItem(STUDIO_VERSIONS_PANEL_LS_KEY, studioVersionsPanelOpen ? '1' : '0')
+        } catch {
+            /* ignore quota / private mode */
+        }
+    }, [studioVersionsPanelOpen])
     /** Shown when an image URL failed; cleared when the layer’s src changes away from placeholder. */
     const [imageLoadFailedByLayerId, setImageLoadFailedByLayerId] = useState<Record<string, true>>({})
     const [genUsage, setGenUsage] = useState<{
@@ -2008,6 +2096,23 @@ export default function AssetEditor() {
         }
     }, [])
 
+    const refreshCompositionAnimations = useCallback(async () => {
+        const id = compositionIdRef.current
+        if (!id) {
+            setCompositionAnimations([])
+            return
+        }
+        setAnimationsLoading(true)
+        try {
+            const { animations } = await fetchStudioAnimations(id)
+            setCompositionAnimations(animations)
+        } catch {
+            setCompositionAnimations([])
+        } finally {
+            setAnimationsLoading(false)
+        }
+    }, [])
+
     const snapshotCheckpoint = useCallback(
         async (label: string, doc: DocumentModel) => {
             const id = compositionIdRef.current
@@ -2146,8 +2251,83 @@ export default function AssetEditor() {
     }, [compositionId])
 
     useEffect(() => {
+        const id = studioCreativeSet?.id ?? null
+        if (id !== studioCreativeSetIdForNewcomerUxRef.current) {
+            studioCreativeSetIdForNewcomerUxRef.current = id
+            setStudioPackNewcomerCompositionIds([])
+            setStudioUnviewedNewcomerCompositionIds([])
+            setStudioPostCreateBannerDismissed(false)
+            studioPackNewcomerPrevLenRef.current = 0
+            setStudioHandoffSelectionMode(false)
+            setStudioHandoffSelectedCompositionIds([])
+            setStudioHandoffExportPhase('idle')
+            setStudioHandoffExportDetail('')
+        }
+    }, [studioCreativeSet?.id])
+
+    useEffect(() => {
+        if (!studioGenerationPollJobId) {
+            return
+        }
+        const ids = studioCreativeSetRef.current?.variants.map((v) => String(v.composition_id)) ?? []
+        studioGenerationBaselineCompositionIdsRef.current = new Set(ids)
+        setStudioPackNewcomerCompositionIds([])
+        setStudioUnviewedNewcomerCompositionIds([])
+        setStudioPostCreateBannerDismissed(true)
+    }, [studioGenerationPollJobId])
+
+    useEffect(() => {
         setStudioApplyScope('this_version')
+        setStudioVersionPickMode(false)
+        setStudioApplySelectedCompositionIds([])
     }, [compositionId])
+
+    useEffect(() => {
+        if (!compositionId) {
+            return
+        }
+        setStudioUnviewedNewcomerCompositionIds((prev) => prev.filter((id) => id !== compositionId))
+    }, [compositionId])
+
+    const handleStudioApplyScopeChange = useCallback((scope: StudioApplyScope) => {
+        setStudioApplyScope(scope)
+        if (scope === 'selected_versions') {
+            setStudioVersionPickMode(true)
+            setStudioHandoffSelectionMode(false)
+            setStudioHandoffSelectedCompositionIds([])
+        } else {
+            setStudioVersionPickMode(false)
+            setStudioApplySelectedCompositionIds([])
+        }
+    }, [])
+
+    const toggleStudioPickComposition = useCallback(
+        (id: string) => {
+            if (!compositionId || id === compositionId) {
+                return
+            }
+            setStudioApplySelectedCompositionIds((prev) => {
+                const next = new Set(prev)
+                if (next.has(id)) {
+                    next.delete(id)
+                } else {
+                    next.add(id)
+                }
+                return [...next]
+            })
+        },
+        [compositionId]
+    )
+
+    const selectAllStudioSiblingCompositions = useCallback(() => {
+        if (!studioCreativeSet || !compositionId) {
+            return
+        }
+        const others = studioCreativeSet.variants
+            .map((v) => v.composition_id)
+            .filter((cid) => cid !== compositionId)
+        setStudioApplySelectedCompositionIds(others)
+    }, [studioCreativeSet, compositionId])
 
     useEffect(() => {
         if (!studioGenerationPollJobId || !studioCreativeSetIdRef.current) {
@@ -2155,34 +2335,132 @@ export default function AssetEditor() {
         }
         const creativeSetId = studioCreativeSetIdRef.current
         const jobId = studioGenerationPollJobId
-        const tick = window.setInterval(() => {
-            void (async () => {
+        let cancelled = false
+        let intervalId: ReturnType<typeof window.setInterval> | null = null
+        const clearPollInterval = () => {
+            if (intervalId !== null) {
+                window.clearInterval(intervalId)
+                intervalId = null
+            }
+        }
+        const finishTerminal = (
+            generation_job: StudioGenerationJobDto,
+            creative_set: StudioCreativeSetDto | null | undefined
+        ) => {
+            setStudioGenerationPollJobId(null)
+            const baseline = studioGenerationBaselineCompositionIdsRef.current
+            studioGenerationBaselineCompositionIdsRef.current = null
+            let newIds: string[] = []
+            if (generation_job.status === 'completed' && baseline && creative_set?.variants?.length) {
+                newIds = creative_set.variants
+                    .filter((v) => !baseline.has(String(v.composition_id)))
+                    .sort((a, b) => a.sort_order - b.sort_order)
+                    .map((v) => String(v.composition_id))
+                if (newIds.length > 0) {
+                    setStudioPackNewcomerCompositionIds(newIds)
+                    setStudioUnviewedNewcomerCompositionIds(newIds)
+                    setStudioPostCreateBannerDismissed(false)
+                }
+            }
+            const items = generation_job.items ?? []
+            const itemFailed = items.filter((i) => i.status === 'failed').length
+            const itemCompleted = items.filter((i) => i.status === 'completed').length
+            if (generation_job.status === 'cancelled') {
+                setActivityToast('Version generation was cancelled.')
+            } else if (generation_job.status === 'failed') {
+                setActivityToast('Version generation failed. Check the rail or try again.')
+            } else if (generation_job.status === 'completed') {
+                if (newIds.length > 0 && itemFailed === 0) {
+                    setActivityToast(
+                        newIds.length === 1
+                            ? '1 new version was added to the set.'
+                            : `${newIds.length} new versions were added to the set.`
+                    )
+                } else if (newIds.length > 0 && itemFailed > 0) {
+                    setActivityToast(
+                        `${newIds.length} version(s) were created; ${itemFailed} combination(s) failed — check the rail.`
+                    )
+                } else if (itemCompleted === 0 && items.length > 0) {
+                    setActivityToast('No versions were generated from this request — every combination failed.')
+                } else {
+                    setActivityToast(
+                        'Generation finished, but no new versions appeared in the set (limits, duplicates, or partial failure).'
+                    )
+                }
+            }
+        }
+        const runTick = async (): Promise<boolean> => {
+            if (studioGenerationPollLockRef.current) {
+                return false
+            }
+            studioGenerationPollLockRef.current = true
+            try {
                 try {
                     const { generation_job, creative_set } = await fetchCreativeSetGenerationJob(creativeSetId, jobId)
+                    if (cancelled) {
+                        return true
+                    }
                     setStudioCreativeSet(creative_set)
                     const terminal =
                         generation_job.status === 'completed' ||
                         generation_job.status === 'failed' ||
                         generation_job.status === 'cancelled'
                     if (terminal) {
-                        window.clearInterval(tick)
-                        setStudioGenerationPollJobId(null)
-                        const failed = generation_job.items?.some((i) => i.status === 'failed')
-                        setActivityToast(
-                            generation_job.status === 'completed' && !failed
-                                ? 'Version generation finished'
-                                : 'Version generation finished (some versions may have failed — check the rail).'
-                        )
+                        clearPollInterval()
+                        finishTerminal(generation_job, creative_set)
+                        return true
                     }
+                    return false
                 } catch {
-                    window.clearInterval(tick)
-                    setStudioGenerationPollJobId(null)
-                    setActivityToast('Could not refresh generation status')
+                    if (!cancelled) {
+                        clearPollInterval()
+                        setStudioGenerationPollJobId(null)
+                        studioGenerationBaselineCompositionIdsRef.current = null
+                        setActivityToast('Could not refresh generation status.')
+                    }
+                    return true
                 }
-            })()
-        }, 2500)
-        return () => window.clearInterval(tick)
+            } finally {
+                studioGenerationPollLockRef.current = false
+            }
+        }
+        void (async () => {
+            const stop = await runTick()
+            if (cancelled || stop) {
+                return
+            }
+            intervalId = window.setInterval(() => {
+                void runTick()
+            }, 2500)
+        })()
+        return () => {
+            cancelled = true
+            clearPollInterval()
+        }
     }, [studioGenerationPollJobId])
+
+    useLayoutEffect(() => {
+        const n = studioPackNewcomerCompositionIds.length
+        const prev = studioPackNewcomerPrevLenRef.current
+        if (n === 0) {
+            studioPackNewcomerPrevLenRef.current = 0
+            return
+        }
+        if (prev === 0 && n > 0 && studioCreativeSet) {
+            const sorted = [...studioCreativeSet.variants].sort((a, b) => a.sort_order - b.sort_order)
+            const tid = firstScrollTargetCompositionId(
+                sorted,
+                studioPackNewcomerCompositionIds,
+                studioUnviewedNewcomerCompositionIds,
+            )
+            const root = studioVersionsRailScrollRef.current
+            if (tid && root) {
+                const el = root.querySelector(`[data-studio-version-cid="${tid}"]`)
+                el?.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' })
+            }
+        }
+        studioPackNewcomerPrevLenRef.current = n
+    }, [studioPackNewcomerCompositionIds, studioUnviewedNewcomerCompositionIds, studioCreativeSet])
 
     useEffect(() => {
         if (!compositionId || !dirty) {
@@ -2902,11 +3180,11 @@ export default function AssetEditor() {
     }, [compositionId, refreshVersions])
 
     const switchToSiblingComposition = useCallback(
-        async (nextCompositionId: string) => {
+        async (nextCompositionId: string, options?: { skipDiscardConfirm?: boolean }) => {
             if (!nextCompositionId || compositionId === nextCompositionId) {
                 return
             }
-            if (discardRequiresConfirmation) {
+            if (!options?.skipDiscardConfirm && discardRequiresConfirmation) {
                 const ok = await editorConfirm({
                     title: 'Unsaved changes',
                     message: 'Discard unsaved changes and open this version?',
@@ -2946,6 +3224,74 @@ export default function AssetEditor() {
         [compositionId, discardRequiresConfirmation, editorConfirm, refreshVersions]
     )
 
+    const handleReviewNextStudioNewcomer = useCallback(() => {
+        if (!studioCreativeSet || studioPackNewcomerCompositionIds.length === 0) {
+            return
+        }
+        const sorted = [...studioCreativeSet.variants].sort((a, b) => a.sort_order - b.sort_order)
+        const viewed = studioPackNewcomerCompositionIds.filter(
+            (id) => !studioUnviewedNewcomerCompositionIds.includes(id),
+        )
+        const next = nextNewCompositionId(sorted, compositionId, studioPackNewcomerCompositionIds, viewed)
+        if (next) {
+            void switchToSiblingComposition(next)
+        }
+    }, [
+        studioCreativeSet,
+        studioPackNewcomerCompositionIds,
+        studioUnviewedNewcomerCompositionIds,
+        compositionId,
+        switchToSiblingComposition,
+    ])
+
+    const handleToggleStudioHero = useCallback(
+        async (cid: string) => {
+            if (!studioCreativeSet) {
+                return
+            }
+            const current = studioCreativeSet.hero_composition_id ?? null
+            const nextHero = current === cid ? null : cid
+            setStudioHeroPatchBusy(true)
+            try {
+                const { creative_set } = await patchCreativeSetHero(studioCreativeSet.id, {
+                    composition_id: nextHero,
+                })
+                setStudioCreativeSet(creative_set)
+                setActivityToast(nextHero ? 'Marked hero version' : 'Cleared hero')
+            } catch (e) {
+                setActivityToast(e instanceof Error ? e.message : 'Could not update hero')
+            } finally {
+                setStudioHeroPatchBusy(false)
+            }
+        },
+        [studioCreativeSet],
+    )
+
+    const studioVersionsPostCreateBanner = useMemo(() => {
+        if (
+            !studioCreativeSet ||
+            studioPackNewcomerCompositionIds.length === 0 ||
+            studioPostCreateBannerDismissed
+        ) {
+            return null
+        }
+        return {
+            newCount: studioPackNewcomerCompositionIds.length,
+            unviewedCount: studioUnviewedNewcomerCompositionIds.length,
+            onDismiss: () => setStudioPostCreateBannerDismissed(true),
+            onReviewNext: () => {
+                handleReviewNextStudioNewcomer()
+            },
+            onCreateAnotherPack: () => setVersionBuilderOpen(true),
+        }
+    }, [
+        studioCreativeSet,
+        studioPackNewcomerCompositionIds,
+        studioUnviewedNewcomerCompositionIds,
+        studioPostCreateBannerDismissed,
+        handleReviewNextStudioNewcomer,
+    ])
+
     const createStudioVersionsSet = useCallback(async () => {
         if (!compositionId) {
             setActivityToast('Save the composition first.')
@@ -2974,6 +3320,10 @@ export default function AssetEditor() {
                 source_composition_id: compositionId,
             })
             setStudioCreativeSet(creative_set)
+            const nid = String(variant.composition_id)
+            setStudioPackNewcomerCompositionIds((prev) => (prev.includes(nid) ? prev : [...prev, nid]))
+            setStudioUnviewedNewcomerCompositionIds((prev) => (prev.includes(nid) ? prev : [...prev, nid]))
+            setStudioPostCreateBannerDismissed(false)
             await switchToSiblingComposition(variant.composition_id)
             setActivityToast('Version duplicated')
         } catch (e) {
@@ -3005,6 +3355,106 @@ export default function AssetEditor() {
         },
         [studioCreativeSet]
     )
+
+    const bumpGenerateVersionsModal = useCallback(() => {
+        setGenerateVersionsModalMountKey((k) => k + 1)
+    }, [])
+
+    const handleVersionBuilderFormatPack = useCallback(async () => {
+        setVersionBuilderPackBusy(true)
+        try {
+            const p = await fetchGenerationPresets()
+            const maxF = p.limits.max_formats ?? 3
+            const allowed = new Set((p.preset_formats ?? []).map((f) => f.id))
+            const quick =
+                p.format_pack_quick_ids != null && p.format_pack_quick_ids.length > 0
+                    ? p.format_pack_quick_ids
+                    : (p.preset_formats ?? []).map((f) => f.id)
+            const formatIds = quick.filter((id) => allowed.has(id)).slice(0, maxF)
+            if (formatIds.length === 0) {
+                setActivityToast('Format presets are not available yet.')
+                setVersionBuilderOpen(false)
+                return
+            }
+            bumpGenerateVersionsModal()
+            setGenerateVersionsPrefill({ colorIds: [], sceneIds: [], formatIds })
+            setVersionBuilderOpen(false)
+            setGenerateVersionsModalOpen(true)
+        } catch (e) {
+            setActivityToast(e instanceof Error ? e.message : 'Could not load presets')
+            setVersionBuilderOpen(false)
+        } finally {
+            setVersionBuilderPackBusy(false)
+        }
+    }, [bumpGenerateVersionsModal])
+
+    const handleVersionBuilderColorPack = useCallback(async () => {
+        setVersionBuilderPackBusy(true)
+        try {
+            const p = await fetchGenerationPresets()
+            const maxC = p.limits.max_colors ?? 6
+            const colorIds = p.preset_colors.map((c) => c.id).slice(0, maxC)
+            if (colorIds.length === 0) {
+                setActivityToast('Color presets are not available yet.')
+                setVersionBuilderOpen(false)
+                return
+            }
+            bumpGenerateVersionsModal()
+            setGenerateVersionsPrefill({ colorIds, sceneIds: [], formatIds: [] })
+            setVersionBuilderOpen(false)
+            setGenerateVersionsModalOpen(true)
+        } catch (e) {
+            setActivityToast(e instanceof Error ? e.message : 'Could not load presets')
+            setVersionBuilderOpen(false)
+        } finally {
+            setVersionBuilderPackBusy(false)
+        }
+    }, [bumpGenerateVersionsModal])
+
+    const handleVersionBuilderScenePack = useCallback(async () => {
+        setVersionBuilderPackBusy(true)
+        try {
+            const p = await fetchGenerationPresets()
+            const maxS = p.limits.max_scenes ?? 6
+            const want = new Set(['studio', 'lifestyle_indoor', 'lifestyle_outdoor', 'minimal'])
+            const sceneIds = p.preset_scenes
+                .filter((s) => want.has(s.id))
+                .map((s) => s.id)
+                .slice(0, maxS)
+            if (sceneIds.length === 0) {
+                setActivityToast('Scene pack presets are not available in this workspace.')
+                setVersionBuilderOpen(false)
+                return
+            }
+            bumpGenerateVersionsModal()
+            setGenerateVersionsPrefill({ colorIds: [], sceneIds, formatIds: [] })
+            setVersionBuilderOpen(false)
+            setGenerateVersionsModalOpen(true)
+        } catch (e) {
+            setActivityToast(e instanceof Error ? e.message : 'Could not load presets')
+            setVersionBuilderOpen(false)
+        } finally {
+            setVersionBuilderPackBusy(false)
+        }
+    }, [bumpGenerateVersionsModal])
+
+    const handleVersionBuilderDuplicate = useCallback(() => {
+        setVersionBuilderOpen(false)
+        void duplicateStudioVariant()
+    }, [duplicateStudioVariant])
+
+    const handleVersionBuilderAdvanced = useCallback(() => {
+        bumpGenerateVersionsModal()
+        setGenerateVersionsPrefill(null)
+        setVersionBuilderOpen(false)
+        setGenerateVersionsModalOpen(true)
+    }, [bumpGenerateVersionsModal])
+
+    const handleVersionBuilderAnimateVideo = useCallback(() => {
+        setVersionBuilderOpen(false)
+        setStudioVersionsPanelOpen(true)
+        setStudioAnimateModalOpen(true)
+    }, [])
 
     const runCompareCapture = useCallback(async () => {
         if (!compositionId || !compareLeftId || !compareRightId || compareLeftId === compareRightId) {
@@ -3072,15 +3522,26 @@ export default function AssetEditor() {
     }, [compositionId, compareLeftId, compareRightId])
 
     const downloadExport = useCallback(
-        async (kind: 'png' | 'jpeg' | 'json' | 'psd') => {
-            const base = (compositionName.trim() || defaultCompositionName(document)).replace(
+        async (
+            kind: 'png' | 'jpeg' | 'json' | 'psd',
+            opts?: { downloadBaseName?: string; returnBlob?: boolean }
+        ): Promise<{ blob: Blob } | void> => {
+            const doc = documentRef.current
+            const baseFromName = (compositionNameRef.current.trim() || defaultCompositionName(doc)).replace(
                 /[^a-z0-9-_]+/gi,
-                '_'
+                '_',
             )
             const stamp = new Date().toISOString().slice(0, 19).replace(/T/, '_').replace(/:/g, '-')
-            const fileStem = `${base || 'composition'}-${stamp}`
+            const sanitizedOverride =
+                opts?.downloadBaseName != null && opts.downloadBaseName !== ''
+                    ? opts.downloadBaseName.replace(/[^a-z0-9-_]+/gi, '_')
+                    : null
+            const fileStem = sanitizedOverride ?? `${baseFromName || 'composition'}-${stamp}`
             if (kind === 'json') {
-                const raw = JSON.stringify(document, null, 2)
+                if (opts?.returnBlob) {
+                    throw new Error('returnBlob is only supported for PNG or JPEG')
+                }
+                const raw = JSON.stringify(doc, null, 2)
                 const blob = new Blob([raw], { type: 'application/json' })
                 const a = window.document.createElement('a')
                 a.href = URL.createObjectURL(blob)
@@ -3093,7 +3554,7 @@ export default function AssetEditor() {
             if (!node) {
                 return
             }
-            if (document.layers.length === 0) {
+            if (doc.layers.length === 0) {
                 setActivityToast('Exported empty canvas')
             }
             await waitForImagesToLoad(node)
@@ -3105,27 +3566,30 @@ export default function AssetEditor() {
             await new Promise<void>((r) =>
                 requestAnimationFrame(() => requestAnimationFrame(() => r()))
             )
-            const opts = {
+            const rasterOpts = {
                 cacheBust: true,
                 skipFonts: true,
                 pixelRatio: 1,
                 backgroundColor: '#ffffff',
-                width: document.width,
-                height: document.height,
+                width: doc.width,
+                height: doc.height,
                 fetchRequestInit: editorHtmlToImageFetchRequestInit,
                 style: {
                     transform: 'none',
-                    width: `${document.width}px`,
-                    height: `${document.height}px`,
+                    width: `${doc.width}px`,
+                    height: `${doc.height}px`,
                 },
             } as const
             try {
                 const dataUrl =
                     kind === 'jpeg'
-                        ? await toJpeg(node, { ...opts, quality: 0.92 })
-                        : await toPng(node, opts)
+                        ? await toJpeg(node, { ...rasterOpts, quality: 0.92 })
+                        : await toPng(node, rasterOpts)
                 if (kind === 'psd') {
-                    const bytes = await buildTestPsdFromFlattenedPng(dataUrl, document.width, document.height)
+                    if (opts?.returnBlob) {
+                        throw new Error('returnBlob is only supported for PNG or JPEG')
+                    }
+                    const bytes = await buildTestPsdFromFlattenedPng(dataUrl, doc.width, doc.height)
                     const blob = new Blob([bytes], { type: 'application/octet-stream' })
                     const a = window.document.createElement('a')
                     a.href = URL.createObjectURL(blob)
@@ -3134,6 +3598,10 @@ export default function AssetEditor() {
                     URL.revokeObjectURL(a.href)
                     setActivityToast('PSD exported (test)')
                     return
+                }
+                if (opts?.returnBlob === true) {
+                    const blob = await (await fetch(dataUrl)).blob()
+                    return { blob }
                 }
                 const a = window.document.createElement('a')
                 a.href = dataUrl
@@ -3144,8 +3612,311 @@ export default function AssetEditor() {
                 flushSync(() => setUiMode(priorUiMode))
             }
         },
-        [document, compositionName, uiMode]
+        [uiMode]
     )
+
+    const runStudioHandoffExportIds = useCallback(
+        async (compositionIds: string[], kind: 'png' | 'jpeg') => {
+            const STUDIO_HANDOFF_BUNDLE_MAX = 24
+            if (!studioCreativeSet || compositionIds.length === 0) {
+                return
+            }
+            let sorted = sortCompositionIdsByVariantSortOrder(compositionIds, studioCreativeSet.variants)
+            sorted = orderExportCompositionIdsHeroFirst(sorted, studioCreativeSet.hero_composition_id)
+            if (sorted.length === 0) {
+                return
+            }
+            if (sorted.length > STUDIO_HANDOFF_BUNDLE_MAX) {
+                setActivityToast(`Choose at most ${STUDIO_HANDOFF_BUNDLE_MAX} versions per ZIP bundle`)
+                return
+            }
+            if (discardRequiresConfirmation) {
+                const ok = await editorConfirm({
+                    title: sorted.length > 1 ? 'Export bundle' : 'Export version',
+                    message:
+                        sorted.length > 1
+                            ? 'Versions are captured from the editor, then packaged into one ZIP. The canvas may switch between versions; unsaved changes on a version you leave can be lost. Continue?'
+                            : 'Exports use the live editor canvas. If you leave this composition, unsaved changes may be lost. Continue?',
+                    confirmText: 'Continue',
+                    variant: 'warning',
+                })
+                if (!ok) {
+                    return
+                }
+            }
+            const batchStamp = new Date().toISOString().slice(0, 19).replace(/T/, '_').replace(/:/g, '-')
+            const ext: 'png' | 'jpg' = kind === 'jpeg' ? 'jpg' : 'png'
+            setStudioHandoffExportBusy(true)
+            setStudioHandoffExportPhase('capturing')
+            setStudioHandoffExportDetail('')
+            try {
+                if (sorted.length === 1) {
+                    setStudioHandoffExportDetail('Exporting…')
+                    const id = sorted[0]
+                    if (compositionIdRef.current !== id) {
+                        await switchToSiblingComposition(id, { skipDiscardConfirm: true })
+                    }
+                    await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())))
+                    const v = studioCreativeSet.variants.find((x) => x.composition_id === id)
+                    const label = (v?.label || 'version-1').replace(/[^a-z0-9-_]+/gi, '_')
+                    const shortId = String(id).slice(-6)
+                    await downloadExport(kind, {
+                        downloadBaseName: `${label}_${shortId}_${batchStamp}`,
+                    })
+                    setActivityToast('Exported 1 version')
+                    return
+                }
+                const entries: { path: string; blob: Blob }[] = []
+                const failures: { id: string; message: string }[] = []
+                for (let i = 0; i < sorted.length; i += 1) {
+                    const id = sorted[i]
+                    setStudioHandoffExportDetail(`Capturing ${i + 1} of ${sorted.length}…`)
+                    try {
+                        if (compositionIdRef.current !== id) {
+                            await switchToSiblingComposition(id, { skipDiscardConfirm: true })
+                        }
+                        await new Promise<void>((r) =>
+                            requestAnimationFrame(() => requestAnimationFrame(() => r()))
+                        )
+                        const cap = await downloadExport(kind, { returnBlob: true })
+                        if (!cap || typeof cap !== 'object' || !('blob' in cap)) {
+                            throw new Error('Raster capture failed')
+                        }
+                        const v = studioCreativeSet.variants.find((x) => x.composition_id === id)
+                        const path = studioHandoffVersionRasterFilename({
+                            index1Based: i + 1,
+                            totalCount: sorted.length,
+                            label: v?.label || `version-${i + 1}`,
+                            compositionId: String(id),
+                            heroCompositionId: studioCreativeSet.hero_composition_id ?? null,
+                            ext,
+                        })
+                        entries.push({ path, blob: cap.blob })
+                    } catch (err) {
+                        failures.push({
+                            id: String(id),
+                            message: err instanceof Error ? err.message : String(err),
+                        })
+                    }
+                }
+                if (entries.length === 0) {
+                    setActivityToast(
+                        failures.length ? 'Bundle failed — could not capture any version' : 'Nothing to export'
+                    )
+                    return
+                }
+                setStudioHandoffExportPhase('zipping')
+                setStudioHandoffExportDetail('Building ZIP…')
+                const readmeLines = [
+                    'Studio — Versions handoff bundle',
+                    `Creative set: ${studioCreativeSet.name}`,
+                    `Set id: ${studioCreativeSet.id}`,
+                    `Generated: ${batchStamp}`,
+                    `Raster: ${ext.toUpperCase()}`,
+                    '',
+                    'Included files (hero first when applicable):',
+                    ...entries.map((e) => `  ${e.path}`),
+                ]
+                if (failures.length > 0) {
+                    readmeLines.push('', 'Skipped (capture error):')
+                    for (const f of failures) {
+                        readmeLines.push(`  - ${f.id}: ${f.message}`)
+                    }
+                }
+                const zipBlob = await buildRasterBundleZip(entries, readmeLines.join('\n'))
+                setStudioHandoffExportPhase('downloading')
+                setStudioHandoffExportDetail('Starting download…')
+                const bundleName = studioHandoffBundleZipFilename({
+                    setName: studioCreativeSet.name,
+                    setId: studioCreativeSet.id,
+                    rasterKind: kind,
+                    stamp: batchStamp,
+                })
+                const url = URL.createObjectURL(zipBlob)
+                const a = window.document.createElement('a')
+                a.href = url
+                a.download = bundleName
+                a.click()
+                URL.revokeObjectURL(url)
+                const skipNote = failures.length ? ` — ${failures.length} skipped` : ''
+                setActivityToast(`ZIP ready (${entries.length} image${entries.length === 1 ? '' : 's'})${skipNote}`)
+            } catch (e) {
+                setActivityToast(e instanceof Error ? e.message : 'Bundle export failed')
+            } finally {
+                setStudioHandoffExportBusy(false)
+                setStudioHandoffExportPhase('idle')
+                setStudioHandoffExportDetail('')
+            }
+        },
+        [studioCreativeSet, discardRequiresConfirmation, editorConfirm, switchToSiblingComposition, downloadExport]
+    )
+
+    const setStudioHandoffMode = useCallback((next: boolean) => {
+        setStudioHandoffSelectionMode(next)
+        if (next) {
+            setStudioApplyScope('this_version')
+            setStudioVersionPickMode(false)
+            setStudioApplySelectedCompositionIds([])
+        } else {
+            setStudioHandoffSelectedCompositionIds([])
+        }
+    }, [])
+
+    const toggleStudioHandoffComposition = useCallback((id: string) => {
+        setStudioHandoffSelectedCompositionIds((prev) => {
+            const s = new Set(prev)
+            if (s.has(id)) {
+                s.delete(id)
+            } else {
+                s.add(id)
+            }
+            return [...s]
+        })
+    }, [])
+
+    const studioHandoffSelectAll = useCallback(() => {
+        if (!studioCreativeSet) {
+            return
+        }
+        setStudioHandoffSelectedCompositionIds(studioCreativeSet.variants.map((x) => x.composition_id))
+    }, [studioCreativeSet])
+
+    const studioHandoffSelectHero = useCallback(() => {
+        const h = studioCreativeSet?.hero_composition_id
+        if (!h) {
+            setActivityToast('Set a hero version first (star on a tile)')
+            return
+        }
+        setStudioHandoffSelectedCompositionIds([h])
+    }, [studioCreativeSet])
+
+    const studioHandoffSelectNew = useCallback(() => {
+        if (studioPackNewcomerCompositionIds.length === 0) {
+            setActivityToast('No “new” versions in the current batch')
+            return
+        }
+        setStudioHandoffSelectedCompositionIds([...studioPackNewcomerCompositionIds])
+    }, [studioPackNewcomerCompositionIds])
+
+    const studioHandoffClearSelection = useCallback(() => {
+        setStudioHandoffSelectedCompositionIds([])
+    }, [])
+
+    const studioHandoffSetSelectedIds = useCallback((ids: string[]) => {
+        setStudioHandoffSelectedCompositionIds(ids)
+    }, [])
+
+    const exportStudioHandoffSelectedPng = useCallback(() => {
+        if (studioHandoffSelectedCompositionIds.length === 0) {
+            setActivityToast('Select at least one version')
+            return
+        }
+        void runStudioHandoffExportIds(studioHandoffSelectedCompositionIds, 'png')
+    }, [runStudioHandoffExportIds, studioHandoffSelectedCompositionIds])
+
+    const exportStudioHandoffSelectedJpeg = useCallback(() => {
+        if (studioHandoffSelectedCompositionIds.length === 0) {
+            setActivityToast('Select at least one version')
+            return
+        }
+        void runStudioHandoffExportIds(studioHandoffSelectedCompositionIds, 'jpeg')
+    }, [runStudioHandoffExportIds, studioHandoffSelectedCompositionIds])
+
+    const exportStudioHandoffHeroPng = useCallback(() => {
+        const h = studioCreativeSet?.hero_composition_id
+        if (!h) {
+            setActivityToast('Set a hero version first')
+            return
+        }
+        void runStudioHandoffExportIds([h], 'png')
+    }, [studioCreativeSet, runStudioHandoffExportIds])
+
+    const exportStudioHandoffHeroJpeg = useCallback(() => {
+        const h = studioCreativeSet?.hero_composition_id
+        if (!h) {
+            setActivityToast('Set a hero version first')
+            return
+        }
+        void runStudioHandoffExportIds([h], 'jpeg')
+    }, [studioCreativeSet, runStudioHandoffExportIds])
+
+    const exportStudioHandoffHeroAndAltsPng = useCallback(() => {
+        if (!studioCreativeSet) {
+            return
+        }
+        const ids = mergeHeroAndAlternatesForExport(
+            studioCreativeSet.hero_composition_id,
+            studioHandoffSelectedCompositionIds,
+            studioCreativeSet.variants,
+        )
+        if (ids.length === 0) {
+            setActivityToast('Nothing to export')
+            return
+        }
+        void runStudioHandoffExportIds(ids, 'png')
+    }, [studioCreativeSet, studioHandoffSelectedCompositionIds, runStudioHandoffExportIds])
+
+    const exportStudioHandoffHeroAndAltsJpeg = useCallback(() => {
+        if (!studioCreativeSet) {
+            return
+        }
+        const ids = mergeHeroAndAlternatesForExport(
+            studioCreativeSet.hero_composition_id,
+            studioHandoffSelectedCompositionIds,
+            studioCreativeSet.variants,
+        )
+        if (ids.length === 0) {
+            setActivityToast('Nothing to export')
+            return
+        }
+        void runStudioHandoffExportIds(ids, 'jpeg')
+    }, [studioCreativeSet, studioHandoffSelectedCompositionIds, runStudioHandoffExportIds])
+
+    const studioVersionsHandoffChrome = useMemo((): StudioVersionsHandoffChrome | null => {
+        if (!studioCreativeSet) {
+            return null
+        }
+        return {
+            selectionMode: studioHandoffSelectionMode,
+            selectedCompositionIds: studioHandoffSelectedCompositionIds,
+            exportBusy: studioHandoffExportBusy,
+            exportPhase: studioHandoffExportPhase,
+            exportDetail: studioHandoffExportDetail,
+            onModeChange: setStudioHandoffMode,
+            onToggleComposition: toggleStudioHandoffComposition,
+            onClearSelection: studioHandoffClearSelection,
+            onSelectAll: studioHandoffSelectAll,
+            onSelectHero: studioHandoffSelectHero,
+            onSelectNew: studioHandoffSelectNew,
+            onSetSelectedCompositionIds: studioHandoffSetSelectedIds,
+            onExportSelectedPng: exportStudioHandoffSelectedPng,
+            onExportSelectedJpeg: exportStudioHandoffSelectedJpeg,
+            onExportHeroPng: exportStudioHandoffHeroPng,
+            onExportHeroJpeg: exportStudioHandoffHeroJpeg,
+            onExportHeroAndAlternatesPng: exportStudioHandoffHeroAndAltsPng,
+            onExportHeroAndAlternatesJpeg: exportStudioHandoffHeroAndAltsJpeg,
+        }
+    }, [
+        studioCreativeSet,
+        studioHandoffSelectionMode,
+        studioHandoffSelectedCompositionIds,
+        studioHandoffExportBusy,
+        studioHandoffExportPhase,
+        studioHandoffExportDetail,
+        setStudioHandoffMode,
+        toggleStudioHandoffComposition,
+        studioHandoffClearSelection,
+        studioHandoffSelectAll,
+        studioHandoffSelectHero,
+        studioHandoffSelectNew,
+        studioHandoffSetSelectedIds,
+        exportStudioHandoffSelectedPng,
+        exportStudioHandoffSelectedJpeg,
+        exportStudioHandoffHeroPng,
+        exportStudioHandoffHeroJpeg,
+        exportStudioHandoffHeroAndAltsPng,
+        exportStudioHandoffHeroAndAltsJpeg,
+    ])
 
     const startNewComposition = useCallback(async (opts?: { skipDiscardConfirm?: boolean }) => {
         if (!opts?.skipDiscardConfirm && discardRequiresConfirmation) {
@@ -3254,6 +4025,50 @@ export default function AssetEditor() {
             void refreshVersions()
         }
     }, [historyOpen, compositionId, refreshVersions])
+
+    useEffect(() => {
+        if (!compositionId) {
+            return undefined
+        }
+        const hasActiveAnimation = compositionAnimations.some(
+            (j) => j.status !== 'complete' && j.status !== 'failed' && j.status !== 'canceled',
+        )
+        const pollAnimations =
+            leftPanel === 'history' ||
+            (studioVersionsPanelOpen && studioCreativeSet !== null) ||
+            hasActiveAnimation
+        if (!pollAnimations) {
+            return undefined
+        }
+        if (leftPanel === 'history') {
+            void refreshVersions()
+        }
+        void refreshCompositionAnimations()
+        const id = window.setInterval(() => {
+            void refreshCompositionAnimations()
+            if (leftPanel === 'history') {
+                void refreshVersions()
+            }
+        }, 5000)
+        return () => window.clearInterval(id)
+    }, [
+        leftPanel,
+        compositionId,
+        studioVersionsPanelOpen,
+        studioCreativeSet,
+        refreshVersions,
+        refreshCompositionAnimations,
+        compositionAnimations,
+    ])
+
+    useEffect(() => {
+        if (!studioAnimationDetailJobId) {
+            return
+        }
+        if (!compositionAnimations.some((j) => j.id === studioAnimationDetailJobId)) {
+            setStudioAnimationDetailJobId(null)
+        }
+    }, [compositionAnimations, studioAnimationDetailJobId])
 
     useEffect(() => {
         if (compareOpen && versions.length >= 2 && !compareLeftId && !compareRightId) {
@@ -4184,8 +4999,8 @@ export default function AssetEditor() {
                                 updated_at: new Date().toISOString(),
                             }))
                         }
-                    } catch {
-                        /* version strip refresh is optional */
+                    } catch (err) {
+                        console.warn('[editor] Could not refresh asset version strip after AI edit', err)
                     }
                 }
                 finishedOk = true
@@ -5961,6 +6776,25 @@ export default function AssetEditor() {
                                                 type="button"
                                                 onClick={() => {
                                                     setLeftPanel(null)
+                                                    setStudioAnimateModalOpen(true)
+                                                }}
+                                                disabled={!compositionId || !aiEnabled}
+                                                className="flex w-full items-center gap-2.5 rounded-md px-3 py-1.5 text-sm text-gray-200 hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
+                                                title={
+                                                    !compositionId
+                                                        ? 'Save the composition first'
+                                                        : !aiEnabled
+                                                          ? 'AI features are disabled for this workspace'
+                                                          : 'Create a short video from the current canvas (image-to-video)'
+                                                }
+                                            >
+                                                <FilmIcon className="h-4 w-4 shrink-0 text-violet-400" aria-hidden />
+                                                Animate composition…
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    setLeftPanel(null)
                                                     void createStudioVersionsSet()
                                                 }}
                                                 disabled={!compositionId || !!studioCreativeSet}
@@ -5973,6 +6807,8 @@ export default function AssetEditor() {
                                                 type="button"
                                                 onClick={() => {
                                                     setLeftPanel(null)
+                                                    bumpGenerateVersionsModal()
+                                                    setGenerateVersionsPrefill(null)
                                                     setGenerateVersionsModalOpen(true)
                                                 }}
                                                 disabled={!compositionId || !studioCreativeSet}
@@ -5982,10 +6818,10 @@ export default function AssetEditor() {
                                                         ? 'Save first'
                                                         : !studioCreativeSet
                                                           ? 'Create a Versions set first'
-                                                          : 'Generate color and scene variants with AI'
+                                                          : 'Advanced: pick colors, scenes, formats, and combinations'
                                                 }
                                             >
-                                                <SparklesIcon className="h-4 w-4 shrink-0 text-amber-400" /> Generate versions…
+                                                <SparklesIcon className="h-4 w-4 shrink-0 text-amber-400" /> Advanced version setup…
                                             </button>
                                             <button type="button" onClick={() => { setLeftPanel(null); compositionId && void deleteCompositionById(compositionId) }} disabled={!compositionId || compositionDeleteBusy} className="flex w-full items-center gap-2.5 rounded-md px-3 py-1.5 text-sm text-red-400 hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed">
                                                 <TrashIcon className="h-4 w-4 shrink-0" /> Delete
@@ -6046,7 +6882,7 @@ export default function AssetEditor() {
                                             <button type="button" onClick={() => { setLeftPanel(null); setUiMode('preview') }} className="flex w-full items-center gap-2.5 rounded-md px-3 py-1.5 text-sm text-gray-200 hover:bg-gray-800">
                                                 <EyeIcon className="h-4 w-4 shrink-0 text-gray-400" /> Preview
                                             </button>
-                                            <button type="button" onClick={() => { setLeftPanel('history'); if (compositionId) void refreshVersions() }} className="flex w-full items-center gap-2.5 rounded-md px-3 py-1.5 text-sm text-gray-200 hover:bg-gray-800">
+                                            <button type="button" onClick={() => { setLeftPanel('history'); if (compositionId) { void refreshVersions(); void refreshCompositionAnimations() } }} className="flex w-full items-center gap-2.5 rounded-md px-3 py-1.5 text-sm text-gray-200 hover:bg-gray-800">
                                                 <ClockIcon className="h-4 w-4 shrink-0 text-gray-400" /> History
                                             </button>
                                             <button type="button" onClick={() => { setLeftPanel(null); setCompareOpen(true) }} disabled={!compositionId || versions.length < 2} className="flex w-full items-center gap-2.5 rounded-md px-3 py-1.5 text-sm text-gray-200 hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed">
@@ -6421,6 +7257,218 @@ export default function AssetEditor() {
                                             {compositionLoadError && (
                                                 <p className="px-2 py-4 text-red-400">{compositionLoadError}</p>
                                             )}
+                                            <div className="mt-2 border-t border-gray-700 pt-3">
+                                                <h3 className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-wide text-gray-500">Animations</h3>
+                                                {studioCreativeSet ? (
+                                                    <p className="px-2 pb-1 text-[9px] leading-snug text-gray-600">
+                                                        Video jobs for this composition live in the{' '}
+                                                        <span className="font-medium text-gray-400">Versions</span> bar below (film tiles ahead of
+                                                        your sizes). Click a tile for status, typical wait, and credits.
+                                                    </p>
+                                                ) : (
+                                                    <>
+                                                        <p className="px-2 pb-1 text-[9px] leading-snug text-gray-600">
+                                                            Each job keeps one finished video; safe retries reuse that row when possible.
+                                                        </p>
+                                                        {animationsLoading && compositionAnimations.length === 0 && compositionId && (
+                                                            <div className="flex items-center gap-2 px-2 py-3 text-gray-400" role="status" aria-busy="true">
+                                                                <ArrowPathIcon className="h-4 w-4 shrink-0 animate-spin text-indigo-400" />
+                                                                Loading animations…
+                                                            </div>
+                                                        )}
+                                                        {!compositionId && <p className="px-2 py-2 text-gray-500">Save the composition first.</p>}
+                                                        {compositionId && !animationsLoading && compositionAnimations.length === 0 && (
+                                                            <p className="px-2 py-2 text-gray-500">No animations yet.</p>
+                                                        )}
+                                                        {compositionAnimations.map((a) => {
+                                                    const badgeClass =
+                                                        a.status === 'complete'
+                                                            ? 'bg-emerald-900/40 text-emerald-200 ring-1 ring-emerald-800/60'
+                                                            : a.status === 'failed'
+                                                              ? 'bg-red-950/50 text-red-200 ring-1 ring-red-900/50'
+                                                              : a.status === 'canceled'
+                                                                ? 'bg-gray-800 text-gray-400 ring-1 ring-gray-700'
+                                                                : a.status === 'rendering' || a.status === 'submitting'
+                                                                  ? 'bg-amber-950/50 text-amber-100 ring-1 ring-amber-900/40'
+                                                                  : a.status === 'processing' || a.status === 'downloading'
+                                                                    ? 'bg-sky-950/40 text-sky-100 ring-1 ring-sky-900/40'
+                                                                    : a.status === 'finalizing'
+                                                                      ? 'bg-violet-950/40 text-violet-100 ring-1 ring-violet-900/40'
+                                                                      : 'bg-gray-800 text-gray-300 ring-1 ring-gray-700'
+                                                    const statusLabel =
+                                                        a.status === 'queued'
+                                                            ? 'Queued'
+                                                            : a.status === 'rendering'
+                                                              ? 'Rendering'
+                                                              : a.status === 'submitting'
+                                                                ? 'Submitting'
+                                                                : a.status === 'processing'
+                                                                  ? 'Processing'
+                                                                  : a.status === 'downloading'
+                                                                    ? 'Downloading'
+                                                                    : a.status === 'finalizing'
+                                                                      ? 'Finalizing'
+                                                                      : a.status === 'complete'
+                                                                        ? 'Complete'
+                                                                        : a.status === 'failed'
+                                                                          ? 'Failed'
+                                                                          : a.status === 'canceled'
+                                                                            ? 'Canceled'
+                                                                            : a.status
+                                                    const retryLabel =
+                                                        a.retry_kind === 'poll_only'
+                                                            ? 'Resume polling'
+                                                            : a.retry_kind === 'finalize_only'
+                                                              ? 'Retry finalize'
+                                                              : 'Retry'
+                                                    const submitFrameOrigin =
+                                                        a.provider_submission_used_frame ??
+                                                        (typeof a.canonical_frame?.provider_submit_start_image_origin === 'string'
+                                                            ? a.canonical_frame.provider_submit_start_image_origin
+                                                            : typeof a.canonical_frame?.canonical_source_render_origin === 'string'
+                                                              ? a.canonical_frame.canonical_source_render_origin
+                                                              : null)
+                                                    const startFrameHint =
+                                                        submitFrameOrigin === 'server_locked_state'
+                                                            ? 'Start frame from locked server render'
+                                                            : submitFrameOrigin === 'client_snapshot'
+                                                              ? 'Start frame from editor snapshot'
+                                                              : null
+                                                    const driftLevel = a.drift_level ?? (a.canonical_frame?.drift_level as string | undefined)
+                                                    const driftQualityLabel =
+                                                        driftLevel === 'high'
+                                                            ? 'Start frame: high drift vs editor'
+                                                            : driftLevel === 'medium'
+                                                              ? 'Start frame: moderate drift'
+                                                              : driftLevel === 'low'
+                                                                ? 'Start frame: aligned'
+                                                                : null
+                                                    const driftStatus = a.frame_drift_status ?? (a.canonical_frame?.frame_drift_status as string | undefined)
+                                                    const driftSummary =
+                                                        typeof a.drift_summary === 'string'
+                                                            ? a.drift_summary
+                                                            : typeof a.canonical_frame?.drift_summary === 'string'
+                                                              ? a.canonical_frame.drift_summary
+                                                              : null
+                                                    const finalizeNote =
+                                                        a.finalize_last_outcome === 'finalize_reused_existing_output' ||
+                                                        a.finalize_last_outcome === 'finalize_duplicate_prevented'
+                                                            ? a.finalize_reuse_mode === 'fingerprint'
+                                                                ? 'Same video already saved; skipped duplicate finalize.'
+                                                                : 'Reused existing video (safe retry).'
+                                                            : null
+                                                    const renderEngineHint =
+                                                        a.status === 'complete' && a.render_engine && a.render_engine !== 'client_snapshot'
+                                                            ? a.render_engine === 'browser_headless_official'
+                                                                ? 'Locked frame: official Playwright'
+                                                                : a.render_engine === 'browser_headless'
+                                                                  ? 'Locked frame: browser (legacy command)'
+                                                                  : a.render_engine === 'server_basic'
+                                                                    ? 'Locked frame: server (basic)'
+                                                                    : 'Locked frame: server render'
+                                                            : null
+                                                    const driftDecision = a.drift_decision as { drift_blocked?: boolean } | null | undefined
+                                                    const driftGateFailed =
+                                                        a.status === 'failed' && a.error_code === 'drift_blocked' && driftDecision?.drift_blocked
+                                                    return (
+                                                        <div key={a.id} className="mb-2 rounded-md border border-gray-800 bg-gray-900/40 px-2 py-2">
+                                                            <div className="flex items-center justify-between gap-2">
+                                                                <span className="truncate text-[11px] font-medium text-gray-200">Job #{a.id}</span>
+                                                                <span
+                                                                    className={`shrink-0 rounded px-1.5 py-[1px] text-[9px] font-semibold uppercase tracking-wide ${badgeClass}`}
+                                                                >
+                                                                    {statusLabel}
+                                                                </span>
+                                                            </div>
+                                                            {a.status === 'complete' && (
+                                                                <p className="mt-1 text-[10px] text-gray-500">
+                                                                    {a.duration_seconds}s · {a.motion_preset ?? '—'} · {a.provider}
+                                                                </p>
+                                                            )}
+                                                            {startFrameHint && (
+                                                                <p className="mt-0.5 text-[9px] leading-snug text-gray-500" title="Which image the provider received as the animation start frame.">
+                                                                    {startFrameHint}
+                                                                </p>
+                                                            )}
+                                                            {driftQualityLabel && (
+                                                                <p
+                                                                    className={`mt-0.5 text-[9px] leading-snug ${
+                                                                        driftLevel === 'high' ? 'text-rose-200/90' : driftLevel === 'medium' ? 'text-amber-200/85' : 'text-emerald-200/75'
+                                                                    }`}
+                                                                    title="Compares server-locked frame to your editor snapshot."
+                                                                >
+                                                                    {driftQualityLabel}
+                                                                </p>
+                                                            )}
+                                                            {driftStatus === 'mismatch' && driftSummary && (
+                                                                <p
+                                                                    className="mt-0.5 text-[9px] leading-snug text-amber-200/85"
+                                                                    title="Server-locked render differed from the editor snapshot (often fonts or embedded images)."
+                                                                >
+                                                                    Snapshot drift: {driftSummary.length > 120 ? `${driftSummary.slice(0, 120)}…` : driftSummary}
+                                                                </p>
+                                                            )}
+                                                            {finalizeNote && (
+                                                                <p className="mt-0.5 text-[9px] text-emerald-200/80">{finalizeNote}</p>
+                                                            )}
+                                                            {renderEngineHint && (
+                                                                <p className="mt-0.5 text-[9px] text-gray-500" title={a.renderer_version ? `Renderer ${a.renderer_version}` : undefined}>
+                                                                    {renderEngineHint}
+                                                                </p>
+                                                            )}
+                                                            {driftGateFailed && (
+                                                                <p className="mt-0.5 text-[9px] text-amber-200/80">Drift policy blocked submission.</p>
+                                                            )}
+                                                            {(a.status === 'complete' || a.status === 'failed') && typeof a.credits_charged === 'boolean' && (
+                                                                <p className="mt-0.5 text-[9px] text-gray-500">
+                                                                    Credits: {a.credits_charged ? `charged (${a.credits_charged_units ?? 0})` : 'not charged'}
+                                                                </p>
+                                                            )}
+                                                            {a.status === 'complete' && a.output?.asset_view_url && (
+                                                                <video
+                                                                    src={a.output.asset_view_url}
+                                                                    className="mt-2 w-full rounded border border-gray-700"
+                                                                    controls
+                                                                    playsInline
+                                                                />
+                                                            )}
+                                                            {a.status === 'failed' && a.user_facing_error && (
+                                                                <p className="mt-1 text-[10px] leading-snug text-red-300/90">{a.user_facing_error}</p>
+                                                            )}
+                                                            {a.status === 'failed' && a.retry_kind && (
+                                                                <p className="mt-0.5 text-[9px] text-gray-500">
+                                                                    Recovery:{' '}
+                                                                    {a.retry_kind === 'finalize_only'
+                                                                        ? 'Re-download and finalize the same provider result.'
+                                                                        : a.retry_kind === 'poll_only'
+                                                                          ? 'Resume provider polling only.'
+                                                                          : 'Re-run from snapshot (new start frame).'}
+                                                                </p>
+                                                            )}
+                                                            {a.status === 'failed' && (
+                                                                <button
+                                                                    type="button"
+                                                                    className="mt-2 w-full rounded bg-gray-700 px-2 py-1 text-[10px] font-medium text-gray-200 hover:bg-gray-600"
+                                                                    onClick={() => {
+                                                                        void postStudioAnimationRetry(a.id)
+                                                                            .then(() => refreshCompositionAnimations())
+                                                                            .catch((e: unknown) =>
+                                                                                setActivityToast(e instanceof Error ? e.message : 'Retry failed')
+                                                                            )
+                                                                    }}
+                                                                >
+                                                                    {retryLabel}
+                                                                </button>
+                                                            )}
+                                                        </div>
+                                                    )
+                                                })}
+                                                    </>
+                                                )}
+                                            </div>
+
+                                            <div className="my-2 border-t border-gray-700 pt-2 text-[10px] font-semibold uppercase tracking-wide text-gray-500">Versions</div>
+
                                             {compositionId && versions.map((v) => {
                                                 const isAutosave = v.kind === 'autosave'
                                                 return (
@@ -7349,45 +8397,135 @@ export default function AssetEditor() {
                 </main>
                 {uiMode === 'edit' && studioCreativeSet && compositionId && (
                     <>
-                        <VersionsRail
-                            creativeSet={studioCreativeSet}
-                            activeCompositionId={compositionId}
-                            onSelectComposition={(id) => {
-                                void switchToSiblingComposition(id)
-                            }}
-                            onDuplicateFromCurrent={() => {
-                                void duplicateStudioVariant()
-                            }}
-                            duplicateBusy={studioCreativeSetDuplicateBusy}
-                            onRetryVersion={(itemId) => {
-                                void retryStudioGenerationItem(itemId)
-                            }}
-                            retryBusyItemId={studioRetryGenerationItemBusy}
-                        />
-                        <ApplyScopeBar
-                            creativeSetId={studioCreativeSet.id}
-                            sourceCompositionId={compositionId}
-                            applyScope={studioApplyScope}
-                            onApplyScopeChange={setStudioApplyScope}
-                            selectedLayer={selectedLayer}
-                            siblingCompositionCount={Math.max(
-                                0,
-                                studioCreativeSet.variants.filter((v) => v.composition_id !== compositionId).length
-                            )}
-                            onNotice={(msg) => setActivityToast(msg)}
-                            onCreativeSetUpdated={(cs) => setStudioCreativeSet(cs)}
-                        />
+                        {studioVersionsPanelOpen ? (
+                            <>
+                                <VersionsRail
+                                    creativeSet={studioCreativeSet}
+                                    activeCompositionId={compositionId}
+                                    onSelectComposition={(id) => {
+                                        void switchToSiblingComposition(id)
+                                    }}
+                                    onCreateVersions={() => setVersionBuilderOpen(true)}
+                                    onDuplicateFromCurrent={() => {
+                                        void duplicateStudioVariant()
+                                    }}
+                                    duplicateBusy={studioCreativeSetDuplicateBusy}
+                                    onRetryVersion={(itemId) => {
+                                        void retryStudioGenerationItem(itemId)
+                                    }}
+                                    retryBusyItemId={studioRetryGenerationItemBusy}
+                                    applyScope={studioApplyScope}
+                                    pickMode={studioVersionPickMode}
+                                    selectedCompositionIds={studioApplySelectedCompositionIds}
+                                    onTogglePickComposition={toggleStudioPickComposition}
+                                    onSelectAllSiblingCompositions={selectAllStudioSiblingCompositions}
+                                    onClearPickedCompositions={() => setStudioApplySelectedCompositionIds([])}
+                                    onReplacePickedCompositions={(ids) => setStudioApplySelectedCompositionIds(ids)}
+                                    onPickModeChange={setStudioVersionPickMode}
+                                    packNewcomerCompositionIds={studioPackNewcomerCompositionIds}
+                                    unviewedNewcomerCompositionIds={studioUnviewedNewcomerCompositionIds}
+                                    heroCompositionId={studioCreativeSet.hero_composition_id ?? null}
+                                    onReviewNextNew={handleReviewNextStudioNewcomer}
+                                    onToggleHero={handleToggleStudioHero}
+                                    heroBusyCompositionId={studioHeroPatchBusy ? 'patch' : null}
+                                    postCreateBanner={studioVersionsPostCreateBanner}
+                                    railScrollRef={studioVersionsRailScrollRef}
+                                    studioHandoff={studioVersionsHandoffChrome}
+                                    onCollapsePanel={() => setStudioVersionsPanelOpen(false)}
+                                    compositionAnimations={compositionAnimations}
+                                    compositionAnimationsLoading={animationsLoading}
+                                    selectedStudioAnimationJobId={studioAnimationDetailJobId}
+                                    onSelectStudioAnimationJob={(jobId) => setStudioAnimationDetailJobId(jobId)}
+                                />
+                                <ApplyScopeBar
+                                    creativeSetId={studioCreativeSet.id}
+                                    sourceCompositionId={compositionId}
+                                    applyScope={studioApplyScope}
+                                    onApplyScopeChange={handleStudioApplyScopeChange}
+                                    selectedTargetCompositionIds={studioApplySelectedCompositionIds}
+                                    selectedLayer={selectedLayer}
+                                    siblingCompositionCount={Math.max(
+                                        0,
+                                        studioCreativeSet.variants.filter((v) => v.composition_id !== compositionId)
+                                            .length
+                                    )}
+                                    onNotice={(msg) => setActivityToast(msg)}
+                                    onCreativeSetUpdated={(cs) => setStudioCreativeSet(cs)}
+                                />
+                            </>
+                        ) : (
+                            <button
+                                type="button"
+                                data-testid="studio-versions-panel-reopen"
+                                onClick={() => setStudioVersionsPanelOpen(true)}
+                                className="flex shrink-0 items-center justify-between gap-3 border-t border-gray-800 bg-gray-950 px-3 py-1.5 text-left transition-colors hover:bg-gray-900"
+                                title="Show versions panel"
+                            >
+                                <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">
+                                    Versions
+                                </span>
+                                <span className="flex items-center gap-1.5 text-[11px] font-medium text-gray-300">
+                                    <span className="tabular-nums">{studioCreativeSet.variants.length} in set</span>
+                                    <ChevronUpIcon className="h-4 w-4 shrink-0 text-gray-400" aria-hidden />
+                                </span>
+                            </button>
+                        )}
                     </>
+                )}
+                {versionBuilderOpen && studioCreativeSet && compositionId && (
+                    <VersionBuilderModal
+                        open
+                        onClose={() => setVersionBuilderOpen(false)}
+                        onChooseFormatPack={handleVersionBuilderFormatPack}
+                        onChooseColorPack={handleVersionBuilderColorPack}
+                        onChooseScenePack={handleVersionBuilderScenePack}
+                        onChooseDuplicateCurrent={handleVersionBuilderDuplicate}
+                        duplicateBusy={studioCreativeSetDuplicateBusy}
+                        packBusy={versionBuilderPackBusy}
+                        onChooseAdvanced={handleVersionBuilderAdvanced}
+                        onChooseAnimateVideo={handleVersionBuilderAnimateVideo}
+                    />
                 )}
                 {generateVersionsModalOpen && studioCreativeSet && compositionId && (
                     <GenerateStudioVersionsModal
+                        key={generateVersionsModalMountKey}
                         open
                         creativeSetId={studioCreativeSet.id}
                         sourceCompositionId={compositionId}
-                        onClose={() => setGenerateVersionsModalOpen(false)}
+                        initialAxes={generateVersionsPrefill}
+                        onClose={() => {
+                            setGenerateVersionsModalOpen(false)
+                            setGenerateVersionsPrefill(null)
+                        }}
                         onGenerationQueued={(jobId) => {
                             setStudioGenerationPollJobId(jobId)
-                            setActivityToast('Generating versions…')
+                            setActivityToast('Version generation started — new tiles will appear in the rail as each finishes.')
+                        }}
+                    />
+                )}
+                {studioAnimateModalOpen && compositionId && (
+                    <StudioAnimateCompositionModal
+                        open
+                        compositionId={compositionId}
+                        latestCompositionVersionId={versions[0]?.id ?? null}
+                        document={document}
+                        textLayerCount={document.layers.filter((l) => l.type === 'text').length}
+                        getStageEl={() => stageRef.current}
+                        onClose={() => setStudioAnimateModalOpen(false)}
+                        onQueued={(_jobId) => {
+                            setActivityToast('Animation started…')
+                            setStudioVersionsPanelOpen(true)
+                            void refreshCompositionAnimations()
+                        }}
+                    />
+                )}
+                {studioAnimationDetailJobId && (
+                    <StudioAnimationJobDetailDialog
+                        open
+                        job={compositionAnimations.find((j) => j.id === studioAnimationDetailJobId) ?? null}
+                        onClose={() => setStudioAnimationDetailJobId(null)}
+                        onJobsUpdated={() => {
+                            void refreshCompositionAnimations()
                         }}
                     />
                 )}
@@ -9402,25 +10540,29 @@ export default function AssetEditor() {
                                                     const primary = brandContext?.typography?.primary_font?.trim()
                                                     const primaryCanvas = effectivePrimaryFontFamily(brandContext)
                                                     const secondary = brandContext?.typography?.secondary_font?.trim()
-                                                    const faceFamilies = uniqueFontFamiliesFromFaceSources(
-                                                        brandContext?.typography?.font_face_sources
-                                                    )
-                                                    const extraFamilies = faceFamilies.filter((f) => {
-                                                        if (primaryCanvas && fontFamilyMatches(f, primaryCanvas)) {
-                                                            return false
-                                                        }
-                                                        if (primary && fontFamilyMatches(f, primary)) {
-                                                            return false
-                                                        }
-                                                        if (secondary && fontFamilyMatches(f, secondary)) {
-                                                            return false
-                                                        }
-                                                        return true
-                                                    })
+                                                    const faceSources = brandContext?.typography?.font_face_sources ?? []
+                                                    const dnaFaceSources = faceSources.filter((s) => s.source !== 'library')
+                                                    const libraryFaceSources = faceSources.filter((s) => s.source === 'library')
+                                                    const extraFromSources = (sources: typeof faceSources) =>
+                                                        uniqueFontFamiliesFromFaceSources(sources).filter((f) => {
+                                                            if (primaryCanvas && fontFamilyMatches(f, primaryCanvas)) {
+                                                                return false
+                                                            }
+                                                            if (primary && fontFamilyMatches(f, primary)) {
+                                                                return false
+                                                            }
+                                                            if (secondary && fontFamilyMatches(f, secondary)) {
+                                                                return false
+                                                            }
+                                                            return true
+                                                        })
+                                                    const extraDnaFamilies = extraFromSources(dnaFaceSources)
+                                                    const libraryFamilies = extraFromSources(libraryFaceSources)
                                                     const listed = [
                                                         primaryCanvas,
                                                         secondary,
-                                                        ...extraFamilies,
+                                                        ...extraDnaFamilies,
+                                                        ...libraryFamilies,
                                                         DEFAULT_TEXT_FONT_FAMILY,
                                                         'system-ui, -apple-system, sans-serif',
                                                         'Georgia, serif',
@@ -9444,28 +10586,43 @@ export default function AssetEditor() {
                                                                     {firstFontFamilyToken(cur)} (current)
                                                                 </option>
                                                             )}
-                                                            {primaryCanvas && (
-                                                                <option value={primaryCanvas}>Primary brand font</option>
-                                                            )}
-                                                            {secondary &&
-                                                                !fontFamilyMatches(
-                                                                    secondary,
-                                                                    primaryCanvas ?? primary ?? ''
-                                                                ) && (
-                                                                    <option value={secondary}>Brand secondary</option>
+                                                            <optgroup label="Brand guidelines">
+                                                                {primaryCanvas && (
+                                                                    <option value={primaryCanvas}>
+                                                                        Primary brand font
+                                                                    </option>
                                                                 )}
-                                                            {extraFamilies.map((fam) => (
-                                                                <option key={fam} value={fam}>
-                                                                    {firstFontFamilyToken(fam)}
+                                                                {secondary &&
+                                                                    !fontFamilyMatches(
+                                                                        secondary,
+                                                                        primaryCanvas ?? primary ?? ''
+                                                                    ) && (
+                                                                        <option value={secondary}>Brand secondary</option>
+                                                                    )}
+                                                                {extraDnaFamilies.map((fam) => (
+                                                                    <option key={`dna:${fam}`} value={fam}>
+                                                                        {firstFontFamilyToken(fam)}
+                                                                    </option>
+                                                                ))}
+                                                            </optgroup>
+                                                            {libraryFamilies.length > 0 ? (
+                                                                <optgroup label="Uploaded fonts (library)">
+                                                                    {libraryFamilies.map((fam) => (
+                                                                        <option key={`lib:${fam}`} value={fam}>
+                                                                            {firstFontFamilyToken(fam)}
+                                                                        </option>
+                                                                    ))}
+                                                                </optgroup>
+                                                            ) : null}
+                                                            <optgroup label="System fonts">
+                                                                <option value={DEFAULT_TEXT_FONT_FAMILY}>
+                                                                    Inter (default)
                                                                 </option>
-                                                            ))}
-                                                            <option value={DEFAULT_TEXT_FONT_FAMILY}>
-                                                                Inter (default)
-                                                            </option>
-                                                            <option value="system-ui, -apple-system, sans-serif">
-                                                                System UI
-                                                            </option>
-                                                            <option value="Georgia, serif">Georgia</option>
+                                                                <option value="system-ui, -apple-system, sans-serif">
+                                                                    System UI
+                                                                </option>
+                                                                <option value="Georgia, serif">Georgia</option>
+                                                            </optgroup>
                                                         </>
                                                     )
                                                 })()}

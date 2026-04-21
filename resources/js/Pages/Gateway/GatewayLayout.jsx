@@ -11,6 +11,7 @@ export default function GatewayLayout({ children, onSwitchOpen }) {
     /** Show Jackpot attribution only after sign-in when workspace (tenant/brand) theme is active. */
     const showPoweredBy = isAuthenticated && !isDefault
     const canSwitch = context?.is_multi_company || context?.is_multi_brand
+    const singleBrandWithLogo = Boolean(theme?.single_brand_tenant && (theme?.logo || theme?.logo_dark))
 
     return (
         <div
@@ -57,7 +58,7 @@ export default function GatewayLayout({ children, onSwitchOpen }) {
                 {/* Footer */}
                 <footer className="px-8 py-6 text-center">
                     <p className="text-[11px] text-white/25 tracking-widest uppercase">
-                        {theme?.name || 'Jackpot'} &middot; Brand asset manager
+                        {singleBrandWithLogo ? 'Brand asset manager' : `${theme?.name || 'Jackpot'} · Brand asset manager`}
                     </p>
                     {showPoweredBy && (
                         <p className="text-[10px] text-white/15 tracking-widest uppercase mt-1">

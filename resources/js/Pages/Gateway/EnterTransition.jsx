@@ -45,6 +45,9 @@ export default function EnterTransition({ suppressAutoRedirect = false }) {
 
     const primary = theme?.colors?.primary || '#6366f1'
     const isJackpotDefault = theme?.mode === 'default'
+    const singleBrand = Boolean(theme?.single_brand_tenant)
+    const hasLogo = Boolean(theme?.logo)
+    const compactIdentity = singleBrand && !isJackpotDefault
 
     // Instant mode: minimal fade with brand presence
     if (isInstant) {
@@ -63,6 +66,15 @@ export default function EnterTransition({ suppressAutoRedirect = false }) {
                             className="h-8 w-auto max-w-[min(100%,14rem)] mb-3"
                             decoding="async"
                         />
+                    ) : compactIdentity && hasLogo ? (
+                        <img
+                            src={theme.logo}
+                            alt={theme.name || 'Brand'}
+                            className="h-10 w-auto max-w-[min(100%,16rem)] mb-3 object-contain"
+                            decoding="async"
+                        />
+                    ) : compactIdentity && !hasLogo ? (
+                        <p className="text-lg font-semibold tracking-tight text-white/95 mb-3">{theme?.name || 'Jackpot'}</p>
                     ) : (
                         <div
                             className="h-12 w-12 rounded-xl flex items-center justify-center mb-3"
@@ -78,7 +90,7 @@ export default function EnterTransition({ suppressAutoRedirect = false }) {
                         </div>
                     )}
                     <p className="text-xs text-white/40 tracking-wide">
-                        Entering {theme?.name || 'Jackpot'}
+                        {compactIdentity && hasLogo ? 'Entering workspace' : `Entering ${theme?.name || 'Jackpot'}`}
                     </p>
                 </div>
             </div>
@@ -118,6 +130,20 @@ export default function EnterTransition({ suppressAutoRedirect = false }) {
                             className="h-16 w-auto max-w-full sm:h-20 md:h-24 lg:h-28 mx-auto mb-6 object-contain"
                             decoding="async"
                         />
+                    ) : compactIdentity && hasLogo ? (
+                        <img
+                            src={theme.logo}
+                            alt={theme.name || 'Brand'}
+                            className="h-24 md:h-36 lg:h-44 w-auto max-w-[min(100%,28rem)] object-contain mx-auto mb-6"
+                            decoding="async"
+                        />
+                    ) : compactIdentity && !hasLogo ? (
+                        <h1
+                            className="text-5xl md:text-6xl font-semibold tracking-tight leading-tight text-white/95 mb-6 transition-opacity duration-500"
+                            style={{ opacity: stage !== 'init' ? 1 : 0 }}
+                        >
+                            {theme?.name || 'JACKPOT'}
+                        </h1>
                     ) : theme?.logo ? (
                         <img
                             src={theme.logo}
@@ -138,7 +164,7 @@ export default function EnterTransition({ suppressAutoRedirect = false }) {
                     )}
                 </div>
 
-                {!isJackpotDefault && (
+                {!isJackpotDefault && !(compactIdentity && hasLogo) && (
                     <h1
                         className="text-5xl md:text-6xl font-semibold tracking-tight leading-tight text-white/95 mb-2 transition-opacity duration-500"
                         style={{ opacity: stage !== 'init' ? 1 : 0 }}
@@ -147,18 +173,20 @@ export default function EnterTransition({ suppressAutoRedirect = false }) {
                     </h1>
                 )}
 
-                <p
-                    className="text-lg text-white/60 mb-2 transition-opacity duration-500 delay-100"
-                    style={{ opacity: stage !== 'init' ? 1 : 0 }}
-                >
-                    {theme?.tagline || 'Brand asset manager'}
-                </p>
+                {!(compactIdentity && hasLogo) && (
+                    <p
+                        className="text-lg text-white/60 mb-2 transition-opacity duration-500 delay-100"
+                        style={{ opacity: stage !== 'init' ? 1 : 0 }}
+                    >
+                        {theme?.tagline || 'Brand asset manager'}
+                    </p>
+                )}
 
                 <p
                     className="text-xs text-white/40 mb-10 transition-opacity duration-500 delay-150 tracking-wide"
                     style={{ opacity: stage !== 'init' ? 1 : 0 }}
                 >
-                    Entering {theme?.name || 'Jackpot'}
+                    {compactIdentity && hasLogo ? 'Entering workspace' : `Entering ${theme?.name || 'Jackpot'}`}
                 </p>
 
                 {/* Progress bar */}

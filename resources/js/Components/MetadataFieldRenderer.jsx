@@ -135,39 +135,45 @@ export default function MetadataFieldRenderer({ field, value, onChange, hasError
         case 'multiselect':
             return (
                 <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                    <label className="mb-2 block text-sm font-medium text-gray-700">
                         {field.label}
-                        {field.required && <span className="text-red-500 ml-1">*</span>}
+                        {field.required && <span className="ml-1 text-red-500">*</span>}
                     </label>
-                    <div className="space-y-2">
+                    <ul
+                        className="max-h-64 divide-y divide-gray-100 overflow-y-auto rounded-lg border border-gray-200 bg-gradient-to-b from-white to-slate-50/80 shadow-sm"
+                        aria-label={field.label}
+                    >
                         {field.options?.map((option) => {
                             const isSelected = multiselectValues.includes(option.value);
                             return (
-                                <label
-                                    key={option.value}
-                                    className="flex items-center"
-                                >
-                                    <input
-                                        type="checkbox"
-                                        checked={isSelected}
-                                        onChange={(e) => {
-                                            const newValues = e.target.checked
-                                                ? [...multiselectValues, option.value]
-                                                : multiselectValues.filter(v => v !== option.value);
-                                            handleChange(newValues);
-                                        }}
-                                        disabled={disabled}
-                                        className={`h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded ${
-                                            disabled ? 'cursor-not-allowed opacity-60' : ''
-                                        }`}
-                                    />
-                                    <span className="ml-2 text-sm text-gray-700">
-                                        {option.label}
-                                    </span>
-                                </label>
+                                <li key={option.value}>
+                                    <label
+                                        className={`flex cursor-pointer items-start gap-3 px-3 py-2.5 transition-colors ${
+                                            isSelected ? 'bg-indigo-50/60' : 'hover:bg-white/90'
+                                        } ${disabled ? 'cursor-not-allowed opacity-60' : ''}`}
+                                    >
+                                        <input
+                                            type="checkbox"
+                                            checked={isSelected}
+                                            onChange={(e) => {
+                                                const newValues = e.target.checked
+                                                    ? [...multiselectValues, option.value]
+                                                    : multiselectValues.filter((v) => v !== option.value);
+                                                handleChange(newValues);
+                                            }}
+                                            disabled={disabled}
+                                            className={`mt-0.5 h-4 w-4 shrink-0 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 ${
+                                                disabled ? 'cursor-not-allowed' : ''
+                                            }`}
+                                        />
+                                        <span className="min-w-0 flex-1 text-sm leading-snug text-gray-800">
+                                            {option.label}
+                                        </span>
+                                    </label>
+                                </li>
                             );
                         })}
-                    </div>
+                    </ul>
                     {hasError && (
                         <p className="mt-1 text-xs text-red-600">At least one option must be selected</p>
                     )}

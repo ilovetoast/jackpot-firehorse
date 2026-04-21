@@ -12,6 +12,7 @@ export default function LogoMark({ name, logo, size = 'md', className = '' }) {
     const resolvedLogo = logo ?? theme?.logo_dark ?? theme?.logo
     const primary = theme?.colors?.primary || '#6366f1'
     const letter = resolvedName.charAt(0).toUpperCase()
+    const hideAdjacentName = Boolean(theme?.single_brand_tenant && resolvedLogo)
 
     const sizes = {
         sm: { pill: 'h-8 w-8 rounded-lg', icon: 'text-sm', img: 'h-5', text: 'text-sm', wordmark: 'h-7 sm:h-8' },
@@ -54,9 +55,9 @@ export default function LogoMark({ name, logo, size = 'md', className = '' }) {
                     </span>
                 )}
             </div>
-            <span className={`${s.text} font-semibold tracking-tight text-white`}>
-                {resolvedName}
-            </span>
+            {!hideAdjacentName && (
+                <span className={`${s.text} font-semibold tracking-tight text-white`}>{resolvedName}</span>
+            )}
         </div>
     )
 }

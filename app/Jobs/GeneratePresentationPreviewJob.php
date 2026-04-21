@@ -3,12 +3,13 @@
 namespace App\Jobs;
 
 use App\Enums\AITaskType;
+use App\Exceptions\PlanLimitExceededException;
 use App\Models\Asset;
 use App\Models\AssetVersion;
-use App\Exceptions\PlanLimitExceededException;
 use App\Services\AIService;
 use App\Services\AiUsageService;
 use App\Services\EditorGenerativeImagePersistService;
+use App\Services\FreePlanImageWatermarkService;
 use App\Services\PresentationPreviewPromptBuilder;
 use App\Services\ThumbnailEnhancementAiTaskRecorder;
 use App\Services\ThumbnailGenerationService;
@@ -47,6 +48,7 @@ class GeneratePresentationPreviewJob implements ShouldQueue
         PresentationPreviewPromptBuilder $promptBuilder,
         EditorGenerativeImagePersistService $imagePersist,
         AiUsageService $aiUsageService,
+        FreePlanImageWatermarkService $freePlanWatermark,
     ): void {
         $asset = Asset::query()
             ->with(['storageBucket', 'tenant', 'category', 'currentVersion'])
@@ -252,6 +254,9 @@ class GeneratePresentationPreviewJob implements ShouldQueue
         $presentationTemp = null;
         try {
             $bytes = $imagePersist->binaryFromProviderReference($imageRef);
+            if ($tenant !== null) {
+                $bytes = $freePlanWatermark->applyIfEligible($tenant, $bytes);
+            }
             $presentationTemp = tempnam(sys_get_temp_dir(), 'pres_ai_');
             if ($presentationTemp === false) {
                 throw new \RuntimeException('Could not allocate temp file for presentation output');

@@ -552,8 +552,7 @@ export function FilterValueInput({
                     value={Array.isArray(value) ? value : []}
                     onChange={onChange}
                     placeholder="Any"
-                    multiple={true}
-                    size={Math.min((options?.length || 0) + 1, 5)}
+                    multiple
                     className={inputClass}
                 />
             )

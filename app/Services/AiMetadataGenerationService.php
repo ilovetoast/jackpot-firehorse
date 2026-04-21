@@ -618,9 +618,12 @@ class AiMetadataGenerationService
 
         $prompt .= "GENERAL TAGS (for search & discovery):\n";
         $prompt .= "Provide concise tags (1–3 words each) that help users find this asset in the library.\n";
-        $prompt .= "Prefer concrete, searchable terms: subject, setting, style, mood, notable people or objects, production type when visible.\n";
+        $prompt .= "Prefer concrete, searchable terms: visible products, packaging, beverages, printed copy, logos, props, location type, and composition when clear.\n";
         $prompt .= "Do not use the tag \"photo shoot\" or \"photoshoot\" — category already covers photography; tag specific subjects, people, objects, and visible settings instead.\n";
-        $prompt .= "Use lowercase; use short phrases where helpful (e.g. \"on location\", \"model\", \"product\"); avoid punctuation.\n";
+        $prompt .= "Do NOT use the tag \"model\" for illustrations, historical figures, silhouettes on labels, mannequins, or background artwork — only when a clearly identifiable live person is a deliberate photographic subject.\n";
+        $prompt .= "Do NOT use \"fashion\" unless clothing, footwear, or wearable apparel is clearly the main subject (not merely a premium layout, spirits, cosmetics, or packaging).\n";
+        $prompt .= "For sell sheets, one-sheets, shelf talkers, case cards, and product hero shots: tag the product type (e.g. bourbon, whiskey, bottle), layout role (sell sheet, product photography), and readable brand or product names — not genre guesses.\n";
+        $prompt .= "Use lowercase; use short phrases where helpful (e.g. \"on location\", \"product bottle\", \"sell sheet\"); avoid punctuation.\n";
         $prompt .= "Do not repeat the category name unless it adds specificity.\n\n";
 
         $prompt .= "REQUIREMENTS:\n";
@@ -662,7 +665,10 @@ class AiMetadataGenerationService
         $prompt .= "- Avoid abstract terms (e.g. \"modern\", \"professional\", \"aesthetic\", \"branding\")\n";
         $prompt .= "- Avoid subjective descriptors (e.g. \"beautiful\", \"clean\", \"bold\")\n";
         $prompt .= "- Prefer concrete nouns and simple descriptors\n";
-        $prompt .= "- Tags should help someone FIND this exact image\n\n";
+        $prompt .= "- Tags should help someone FIND this exact image\n";
+        $prompt .= "- Never use \"model\" for label art, engravings, historical portraits in graphics, or packaging silhouettes — only for an obvious live human subject in the photograph\n";
+        $prompt .= "- Never use \"fashion\" unless wearable apparel is clearly dominant; premium packaging, spirits, or beauty products are not \"fashion\" by default\n";
+        $prompt .= "- For printed marketing and product layouts (sell sheets, case cards, posters): name visible product categories (e.g. spirits, bourbon) and objects (bottle, label) instead of vague lifestyle genres\n\n";
 
         $prompt .= "TAG COVERAGE (describe only what is visible—do not copy hypothetical examples from instructions):\n";
         $prompt .= "- Objects and props actually in frame\n";
@@ -753,7 +759,11 @@ class AiMetadataGenerationService
             return 'For photography structured fields, use shoot type (studio, on location, editorial), roles, product, composition where applicable. For free-form tags, do not use \"photo shoot\" — prefer specific subjects, people, and objects visible in the image.';
         }
 
-        return 'Include terms users might search for: subject, setting, style, mood, and notable objects or people when clearly visible.';
+        if (str_contains($name, 'product') || str_contains($name, 'marketing') || str_contains($name, 'graphic') || str_contains($name, 'print')) {
+            return 'For free-form tags, emphasize visible product, packaging, beverage type, print format (sell sheet, poster, case card), and readable brand cues — avoid vague lifestyle labels unless clearly shown.';
+        }
+
+        return 'Include terms users might search for: subject, setting, and notable objects or people when clearly visible; avoid vague genre labels unless they match what is plainly in the image.';
     }
 
     /**
@@ -775,6 +785,7 @@ class AiMetadataGenerationService
             'raw_tag_count' => 0,
             'passed_confidence_count' => 0,
             'rejected_low_confidence_count' => 0,
+            'rejected_blocklist_count' => 0,
         ];
 
         try {
@@ -921,6 +932,16 @@ class AiMetadataGenerationService
             return;
         }
 
+        if ($this->isVisionTagBlocklisted($normalizedTag)) {
+            $tagParseStats['rejected_blocklist_count'] = (int) ($tagParseStats['rejected_blocklist_count'] ?? 0) + 1;
+            Log::debug('[AiMetadataGenerationService] Blocklisted vision tag skipped', [
+                'asset_id' => $assetId,
+                'tag' => $normalizedTag,
+            ]);
+
+            return;
+        }
+
         if ($this->isRedundantTag($normalizedTag)) {
             Log::debug('[AiMetadataGenerationService] Redundant tag skipped', [
                 'asset_id' => $assetId,
@@ -1025,6 +1046,30 @@ class AiMetadataGenerationService
         $tag = trim($tag);
 
         return $tag;
+    }
+
+    /**
+     * @return list<string> lowercase normalized single-tag strings to drop (see config ai.metadata_tagging.vision_tag_blocklist).
+     */
+    protected function visionTagBlocklist(): array
+    {
+        $raw = config('ai.metadata_tagging.vision_tag_blocklist', ['model', 'fashion']);
+        if (! is_array($raw)) {
+            return ['model', 'fashion'];
+        }
+        $out = [];
+        foreach ($raw as $t) {
+            if (is_string($t) && $t !== '') {
+                $out[] = strtolower(trim($t));
+            }
+        }
+
+        return array_values(array_unique($out));
+    }
+
+    protected function isVisionTagBlocklisted(string $normalizedTag): bool
+    {
+        return in_array($normalizedTag, $this->visionTagBlocklist(), true);
     }
 
     /**

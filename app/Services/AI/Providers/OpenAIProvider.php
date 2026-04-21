@@ -359,6 +359,7 @@ class OpenAIProvider implements AIProviderInterface
      *                                         - image_binary: string (raw image bytes, required)
      *                                         - filename: optional filename hint for multipart (e.g. source.png)
      *                                         - model: e.g. gpt-image-1
+     *                                         - openai_image_edit: optional array for GPT Image edits only: background (transparent|opaque|auto), output_format (png|jpeg|webp), quality, size
      * @return array{text: string, tokens_in: int, tokens_out: int, model: string, metadata: array<string, mixed>}
      */
     public function editImage(string $prompt, array $options = []): array
@@ -375,15 +376,40 @@ class OpenAIProvider implements AIProviderInterface
 
         $filename = $options['filename'] ?? $this->guessImageFilename($binary);
 
+        $payload = [
+            'model' => $model,
+            'prompt' => $prompt,
+            'n' => 1,
+        ];
+
+        $editExtras = $options['openai_image_edit'] ?? null;
+        if (is_array($editExtras) && $this->isGptImageModelForEdits($model)) {
+            foreach (['background', 'output_format', 'quality', 'size'] as $key) {
+                if (! isset($editExtras[$key]) || ! is_string($editExtras[$key]) || $editExtras[$key] === '') {
+                    continue;
+                }
+                $value = $editExtras[$key];
+                if ($key === 'background' && ! in_array($value, ['transparent', 'opaque', 'auto'], true)) {
+                    continue;
+                }
+                if ($key === 'output_format' && ! in_array($value, ['png', 'jpeg', 'webp'], true)) {
+                    continue;
+                }
+                if ($key === 'quality' && ! in_array($value, ['low', 'medium', 'high', 'auto'], true)) {
+                    continue;
+                }
+                if ($key === 'size' && ! in_array($value, self::OPENAI_IMAGE_SIZES, true)) {
+                    continue;
+                }
+                $payload[$key] = $value;
+            }
+        }
+
         try {
             $response = Http::withToken($this->apiKey)
                 ->timeout(180)
                 ->attach('image', $binary, $filename)
-                ->post("{$this->baseUrl}/images/edits", [
-                    'model' => $model,
-                    'prompt' => $prompt,
-                    'n' => 1,
-                ]);
+                ->post("{$this->baseUrl}/images/edits", $payload);
 
             if ($response->failed()) {
                 $error = $response->json();
@@ -456,6 +482,20 @@ class OpenAIProvider implements AIProviderInterface
             ]);
             throw $e;
         }
+    }
+
+    /**
+     * GPT Image family models accept `background`, `output_format`, etc. on /v1/images/edits.
+     * DALL·E 2/3 do not; omit those fields to avoid API errors.
+     */
+    private function isGptImageModelForEdits(string $model): bool
+    {
+        $m = strtolower($model);
+        if (str_starts_with($m, 'dall-e')) {
+            return false;
+        }
+
+        return str_contains($m, 'gpt-image') || str_contains($m, 'chatgpt-image');
     }
 
     private function guessImageFilename(string $binary): string

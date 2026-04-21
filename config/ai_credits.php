@@ -30,6 +30,8 @@ return [
         'generative_editor_edits' => 15,
         'generative_editor_images' => 20,
         'generative_editor_layout' => 8,
+        /** Studio composition animation (Kling i2v, etc.): per-call units = credits from {@see AiUsageService::getStudioAnimationCreditCost()}; weight is 1. */
+        'studio_animation' => 1,
         /*
          * Intentionally no weight for `thumbnail_enhancement` (Studio View enhanced mode):
          * GenerateEnhancedPreviewJob composites locally via TemplateRenderer + GD/ImageMagick — no LLM/provider API.

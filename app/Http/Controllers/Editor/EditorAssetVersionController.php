@@ -53,9 +53,12 @@ class EditorAssetVersionController extends Controller
                 ];
             });
 
-        return response()->json([
-            'versions' => $versions,
-        ]);
+        return response()
+            ->json([
+                'versions' => $versions,
+            ])
+            ->header('Cache-Control', 'private, no-store, must-revalidate')
+            ->header('Pragma', 'no-cache');
     }
 
     /**

@@ -289,35 +289,50 @@ const MetadataFieldInput = forwardRef(function MetadataFieldInput(
             }
             const currentValues = Array.isArray(value) ? value : []
             return (
-                <div className="flex items-start gap-2 min-w-0">
-                    <label className="flex-shrink-0 w-56 text-sm font-medium text-gray-700 pt-0.5">
+                <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:gap-4">
+                    <label className="shrink-0 text-sm font-medium text-gray-700 sm:w-56 sm:pt-0.5">
                         {field.display_label}
                         {isRequired && <span className="text-red-500 ml-0.5">*</span>}
                     </label>
-                    <div className="flex-1 min-w-0 flex flex-wrap gap-x-3 gap-y-1">
-                        {field.options.map((option) => {
-                            const isSelected = currentValues.includes(option.value)
-                            return (
-                                <label key={option.value} className="flex items-center">
-                                    <input
-                                        type="checkbox"
-                                        checked={isSelected}
-                                        onChange={(e) => {
-                                            const newValues = e.target.checked
-                                                ? [...currentValues, option.value]
-                                                : currentValues.filter(v => v !== option.value)
-                                            handleChange(newValues)
-                                        }}
-                                        disabled={isDisabled}
-                                        title={!canEdit ? "You don't have permission to edit this field" : undefined}
-                                        className={`h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded ${hasError ? 'border-red-300' : ''} ${isDisabled ? 'cursor-not-allowed opacity-60' : ''}`}
-                                    />
-                                    <span className="ml-1.5 text-sm text-gray-700">{option.display_label}</span>
-                                </label>
-                            )
-                        })}
+                    <div className="min-w-0 flex-1 space-y-1.5">
+                        <ul
+                            className="max-h-64 divide-y divide-gray-100 overflow-y-auto rounded-lg border border-gray-200 bg-gradient-to-b from-white to-slate-50/80 shadow-sm"
+                            aria-label={field.display_label}
+                        >
+                            {field.options.map((option) => {
+                                const isSelected = currentValues.includes(option.value)
+                                return (
+                                    <li key={option.value}>
+                                        <label
+                                            className={`flex cursor-pointer items-start gap-3 px-3 py-2.5 transition-colors sm:py-2 ${
+                                                isSelected ? 'bg-indigo-50/60' : 'hover:bg-white/90'
+                                            } ${isDisabled ? 'cursor-not-allowed opacity-60' : ''}`}
+                                        >
+                                            <input
+                                                type="checkbox"
+                                                checked={isSelected}
+                                                onChange={(e) => {
+                                                    const newValues = e.target.checked
+                                                        ? [...currentValues, option.value]
+                                                        : currentValues.filter((v) => v !== option.value)
+                                                    handleChange(newValues)
+                                                }}
+                                                disabled={isDisabled}
+                                                title={!canEdit ? "You don't have permission to edit this field" : undefined}
+                                                className={`mt-0.5 h-4 w-4 shrink-0 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 ${
+                                                    hasError ? 'border-red-300' : ''
+                                                } ${isDisabled ? 'cursor-not-allowed' : ''}`}
+                                            />
+                                            <span className="min-w-0 flex-1 text-sm leading-snug text-gray-800">
+                                                {option.display_label}
+                                            </span>
+                                        </label>
+                                    </li>
+                                )
+                            })}
+                        </ul>
+                        {hasError && <p className="text-xs text-red-600">Required</p>}
                     </div>
-                    {hasError && <span className="flex-shrink-0 text-xs text-red-600">Required</span>}
                 </div>
             )
 

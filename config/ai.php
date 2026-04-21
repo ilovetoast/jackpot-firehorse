@@ -39,6 +39,18 @@ return [
     */
     'metadata_tagging' => [
         'min_confidence' => (float) env('AI_METADATA_TAGGING_MIN_CONFIDENCE', 0.90),
+        /**
+         * Normalized tags (whole string, after {@see AiMetadataGenerationService::normalizeTag}) that Vision
+         * often misassigns on packaging, sell sheets, and product hero art — dropped before candidates are stored.
+         * Comma-separated env override replaces the default list (use empty string to allow all).
+         */
+        'vision_tag_blocklist' => array_values(array_filter(array_map(
+            'strtolower',
+            array_map('trim', explode(',', (string) env(
+                'AI_METADATA_VISION_TAG_BLOCKLIST',
+                'model,fashion'
+            )))
+        ))),
     ],
 
     /*
@@ -666,6 +678,17 @@ PROMPT
                 'gpt-image-1',
                 'gemini-2.5-flash-image',
                 'gemini-3-pro-image-preview',
+            ],
+            'allowed_actions' => ['read', 'generate_image'],
+            'permissions' => [],
+        ],
+        'studio_animate_composition' => [
+            'name' => 'Studio Animate Composition',
+            'description' => 'Provider-backed image-to-video from a deterministic Studio composition snapshot (V1: full composition; future: layers/groups/start-end).',
+            'scope' => 'tenant',
+            'default_model' => 'kling_v3_standard_image_to_video',
+            'allowed_models' => [
+                'kling_v3_standard_image_to_video',
             ],
             'allowed_actions' => ['read', 'generate_image'],
             'permissions' => [],

@@ -15,6 +15,7 @@ export function inferStudioSyncRole(layer: Layer): StudioSyncRole | null {
         return layer.studioSyncRole
     }
     if (layer.type === 'text') {
+        const n = (layer.name ?? '').toLowerCase()
         if (n.includes('headline')) {
             return 'headline'
         }
@@ -58,20 +59,157 @@ export function inferStudioSyncRole(layer: Layer): StudioSyncRole | null {
     return null
 }
 
+const ROLE_DISPLAY: Record<StudioSyncRole, string> = {
+    headline: 'Headline',
+    subheadline: 'Subheadline',
+    cta: 'CTA',
+    disclaimer: 'Disclaimer',
+    logo: 'Logo',
+    badge: 'Badge',
+}
+
+export function displayNameForSyncRole(role: StudioSyncRole): string {
+    return ROLE_DISPLAY[role] ?? role
+}
+
+/** Short label for the scope bar (which role is driving sync). */
 export function describeSyncForLayer(layer: Layer): string | null {
     const role = inferStudioSyncRole(layer)
     if (!role) {
         return null
     }
-    const labels: Record<StudioSyncRole, string> = {
-        headline: 'headline',
-        subheadline: 'subheadline',
-        cta: 'CTA',
-        disclaimer: 'disclaimer',
-        logo: 'logo',
-        badge: 'badge',
+    return displayNameForSyncRole(role)
+}
+
+/**
+ * Human summary of what will be pushed when applying the given command bundle
+ * (e.g. "Headline — text, alignment, and position").
+ */
+export function describeApplyCommandBundle(commands: CreativeSetApplyCommand[]): {
+    primaryRoleLabel: string
+    aspects: string
+} {
+    if (commands.length === 0) {
+        return { primaryRoleLabel: 'Layer', aspects: 'updates' }
     }
-    return labels[role] ?? role
+    const first = commands[0]
+    const role = 'role' in first ? first.role : 'headline'
+    const primaryRoleLabel =
+        role === 'headline' ||
+        role === 'subheadline' ||
+        role === 'cta' ||
+        role === 'disclaimer' ||
+        role === 'logo' ||
+        role === 'badge'
+            ? displayNameForSyncRole(role)
+            : String(role)
+
+    const aspectsSet = new Set<string>()
+    for (const c of commands) {
+        if (c.type === 'update_text_content') {
+            aspectsSet.add('text')
+        }
+        if (c.type === 'update_text_alignment') {
+            aspectsSet.add('alignment')
+        }
+        if (c.type === 'update_layer_visibility') {
+            aspectsSet.add('visibility')
+        }
+        if (c.type === 'update_role_transform') {
+            aspectsSet.add('position & size')
+        }
+    }
+    const order = ['text', 'alignment', 'visibility', 'position & size']
+    const aspects = order.filter((k) => aspectsSet.has(k)).join(', ')
+
+    return { primaryRoleLabel, aspects: aspects || 'updates' }
+}
+
+export type ApplyPhraseScope = 'all_versions' | 'selected_versions'
+
+export function formatApplyConfirmMessage(p: {
+    mode: ApplyPhraseScope
+    primaryRoleLabel: string
+    aspects: string
+    siblingTargetCount: number
+    eligibleCount: number
+    wouldSkipCount: number
+}): string {
+    const { mode, primaryRoleLabel, aspects, siblingTargetCount, eligibleCount, wouldSkipCount } = p
+    const noun = `${primaryRoleLabel} (${aspects})`
+    const dest =
+        mode === 'selected_versions'
+            ? siblingTargetCount === 1
+                ? '1 selected version'
+                : `${siblingTargetCount} selected versions`
+            : siblingTargetCount === 1
+              ? '1 other version'
+              : `${siblingTargetCount} other versions`
+
+    if (siblingTargetCount === 0) {
+        return mode === 'selected_versions'
+            ? `No selected versions to sync.`
+            : `No other versions in this set to sync.`
+    }
+    if (wouldSkipCount === 0 && eligibleCount === siblingTargetCount) {
+        return `Push ${noun} to ${dest}?\n\nOnly allowlisted fields are updated across versions.`
+    }
+    const destShort = mode === 'selected_versions' ? `${siblingTargetCount} selected` : `${siblingTargetCount} other`
+    if (eligibleCount === 0) {
+        const pool =
+            mode === 'selected_versions'
+                ? siblingTargetCount === 1
+                    ? 'this selected version'
+                    : `these ${siblingTargetCount} selected versions`
+                : siblingTargetCount === 1
+                  ? 'this other version'
+                  : `these ${siblingTargetCount} other versions`
+        return `Push ${noun} to ${pool}?\n\nBased on a quick check, none may apply automatically — layouts may be too different. You can still try, or fix template roles.`
+    }
+    return `Push ${noun} to ${eligibleCount} of ${destShort} version${siblingTargetCount === 1 ? '' : 's'} (${wouldSkipCount} may be skipped if layouts differ).\n\nOnly allowlisted fields are updated across versions.`
+}
+
+/** @deprecated Use {@link formatApplyConfirmMessage} with `mode: 'all_versions'`. */
+export function formatApplyToAllConfirmMessage(p: {
+    primaryRoleLabel: string
+    aspects: string
+    siblingTargetCount: number
+    eligibleCount: number
+    wouldSkipCount: number
+}): string {
+    return formatApplyConfirmMessage({ mode: 'all_versions', ...p })
+}
+
+export function formatApplyResultNotice(p: {
+    mode?: ApplyPhraseScope
+    primaryRoleLabel: string
+    aspects: string
+    updated: number
+    skipped: number
+}): string {
+    const mode = p.mode ?? 'all_versions'
+    const bundle = `${p.primaryRoleLabel} (${p.aspects})`
+    const dest =
+        mode === 'selected_versions'
+            ? p.updated === 1
+                ? '1 selected version'
+                : `${p.updated} selected versions`
+            : p.updated === 1
+              ? '1 other version'
+              : `${p.updated} other versions`
+    if (p.skipped === 0) {
+        return `Updated ${bundle} on ${dest}.`
+    }
+    if (p.updated === 0) {
+        return mode === 'selected_versions'
+            ? `No selected versions could be updated — ${p.skipped} skipped (layouts may not share the same sync roles).`
+            : `Could not update other versions — ${p.skipped} skipped (layouts may not share the same sync roles).`
+    }
+    if (mode === 'selected_versions') {
+        const label = p.updated === 1 ? '1 selected version' : `${p.updated} selected versions`
+        return `Updated ${bundle} on ${label}; skipped ${p.skipped}.`
+    }
+    return `Updated ${bundle} on ${p.updated} version${p.updated === 1 ? '' : 's'}; skipped ${p.skipped}.`
 }
 
 /**

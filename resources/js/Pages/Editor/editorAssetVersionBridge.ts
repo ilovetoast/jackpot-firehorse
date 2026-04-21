@@ -68,10 +68,15 @@ export function isAssetVersionThumbnailActive(
 /** GET /app/api/assets/{assetId}/versions */
 export async function fetchAssetVersions(assetId: string): Promise<EditorAssetVersionsResponse> {
     const csrf = document.querySelector('meta[name="csrf-token"]')?.content
-    const res = await fetch(`/app/api/assets/${encodeURIComponent(assetId)}/versions`, {
-        headers: { Accept: 'application/json', 'X-CSRF-TOKEN': csrf ?? '' },
-        credentials: 'same-origin',
-    })
+    // Bust caches: after repeated AI edits the asset id is unchanged but new version rows exist.
+    const res = await fetch(
+        `/app/api/assets/${encodeURIComponent(assetId)}/versions?_=${encodeURIComponent(String(Date.now()))}`,
+        {
+            headers: { Accept: 'application/json', 'X-CSRF-TOKEN': csrf ?? '' },
+            credentials: 'same-origin',
+            cache: 'no-store',
+        }
+    )
     if (!res.ok) {
         throw new Error(`Failed to fetch versions (${res.status})`)
     }

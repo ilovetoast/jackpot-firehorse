@@ -31,7 +31,8 @@ final class EditorGenerativeImagePersistService
     public function __construct(
         protected AssetPathGenerator $pathGenerator,
         protected TenantBucketService $tenantBucketService,
-        protected CompositionAssetReferenceStateService $compositionRefState
+        protected CompositionAssetReferenceStateService $compositionRefState,
+        protected FreePlanImageWatermarkService $freePlanWatermark
     ) {}
 
     /**
@@ -54,7 +55,10 @@ final class EditorGenerativeImagePersistService
 
         $binary = $this->loadBinary($urlOrDataUrl);
         $normalized = $this->normalizeImageForStorage($binary);
-
+        $maybeMarked = $this->freePlanWatermark->applyIfEligible($tenant, $normalized['binary']);
+        if ($maybeMarked !== $normalized['binary']) {
+            $normalized = $this->normalizeImageForStorage($maybeMarked);
+        }
         $binary = $normalized['binary'];
         $extension = $normalized['extension'];
         $mimeType = $normalized['mime_type'];

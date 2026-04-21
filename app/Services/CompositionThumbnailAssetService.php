@@ -32,7 +32,8 @@ class CompositionThumbnailAssetService
     private const MAX_VERSIONS_TO_RETAIN = 20;
 
     public function __construct(
-        protected AssetPathGenerator $pathGenerator
+        protected AssetPathGenerator $pathGenerator,
+        protected FreePlanImageWatermarkService $freePlanWatermark
     ) {}
 
     /**
@@ -52,6 +53,8 @@ class CompositionThumbnailAssetService
         if ($tenant->uuid === null || $tenant->uuid === '') {
             throw new RuntimeException('Tenant UUID is required for composition thumbnail storage.');
         }
+
+        $pngBinary = $this->freePlanWatermark->applyIfEligible($tenant, $pngBinary);
 
         if ($replaceAssetId !== null && $replaceAssetId !== '') {
             $existing = Asset::withTrashed()->find($replaceAssetId);
@@ -78,7 +81,7 @@ class CompositionThumbnailAssetService
         string $pngBinary,
         ?int $compositionId
     ): string {
-        return DB::transaction(function () use ($tenant, $brand, $user, $asset, $pngBinary, $compositionId) {
+        return DB::transaction(function () use ($tenant, $user, $asset, $pngBinary, $compositionId) {
             // Serialize concurrent thumbnail saves for the same asset: otherwise two requests can
             // read the same max(version_number) and both insert the same next number (unique violation).
             Asset::query()->whereKey($asset->id)->lockForUpdate()->firstOrFail();

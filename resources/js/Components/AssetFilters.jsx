@@ -7,6 +7,7 @@
 import { useState, useEffect } from 'react'
 import { XMarkIcon, FunnelIcon, BookmarkIcon } from '@heroicons/react/24/outline'
 import { router } from '@inertiajs/react'
+import { OptionChipSelect } from './OptionChipSelect'
 
 export default function AssetFilters({ filterableSchema = [], categoryId, savedViews = [] }) {
     const [filters, setFilters] = useState({})
@@ -456,22 +457,14 @@ function FilterValueInput({ field, operator, value, onChange }) {
 
         case 'multiselect':
             return (
-                <select
-                    multiple
+                <OptionChipSelect
+                    options={field.options}
                     value={Array.isArray(value) ? value : []}
-                    onChange={(e) => {
-                        const selected = Array.from(e.target.selectedOptions, (opt) => opt.value)
-                        onChange(selected.length > 0 ? selected : null)
-                    }}
+                    onChange={onChange}
+                    placeholder="Any"
+                    multiple
                     className="flex-1 px-2 py-1 text-xs border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
-                    size={Math.min(field.options.length + 1, 5)}
-                >
-                    {field.options.map((option) => (
-                        <option key={option.value} value={option.value}>
-                            {option.display_label || option.value}
-                        </option>
-                    ))}
-                </select>
+                />
             )
 
         case 'date':

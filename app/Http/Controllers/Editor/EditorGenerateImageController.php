@@ -11,6 +11,7 @@ use App\Services\AIService;
 use App\Services\AiUsageService;
 use App\Services\Editor\EditorGenerativeImageOutputFinalizer;
 use App\Services\EditorGenerativeImagePersistService;
+use App\Services\FreePlanImageWatermarkService;
 use App\Services\PlanService;
 use App\Support\GenerativeEditorModelNormalizer;
 use Illuminate\Http\JsonResponse;
@@ -34,6 +35,7 @@ class EditorGenerateImageController extends Controller
         protected AiUsageService $aiUsageService,
         protected EditorGenerativeImagePersistService $generativeImagePersistService,
         protected EditorGenerativeImageOutputFinalizer $generativeImageOutputFinalizer,
+        protected FreePlanImageWatermarkService $freePlanWatermark,
     ) {}
 
     public function usage(Request $request): JsonResponse
@@ -282,12 +284,20 @@ class EditorGenerateImageController extends Controller
             return response()->json(['message' => 'Image not found or expired'], 410);
         }
 
+        $tenant = app('tenant');
+        $tenant = $tenant instanceof Tenant ? $tenant : null;
+
         if (str_starts_with($payload, 'data:image')) {
             if (preg_match('#^data:image/[^;]+;base64,(.+)$#', $payload, $m)) {
                 $binary = base64_decode($m[1], true);
                 if ($binary !== false && strlen($binary) > 0) {
-                    return response($binary, 200, [
-                        'Content-Type' => 'image/png',
+                    $out = $tenant ? $this->freePlanWatermark->applyIfEligible($tenant, $binary) : $binary;
+                    $mime = $out !== $binary
+                        ? 'image/png'
+                        : $this->inferImageMimeFromBinary($out);
+
+                    return response($out, 200, [
+                        'Content-Type' => $mime,
                         'Cache-Control' => 'private, max-age=3600',
                     ]);
                 }
@@ -310,12 +320,35 @@ class EditorGenerateImageController extends Controller
             return response()->json(['message' => 'Failed to fetch generated image'], 502);
         }
 
+        $body = $remote->body();
+        if ($tenant !== null) {
+            $marked = $this->freePlanWatermark->applyIfEligible($tenant, $body);
+            if ($marked !== $body) {
+                return response($marked, 200, [
+                    'Content-Type' => 'image/png',
+                    'Cache-Control' => 'private, max-age=3600',
+                ]);
+            }
+        }
+
         $contentType = $remote->header('Content-Type') ?? 'image/png';
 
-        return response($remote->body(), 200, [
+        return response($body, 200, [
             'Content-Type' => $contentType,
             'Cache-Control' => 'private, max-age=3600',
         ]);
+    }
+
+    private function inferImageMimeFromBinary(string $binary): string
+    {
+        if (class_exists(\finfo::class)) {
+            $buf = (new \finfo(FILEINFO_MIME_TYPE))->buffer($binary);
+            if (is_string($buf) && str_starts_with($buf, 'image/')) {
+                return $buf === 'image/jpg' ? 'image/jpeg' : $buf;
+            }
+        }
+
+        return 'image/png';
     }
 
     /**

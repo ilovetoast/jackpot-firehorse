@@ -9,9 +9,11 @@ use App\Http\Controllers\Controller;
 use App\Models\Asset;
 use App\Models\Brand;
 use App\Models\Category;
+use App\Models\StudioAnimationJob;
 use App\Models\Tenant;
 use App\Services\AIService;
 use App\Services\AiUsageService;
+use App\Studio\Animation\Enums\StudioAnimationStatus;
 use App\Support\AssetVariant;
 use App\Support\DeliveryContext;
 use Illuminate\Http\JsonResponse;
@@ -110,7 +112,8 @@ class EditorGenerateLayoutController extends Controller
         $perFeature = $status['per_feature'] ?? [];
         $generativeEditorUsed = ($perFeature['generative_editor_layout']['credits_used'] ?? 0)
             + ($perFeature['generative_editor_images']['credits_used'] ?? 0)
-            + ($perFeature['generative_editor_edits']['credits_used'] ?? 0);
+            + ($perFeature['generative_editor_edits']['credits_used'] ?? 0)
+            + ($perFeature['studio_animation']['credits_used'] ?? 0);
 
         $thisCompositionUsed = null;
         $compositionIdRaw = $request->query('composition_id');
@@ -177,6 +180,18 @@ class EditorGenerateLayoutController extends Controller
             }
             $weight = $this->aiUsageService->getCreditWeight($feature);
             $total += (int) $row->call_count * $weight;
+        }
+
+        $animationJobs = StudioAnimationJob::query()
+            ->where('tenant_id', $tenant->id)
+            ->where('composition_id', (int) $compositionId)
+            ->where('status', StudioAnimationStatus::Complete->value)
+            ->whereBetween('completed_at', [$start, $end])
+            ->get(['settings_json']);
+
+        foreach ($animationJobs as $job) {
+            $settings = $job->settings_json ?? [];
+            $total += (int) ($settings['credits_charged'] ?? 0);
         }
 
         return $total;

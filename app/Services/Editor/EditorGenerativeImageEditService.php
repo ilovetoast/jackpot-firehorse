@@ -180,6 +180,14 @@ final class EditorGenerativeImageEditService
             'user' => $user,
             'triggering_context' => 'user',
         ];
+        if ($providerName === 'openai' && $this->instructionRequestsTransparentBackground($instruction)) {
+            // OpenAI GPT Image models honor real PNG alpha via API `background=transparent`; prompting alone
+            // often yields a painted checkerboard. See https://platform.openai.com/docs/api-reference/images/createEdit
+            $options['openai_image_edit'] = [
+                'background' => 'transparent',
+                'output_format' => 'png',
+            ];
+        }
         if (isset($validated['brand_id'])) {
             $options['brand_id'] = (int) $validated['brand_id'];
         }
@@ -272,12 +280,8 @@ final class EditorGenerativeImageEditService
             '- Preserve realism and lighting consistency',
         ];
 
-        $hint = strtolower($userInstruction);
-        if (str_contains($hint, 'transparent')
-            || str_contains($hint, 'alpha')
-            || str_contains($hint, 'cutout')
-            || (str_contains($hint, 'background') && (str_contains($hint, 'remove') || str_contains($hint, 'white') || str_contains($hint, 'studio')))) {
-            $lines[] = '- When the result should be transparent: use a real alpha channel only. Do not paint transparency as a gray-and-white checkerboard, grid, hatch, or watermark in the pixels.';
+        if ($this->instructionRequestsTransparentBackground($userInstruction)) {
+            $lines[] = '- Transparent result: pixels outside the subject must be fully transparent (alpha 0). Do not simulate transparency with patterns, grids, hatching, or cast shadows in the background region; keep garment/product colors and texture accurate with sharp, halo-free edges.';
         }
 
         if (is_array($brandContext) && $brandContext !== []) {
@@ -300,6 +304,21 @@ final class EditorGenerativeImageEditService
         }
 
         return implode("\n", $lines);
+    }
+
+    private function instructionRequestsTransparentBackground(string $userInstruction): bool
+    {
+        $hint = strtolower($userInstruction);
+
+        return str_contains($hint, 'transparent')
+            || str_contains($hint, 'alpha channel')
+            || str_contains($hint, 'png alpha')
+            || preg_match('/\balpha\b/', $hint) === 1
+            || str_contains($hint, 'cutout')
+            || str_contains($hint, 'remove background')
+            || str_contains($hint, 'remove bg')
+            || str_contains($hint, 'background removal')
+            || (str_contains($hint, 'background') && (str_contains($hint, 'remove') || str_contains($hint, 'white') || str_contains($hint, 'studio')));
     }
 
     /**

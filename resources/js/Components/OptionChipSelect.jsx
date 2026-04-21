@@ -1,7 +1,7 @@
 /**
  * Option Chip Select
  * Custom dropdown for select/multiselect filters that displays color chips when options have color.
- * Falls back to native select when no options have color (backward compatible).
+ * Multiselect always uses a compact dropdown + checkboxes (no native <select multiple>).
  */
 
 import { useState, useRef, useEffect } from 'react'
@@ -20,7 +20,7 @@ function getLabel(opt) {
 }
 
 /**
- * Single-select with optional color chips
+ * Single-select with optional color chips; multiselect = dropdown + checkboxes (Tailwind, matches metadata modals).
  */
 export function OptionChipSelect({
     options = [],
@@ -28,7 +28,7 @@ export function OptionChipSelect({
     onChange,
     placeholder = 'Any',
     multiple = false,
-    size,
+    size: _sizeIgnored,
     className = '',
 }) {
     const hasColor = hasOptionsWithColor(options)
@@ -51,29 +51,24 @@ export function OptionChipSelect({
         ? selectedOpts.length > 0
             ? selectedOpts.map(getLabel).join(', ')
             : placeholder
-        : selectedOpts[0] ? getLabel(selectedOpts[0]) : placeholder
+        : selectedOpts[0]
+          ? getLabel(selectedOpts[0])
+          : placeholder
 
-    if (!hasColor) {
+    const toggleOption = (optValue) => {
         if (multiple) {
-            return (
-                <select
-                    multiple
-                    value={value ?? []}
-                    onChange={(e) => {
-                        const selected = Array.from(e.target.selectedOptions, (o) => o.value)
-                        onChange(selected.length > 0 ? selected : null)
-                    }}
-                    className={className}
-                    size={size ?? Math.min((options?.length || 0) + 1, 5)}
-                >
-                    {options.map((opt) => (
-                        <option key={opt.value} value={opt.value}>
-                            {getLabel(opt)}
-                        </option>
-                    ))}
-                </select>
-            )
+            const next = selectedValues.includes(optValue)
+                ? selectedValues.filter((v) => v !== optValue)
+                : [...selectedValues, optValue]
+            onChange(next.length > 0 ? next : null)
+        } else {
+            onChange(optValue === value ? null : optValue)
+            setOpen(false)
         }
+    }
+
+    // Single, no color chips — native select (compact row height)
+    if (!hasColor && !multiple) {
         return (
             <select
                 value={value ?? ''}
@@ -90,79 +85,113 @@ export function OptionChipSelect({
         )
     }
 
-    // Custom dropdown with color chips
-    const toggleOption = (optValue) => {
-        if (multiple) {
-            const next = selectedValues.includes(optValue)
-                ? selectedValues.filter((v) => v !== optValue)
-                : [...selectedValues, optValue]
-            onChange(next.length > 0 ? next : null)
-        } else {
-            onChange(optValue === value ? null : optValue)
-            setOpen(false)
-        }
-    }
-
+    // Multiselect (any) or single with color — custom dropdown
     return (
-        <div ref={ref} className="relative">
+        <div ref={ref} className="relative min-w-0">
             <button
                 type="button"
                 onClick={() => setOpen(!open)}
-                className={`w-full text-left flex items-center gap-2 min-w-0 ${className}`}
+                aria-expanded={open}
+                aria-haspopup="listbox"
+                className={`flex w-full min-w-0 max-w-[22rem] items-center justify-between gap-2 text-left ${className}`}
             >
-                <span className="flex-1 truncate flex items-center gap-1.5">
-                    {selectedOpts.length > 0 ? (
-                        selectedOpts.map((opt) => (
-                            <span
-                                key={opt.value}
-                                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium"
-                                style={
-                                    opt.color
-                                        ? { backgroundColor: `${opt.color}20`, color: opt.color }
-                                        : { backgroundColor: '#f3f4f6', color: '#374151' }
-                                }
-                            >
-                                {opt.color && (
-                                    <span
-                                        className="w-2 h-2 rounded-full flex-shrink-0"
-                                        style={{ backgroundColor: opt.color }}
-                                    />
-                                )}
-                                {opt.icon && <OptionIcon icon={opt.icon} className="h-3 w-3" />}
-                                {getLabel(opt)}
+                <span className="min-w-0 flex-1 truncate">
+                    {multiple ? (
+                        selectedOpts.length > 0 ? (
+                            <span className="text-slate-800" title={selectedOpts.map(getLabel).join(', ')}>
+                                {displayLabel}
                             </span>
-                        ))
+                        ) : (
+                            <span className="font-normal text-slate-500">{placeholder}</span>
+                        )
+                    ) : selectedOpts.length > 0 ? (
+                        <span className="flex flex-wrap items-center gap-1">
+                            {selectedOpts.map((opt) => (
+                                <span
+                                    key={opt.value}
+                                    className="inline-flex max-w-full items-center gap-1 truncate rounded px-1.5 py-0.5 text-xs font-medium"
+                                    style={
+                                        opt.color
+                                            ? { backgroundColor: `${opt.color}20`, color: opt.color }
+                                            : { backgroundColor: '#f3f4f6', color: '#374151' }
+                                    }
+                                >
+                                    {opt.color && (
+                                        <span
+                                            className="h-2 w-2 shrink-0 rounded-full"
+                                            style={{ backgroundColor: opt.color }}
+                                        />
+                                    )}
+                                    {opt.icon && <OptionIcon icon={opt.icon} className="h-3 w-3 shrink-0" />}
+                                    <span className="truncate">{getLabel(opt)}</span>
+                                </span>
+                            ))}
+                        </span>
                     ) : (
-                        <span className="text-gray-500">{placeholder}</span>
+                        <span className="font-normal text-slate-500">{placeholder}</span>
                     )}
                 </span>
                 <ChevronDownIcon
-                    className={`h-4 w-4 flex-shrink-0 text-gray-400 transition-transform ${open ? 'rotate-180' : ''}`}
+                    className={`h-4 w-4 shrink-0 text-slate-400 transition-transform ${open ? 'rotate-180' : ''}`}
+                    aria-hidden
                 />
             </button>
             {open && (
-                <div className="absolute z-10 mt-1 w-full rounded-md bg-white shadow-lg border border-gray-200 py-1 max-h-48 overflow-auto">
+                <div
+                    className="absolute left-0 z-[100] mt-1 max-h-56 w-full min-w-[12rem] max-w-[min(22rem,100vw-2rem)] overflow-y-auto rounded-lg border border-slate-200 bg-gradient-to-b from-white to-slate-50/90 py-1 shadow-lg"
+                    role="listbox"
+                    aria-multiselectable={multiple}
+                >
                     {options.map((opt) => {
                         const isSelected = multiple
                             ? selectedValues.includes(opt.value)
                             : opt.value === value
+
+                        if (multiple) {
+                            return (
+                                <label
+                                    key={opt.value}
+                                    className={`flex cursor-pointer items-start gap-2.5 px-2.5 py-2 text-sm transition-colors ${
+                                        isSelected ? 'bg-indigo-50/80' : 'hover:bg-white'
+                                    }`}
+                                >
+                                    <input
+                                        type="checkbox"
+                                        checked={isSelected}
+                                        onChange={() => toggleOption(opt.value)}
+                                        className="mt-0.5 h-3.5 w-3.5 shrink-0 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                                    />
+                                    {opt.color && (
+                                        <span
+                                            className="mt-1 h-3 w-3 shrink-0 rounded-full border border-slate-200"
+                                            style={{ backgroundColor: opt.color }}
+                                        />
+                                    )}
+                                    {opt.icon && <OptionIcon icon={opt.icon} className="mt-0.5 h-3.5 w-3.5 shrink-0" />}
+                                    <span className="min-w-0 flex-1 leading-snug text-slate-800">{getLabel(opt)}</span>
+                                </label>
+                            )
+                        }
+
                         return (
                             <button
                                 key={opt.value}
                                 type="button"
+                                role="option"
+                                aria-selected={isSelected}
                                 onClick={() => toggleOption(opt.value)}
-                                className={`w-full text-left px-2 py-1.5 flex items-center gap-2 hover:bg-gray-50 text-sm ${
-                                    isSelected ? 'bg-indigo-50 text-indigo-700' : 'text-gray-900'
+                                className={`flex w-full items-center gap-2 px-2.5 py-2 text-left text-sm transition-colors ${
+                                    isSelected ? 'bg-indigo-50 text-indigo-800' : 'text-slate-900 hover:bg-slate-50'
                                 }`}
                             >
                                 {opt.color && (
                                     <span
-                                        className="w-3 h-3 rounded-full flex-shrink-0 border border-gray-200"
+                                        className="h-3 w-3 shrink-0 rounded-full border border-slate-200"
                                         style={{ backgroundColor: opt.color }}
                                     />
                                 )}
-                                {opt.icon && <OptionIcon icon={opt.icon} className="h-3.5 w-3.5" />}
-                                <span className="truncate">{getLabel(opt)}</span>
+                                {opt.icon && <OptionIcon icon={opt.icon} className="h-3.5 w-3.5 shrink-0" />}
+                                <span className="min-w-0 flex-1 truncate">{getLabel(opt)}</span>
                             </button>
                         )
                     })}

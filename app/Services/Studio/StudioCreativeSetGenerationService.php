@@ -23,6 +23,7 @@ final class StudioCreativeSetGenerationService
     /**
      * @param  array<int, string>  $colorIds
      * @param  array<int, string>  $sceneIds
+     * @param  array<int, string>  $formatIds
      * @param  array<int, string>|null  $selectedCombinationKeys
      */
     public function start(
@@ -31,13 +32,14 @@ final class StudioCreativeSetGenerationService
         int $sourceCompositionId,
         array $colorIds,
         array $sceneIds,
+        array $formatIds,
         ?array $selectedCombinationKeys,
     ): GenerationJob {
         StudioCreativeSetGenerationQueueGuard::assertStudioGenerationUsesWorkers();
 
-        if ($colorIds === [] && $sceneIds === []) {
+        if ($colorIds === [] && $sceneIds === [] && $formatIds === []) {
             throw ValidationException::withMessages([
-                'color_ids' => 'Select at least one color and/or scene.',
+                'color_ids' => 'Select at least one color, scene, and/or format.',
             ]);
         }
 
@@ -65,6 +67,7 @@ final class StudioCreativeSetGenerationService
 
         $maxColors = (int) config('studio_creative_set_generation.max_colors', 6);
         $maxScenes = (int) config('studio_creative_set_generation.max_scenes', 5);
+        $maxFormats = (int) config('studio_creative_set_generation.max_formats', 3);
         $maxOutputs = (int) config('studio_creative_set_generation.max_outputs_per_request', 24);
 
         if (count($colorIds) > $maxColors) {
@@ -73,9 +76,13 @@ final class StudioCreativeSetGenerationService
         if (count($sceneIds) > $maxScenes) {
             throw ValidationException::withMessages(['scene_ids' => "At most {$maxScenes} scenes."]);
         }
+        if (count($formatIds) > $maxFormats) {
+            throw ValidationException::withMessages(['format_ids' => "At most {$maxFormats} formats."]);
+        }
 
         $colors = $this->resolvePresetColors($colorIds);
         $scenes = $this->resolvePresetScenes($sceneIds);
+        $formats = $this->resolvePresetFormats($formatIds);
 
         if ($colors === [] && $colorIds !== []) {
             throw ValidationException::withMessages(['color_ids' => 'Unknown color id(s).']);
@@ -83,11 +90,15 @@ final class StudioCreativeSetGenerationService
         if ($scenes === [] && $sceneIds !== []) {
             throw ValidationException::withMessages(['scene_ids' => 'Unknown scene id(s).']);
         }
+        if ($formats === [] && $formatIds !== []) {
+            throw ValidationException::withMessages(['format_ids' => 'Unknown format id(s).']);
+        }
 
         $allowedKeys = $this->planner->plan(
             (int) $baseline->id,
             $colors,
             $scenes,
+            $formats,
             null,
         )['keys'];
 
@@ -106,6 +117,7 @@ final class StudioCreativeSetGenerationService
             (int) $baseline->id,
             $colors,
             $scenes,
+            $formats,
             $selectedCombinationKeys,
         );
 
@@ -200,6 +212,53 @@ final class StudioCreativeSetGenerationService
         foreach ($presets as $row) {
             if (is_array($row) && isset($row['id'])) {
                 $byId[(string) $row['id']] = $row;
+            }
+        }
+        $out = [];
+        foreach ($ids as $id) {
+            $id = (string) $id;
+            if (isset($byId[$id])) {
+                $out[] = $byId[$id];
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * @param  array<int, string>  $ids
+     * @return array<int, array{id: string, label: string, width: int, height: int}>
+     */
+    private function resolvePresetFormats(array $ids): array
+    {
+        $presets = config('studio_creative_set_generation.preset_formats', []);
+        if (! is_array($presets)) {
+            return [];
+        }
+        $byId = [];
+        foreach ($presets as $row) {
+            if (is_array($row) && isset($row['id'], $row['width'], $row['height'])) {
+                $entry = [
+                    'id' => (string) $row['id'],
+                    'label' => (string) ($row['label'] ?? $row['id']),
+                    'width' => (int) $row['width'],
+                    'height' => (int) $row['height'],
+                ];
+                foreach (['group', 'description', 'recommended'] as $extra) {
+                    if (! array_key_exists($extra, $row)) {
+                        continue;
+                    }
+                    if ($extra === 'recommended') {
+                        $entry['recommended'] = (bool) $row['recommended'];
+
+                        continue;
+                    }
+                    $v = $row[$extra];
+                    if (is_string($v) && $v !== '') {
+                        $entry[$extra] = $v;
+                    }
+                }
+                $byId[(string) $row['id']] = $entry;
             }
         }
         $out = [];

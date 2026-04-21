@@ -1,5 +1,7 @@
 import type {
     CreativeSetApplyCommand,
+    CreativeSetApplyPreviewDto,
+    CreativeSetSemanticApplyScopeApi,
     StudioCreativeSetDto,
     StudioGenerationJobDto,
     StudioGenerationPresetsDto,
@@ -104,6 +106,7 @@ export async function postCreativeSetGenerate(
         source_composition_id: string
         color_ids?: string[]
         scene_ids?: string[]
+        format_ids?: string[]
         selected_combination_keys?: string[]
     }
 ): Promise<{ generation_job: StudioGenerationJobDto }> {
@@ -115,6 +118,7 @@ export async function postCreativeSetGenerate(
             source_composition_id: Number(body.source_composition_id),
             color_ids: body.color_ids ?? [],
             scene_ids: body.scene_ids ?? [],
+            format_ids: body.format_ids ?? [],
             selected_combination_keys: body.selected_combination_keys,
         }),
     })
@@ -199,35 +203,140 @@ export async function fetchCreativeSetGenerationJob(
     return { generation_job: data.generation_job, creative_set: data.creative_set }
 }
 
-export type { CreativeSetApplyCommand } from './studioCreativeSetTypes'
+export async function patchCreativeSetHero(
+    creativeSetId: string,
+    body: { composition_id: string | number | null }
+): Promise<{ creative_set: StudioCreativeSetDto }> {
+    const res = await fetch(`/app/api/creative-sets/${encodeURIComponent(creativeSetId)}/hero`, {
+        method: 'PATCH',
+        headers: csrfHeaders(),
+        credentials: 'same-origin',
+        body: JSON.stringify({
+            composition_id:
+                body.composition_id === null || body.composition_id === ''
+                    ? null
+                    : Number(body.composition_id),
+        }),
+    })
+    const data = (await res.json().catch(() => ({}))) as {
+        creative_set?: StudioCreativeSetDto
+        message?: string
+        errors?: Record<string, string[]>
+    }
+    if (!res.ok) {
+        const fromValidation =
+            data.errors && typeof data.errors === 'object'
+                ? Object.values(data.errors)
+                      .flat()
+                      .filter(Boolean)
+                      .join(' ')
+                : ''
+        throw new Error(fromValidation || data.message || 'Could not update hero')
+    }
+    if (!data.creative_set) {
+        throw new Error('Invalid response')
+    }
+    return { creative_set: data.creative_set }
+}
+
+export type {
+    CreativeSetApplyCommand,
+    CreativeSetApplyPreviewDto,
+    CreativeSetSemanticApplyScopeApi,
+} from './studioCreativeSetTypes'
+
+export async function postCreativeSetApplyPreview(
+    creativeSetId: string,
+    body: {
+        source_composition_id: string
+        commands: CreativeSetApplyCommand[]
+        scope?: CreativeSetSemanticApplyScopeApi
+        target_composition_ids?: number[]
+    }
+): Promise<CreativeSetApplyPreviewDto> {
+    const payload: Record<string, unknown> = {
+        source_composition_id: Number(body.source_composition_id),
+        commands: body.commands,
+    }
+    if (body.scope) {
+        payload.scope = body.scope
+    }
+    if (body.target_composition_ids && body.target_composition_ids.length > 0) {
+        payload.target_composition_ids = body.target_composition_ids
+    }
+    const res = await fetch(`/app/api/creative-sets/${encodeURIComponent(creativeSetId)}/apply-preview`, {
+        method: 'POST',
+        headers: csrfHeaders(),
+        credentials: 'same-origin',
+        body: JSON.stringify(payload),
+    })
+    const data = (await res.json().catch(() => ({}))) as CreativeSetApplyPreviewDto & {
+        ok?: boolean
+        message?: string
+        errors?: Record<string, string[]>
+    }
+    if (!res.ok) {
+        const fromValidation =
+            data.errors && typeof data.errors === 'object'
+                ? Object.values(data.errors)
+                      .flat()
+                      .filter(Boolean)
+                      .join(' ')
+                : ''
+        throw new Error(fromValidation || (data as { message?: string }).message || 'Apply preview failed')
+    }
+    if (typeof data.sibling_compositions_targeted !== 'number') {
+        throw new Error('Invalid preview response')
+    }
+    return {
+        scope: data.scope,
+        skipped: data.skipped ?? [],
+        skipped_by_reason: data.skipped_by_reason ?? {},
+        sibling_compositions_targeted: data.sibling_compositions_targeted,
+        sibling_compositions_eligible: data.sibling_compositions_eligible ?? 0,
+        sibling_compositions_would_skip: data.sibling_compositions_would_skip ?? 0,
+        commands_considered: data.commands_considered ?? 0,
+    }
+}
 
 export async function postCreativeSetApply(
     creativeSetId: string,
     body: {
         source_composition_id: string
         commands: CreativeSetApplyCommand[]
+        scope?: CreativeSetSemanticApplyScopeApi
+        target_composition_ids?: number[]
     }
 ): Promise<{
     updated_composition_ids: string[]
-    skipped: Array<{ composition_id: string; reason: string }>
+    skipped: Array<{ composition_id: string; reason: string; reason_code?: string }>
+    skipped_by_reason?: Record<string, number>
     creative_set: StudioCreativeSetDto
     sibling_compositions_targeted?: number
     sibling_compositions_updated?: number
     commands_applied?: number
 }> {
+    const applyPayload: Record<string, unknown> = {
+        source_composition_id: Number(body.source_composition_id),
+        commands: body.commands,
+    }
+    if (body.scope) {
+        applyPayload.scope = body.scope
+    }
+    if (body.target_composition_ids && body.target_composition_ids.length > 0) {
+        applyPayload.target_composition_ids = body.target_composition_ids
+    }
     const res = await fetch(`/app/api/creative-sets/${encodeURIComponent(creativeSetId)}/apply`, {
         method: 'POST',
         headers: csrfHeaders(),
         credentials: 'same-origin',
-        body: JSON.stringify({
-            source_composition_id: Number(body.source_composition_id),
-            commands: body.commands,
-        }),
+        body: JSON.stringify(applyPayload),
     })
     const data = (await res.json().catch(() => ({}))) as {
         ok?: boolean
         updated_composition_ids?: string[]
-        skipped?: Array<{ composition_id: string; reason: string }>
+        skipped?: Array<{ composition_id: string; reason: string; reason_code?: string }>
+        skipped_by_reason?: Record<string, number>
         creative_set?: StudioCreativeSetDto
         sibling_compositions_targeted?: number
         sibling_compositions_updated?: number
@@ -251,6 +360,7 @@ export async function postCreativeSetApply(
     return {
         updated_composition_ids: data.updated_composition_ids,
         skipped: data.skipped ?? [],
+        skipped_by_reason: data.skipped_by_reason,
         creative_set: data.creative_set,
         sibling_compositions_targeted: data.sibling_compositions_targeted,
         sibling_compositions_updated: data.sibling_compositions_updated,

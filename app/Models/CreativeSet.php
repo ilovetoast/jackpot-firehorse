@@ -18,7 +18,16 @@ class CreativeSet extends Model
         'user_id',
         'name',
         'status',
+        'hero_composition_id',
     ];
+
+    /**
+     * Optional “best” composition in this set for export/share cues (exactly one per set when set).
+     */
+    public function heroComposition(): BelongsTo
+    {
+        return $this->belongsTo(Composition::class, 'hero_composition_id');
+    }
 
     public function tenant(): BelongsTo
     {

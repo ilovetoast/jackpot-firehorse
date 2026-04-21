@@ -1,5 +1,7 @@
-import { Link } from '@inertiajs/react'
+import { Link, router, usePage } from '@inertiajs/react'
+import { useEffect, useState } from 'react'
 import InsightsLayout from '../../layouts/InsightsLayout'
+import StorageInsightPanel from '../../Components/insights/StorageInsightPanel'
 import { isUnlimitedCount, isUnlimitedStorageMB } from '../../utils/planLimitDisplay'
 import {
     AI_FEATURE_LABELS,
@@ -14,14 +16,55 @@ import {
     SparklesIcon,
     ArrowRightIcon,
     ExclamationTriangleIcon,
+    EyeIcon,
+    ChartBarIcon,
+    UserIcon,
+    CalendarDaysIcon,
 } from '@heroicons/react/24/outline'
+
+const emptyEngagement = {
+    totals: { views: 0, download_events: 0, download_packages: 0, uploads_finalized: 0 },
+    top_assets: [],
+    top_uploaders: [],
+}
 
 export default function AnalyticsUsage({
     stats = {},
     ai_usage = null,
     ai_monthly_cap_alert = null,
     plan = {},
+    asset_engagement = emptyEngagement,
+    engagement_range = { preset: 'this_month', start_date: '', end_date: '', label: '' },
+    storage_insight = null,
 }) {
+    const page = usePage()
+    const range = page.props.engagement_range ?? engagement_range
+    const engagement = page.props.asset_engagement ?? asset_engagement
+    const storageInsight = page.props.storage_insight ?? storage_insight
+    const [customStart, setCustomStart] = useState(range.start_date)
+    const [customEnd, setCustomEnd] = useState(range.end_date)
+
+    useEffect(() => {
+        setCustomStart(range.start_date)
+        setCustomEnd(range.end_date)
+    }, [range.start_date, range.end_date])
+
+    const applyPreset = (preset) => {
+        router.get(
+            route('insights.usage'),
+            { range: preset },
+            { preserveScroll: true, replace: true }
+        )
+    }
+
+    const applyCustomRange = () => {
+        if (!customStart || !customEnd) return
+        router.get(
+            route('insights.usage'),
+            { range: 'custom', start_date: customStart, end_date: customEnd },
+            { preserveScroll: true, replace: true }
+        )
+    }
     const formatStorage = (mb) => {
         if (!mb || mb === 0) return '0 MB'
         if (mb < 1) return `${(mb * 1024).toFixed(2)} KB`
@@ -75,6 +118,197 @@ export default function AnalyticsUsage({
                         </div>
                     </section>
                 )}
+                <section aria-labelledby="asset-activity-heading">
+                    <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between mb-4">
+                        <div>
+                            <h2
+                                id="asset-activity-heading"
+                                className="text-sm font-semibold text-gray-700 uppercase tracking-wide flex items-center gap-2"
+                            >
+                                <ChartBarIcon className="h-5 w-5 text-gray-400" aria-hidden />
+                                Asset activity
+                            </h2>
+                            <p className="mt-1 flex flex-wrap items-center gap-2 text-sm text-gray-600">
+                                <span>{range.label}</span>
+                                {range.preset === 'custom' && (
+                                    <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-800">
+                                        Custom range
+                                    </span>
+                                )}
+                            </p>
+                        </div>
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+                            <div>
+                                <span className="sr-only">Reporting period</span>
+                                <div className="inline-flex rounded-lg border border-gray-300 bg-white p-0.5 shadow-sm">
+                                    {[
+                                        { id: 'last_7', label: '7d' },
+                                        { id: 'last_30', label: '30d' },
+                                        { id: 'this_month', label: 'Month' },
+                                    ].map((p) => (
+                                        <button
+                                            key={p.id}
+                                            type="button"
+                                            onClick={() => applyPreset(p.id)}
+                                            className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                                                range.preset === p.id
+                                                    ? 'bg-indigo-600 text-white shadow'
+                                                    : 'text-gray-700 hover:bg-gray-50'
+                                            }`}
+                                        >
+                                            {p.label}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                            <div className="flex flex-wrap items-end gap-2">
+                                <CalendarDaysIcon className="hidden h-5 w-5 text-gray-400 sm:block mb-2" aria-hidden />
+                                <div>
+                                    <label htmlFor="usage-custom-start" className="block text-xs font-medium text-gray-600">
+                                        From
+                                    </label>
+                                    <input
+                                        id="usage-custom-start"
+                                        type="date"
+                                        value={customStart}
+                                        onChange={(e) => setCustomStart(e.target.value)}
+                                        className="mt-0.5 rounded-md border border-gray-300 px-2 py-1.5 text-sm shadow-sm"
+                                    />
+                                </div>
+                                <div>
+                                    <label htmlFor="usage-custom-end" className="block text-xs font-medium text-gray-600">
+                                        To
+                                    </label>
+                                    <input
+                                        id="usage-custom-end"
+                                        type="date"
+                                        value={customEnd}
+                                        onChange={(e) => setCustomEnd(e.target.value)}
+                                        className="mt-0.5 rounded-md border border-gray-300 px-2 py-1.5 text-sm shadow-sm"
+                                    />
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={applyCustomRange}
+                                    className="rounded-md bg-white px-3 py-2 text-sm font-medium text-indigo-700 ring-1 ring-inset ring-indigo-200 hover:bg-indigo-50"
+                                >
+                                    Apply range
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    <p className="mb-4 text-xs text-gray-500">
+                        {
+                            "Views and per-asset downloads are tracked when teammates use the library (in-app metrics). Share links counts ready download packages that include this brand's assets. Uploads counts completed uploads."
+                        }
+                    </p>
+                    <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 mb-6">
+                        <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+                            <div className="flex items-center gap-2 text-gray-500 text-xs font-medium uppercase tracking-wide">
+                                <EyeIcon className="h-4 w-4" aria-hidden />
+                                Views
+                            </div>
+                            <p className="mt-1 text-2xl font-semibold text-gray-900 tabular-nums">
+                                {(engagement.totals?.views ?? 0).toLocaleString()}
+                            </p>
+                        </div>
+                        <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+                            <div className="flex items-center gap-2 text-gray-500 text-xs font-medium uppercase tracking-wide">
+                                <CloudArrowDownIcon className="h-4 w-4" aria-hidden />
+                                Asset downloads
+                            </div>
+                            <p className="mt-1 text-2xl font-semibold text-gray-900 tabular-nums">
+                                {(engagement.totals?.download_events ?? 0).toLocaleString()}
+                            </p>
+                        </div>
+                        <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+                            <div className="flex items-center gap-2 text-gray-500 text-xs font-medium uppercase tracking-wide">
+                                <CloudArrowDownIcon className="h-4 w-4" aria-hidden />
+                                Share links created
+                            </div>
+                            <p className="mt-1 text-2xl font-semibold text-gray-900 tabular-nums">
+                                {(engagement.totals?.download_packages ?? 0).toLocaleString()}
+                            </p>
+                        </div>
+                        <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+                            <div className="flex items-center gap-2 text-gray-500 text-xs font-medium uppercase tracking-wide">
+                                <UserIcon className="h-4 w-4" aria-hidden />
+                                Uploads completed
+                            </div>
+                            <p className="mt-1 text-2xl font-semibold text-gray-900 tabular-nums">
+                                {(engagement.totals?.uploads_finalized ?? 0).toLocaleString()}
+                            </p>
+                        </div>
+                    </div>
+                    <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+                        <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow">
+                            <div className="border-b border-gray-100 px-4 py-3">
+                                <h3 className="text-sm font-semibold text-gray-900">Top assets</h3>
+                                <p className="text-xs text-gray-500">By views + tracked downloads in this period</p>
+                            </div>
+                            {engagement.top_assets?.length ? (
+                                <ul className="divide-y divide-gray-100">
+                                    {engagement.top_assets.map((row) => (
+                                        <li key={row.asset_id} className="flex items-center gap-3 px-4 py-3">
+                                            {row.thumbnail_url ? (
+                                                <img
+                                                    src={row.thumbnail_url}
+                                                    alt=""
+                                                    className="h-10 w-10 flex-shrink-0 rounded object-cover bg-gray-100"
+                                                    loading="lazy"
+                                                />
+                                            ) : (
+                                                <div className="h-10 w-10 flex-shrink-0 rounded bg-gray-100" aria-hidden />
+                                            )}
+                                            <div className="min-w-0 flex-1">
+                                                <Link
+                                                    href={row.asset_url}
+                                                    className="truncate font-medium text-indigo-700 hover:text-indigo-600 text-sm"
+                                                >
+                                                    {row.title}
+                                                </Link>
+                                                <div className="mt-0.5 flex gap-3 text-xs text-gray-500 tabular-nums">
+                                                    <span>{row.views} views</span>
+                                                    <span>{row.download_events} dl</span>
+                                                </div>
+                                            </div>
+                                            <span className="text-sm font-semibold text-gray-900 tabular-nums">
+                                                {row.engagement}
+                                            </span>
+                                        </li>
+                                    ))}
+                                </ul>
+                            ) : (
+                                <p className="px-4 py-8 text-center text-sm text-gray-500">
+                                    No view or download activity in this range yet.
+                                </p>
+                            )}
+                        </div>
+                        <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow">
+                            <div className="border-b border-gray-100 px-4 py-3">
+                                <h3 className="text-sm font-semibold text-gray-900">Most uploads</h3>
+                                <p className="text-xs text-gray-500">Completed uploads in this period</p>
+                            </div>
+                            {engagement.top_uploaders?.length ? (
+                                <ul className="divide-y divide-gray-100">
+                                    {engagement.top_uploaders.map((row) => (
+                                        <li
+                                            key={row.user_id}
+                                            className="flex items-center justify-between gap-3 px-4 py-3 text-sm"
+                                        >
+                                            <span className="truncate font-medium text-gray-900">{row.name}</span>
+                                            <span className="tabular-nums text-gray-700">{row.uploads}</span>
+                                        </li>
+                                    ))}
+                                </ul>
+                            ) : (
+                                <p className="px-4 py-8 text-center text-sm text-gray-500">
+                                    No completed uploads in this range yet.
+                                </p>
+                            )}
+                        </div>
+                    </div>
+                </section>
                 <section>
                     <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-4">
                         Storage & Downloads
@@ -138,6 +372,9 @@ export default function AnalyticsUsage({
                                 </div>
                             </div>
                         </div>
+                    </div>
+                    <div className="mt-5">
+                        <StorageInsightPanel storage_insight={storageInsight} formatStorage={formatStorage} />
                     </div>
                 </section>
 

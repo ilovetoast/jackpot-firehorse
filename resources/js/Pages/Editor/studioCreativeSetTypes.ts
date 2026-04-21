@@ -16,6 +16,8 @@ export type StudioCreativeSetDto = {
     id: string
     name: string
     status: string
+    /** Marked “hero” composition for this set (export / best-version cue); at most one. */
+    hero_composition_id?: string | null
     variants: StudioCreativeSetVariantDto[]
 }
 
@@ -23,12 +25,29 @@ export type StudioGenerationPresetColor = { id: string; label: string; hex?: str
 
 export type StudioGenerationPresetScene = { id: string; label: string; instruction: string }
 
+export type StudioGenerationPresetFormat = {
+    id: string
+    label: string
+    width: number
+    height: number
+    /** Taxonomy bucket for grouped format picker (Generate modal). */
+    group?: string
+    description?: string
+    recommended?: boolean
+}
+
 export type StudioGenerationPresetsDto = {
     preset_colors: StudioGenerationPresetColor[]
     preset_scenes: StudioGenerationPresetScene[]
+    preset_formats: StudioGenerationPresetFormat[]
+    /** Version Builder format-pack shortcut; each id must exist in `preset_formats`. */
+    format_pack_quick_ids?: string[]
+    format_group_order?: string[]
+    format_group_labels?: Record<string, string>
     limits: {
         max_colors: number
         max_scenes: number
+        max_formats: number
         max_outputs_per_request: number
         max_versions_per_set: number
     }
@@ -42,6 +61,29 @@ export type StudioGenerationJobItemDto = {
     error: { message?: string } | null
     superseded_at?: string | null
     retried_from_item_id?: string | null
+}
+
+/** One sibling composition that could not receive the full command chain. */
+export type CreativeSetApplySkippedDto = {
+    composition_id: string
+    reason: string
+    reason_code: string
+    command_index?: number
+    command_type?: string
+}
+
+/** API body / response: which sibling cohort semantic apply runs against. */
+export type CreativeSetSemanticApplyScopeApi = 'all_versions' | 'selected_versions'
+
+/** POST /app/api/creative-sets/{id}/apply-preview — dry-run counts for confirm copy. */
+export type CreativeSetApplyPreviewDto = {
+    scope?: CreativeSetSemanticApplyScopeApi
+    skipped: CreativeSetApplySkippedDto[]
+    skipped_by_reason: Record<string, number>
+    sibling_compositions_targeted: number
+    sibling_compositions_eligible: number
+    sibling_compositions_would_skip: number
+    commands_considered: number
 }
 
 /** POST /app/api/creative-sets/{id}/apply — allowlisted semantic sync between sibling compositions. */

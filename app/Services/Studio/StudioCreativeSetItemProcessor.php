@@ -4,6 +4,7 @@ namespace App\Services\Studio;
 
 use App\Jobs\RefreshCompositionThumbnailFromProductLayerJob;
 use App\Models\Composition;
+use App\Models\CompositionVersion;
 use App\Models\CreativeSetVariant;
 use App\Models\GenerationJob;
 use App\Models\GenerationJobItem;
@@ -23,6 +24,7 @@ final class StudioCreativeSetItemProcessor
         protected CompositionDuplicateService $compositionDuplicate,
         protected CreativeSetGenerationPlanner $planner,
         protected EditorGenerativeImageEditService $generativeImageEditService,
+        protected StudioCompositionFormatReflowService $formatReflow,
     ) {}
 
     public function process(GenerationJobItem $item): void
@@ -98,6 +100,9 @@ final class StudioCreativeSetItemProcessor
                 if (is_array($parsed['scene'])) {
                     $labelParts[] = (string) ($parsed['scene']['label'] ?? '');
                 }
+                if (is_array($parsed['format'] ?? null)) {
+                    $labelParts[] = (string) ($parsed['format']['label'] ?? '');
+                }
                 $label = implode(' · ', array_filter($labelParts)) ?: 'Generated';
 
                 if ($item->retried_from_item_id !== null) {
@@ -132,12 +137,34 @@ final class StudioCreativeSetItemProcessor
                 } else {
                     $composition = $this->compositionDuplicate->duplicate($baseline, $user, $baseline->name.' — '.$label, 'Duplicated');
 
+                    $doc = is_array($composition->document_json) ? $composition->document_json : [];
+                    $formatPreset = is_array($parsed['format'] ?? null) ? $parsed['format'] : null;
+                    if ($formatPreset !== null) {
+                        $tw = (int) ($formatPreset['width'] ?? 0);
+                        $th = (int) ($formatPreset['height'] ?? 0);
+                        if ($tw > 0 && $th > 0) {
+                            $sw = (int) ($doc['width'] ?? 0);
+                            $sh = (int) ($doc['height'] ?? 0);
+                            if ($sw !== $tw || $sh !== $th) {
+                                $doc = $this->formatReflow->reflowToCanvasSize($doc, $tw, $th);
+                                $composition->document_json = $doc;
+                                $composition->save();
+                                CompositionVersion::query()
+                                    ->where('composition_id', $composition->id)
+                                    ->orderByDesc('id')
+                                    ->limit(1)
+                                    ->update(['document_json' => $doc]);
+                            }
+                        }
+                    }
+
                     $nextSort = (int) CreativeSetVariant::query()->where('creative_set_id', $set->id)->max('sort_order') + 1;
 
                     $axis = [
                         'combination_key' => $item->combination_key,
                         'color' => $parsed['color'],
                         'scene' => $parsed['scene'],
+                        'format' => $parsed['format'],
                     ];
 
                     $variant = CreativeSetVariant::query()->create([
@@ -154,6 +181,16 @@ final class StudioCreativeSetItemProcessor
                         'creative_set_variant_id' => $variant->id,
                         'composition_id' => $composition->id,
                     ]);
+                }
+
+                if (config('studio_creative_set_generation.fake_complete_generation')) {
+                    $variant->update(['status' => CreativeSetVariant::STATUS_READY]);
+                    $item->update([
+                        'status' => GenerationJobItem::STATUS_COMPLETED,
+                        'error' => null,
+                    ]);
+
+                    return;
                 }
 
                 $doc = is_array($composition->document_json) ? $composition->document_json : [];

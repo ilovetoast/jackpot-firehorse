@@ -241,6 +241,22 @@ class AiUsageService
     }
 
     /**
+     * Credits for one Studio composition animation job (duration-aware).
+     *
+     * Formula: base + max(0, duration_seconds - base_covers_seconds) * per_extra_second
+     */
+    public function getStudioAnimationCreditCost(int $durationSeconds): int
+    {
+        $base = (int) config('studio_animation.credits.base', 40);
+        $covers = max(1, (int) config('studio_animation.credits.base_covers_seconds', 5));
+        $perExtra = (int) config('studio_animation.credits.per_extra_second', 5);
+        $d = max(1, $durationSeconds);
+        $extra = max(0, $d - $covers);
+
+        return $base + $extra * $perExtra;
+    }
+
+    /**
      * Which warning threshold (80/90/100) is the tenant at, or null if below all.
      */
     public function getCreditWarningLevel(Tenant $tenant): ?int
@@ -350,7 +366,7 @@ class AiUsageService
      */
     public function getUsageStatus(Tenant $tenant): array
     {
-        $features = ['tagging', 'suggestions', 'photography_focal_point', 'brand_research', 'insights', 'generative_editor_images', 'generative_editor_edits', 'video_insights', 'pdf_extraction', 'presentation_preview'];
+        $features = ['tagging', 'suggestions', 'photography_focal_point', 'brand_research', 'insights', 'generative_editor_images', 'generative_editor_edits', 'video_insights', 'pdf_extraction', 'presentation_preview', 'studio_animation'];
         $perFeature = [];
         $totalCreditsUsed = 0;
 
@@ -388,7 +404,7 @@ class AiUsageService
      */
     public function getUsageStatusForPeriod(Tenant $tenant, int $year, int $month): array
     {
-        $features = ['tagging', 'suggestions', 'photography_focal_point', 'brand_research', 'insights', 'generative_editor_images', 'generative_editor_edits', 'video_insights', 'pdf_extraction', 'presentation_preview'];
+        $features = ['tagging', 'suggestions', 'photography_focal_point', 'brand_research', 'insights', 'generative_editor_images', 'generative_editor_edits', 'video_insights', 'pdf_extraction', 'presentation_preview', 'studio_animation'];
         $perFeature = [];
         $totalCreditsUsed = 0;
 
@@ -513,7 +529,7 @@ class AiUsageService
                 'ai_credits',
                 $currentCredits,
                 $cap,
-                "Monthly AI credit budget exceeded for video insights. Usage resets at the start of next month."
+                'Monthly AI credit budget exceeded for video insights. Usage resets at the start of next month.'
             );
         }
     }

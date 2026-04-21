@@ -1,10 +1,20 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { formatSectionsForGenerateModal } from '../../../../utils/studioVersionFormatPresetGroups.mjs'
+import { combinationKeys, labelForCombinationKey } from '../../../../utils/studioVersionsGenerationCartesian.mjs'
 import { fetchGenerationPresets, postCreativeSetGenerate } from '../../studioCreativeSetBridge'
 import type {
     StudioGenerationPresetColor,
+    StudioGenerationPresetFormat,
     StudioGenerationPresetScene,
     StudioGenerationPresetsDto,
 } from '../../studioCreativeSetTypes'
+
+/** When opening from quick packs, parent supplies preset axis ids (empty arrays = axis omitted). */
+export type GenerateStudioVersionsInitialAxes = {
+    colorIds: string[]
+    sceneIds: string[]
+    formatIds: string[]
+}
 
 type Props = {
     open: boolean
@@ -13,54 +23,25 @@ type Props = {
     onClose: () => void
     /** Called after POST /generate returns (202). Parent starts polling `jobId`. */
     onGenerationQueued: (jobId: string) => void
+    /** Applied whenever the modal opens (e.g. quick pack from Version Builder). */
+    initialAxes?: GenerateStudioVersionsInitialAxes | null
 }
 
-function combinationKeys(colorIds: string[], sceneIds: string[]): string[] {
-    if (colorIds.length > 0 && sceneIds.length > 0) {
-        const keys: string[] = []
-        for (const c of colorIds) {
-            for (const s of sceneIds) {
-                keys.push(`c:${c}|s:${s}`)
-            }
-        }
-        return keys
-    }
-    if (colorIds.length > 0) {
-        return colorIds.map((c) => `c:${c}`)
-    }
-    if (sceneIds.length > 0) {
-        return sceneIds.map((s) => `s:${s}`)
-    }
-    return []
-}
-
-function labelForCombinationKey(key: string, presets: StudioGenerationPresetsDto): string {
-    const colorById = Object.fromEntries(presets.preset_colors.map((c) => [c.id, c.label]))
-    const sceneById = Object.fromEntries(presets.preset_scenes.map((s) => [s.id, s.label]))
-    const parts: string[] = []
-    for (const part of key.split('|')) {
-        const p = part.trim()
-        if (p.startsWith('c:')) {
-            const id = p.slice(2)
-            parts.push(colorById[id] ?? id)
-        }
-        if (p.startsWith('s:')) {
-            const id = p.slice(2)
-            parts.push(sceneById[id] ?? id)
-        }
-    }
-    return parts.length ? parts.join(' · ') : key
+function formatChipSubtitle(f: StudioGenerationPresetFormat): string {
+    return `${f.width}×${f.height}`
 }
 
 export function GenerateStudioVersionsModal(props: Props) {
-    const { open, creativeSetId, sourceCompositionId, onClose, onGenerationQueued } = props
+    const { open, creativeSetId, sourceCompositionId, onClose, onGenerationQueued, initialAxes = null } = props
     const [presets, setPresets] = useState<StudioGenerationPresetsDto | null>(null)
     const [loadError, setLoadError] = useState<string | null>(null)
     const [submitting, setSubmitting] = useState(false)
     const [submitError, setSubmitError] = useState<string | null>(null)
+    const submitLockRef = useRef(false)
 
     const [colorIds, setColorIds] = useState<string[]>([])
     const [sceneIds, setSceneIds] = useState<string[]>([])
+    const [formatIds, setFormatIds] = useState<string[]>([])
     /** Keys the user wants to generate (subset of allKeys). */
     const [enabledCombinationKeys, setEnabledCombinationKeys] = useState<Set<string>>(new Set())
 
@@ -73,7 +54,14 @@ export function GenerateStudioVersionsModal(props: Props) {
         void fetchGenerationPresets()
             .then((p) => {
                 if (!cancelled) {
-                    setPresets(p)
+                    setPresets({
+                        ...p,
+                        preset_formats: p.preset_formats ?? [],
+                        limits: {
+                            ...p.limits,
+                            max_formats: p.limits.max_formats ?? 3,
+                        },
+                    })
                 }
             })
             .catch((e: unknown) => {
@@ -86,13 +74,40 @@ export function GenerateStudioVersionsModal(props: Props) {
         }
     }, [open])
 
-    const allKeys = useMemo(() => combinationKeys(colorIds, sceneIds), [colorIds, sceneIds])
+    const initialAxesKey = useMemo(() => JSON.stringify(initialAxes ?? null), [initialAxes])
+
+    useEffect(() => {
+        if (!open) {
+            return
+        }
+        if (initialAxes) {
+            setColorIds([...initialAxes.colorIds])
+            setSceneIds([...initialAxes.sceneIds])
+            setFormatIds([...initialAxes.formatIds])
+        } else {
+            setColorIds([])
+            setSceneIds([])
+            setFormatIds([])
+        }
+    }, [open, initialAxesKey])
+
+    const allKeys = useMemo(() => combinationKeys(colorIds, sceneIds, formatIds), [colorIds, sceneIds, formatIds])
 
     useEffect(() => {
         setEnabledCombinationKeys(new Set(allKeys))
     }, [allKeys])
 
     const maxOutputs = presets?.limits.max_outputs_per_request ?? 24
+    const maxFormats = presets?.limits.max_formats ?? 3
+    const presetFormats = presets?.preset_formats ?? []
+
+    const { recommendedFormatPresets, formatPresetGroups } = useMemo(() => {
+        if (!presets) {
+            return { recommendedFormatPresets: [], formatPresetGroups: [] }
+        }
+        const { recommended, groups } = formatSectionsForGenerateModal(presets)
+        return { recommendedFormatPresets: recommended, formatPresetGroups: groups }
+    }, [presets])
 
     const selectedCount = useMemo(() => {
         let n = 0
@@ -121,8 +136,11 @@ export function GenerateStudioVersionsModal(props: Props) {
     }, [])
 
     const onSubmit = useCallback(async () => {
-        if (colorIds.length === 0 && sceneIds.length === 0) {
-            setSubmitError('Select at least one color and/or scene.')
+        if (submitLockRef.current) {
+            return
+        }
+        if (colorIds.length === 0 && sceneIds.length === 0 && formatIds.length === 0) {
+            setSubmitError('Select at least one color, scene, and/or format.')
             return
         }
         if (selectedCount < 1) {
@@ -133,6 +151,7 @@ export function GenerateStudioVersionsModal(props: Props) {
             setSubmitError(`At most ${maxOutputs} selected outputs per request.`)
             return
         }
+        submitLockRef.current = true
         setSubmitting(true)
         setSubmitError(null)
         try {
@@ -142,20 +161,27 @@ export function GenerateStudioVersionsModal(props: Props) {
                 source_composition_id: sourceCompositionId,
                 color_ids: colorIds,
                 scene_ids: sceneIds,
+                format_ids: formatIds,
                 selected_combination_keys: selectedKeys,
             })
             onGenerationQueued(generation_job.id)
             onClose()
         } catch (e: unknown) {
-            setSubmitError(e instanceof Error ? e.message : 'Generation could not start')
+            setSubmitError(
+                e instanceof Error && e.message
+                    ? e.message
+                    : "Couldn't start version generation. Check your connection and try again."
+            )
         } finally {
             setSubmitting(false)
+            submitLockRef.current = false
         }
     }, [
         allKeys,
         colorIds,
         creativeSetId,
         enabledCombinationKeys,
+        formatIds,
         maxOutputs,
         onClose,
         onGenerationQueued,
@@ -173,17 +199,27 @@ export function GenerateStudioVersionsModal(props: Props) {
             <div
                 role="dialog"
                 aria-labelledby="gen-versions-title"
-                className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-xl border border-gray-700 bg-gray-900 p-5 shadow-2xl"
+                data-testid="generate-versions-dialog"
+                className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-xl border border-gray-700 bg-gray-900 p-5 shadow-2xl"
             >
                 <h2 id="gen-versions-title" className="text-lg font-semibold text-white">
                     Generate versions
                 </h2>
                 <p className="mt-1 text-sm text-gray-400">
-                    Choose colorways and/or scenes. We duplicate your layout and run a controlled image edit on the main
-                    product photo for each combination.
+                    Choose colorways, scenes, and/or output formats. We duplicate your layout, reflow roles into the
+                    target canvas when the size changes, then run a controlled image edit on the main product photo for
+                    each combination.
                 </p>
 
                 {loadError && <p className="mt-3 text-sm text-red-400">{loadError}</p>}
+
+                {!presets && !loadError && (
+                    <div className="mt-6 flex flex-col items-center gap-2 rounded-lg border border-gray-800 bg-gray-950/60 px-4 py-6 text-center">
+                        <span className="h-6 w-6 animate-spin rounded-full border-2 border-indigo-400 border-t-transparent" aria-hidden />
+                        <p className="text-sm text-gray-300">Loading generation presets…</p>
+                        <p className="text-[11px] text-gray-500">This usually takes a moment.</p>
+                    </div>
+                )}
 
                 {presets && !loadError && (
                     <>
@@ -230,6 +266,102 @@ export function GenerateStudioVersionsModal(props: Props) {
                                 ))}
                             </div>
                         </div>
+                        {presetFormats.length > 0 && (
+                            <div className="mt-4" data-testid="generate-versions-formats-section">
+                                <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Formats</p>
+                                <p className="mt-1 text-[11px] text-gray-500">
+                                    Optional — omit formats to keep the current canvas size. Select up to {maxFormats}{' '}
+                                    curated presets (role-aware reflow, not simple scaling). Grouped by use case.
+                                </p>
+                                {recommendedFormatPresets.length > 0 && (
+                                    <div className="mt-3" data-testid="generate-versions-formats-recommended">
+                                        <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">
+                                            Recommended
+                                        </p>
+                                        <div className="mt-1.5 flex flex-wrap gap-2">
+                                            {recommendedFormatPresets.map((f: StudioGenerationPresetFormat) => {
+                                                const on = formatIds.includes(f.id)
+                                                const atCap = !on && formatIds.length >= maxFormats
+                                                const tip =
+                                                    f.description != null && f.description !== ''
+                                                        ? `${f.description} ${formatChipSubtitle(f)}`
+                                                        : `${f.label} (${formatChipSubtitle(f)})`
+                                                return (
+                                                    <button
+                                                        key={f.id}
+                                                        type="button"
+                                                        data-testid={`generate-versions-format-chip-${f.id}`}
+                                                        disabled={atCap}
+                                                        title={
+                                                            atCap
+                                                                ? `At most ${maxFormats} formats per generation`
+                                                                : tip
+                                                        }
+                                                        onClick={() => toggle(f.id, formatIds, setFormatIds)}
+                                                        className={`rounded-lg border px-2.5 py-1.5 text-left text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+                                                            on
+                                                                ? 'border-indigo-500 bg-indigo-950/50 text-indigo-100'
+                                                                : 'border-gray-700 bg-gray-800 text-gray-300 hover:border-gray-500'
+                                                        }`}
+                                                    >
+                                                        <span className="block font-semibold">{f.label}</span>
+                                                        <span className="block text-[10px] font-normal text-gray-500">
+                                                            {formatChipSubtitle(f)}
+                                                        </span>
+                                                    </button>
+                                                )
+                                            })}
+                                        </div>
+                                    </div>
+                                )}
+                                <div className="mt-3 space-y-4">
+                                    {formatPresetGroups.map((section) => (
+                                        <div
+                                            key={section.group}
+                                            data-testid={`generate-versions-format-group-${section.group}`}
+                                        >
+                                            <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">
+                                                {section.heading}
+                                            </p>
+                                            <div className="mt-1.5 flex flex-wrap gap-2">
+                                                {section.formats.map((f: StudioGenerationPresetFormat) => {
+                                                    const on = formatIds.includes(f.id)
+                                                    const atCap = !on && formatIds.length >= maxFormats
+                                                    const tip =
+                                                        f.description != null && f.description !== ''
+                                                            ? `${f.description} ${formatChipSubtitle(f)}`
+                                                            : `${f.label} (${formatChipSubtitle(f)})`
+                                                    return (
+                                                        <button
+                                                            key={f.id}
+                                                            type="button"
+                                                            data-testid={`generate-versions-format-chip-${f.id}`}
+                                                            disabled={atCap}
+                                                            title={
+                                                                atCap
+                                                                    ? `At most ${maxFormats} formats per generation`
+                                                                    : tip
+                                                            }
+                                                            onClick={() => toggle(f.id, formatIds, setFormatIds)}
+                                                            className={`rounded-lg border px-2.5 py-1.5 text-left text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+                                                                on
+                                                                    ? 'border-indigo-500 bg-indigo-950/50 text-indigo-100'
+                                                                    : 'border-gray-700 bg-gray-800 text-gray-300 hover:border-gray-500'
+                                                            }`}
+                                                        >
+                                                            <span className="block font-semibold">{f.label}</span>
+                                                            <span className="block text-[10px] font-normal text-gray-500">
+                                                                {formatChipSubtitle(f)}
+                                                            </span>
+                                                        </button>
+                                                    )
+                                                })}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
 
                         {allKeys.length > 0 && (
                             <div className="mt-4">
@@ -266,7 +398,10 @@ export function GenerateStudioVersionsModal(props: Props) {
                             </div>
                         )}
 
-                        <div className="mt-4 rounded-lg border border-gray-800 bg-gray-950/80 px-3 py-2 text-sm text-gray-300">
+                        <div
+                            className="mt-4 rounded-lg border border-gray-800 bg-gray-950/80 px-3 py-2 text-sm text-gray-300"
+                            data-testid="generate-versions-selected-summary"
+                        >
                             <span className="font-semibold text-white">{selectedCount}</span> selected outputs
                             {allKeys.length > 0 && (
                                 <span className="text-gray-500">
@@ -295,11 +430,12 @@ export function GenerateStudioVersionsModal(props: Props) {
                     </button>
                     <button
                         type="button"
+                        data-testid="generate-versions-submit"
                         disabled={submitting || !!loadError || !presets || selectedCount < 1}
                         onClick={() => void onSubmit()}
                         className="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-40"
                     >
-                        {submitting ? 'Starting…' : `Generate ${selectedCount} version${selectedCount === 1 ? '' : 's'}`}
+                        {submitting ? 'Starting generation…' : `Generate ${selectedCount} version${selectedCount === 1 ? '' : 's'}`}
                     </button>
                 </div>
             </div>

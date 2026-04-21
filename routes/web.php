@@ -748,9 +748,32 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
                     ->whereNumber('id')
                     ->whereNumber('jobId')
                     ->name('api.editor.creative-sets.generation-jobs.show');
+                Route::patch('/api/creative-sets/{id}/hero', [\App\Http\Controllers\Editor\EditorCreativeSetController::class, 'updateHero'])
+                    ->whereNumber('id')
+                    ->name('api.editor.creative-sets.hero');
+                Route::post('/api/creative-sets/{id}/apply-preview', [\App\Http\Controllers\Editor\EditorCreativeSetController::class, 'applyPreview'])
+                    ->whereNumber('id')
+                    ->name('api.editor.creative-sets.apply-preview');
                 Route::post('/api/creative-sets/{id}/apply', [\App\Http\Controllers\Editor\EditorCreativeSetController::class, 'apply'])
                     ->whereNumber('id')
                     ->name('api.editor.creative-sets.apply');
+
+                // Studio Creator — composition animation (provider-agnostic pipeline; V1: Kling i2v)
+                Route::get('/studio/documents/{document}/animations', [\App\Http\Controllers\Studio\StudioAnimationController::class, 'index'])
+                    ->whereNumber('document')
+                    ->name('app.studio.documents.animations.index');
+                Route::post('/studio/documents/{document}/animations', [\App\Http\Controllers\Studio\StudioAnimationController::class, 'store'])
+                    ->whereNumber('document')
+                    ->name('app.studio.documents.animations.store');
+                Route::post('/studio/documents/{document}/animation-preflight', [\App\Http\Controllers\Studio\StudioAnimationController::class, 'preflight'])
+                    ->whereNumber('document')
+                    ->name('app.studio.documents.animations.preflight');
+                Route::get('/studio/animations/{animationJob}', [\App\Http\Controllers\Studio\StudioAnimationController::class, 'show'])
+                    ->name('app.studio.animations.show');
+                Route::post('/studio/animations/{animationJob}/retry', [\App\Http\Controllers\Studio\StudioAnimationController::class, 'retry'])
+                    ->name('app.studio.animations.retry');
+                Route::post('/studio/animations/{animationJob}/cancel', [\App\Http\Controllers\Studio\StudioAnimationController::class, 'cancel'])
+                    ->name('app.studio.animations.cancel');
             });
 
             // Phase J.2.3: Tag UX API endpoints
@@ -1104,3 +1127,7 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
 
 // Stripe webhook (no auth, no CSRF)
 Route::post('/webhook/stripe', [\App\Http\Controllers\WebhookController::class, 'handleWebhook'])->name('webhook.stripe');
+
+Route::post('/webhooks/studio-animation/{provider}', [\App\Http\Controllers\Studio\StudioAnimationWebhookController::class, 'ingest'])
+    ->middleware(['web', 'throttle:120,1'])
+    ->name('webhooks.studio-animation.ingest');

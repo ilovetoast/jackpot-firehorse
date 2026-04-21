@@ -9,6 +9,7 @@ import {
 } from '../../utils/aiCreditsUsageDisplay'
 import PendingAiSuggestionsModal from '../../Components/PendingAiSuggestionsModal'
 import CreatorInsights from '../../Components/insights/CreatorInsights'
+import StorageInsightPanel from '../../Components/insights/StorageInsightPanel'
 import useLogoWhiteBgPreview from '../../utils/useLogoWhiteBgPreview'
 import {
     FolderIcon,
@@ -64,6 +65,7 @@ export default function AnalyticsOverview({
     brand_guidelines = {},
     creator_module_enabled = false,
     creator_insights = null,
+    storage_insight = null,
 }) {
     const [suggestionsModalOpen, setSuggestionsModalOpen] = useState(false)
     const [lazyMeta, setLazyMeta] = useState(null)
@@ -432,6 +434,9 @@ export default function AnalyticsOverview({
                                 formatValue={(v) => v.toLocaleString()}
                             />
                         )}
+                    </div>
+                    <div className="mt-5">
+                        <StorageInsightPanel storage_insight={storage_insight} formatStorage={formatStorage} />
                     </div>
                 </section>
 
