@@ -27,7 +27,7 @@ Enable:
 
 ## Queues / runtime
 
-- Processor, poll, finalize: `config('queue.ai_queue')` (default `ai`).
+- Processor, poll, finalize: `App\Support\StudioAnimationQueue::name()` — `ai` in staging/production; in `local`, the default connection’s list (usually `default`) so a plain `queue:work` consumes them. Override with `STUDIO_ANIMATION_QUEUE` or `studio_animation.dispatch_queue`.
 - Poll job retries with backoff; webhook path skips polling when ingest completes the job.
 - Expect cold-start latency on first Playwright run after deploy.
 

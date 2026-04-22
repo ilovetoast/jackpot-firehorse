@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Support\StudioAnimationQueue;
 use App\Models\StudioAnimationJob;
 use App\Studio\Animation\Enums\StudioAnimationStatus;
 use App\Studio\Animation\Services\StudioAnimationCompletionService;
@@ -23,7 +24,7 @@ class FinalizeStudioAnimationJob implements ShouldQueue
         public readonly int $studioAnimationJobId,
         public readonly string $remoteVideoUrl,
     ) {
-        $this->onQueue(config('queue.ai_queue', 'ai'));
+        $this->onQueue(StudioAnimationQueue::name());
     }
 
     public function handle(StudioAnimationCompletionService $completion): void

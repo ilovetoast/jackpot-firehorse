@@ -21,7 +21,9 @@ class ProcessCreativeSetGenerationItemJob implements ShouldQueue
 
     public function __construct(public int $generationJobItemId)
     {
-        $this->onQueue(config('queue.default', 'default'));
+        // `config('queue.default')` is the connection name (e.g. redis), not the queue list name workers listen on.
+        $connection = (string) config('queue.default', 'sync');
+        $this->onQueue((string) config("queue.connections.{$connection}.queue", 'default'));
     }
 
     public function handle(StudioCreativeSetItemProcessor $processor): void

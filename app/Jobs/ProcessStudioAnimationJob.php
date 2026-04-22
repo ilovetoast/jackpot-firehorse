@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Support\StudioAnimationQueue;
 use App\Studio\Animation\Services\StudioAnimationProcessor;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -18,7 +19,7 @@ class ProcessStudioAnimationJob implements ShouldQueue
     public function __construct(
         public readonly int $studioAnimationJobId,
     ) {
-        $this->onQueue(config('queue.ai_queue', 'ai'));
+        $this->onQueue(StudioAnimationQueue::name());
     }
 
     public function handle(StudioAnimationProcessor $processor): void

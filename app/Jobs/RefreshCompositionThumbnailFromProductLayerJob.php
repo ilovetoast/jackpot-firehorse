@@ -26,7 +26,8 @@ class RefreshCompositionThumbnailFromProductLayerJob implements ShouldQueue
         public int $compositionId,
         public int $actingUserId,
     ) {
-        $this->onQueue(config('queue.default', 'default'));
+        $connection = (string) config('queue.default', 'sync');
+        $this->onQueue((string) config("queue.connections.{$connection}.queue", 'default'));
     }
 
     public function handle(StudioCompositionHeroThumbnailRefreshService $refresher): void

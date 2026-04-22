@@ -6,6 +6,7 @@ use App\Exceptions\PlanLimitExceededException;
 use App\Jobs\FinalizeStudioAnimationJob;
 use App\Jobs\PollStudioAnimationJob;
 use App\Jobs\ProcessStudioAnimationJob;
+use App\Support\StudioAnimationQueue;
 use App\Models\Asset;
 use App\Models\Composition;
 use App\Models\StudioAnimationJob;
@@ -169,7 +170,7 @@ final class StudioAnimationService
             ]);
         });
 
-        ProcessStudioAnimationJob::dispatch($job->id)->onQueue(config('queue.ai_queue', 'ai'));
+        ProcessStudioAnimationJob::dispatch($job->id)->onQueue(StudioAnimationQueue::name());
 
         return $job;
     }
@@ -269,7 +270,7 @@ final class StudioAnimationService
             'has_pending_finalize_url' => is_string($settings['pending_finalize_remote_video_url'] ?? null)
                 && $settings['pending_finalize_remote_video_url'] !== '',
             'verified_webhook_last' => (bool) ($settings['last_webhook_verified'] ?? false),
-            'queue_ai' => (string) config('queue.ai_queue', 'ai'),
+            'queue_ai' => StudioAnimationQueue::name(),
             'official_playwright' => [
                 'enabled' => (bool) config('studio_animation.official_playwright_renderer.enabled', false),
                 'require_high_fidelity_submit' => (bool) config('studio_animation.official_playwright_renderer.require_high_fidelity_submit', false),
@@ -367,7 +368,7 @@ final class StudioAnimationService
                 'error_message' => null,
                 'completed_at' => null,
             ]);
-            FinalizeStudioAnimationJob::dispatch($job->id, $pending)->onQueue(config('queue.ai_queue', 'ai'));
+            FinalizeStudioAnimationJob::dispatch($job->id, $pending)->onQueue(StudioAnimationQueue::name());
 
             return;
         }
@@ -383,7 +384,7 @@ final class StudioAnimationService
                 'completed_at' => null,
             ]);
             $delay = app()->environment('testing') ? 0 : 12;
-            PollStudioAnimationJob::dispatch($job->id)->delay(now()->addSeconds($delay))->onQueue(config('queue.ai_queue', 'ai'));
+            PollStudioAnimationJob::dispatch($job->id)->delay(now()->addSeconds($delay))->onQueue(StudioAnimationQueue::name());
 
             return;
         }
@@ -436,7 +437,7 @@ final class StudioAnimationService
             ]);
         });
 
-        ProcessStudioAnimationJob::dispatch($job->id)->onQueue(config('queue.ai_queue', 'ai'));
+        ProcessStudioAnimationJob::dispatch($job->id)->onQueue(StudioAnimationQueue::name());
     }
 
     public function cancel(StudioAnimationJob $job): void
@@ -533,7 +534,7 @@ final class StudioAnimationService
             if (str_contains($em, 'authentication')
                 || str_contains($em, '401')
                 || str_contains($em, 'cannot access application')) {
-                return 'The Fal / Kling API rejected this request (not authenticated). On the server, set a valid FAL_KEY (see .env.example; KLING_API_KEY is used as a fallback name), restart PHP/queue workers, then use Retry.';
+                return 'The video API rejected authentication. For official Kling (STUDIO_ANIMATION_KLING_TRANSPORT=kling_api), set KLING_API_KEY and KLING_SECRET_KEY from the Kling API platform. For fal, use FAL_KEY and transport fal_queue. Restart PHP/queue workers, then use Retry.';
             }
         }
 

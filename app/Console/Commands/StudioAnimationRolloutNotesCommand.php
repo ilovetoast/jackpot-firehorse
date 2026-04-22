@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Support\StudioAnimationQueue;
 use Illuminate\Console\Command;
 
 /**
@@ -29,7 +30,8 @@ final class StudioAnimationRolloutNotesCommand extends Command
         $this->line('  • client_snapshot: provider start frame matches editor export; drift metadata still computed when server paths run');
         $this->newLine();
         $this->line('Completion drivers');
-        $this->line('  • Polling: PollStudioAnimationJob on queue '.config('queue.ai_queue', 'ai').' (primary when webhooks off)');
+        $this->line('  • Polling: PollStudioAnimationJob on queue '.StudioAnimationQueue::name().' (primary when webhooks off; local defaults to default list when unset)');
+        $this->line('  • API smoke test: php artisan studio-animation:test-kling-connection (kling_api = Kling native; fal_queue = fal)');
         $this->line('  • Webhook: STUDIO_ANIMATION_WEBHOOK_INGEST_ENABLED=true + shared secret / FAL HMAC; sets last_webhook_verified');
         $this->newLine();
         $this->line('Finalize retry idempotency');

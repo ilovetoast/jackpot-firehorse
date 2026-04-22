@@ -1,11 +1,20 @@
 <?php
 
-/** Fal queue auth: prefer FAL_KEY; whitespace-only counts as unset so KLING_API_KEY fallback still works. */
+/** Official Kling API: Access Key + Secret Key (JWT). Not fal.ai. */
+$klingNativeAccessKey = trim((string) env('KLING_API_KEY', ''));
+$klingNativeSecretKey = trim((string) env('KLING_SECRET_KEY', ''));
+/** fal.ai queue (only when STUDIO_ANIMATION_KLING_TRANSPORT=fal_queue). */
 $falKeyForStudioAnimation = trim((string) env('FAL_KEY', ''));
-$klingApiKeyForStudioAnimationFallback = trim((string) env('KLING_API_KEY', ''));
 
 return [
     'enabled' => (bool) env('STUDIO_ANIMATION_ENABLED', true),
+
+    /**
+     * Queue list name for studio animation jobs (process / poll / finalize). Empty = automatic: `ai` outside local
+     * (Horizon supervisor-ai); in `local`, the default connection's list (usually `default`) so a plain
+     * `php artisan queue:work` picks them up. Set to `ai` if you use a dedicated local worker for the AI queue.
+     */
+    'dispatch_queue' => env('STUDIO_ANIMATION_QUEUE', ''),
 
     /**
      * Structured logs: [sa] <event> with compact keys (render_engine, renderer_version, drift_*, webhook, retry, finalize).
@@ -147,16 +156,23 @@ return [
     'providers' => [
         'kling' => [
             'label' => 'Kling 3.0',
-            'transport' => env('STUDIO_ANIMATION_KLING_TRANSPORT', 'fal_queue'), // fal_queue|mock
+            // kling_api = official Kling (JWT, KLING_API_KEY + KLING_SECRET_KEY). fal_queue = fal.ai (FAL_KEY). mock = tests.
+            'transport' => env('STUDIO_ANIMATION_KLING_TRANSPORT', 'kling_api'),
+            'native' => [
+                'base_url' => rtrim((string) env('KLING_API_BASE_URL', 'https://api-singapore.klingai.com'), '/'),
+                'access_key' => $klingNativeAccessKey,
+                'secret_key' => $klingNativeSecretKey,
+                'default_model' => (string) env('KLING_NATIVE_IMAGE2VIDEO_MODEL', 'kling-v2-5-turbo'),
+            ],
             'fal' => [
-                // fal.ai queue uses a single API key (`Authorization: Key …`). Not the same as Kling’s native Access/Secret pair.
-                'api_key' => $falKeyForStudioAnimation !== '' ? $falKeyForStudioAnimation : $klingApiKeyForStudioAnimationFallback,
+                'api_key' => $falKeyForStudioAnimation,
                 'queue_base_url' => rtrim((string) env('FAL_QUEUE_BASE_URL', 'https://queue.fal.run'), '/'),
                 'model_path' => env('FAL_KLING_I2V_MODEL', 'fal-ai/kling-video/v3/standard/image-to-video'),
             ],
             'models' => [
                 'kling_v3_standard_image_to_video' => [
                     'fal_model_path' => 'fal-ai/kling-video/v3/standard/image-to-video',
+                    'native_model_name' => env('KLING_NATIVE_MODEL_V3_STANDARD', 'kling-v2-5-turbo'),
                     'label' => 'Kling 3.0 Standard (image-to-video)',
                 ],
             ],

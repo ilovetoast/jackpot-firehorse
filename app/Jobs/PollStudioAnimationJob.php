@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Support\StudioAnimationQueue;
 use App\Models\StudioAnimationJob;
 use App\Studio\Animation\Enums\StudioAnimationStatus;
 use App\Studio\Animation\Providers\Kling\KlingAnimationProvider;
@@ -25,7 +26,7 @@ class PollStudioAnimationJob implements ShouldQueue
     public function __construct(
         public readonly int $studioAnimationJobId,
     ) {
-        $this->onQueue(config('queue.ai_queue', 'ai'));
+        $this->onQueue(StudioAnimationQueue::name());
     }
 
     public function handle(KlingAnimationProvider $kling, StudioAnimationProviderStatusService $statusService): void
@@ -110,7 +111,7 @@ class PollStudioAnimationJob implements ShouldQueue
                     'settings_json' => $settings,
                     'status' => StudioAnimationStatus::Downloading->value,
                 ]);
-                FinalizeStudioAnimationJob::dispatch($this->studioAnimationJobId, $result->remoteVideoUrl)->onQueue(config('queue.ai_queue', 'ai'));
+                FinalizeStudioAnimationJob::dispatch($this->studioAnimationJobId, $result->remoteVideoUrl)->onQueue(StudioAnimationQueue::name());
                 StudioAnimationObservability::log('poll_finalize_scheduled', $job->fresh());
 
                 return;

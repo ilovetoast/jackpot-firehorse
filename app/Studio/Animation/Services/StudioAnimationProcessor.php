@@ -3,6 +3,7 @@
 namespace App\Studio\Animation\Services;
 
 use App\Jobs\PollStudioAnimationJob;
+use App\Support\StudioAnimationQueue;
 use App\Models\StudioAnimationJob;
 use App\Models\StudioAnimationRender;
 use App\Studio\Animation\Contracts\AnimationProviderInterface;
@@ -132,7 +133,7 @@ final class StudioAnimationProcessor
             $job->update(['status' => StudioAnimationStatus::Processing->value]);
 
             $pollDelay = app()->environment('testing') ? 0 : 12;
-            PollStudioAnimationJob::dispatch($job->id)->delay(now()->addSeconds($pollDelay))->onQueue(config('queue.ai_queue', 'ai'));
+            PollStudioAnimationJob::dispatch($job->id)->delay(now()->addSeconds($pollDelay))->onQueue(StudioAnimationQueue::name());
             StudioAnimationObservability::log('processor_poll_scheduled', $job->fresh());
         } catch (StudioAnimationDriftBlockedException $e) {
             Log::warning('[StudioAnimationProcessor] drift_blocked', [

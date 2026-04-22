@@ -2130,6 +2130,15 @@ export default function AssetEditor() {
         }
     }, [])
 
+    /** Used by the poll effect: boolean dep avoids re-subscribing the interval on every list refresh. */
+    const hasActiveNonTerminalAnimation = useMemo(
+        () =>
+            compositionAnimations.some(
+                (j) => j.status !== 'complete' && j.status !== 'failed' && j.status !== 'canceled',
+            ),
+        [compositionAnimations],
+    )
+
     const snapshotCheckpoint = useCallback(
         async (label: string, doc: DocumentModel) => {
             const id = compositionIdRef.current
@@ -4116,13 +4125,10 @@ export default function AssetEditor() {
         if (!compositionId) {
             return undefined
         }
-        const hasActiveAnimation = compositionAnimations.some(
-            (j) => j.status !== 'complete' && j.status !== 'failed' && j.status !== 'canceled',
-        )
         const pollAnimations =
             leftPanel === 'history' ||
             (studioVersionsPanelOpen && studioCreativeSet !== null) ||
-            hasActiveAnimation
+            hasActiveNonTerminalAnimation
         if (!pollAnimations) {
             return undefined
         }
@@ -4139,9 +4145,9 @@ export default function AssetEditor() {
         compositionId,
         studioVersionsPanelOpen,
         studioCreativeSet,
+        hasActiveNonTerminalAnimation,
         refreshVersions,
         refreshCompositionAnimations,
-        compositionAnimations,
     ])
 
     useEffect(() => {

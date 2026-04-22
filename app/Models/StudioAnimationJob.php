@@ -122,15 +122,15 @@ class StudioAnimationJob extends Model
     public function resolveRouteBinding($value, $field = null): ?StudioAnimationJob
     {
         $tenant = app()->bound('tenant') ? app('tenant') : null;
-        $brand = app()->bound('brand') ? app('brand') : null;
-        if (! $tenant || ! $brand) {
+        if (! $tenant) {
             return null;
         }
 
+        // Scope by tenant only here; session brand is enforced in {@see \App\Policies\StudioAnimationJobPolicy}
+        // so a valid id in another brand yields 403 (forbidden) instead of 404 (not found).
         return self::query()
             ->whereKey($value)
             ->where('tenant_id', $tenant->id)
-            ->where('brand_id', $brand->id)
             ->first();
     }
 }

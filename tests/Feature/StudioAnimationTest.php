@@ -787,6 +787,49 @@ class StudioAnimationTest extends TestCase
         $this->assertDatabaseMissing('studio_animation_jobs', ['id' => $job->id]);
     }
 
+    public function test_destroy_forbidden_when_session_brand_mismatches_job_brand(): void
+    {
+        $otherBrand = Brand::create([
+            'tenant_id' => $this->tenant->id,
+            'name' => 'Other Brand',
+            'slug' => 'other-brand',
+        ]);
+        $this->user->brands()->attach($otherBrand->id, ['role' => 'admin', 'removed_at' => null]);
+
+        $job = StudioAnimationJob::query()->create([
+            'tenant_id' => $this->tenant->id,
+            'brand_id' => $this->brand->id,
+            'user_id' => $this->user->id,
+            'studio_document_id' => null,
+            'composition_id' => $this->composition->id,
+            'source_composition_version_id' => null,
+            'source_document_revision_hash' => null,
+            'animation_intent_json' => null,
+            'provider' => 'kling',
+            'provider_model' => 'kling_v3_standard_image_to_video',
+            'status' => 'failed',
+            'source_strategy' => 'composition_snapshot',
+            'prompt' => null,
+            'negative_prompt' => null,
+            'motion_preset' => 'cinematic_pan',
+            'duration_seconds' => 5,
+            'aspect_ratio' => '16:9',
+            'generate_audio' => false,
+            'settings_json' => [],
+            'error_code' => 'provider_submit_failed',
+            'error_message' => '401',
+            'started_at' => now(),
+            'completed_at' => now(),
+        ]);
+
+        $this->actingAs($this->user)
+            ->withSession(['tenant_id' => $this->tenant->id, 'brand_id' => $otherBrand->id])
+            ->deleteJson("/app/studio/animations/{$job->id}")
+            ->assertForbidden();
+
+        $this->assertDatabaseHas('studio_animation_jobs', ['id' => $job->id]);
+    }
+
     public function test_destroy_rejects_complete_job(): void
     {
         $job = StudioAnimationJob::query()->create([

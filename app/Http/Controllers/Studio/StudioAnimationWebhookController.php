@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Studio;
 use App\Http\Controllers\Controller;
 use App\Jobs\FinalizeStudioAnimationJob;
 use App\Models\StudioAnimationJob;
+use App\Support\StudioAnimationQueue;
 use App\Studio\Animation\Enums\StudioAnimationStatus;
 use App\Studio\Animation\Services\StudioAnimationProviderStatusService;
 use App\Studio\Animation\Support\StudioAnimationObservability;
@@ -110,7 +111,7 @@ class StudioAnimationWebhookController extends Controller
                     'settings_json' => $settings,
                     'status' => StudioAnimationStatus::Downloading->value,
                 ]);
-                FinalizeStudioAnimationJob::dispatch($job->fresh()->id, $videoUrl)->onQueue(config('queue.ai_queue', 'ai'));
+                FinalizeStudioAnimationJob::dispatch($job->fresh()->id, $videoUrl)->onQueue(StudioAnimationQueue::name());
             }
         }
 
