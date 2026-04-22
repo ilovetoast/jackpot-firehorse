@@ -52,8 +52,6 @@ function nearestSupportedAnimationAspect(canvasWidth: number, canvasHeight: numb
 type Props = {
     open: boolean
     compositionId: string
-    /** Latest saved composition version id (newest in history), if known. */
-    latestCompositionVersionId?: string | null
     document: DocumentModel
     textLayerCount: number
     getStageEl: () => HTMLElement | null
@@ -64,17 +62,7 @@ type Props = {
 }
 
 export function StudioAnimateCompositionModal(props: Props) {
-    const {
-        open,
-        compositionId,
-        latestCompositionVersionId,
-        document,
-        textLayerCount,
-        getStageEl,
-        onClose,
-        onQueued,
-        onAnimateSubmitStart,
-    } = props
+    const { open, compositionId, document, textLayerCount, getStageEl, onClose, onQueued, onAnimateSubmitStart } = props
     const [provider] = useState('kling')
     const [providerModel] = useState('kling_v3_standard_image_to_video')
     const [motionPreset, setMotionPreset] = useState('cinematic_pan')
@@ -169,7 +157,8 @@ export function StudioAnimateCompositionModal(props: Props) {
                 snapshot_width: document.width,
                 snapshot_height: document.height,
                 document_json: document,
-                source_composition_version_id: latestCompositionVersionId ?? undefined,
+                // Do not send source_composition_version_id here: the server requires it to match
+                // document_json byte-for-byte; the live canvas often has unsaved edits vs. last version row.
             }
             const job = await postStudioAnimation(compositionId, payload)
             onQueued(job.id)
@@ -187,7 +176,6 @@ export function StudioAnimateCompositionModal(props: Props) {
         document,
         duration,
         getStageEl,
-        latestCompositionVersionId,
         motionPreset,
         negative,
         onAnimateSubmitStart,

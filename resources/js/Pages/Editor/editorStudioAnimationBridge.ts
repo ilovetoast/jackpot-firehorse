@@ -153,6 +153,26 @@ function csrf(): string {
     return document.querySelector('meta[name="csrf-token"]')?.content ?? ''
 }
 
+function formatStudioAnimationApiError(data: unknown, fallback: string): string {
+    if (!data || typeof data !== 'object') {
+        return fallback
+    }
+    const o = data as { message?: string; errors?: Record<string, string[] | string> }
+    if (o.errors && typeof o.errors === 'object') {
+        const parts: string[] = []
+        for (const [key, val] of Object.entries(o.errors)) {
+            const msgs = Array.isArray(val) ? val : [String(val)]
+            for (const m of msgs) {
+                parts.push(`${key}: ${m}`)
+            }
+        }
+        if (parts.length > 0) {
+            return parts.join(' ')
+        }
+    }
+    return typeof o.message === 'string' && o.message.trim() !== '' ? o.message : fallback
+}
+
 export async function fetchStudioAnimations(compositionId: string): Promise<{ animations: StudioAnimationJobDto[] }> {
     const res = await fetch(`/app/studio/documents/${encodeURIComponent(compositionId)}/animations`, {
         headers: { Accept: 'application/json', 'X-CSRF-TOKEN': csrf() },
@@ -253,8 +273,7 @@ export async function postStudioAnimation(
                 'The snapshot is larger than this server accepts (HTTP 413). An admin should raise nginx client_max_body_size and PHP post_max_size (try 32m+). If you already raised limits, try a smaller canvas for this composition.'
             )
         }
-        const msg = (data as { message?: string })?.message || text
-        throw new Error(msg)
+        throw new Error(formatStudioAnimationApiError(data, text || `Animation request failed (${res.status})`))
     }
     return data as StudioAnimationJobDto
 }

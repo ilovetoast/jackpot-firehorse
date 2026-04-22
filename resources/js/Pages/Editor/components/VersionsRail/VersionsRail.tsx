@@ -487,27 +487,51 @@ export function VersionsRail(props: {
                                 >
                                     <div className={`relative h-14 w-14 overflow-hidden rounded-md bg-gray-800 ${thumbRing}`}>
                                         {onToggleHero && (
-                                            <button
-                                                type="button"
+                                            <span
+                                                role="button"
+                                                tabIndex={heroBusyCompositionId ? -1 : 0}
                                                 title={
                                                     isHero
                                                         ? 'Clear hero'
                                                         : 'Mark as hero (best version for this set)'
                                                 }
-                                                disabled={Boolean(heroBusyCompositionId)}
-                                                onClick={(e) => {
-                                                    e.stopPropagation()
-                                                    e.preventDefault()
-                                                    onToggleHero(v.composition_id)
-                                                }}
-                                                className={`absolute right-0.5 top-0.5 z-[2] flex h-5 w-5 items-center justify-center rounded-full border shadow ${
+                                                aria-label={
+                                                    isHero
+                                                        ? 'Clear hero version'
+                                                        : 'Mark as hero (best version for this set)'
+                                                }
+                                                aria-disabled={Boolean(heroBusyCompositionId)}
+                                                aria-pressed={isHero}
+                                                className={`absolute right-0.5 top-0.5 z-[2] flex h-5 w-5 items-center justify-center rounded-full border shadow outline-none focus-visible:ring-2 focus-visible:ring-amber-400/80 focus-visible:ring-offset-1 focus-visible:ring-offset-gray-900 ${
                                                     isHero
                                                         ? 'border-amber-400/80 bg-amber-500/90 text-gray-950'
                                                         : 'border-gray-600 bg-gray-950/80 text-gray-400 hover:border-amber-500/60 hover:text-amber-200'
-                                                } disabled:cursor-not-allowed disabled:opacity-40`}
+                                                } ${
+                                                    heroBusyCompositionId
+                                                        ? 'cursor-not-allowed opacity-40'
+                                                        : 'cursor-pointer'
+                                                }`}
+                                                onClick={(e) => {
+                                                    e.stopPropagation()
+                                                    e.preventDefault()
+                                                    if (heroBusyCompositionId) {
+                                                        return
+                                                    }
+                                                    onToggleHero(v.composition_id)
+                                                }}
+                                                onKeyDown={(e) => {
+                                                    if (heroBusyCompositionId) {
+                                                        return
+                                                    }
+                                                    if (e.key === 'Enter' || e.key === ' ') {
+                                                        e.preventDefault()
+                                                        e.stopPropagation()
+                                                        onToggleHero(v.composition_id)
+                                                    }
+                                                }}
                                             >
                                                 <StarIcon className="h-3 w-3" aria-hidden />
-                                            </button>
+                                            </span>
                                         )}
                                         {isUnviewedNewcomer && (
                                             <span className="absolute left-1/2 top-0.5 z-[1] -translate-x-1/2 rounded bg-emerald-700/95 px-1 py-px text-[7px] font-bold uppercase tracking-wide text-white">

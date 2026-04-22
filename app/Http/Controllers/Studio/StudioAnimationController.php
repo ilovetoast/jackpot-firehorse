@@ -15,6 +15,7 @@ use App\Studio\Animation\Support\AnimationCapabilityRegistry;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Validation\Rule;
 
 class StudioAnimationController extends Controller
 {
@@ -114,7 +115,11 @@ class StudioAnimationController extends Controller
             'snapshot_width' => 'required|integer|min:16|max:8192',
             'snapshot_height' => 'required|integer|min:16|max:8192',
             'document_json' => 'nullable|array',
-            'source_composition_version_id' => 'nullable|integer|exists:composition_versions,id',
+            'source_composition_version_id' => [
+                'nullable',
+                'integer',
+                Rule::exists('composition_versions', 'id')->where('composition_id', $document),
+            ],
             'high_fidelity_submit' => 'sometimes|boolean',
         ]);
 

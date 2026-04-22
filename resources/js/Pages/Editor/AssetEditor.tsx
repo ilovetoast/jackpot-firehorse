@@ -8616,7 +8616,6 @@ export default function AssetEditor() {
                     <StudioAnimateCompositionModal
                         open
                         compositionId={compositionId}
-                        latestCompositionVersionId={versions[0]?.id ?? null}
                         document={document}
                         textLayerCount={document.layers.filter((l) => l.type === 'text').length}
                         getStageEl={() => stageRef.current}
