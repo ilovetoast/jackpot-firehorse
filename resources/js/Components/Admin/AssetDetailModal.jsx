@@ -9,9 +9,10 @@
  * @param {Function} props.onClose - Callback when modal should close
  * @param {Function} props.onAction - (assetId, action) for repair, retry-pipeline, restore
  * @param {Function} props.onRefresh - Callback after action that refreshes parent
+ * @param {Function} [props.onDetailDataReplace] - After classification save, merge full modal payload without closing
  * @param {boolean} props.showThumbnail - When true, show a compact thumbnail above the tab content
  */
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import JsonView from '@uiw/react-json-view'
 import { Link } from '@inertiajs/react'
 import {
@@ -72,9 +73,25 @@ const STATUS_COLORS = {
     unknown: 'bg-slate-100 text-slate-800',
 }
 
-export default function AssetDetailModal({ data, onClose, onAction, onRefresh, showThumbnail = false }) {
+const ADMIN_ASSET_TYPE_OPTIONS = [
+    { value: 'asset', label: 'Library asset' },
+    { value: 'deliverable', label: 'Execution (deliverable)' },
+    { value: 'ai_generated', label: 'Generative (AI-generated)' },
+    { value: 'reference', label: 'Reference' },
+]
+
+const CATEGORY_SHELF_LABEL = {
+    asset: 'Library categories',
+    deliverable: 'Execution categories',
+    ai_generated: 'Generative categories',
+    reference: 'Reference categories',
+}
+
+export default function AssetDetailModal({ data, onClose, onAction, onRefresh, onDetailDataReplace, showThumbnail = false }) {
     const [tab, setTab] = useState('overview')
     const [restoreVersionLoading, setRestoreVersionLoading] = useState(false)
+    const [classificationSaving, setClassificationSaving] = useState(false)
+    const [classificationError, setClassificationError] = useState(null)
     const {
         asset,
         incidents,
@@ -83,7 +100,21 @@ export default function AssetDetailModal({ data, onClose, onAction, onRefresh, s
         versions = [],
         plan_allows_versions = false,
         embedded_metadata_debug = null,
+        brand_categories_for_admin = [],
     } = data || {}
+
+    const [typeDraft, setTypeDraft] = useState(() => asset?.asset_type?.value ?? '')
+    const [categoryDraft, setCategoryDraft] = useState(() =>
+        asset?.category_id != null && asset?.category_id !== '' ? String(asset.category_id) : ''
+    )
+
+    useEffect(() => {
+        setTypeDraft(asset?.asset_type?.value ?? '')
+        setCategoryDraft(
+            asset?.category_id != null && asset?.category_id !== '' ? String(asset.category_id) : ''
+        )
+        setClassificationError(null)
+    }, [asset?.id, asset?.asset_type?.value, asset?.category_id])
 
     const TABS = [
         { id: 'overview', label: 'Overview' },
@@ -290,6 +321,111 @@ export default function AssetDetailModal({ data, onClose, onAction, onRefresh, s
                                         <span className="text-slate-600">{versions?.length ?? 0} version(s)</span>
                                     </div>
                                 )}
+                            </div>
+                            <div className="mt-5 rounded-lg border border-slate-200 bg-slate-50/80 p-4">
+                                <h3 className="text-sm font-semibold text-slate-900">Classification override</h3>
+                                <p className="mt-1 text-xs text-slate-600">
+                                    Fix library vs execution (deliverable) vs generative type and DAM shelf category when automation mis-files a row or blocks the grid. Clearing category removes{' '}
+                                    <code className="rounded bg-slate-200/80 px-1">metadata.category_id</code> until a category is set again.
+                                </p>
+                                {classificationError && (
+                                    <p className="mt-2 text-xs text-red-700">{classificationError}</p>
+                                )}
+                                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                                    <label className="block text-xs font-medium text-slate-700">
+                                        Row type
+                                        <select
+                                            className="mt-1 block w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-900 shadow-sm"
+                                            value={typeDraft}
+                                            onChange={(e) => setTypeDraft(e.target.value)}
+                                        >
+                                            {ADMIN_ASSET_TYPE_OPTIONS.map((o) => (
+                                                <option key={o.value} value={o.value}>
+                                                    {o.label}
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </label>
+                                    <label className="block text-xs font-medium text-slate-700">
+                                        DAM category (shelf)
+                                        <select
+                                            className="mt-1 block w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-900 shadow-sm"
+                                            value={categoryDraft}
+                                            onChange={(e) => setCategoryDraft(e.target.value)}
+                                        >
+                                            <option value="">— None (not in default grid) —</option>
+                                            {['asset', 'deliverable', 'ai_generated', 'reference']
+                                                .map((shelf) => ({
+                                                    shelf,
+                                                    rows: brand_categories_for_admin.filter((c) => c.asset_type === shelf),
+                                                }))
+                                                .filter((x) => x.rows.length > 0)
+                                                .map(({ shelf, rows }) => (
+                                                    <optgroup key={shelf} label={CATEGORY_SHELF_LABEL[shelf] || shelf}>
+                                                        {rows.map((c) => (
+                                                            <option key={c.id} value={String(c.id)}>
+                                                                {c.name}
+                                                            </option>
+                                                        ))}
+                                                    </optgroup>
+                                                ))}
+                                        </select>
+                                    </label>
+                                </div>
+                                {(!brand_categories_for_admin || brand_categories_for_admin.length === 0) && (
+                                    <p className="mt-2 text-xs text-amber-800">No categories returned for this brand — check tenant/brand linkage.</p>
+                                )}
+                                <div className="mt-3">
+                                    <button
+                                        type="button"
+                                        disabled={classificationSaving}
+                                        onClick={async () => {
+                                            if (!asset?.id) return
+                                            setClassificationError(null)
+                                            const body = {}
+                                            const curType = asset?.asset_type?.value ?? ''
+                                            if (typeDraft && typeDraft !== curType) {
+                                                body.type = typeDraft
+                                            }
+                                            const curCat =
+                                                asset?.category_id != null && asset?.category_id !== ''
+                                                    ? String(asset.category_id)
+                                                    : ''
+                                            if (categoryDraft !== curCat) {
+                                                body.category_id =
+                                                    categoryDraft === '' ? null : parseInt(categoryDraft, 10)
+                                            }
+                                            if (Object.keys(body).length === 0) {
+                                                setClassificationError('Change type or category before saving.')
+                                                return
+                                            }
+                                            setClassificationSaving(true)
+                                            try {
+                                                const res = await window.axios.post(
+                                                    `/app/admin/assets/${asset.id}/update-classification`,
+                                                    body
+                                                )
+                                                if (onDetailDataReplace) {
+                                                    onDetailDataReplace(res.data)
+                                                } else {
+                                                    onRefresh?.()
+                                                }
+                                            } catch (e) {
+                                                setClassificationError(
+                                                    e?.response?.data?.message ||
+                                                        e?.response?.data?.error ||
+                                                        e?.message ||
+                                                        'Save failed'
+                                                )
+                                            } finally {
+                                                setClassificationSaving(false)
+                                            }
+                                        }}
+                                        className="inline-flex items-center rounded-md bg-slate-800 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-50"
+                                    >
+                                        {classificationSaving ? 'Saving…' : 'Save classification'}
+                                    </button>
+                                </div>
                             </div>
                             <div className="pt-2">
                                 <Link

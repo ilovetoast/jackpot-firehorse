@@ -208,6 +208,86 @@ class AdminAssetController extends Controller
             $request->attributes->set('admin_tenants', [$asset->tenant->uuid]);
         }
 
+        return response()->json(array_merge(
+            $this->buildAssetDetailArray($asset, $request),
+            ['brand_categories_for_admin' => $this->categoriesForAdminAssetDetail($asset)]
+        ));
+    }
+
+    /**
+     * POST /app/admin/assets/{asset}/update-classification
+     *
+     * Correct DAM row type (library vs execution vs generative) and/or metadata.category_id when
+     * pipeline bugs or misclassification block grid visibility.
+     */
+    public function updateClassification(Request $request, string $asset): JsonResponse
+    {
+        $this->authorizeAdmin();
+
+        $model = Asset::withTrashed()->findOrFail($asset);
+        $model->load([
+            'tenant:id,name,slug,uuid',
+            'brand:id,name',
+            'user:id,first_name,last_name,email',
+        ]);
+
+        if ($model->tenant?->uuid) {
+            $request->attributes->set('admin_tenants', [$model->tenant->uuid]);
+        }
+
+        $validated = $request->validate([
+            'type' => 'sometimes|nullable|string|in:asset,deliverable,ai_generated,reference',
+            'category_id' => 'sometimes|nullable|integer',
+        ]);
+
+        DB::transaction(function () use ($model, $validated, $request): void {
+            if (array_key_exists('type', $validated) && is_string($validated['type']) && $validated['type'] !== '') {
+                $model->type = AssetType::from($validated['type']);
+                $model->save();
+            }
+            if ($request->exists('category_id')) {
+                $cid = $validated['category_id'] ?? null;
+                $meta = $model->metadata ?? [];
+                if ($cid === null) {
+                    unset($meta['category_id']);
+                } else {
+                    $cat = Category::query()
+                        ->whereNull('deleted_at')
+                        ->whereKey($cid)
+                        ->first();
+                    if ($cat === null) {
+                        abort(422, 'Category not found or was deleted.');
+                    }
+                    if ((int) $cat->brand_id !== (int) $model->brand_id || (int) $cat->tenant_id !== (int) $model->tenant_id) {
+                        abort(422, 'Category must belong to the same brand and tenant as the asset.');
+                    }
+                    $meta['category_id'] = (int) $cid;
+                }
+                $model->metadata = $meta;
+                $model->save();
+            }
+        });
+
+        $model->refresh();
+        $model->load([
+            'tenant:id,name,slug,uuid',
+            'brand:id,name',
+            'user:id,first_name,last_name,email',
+        ]);
+
+        return response()->json(array_merge(
+            $this->buildAssetDetailArray($model, $request),
+            ['brand_categories_for_admin' => $this->categoriesForAdminAssetDetail($model)]
+        ));
+    }
+
+    /**
+     * JSON payload for the admin asset console modal (shared by {@see show} and {@see updateClassification}).
+     *
+     * @return array<string, mixed>
+     */
+    protected function buildAssetDetailArray(Asset $asset, Request $request): array
+    {
         $incidents = SystemIncident::where('source_type', 'asset')
             ->where('source_id', $asset->id)
             ->whereNull('resolved_at')
@@ -225,7 +305,7 @@ class AdminAssetController extends Controller
         $visibility = app(\App\Services\AssetVisibilityService::class)->getVisibilityDetail($asset);
         // Infer thumbnails_generated when flag missing (legacy/race): thumbnail_status=completed + thumbnails/thumbnail_dimensions
         $thumbnailsGenerated = (bool) ($metadata['thumbnails_generated'] ?? false);
-        if (! $thumbnailsGenerated && $asset->thumbnail_status === \App\Enums\ThumbnailStatus::COMPLETED) {
+        if (! $thumbnailsGenerated && $asset->thumbnail_status === ThumbnailStatus::COMPLETED) {
             $thumbnailsGenerated = ! empty($metadata['thumbnails_generated_at'])
                 || ! empty($metadata['thumbnails'])
                 || ! empty($metadata['thumbnail_dimensions']['medium'] ?? []);
@@ -242,7 +322,7 @@ class AdminAssetController extends Controller
         ];
 
         $assetIdStr = (string) $asset->id;
-        $failedJobs = \DB::table('failed_jobs')
+        $failedJobs = DB::table('failed_jobs')
             ->where('payload', 'like', '%'.$assetIdStr.'%')
             ->orderByDesc('failed_at')
             ->limit(20)
@@ -283,7 +363,7 @@ class AdminAssetController extends Controller
 
         $planAllowsVersions = $asset->tenant && app(\App\Services\PlanService::class)->planAllowsVersions($asset->tenant);
 
-        return response()->json([
+        return [
             'asset' => $this->formatAssetForDetail($asset),
             'incidents' => $incidents,
             'pipeline_flags' => $pipelineFlags,
@@ -291,7 +371,39 @@ class AdminAssetController extends Controller
             'versions' => $versions,
             'plan_allows_versions' => $planAllowsVersions,
             'embedded_metadata_debug' => EmbeddedMetadataDebugPayload::assemble($asset->fresh()),
-        ]);
+        ];
+    }
+
+    /**
+     * Brand categories for admin overrides (library shelf vs execution / generative categories).
+     *
+     * @return list<array{id: int, name: string, slug: string, asset_type: string}>
+     */
+    protected function categoriesForAdminAssetDetail(Asset $asset): array
+    {
+        if (! $asset->brand_id || ! $asset->tenant_id) {
+            return [];
+        }
+
+        return Category::query()
+            ->where('brand_id', $asset->brand_id)
+            ->where('tenant_id', $asset->tenant_id)
+            ->whereNull('deleted_at')
+            ->orderBy('asset_type')
+            ->orderBy('name')
+            ->get(['id', 'name', 'slug', 'asset_type'])
+            ->map(static function ($c) {
+                $at = $c->asset_type;
+
+                return [
+                    'id' => (int) $c->id,
+                    'name' => (string) $c->name,
+                    'slug' => (string) $c->slug,
+                    'asset_type' => $at instanceof AssetType ? $at->value : (string) $at,
+                ];
+            })
+            ->values()
+            ->all();
     }
 
     /**
@@ -540,7 +652,7 @@ class AdminAssetController extends Controller
         $this->authorizeAdmin();
 
         $asset = Asset::withTrashed()->findOrFail($asset);
-        $canRetry = $this->thumbnailRetryService->canRetry($asset);
+        $canRetry = $this->thumbnailRetryService->canAdminDispatchFullPipeline($asset);
         if (! $canRetry['allowed']) {
             return response()->json(['error' => $canRetry['reason'] ?? 'Retry not allowed'], 400);
         }

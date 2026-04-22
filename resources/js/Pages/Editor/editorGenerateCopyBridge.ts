@@ -21,6 +21,8 @@ export type GenerateCopyPayload = {
     tone_override?: string
     /** Text layer frame width (px) — line-length awareness. */
     text_box_width?: number
+    /** Persisted composition id when the canvas is saved — attributes the agent run for per-comp spend. */
+    composition_id?: string
 }
 
 export type GenerateCopyResponse = {

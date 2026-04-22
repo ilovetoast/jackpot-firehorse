@@ -236,6 +236,8 @@ PROMPT;
             'visual_context' => 'nullable|array',
             'tone_override' => 'nullable|string|max:200',
             'text_box_width' => 'nullable|numeric|min:1|max:10000',
+            /** When set, {@see AIService::extractEntityFromOptions} attributes the run to this composition. */
+            'composition_id' => 'nullable|integer|min:1',
         ]);
 
         $input = (string) ($validated['input'] ?? '');
@@ -274,6 +276,10 @@ PROMPT;
         ];
         if ($brand instanceof Brand) {
             $executeOptions['brand_id'] = $brand->id;
+        }
+        $compositionId = $validated['composition_id'] ?? null;
+        if ($compositionId !== null) {
+            $executeOptions['composition_id'] = (string) $compositionId;
         }
 
         try {

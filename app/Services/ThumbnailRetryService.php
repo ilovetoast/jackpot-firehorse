@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Enums\ThumbnailStatus;
 use App\Jobs\RetryThumbnailGenerationJob;
 use App\Models\Asset;
+use App\Services\TenantBucketService;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -66,6 +67,69 @@ class ThumbnailRetryService
             return [
                 'allowed' => false,
                 'reason' => 'Asset storage information is missing',
+            ];
+        }
+
+        return ['allowed' => true];
+    }
+
+    /**
+     * Whether admin may dispatch {@see \App\Jobs\ProcessAssetJob} (full pipeline retry).
+     *
+     * Unlike {@see canRetry()}, this does not require FFmpeg/Imagick in the **web** PHP process.
+     * Video and other types are validated against the file-type registry only; workers run the
+     * actual tools. Prevents false "Thumbnail generation is not supported for this file type" on
+     * app nodes where only queue workers have FFmpeg.
+     *
+     * @return array{allowed: bool, reason?: string}
+     */
+    public function canAdminDispatchFullPipeline(Asset $asset): array
+    {
+        if ($asset->thumbnail_status === ThumbnailStatus::PROCESSING) {
+            return [
+                'allowed' => false,
+                'reason' => 'Thumbnail generation is already in progress',
+            ];
+        }
+
+        if (! is_string($asset->storage_root_path) || $asset->storage_root_path === '') {
+            return [
+                'allowed' => false,
+                'reason' => 'Asset storage path is missing',
+            ];
+        }
+
+        $asset->loadMissing('storageBucket', 'tenant');
+
+        $hasExplicitBucket = $asset->storage_bucket_id !== null
+            && (int) $asset->storage_bucket_id > 0
+            && $asset->storageBucket !== null;
+        if (! $hasExplicitBucket) {
+            if ($asset->tenant === null) {
+                return ['allowed' => false, 'reason' => 'Asset storage information is missing'];
+            }
+            try {
+                app(TenantBucketService::class)->resolveActiveBucketOrFail($asset->tenant);
+            } catch (\Throwable) {
+                return ['allowed' => false, 'reason' => 'Asset storage information is missing'];
+            }
+        }
+
+        $fileTypeService = app(FileTypeService::class);
+        $mime = $asset->mime_type;
+        $ext = strtolower((string) pathinfo($asset->original_filename ?? '', PATHINFO_EXTENSION));
+        $unsupported = $fileTypeService->getUnsupportedReason($mime, $ext);
+        if ($unsupported !== null) {
+            return [
+                'allowed' => false,
+                'reason' => $unsupported['message'] ?? 'This file type cannot be processed by the pipeline.',
+            ];
+        }
+
+        if ($fileTypeService->detectFileTypeFromAsset($asset) === null) {
+            return [
+                'allowed' => false,
+                'reason' => 'Could not determine file type (missing or unknown MIME type / extension).',
             ];
         }
 

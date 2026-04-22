@@ -6,6 +6,7 @@ use App\Enums\ApprovalStatus;
 use App\Enums\AssetStatus;
 use App\Enums\AssetType;
 use App\Enums\ThumbnailStatus;
+use App\Jobs\ProcessAssetJob;
 use App\Models\Asset;
 use App\Models\AssetVersion;
 use App\Models\Composition;
@@ -14,6 +15,7 @@ use App\Models\Tenant;
 use App\Models\User;
 use App\Services\AssetPathGenerator;
 use App\Support\EditorAssetOriginalBytesLoader;
+use App\Support\PipelineQueueResolver;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -323,6 +325,11 @@ final class StudioCompositionVideoExportService
                 'pipeline_status' => 'complete',
                 'uploaded_by' => $user->id,
             ]);
+
+            // File is already on disk; without this the row stays on analysis_status=uploading forever
+            // (no thumbnails / metadata / finalize). Mirrors {@see StudioAnimationCompletionService}.
+            ProcessAssetJob::dispatch((string) $asset->id)
+                ->onQueue(PipelineQueueResolver::imagesQueueForAsset($asset));
 
             $technical = [
                 'include_audio' => $includeAudioPref,

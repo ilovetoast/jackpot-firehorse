@@ -1740,6 +1740,9 @@ export default function AssetEditor() {
     const [previewFrame, setPreviewFrame] = useState<'social' | 'banner'>('social')
     const compositionIdRef = useRef<string | null>(null)
     compositionIdRef.current = compositionId
+    /** URL `?composition=` before `compositionId` state hydrates — keeps first credit-status fetch scoped to the comp. */
+    const compositionIdFromUrlRef = useRef<string | null>(null)
+    compositionIdFromUrlRef.current = compositionIdFromUrl
     /** Lets {@link refreshVersions} ignore stale completions when multiple fetches overlap. */
     const compositionVersionsFetchSeqRef = useRef(0)
     /** Bumps on each `compositionId` change so in-flight studio animation list fetches don't apply stale data. */
@@ -1968,7 +1971,8 @@ export default function AssetEditor() {
     // rerun the load-time effect and double-fetch on mount.
     const refreshAiCreditStatus = useCallback(async (): Promise<EditorAiCreditStatus | null> => {
         try {
-            const cid = compositionIdRef.current
+            const raw = compositionIdRef.current ?? compositionIdFromUrlRef.current
+            const cid = raw && /^\d+$/.test(raw) ? raw : null
             const url = cid
                 ? `/app/api/editor/ai-credit-status?composition_id=${encodeURIComponent(cid)}`
                 : '/app/api/editor/ai-credit-status'
@@ -1990,7 +1994,10 @@ export default function AssetEditor() {
     /** After AI work: refresh totals and, for unsaved drafts, bump local composition spend from global delta. */
     const refreshAfterAiAndBumpDraftCredits = useCallback(async () => {
         const before = aiCreditStatusRef.current?.credits_used ?? 0
-        const hadCompositionId = compositionIdRef.current != null
+        const urlId = compositionIdFromUrlRef.current
+        const hadCompositionId =
+            compositionIdRef.current != null ||
+            (urlId != null && urlId !== '' && /^\d+$/.test(urlId))
         const fresh = await refreshAiCreditStatus()
         if (hadCompositionId || !fresh || fresh.is_unlimited) {
             return
@@ -2010,7 +2017,7 @@ export default function AssetEditor() {
     // on aiEnabled to avoid noise for accounts without AI features.
     useEffect(() => {
         if (aiEnabled) void refreshAiCreditStatus()
-    }, [aiEnabled, compositionId, refreshAiCreditStatus])
+    }, [aiEnabled, compositionId, compositionIdFromUrl, compositionUrlEpoch, refreshAiCreditStatus])
 
     // Reset client-side draft credit accumulator whenever the loaded composition id changes.
     const prevCompositionIdForDraftRef = useRef<string | null | undefined>(undefined)
@@ -3499,6 +3506,9 @@ export default function AssetEditor() {
                 const input =
                     operation === 'generate' && !rawInput.trim() ? '' : rawInput.slice(0, 8000)
 
+                const compForCopy = compositionIdRef.current ?? compositionIdFromUrlRef.current
+                const composition_id =
+                    compForCopy && /^\d+$/.test(compForCopy) ? compForCopy : undefined
                 const res = await withAIConcurrency(() =>
                     postGenerateCopy(
                         {
@@ -3508,6 +3518,7 @@ export default function AssetEditor() {
                             brand_context: serializeBrandForCopy(brandContext),
                             visual_context: visual,
                             text_box_width: Math.round(layer.transform.width),
+                            ...(composition_id !== undefined ? { composition_id } : {}),
                         },
                         ac.signal
                     )

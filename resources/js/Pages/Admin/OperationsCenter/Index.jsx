@@ -688,6 +688,7 @@ export default function OperationsCenterIndex({
                                 onClose={closeQuickView}
                                 onAction={runAssetAction}
                                 onRefresh={() => { closeQuickView(); router.reload({ only: ['incidents'] }) }}
+                                onDetailDataReplace={(d) => setQuickViewData(d)}
                                 showThumbnail
                             />
                         ) : null}

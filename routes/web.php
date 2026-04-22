@@ -403,6 +403,7 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
     Route::post('/admin/assets/{asset}/restore', [\App\Http\Controllers\Admin\AdminAssetController::class, 'restore'])->name('admin.assets.restore');
     Route::post('/admin/assets/{asset}/retry-pipeline', [\App\Http\Controllers\Admin\AdminAssetController::class, 'retryPipeline'])->name('admin.assets.retry-pipeline');
     Route::post('/admin/assets/{asset}/reanalyze', [\App\Http\Controllers\Admin\AdminAssetController::class, 'reanalyze'])->name('admin.assets.reanalyze');
+    Route::post('/admin/assets/{asset}/update-classification', [\App\Http\Controllers\Admin\AdminAssetController::class, 'updateClassification'])->name('admin.assets.update-classification');
     Route::post('/admin/assets/{asset}/clear-promotion-failed', [\App\Http\Controllers\Admin\AdminAssetController::class, 'clearPromotionFailed'])->name('admin.assets.clear-promotion-failed');
     Route::post('/admin/assets/{asset}/versions/{version}/restore', [\App\Http\Controllers\Admin\AdminAssetController::class, 'restoreVersion'])->name('admin.assets.versions.restore');
     Route::get('/admin/operations-center', [\App\Http\Controllers\Admin\OperationsCenterController::class, 'index'])->name('admin.operations-center.index');

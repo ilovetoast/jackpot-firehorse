@@ -5,17 +5,18 @@ namespace App\Http\Controllers\Admin;
 use App\Enums\EventType;
 use App\Http\Controllers\Controller;
 use App\Models\ActivityEvent;
+use App\Models\AIAgentRun;
 use App\Models\Asset;
 use App\Models\Tenant;
 use App\Models\TenantAgency;
 use App\Models\TenantModule;
-use App\Services\AICostReportingService;
 use App\Services\AiUsageService;
 use App\Services\CompanyCostService;
 use App\Services\CompanyDataService;
 use App\Services\FeatureGate;
 use App\Services\IncubationWorkspaceService;
 use App\Services\PlanService;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -52,7 +53,6 @@ class CompanyViewController extends Controller
         $incubationWorkspaceService = app(IncubationWorkspaceService::class);
         $costService = app(CompanyCostService::class);
         $aiUsageService = app(AiUsageService::class);
-        $aiCostReportingService = app(AICostReportingService::class);
 
         // Get basic company information
         $owner = $tenant->owner();
@@ -202,12 +202,10 @@ class CompanyViewController extends Controller
             $monthStart = now()->startOfMonth();
             $monthEnd = now()->endOfMonth();
 
-            $tenantCostData = \App\Models\AIAgentRun::where('tenant_id', $tenant->id)
-                ->whereBetween('started_at', [$monthStart, $monthEnd])
-                ->get();
+            $spendDetail = $this->buildAdminTenantAiSpendDetail($tenant->id, $monthStart, $monthEnd);
 
-            $totalCost = $tenantCostData->sum('estimated_cost');
-            $totalRuns = $tenantCostData->count();
+            $totalCost = $spendDetail['combined_total_usd'];
+            $totalRuns = $spendDetail['agent_run_count'];
 
             $creditsUsed = $usageStatus['credits_used'];
             $creditsCap = $usageStatus['credits_cap'];
@@ -222,6 +220,13 @@ class CompanyViewController extends Controller
 
             $usagePercentage = $creditsCap > 0 ? min(100, ($projectedMonthlyCredits / $creditsCap) * 100) : 0;
 
+            $featureCalls = [];
+            foreach ($usageStatus['per_feature'] ?? [] as $feature => $row) {
+                if (is_array($row) && array_key_exists('calls', $row)) {
+                    $featureCalls[$feature] = (int) $row['calls'];
+                }
+            }
+
             $aiUsageData = [
                 'current_usage' => [
                     'credits_used' => $creditsUsed,
@@ -229,13 +234,19 @@ class CompanyViewController extends Controller
                     'per_feature' => $usageStatus['per_feature'],
                     'cost_to_date' => round($totalCost, 4),
                     'total_runs' => $totalRuns,
+                    'total_calls' => $totalRuns,
+                    'features' => $featureCalls,
+                    'agent_runs_cost_usd' => round($spendDetail['agent_runs_total_usd'], 4),
+                    'metered_usage_cost_usd' => round($spendDetail['metered_total_usd'], 4),
                 ],
                 'projections' => [
                     'monthly_credits' => round($projectedMonthlyCredits),
                     'monthly_cost' => round($projectedMonthlyCost, 2),
                     'usage_percentage' => round($usagePercentage, 1),
+                    'monthly_usage' => round($projectedMonthlyCredits),
                 ],
                 'usage_status' => $usageStatus,
+                'cost_detail' => $spendDetail,
                 'status' => 'success',
             ];
         } catch (\Exception $e) {
@@ -365,6 +376,166 @@ class CompanyViewController extends Controller
             ],
             'aiUsage' => $aiUsageData,
         ]);
+    }
+
+    /**
+     * Admin-only rollup of tenant AI spend for the calendar month: agent runs (estimated API cost)
+     * plus optional metered rows from `ai_usage` when cost_usd is populated.
+     *
+     * @return array<string, mixed>
+     */
+    protected function buildAdminTenantAiSpendDetail(int $tenantId, Carbon $monthStart, Carbon $monthEnd): array
+    {
+        $driver = DB::connection()->getDriverName();
+        $daySelect = match ($driver) {
+            'sqlite' => "strftime('%Y-%m-%d', started_at) as day",
+            'pgsql' => "(started_at::date)::text as day",
+            default => 'DATE(started_at) as day',
+        };
+        $dayGroup = match ($driver) {
+            'sqlite' => "strftime('%Y-%m-%d', started_at)",
+            'pgsql' => '(started_at::date)',
+            default => 'DATE(started_at)',
+        };
+
+        $agentRunsTotal = (float) (AIAgentRun::query()
+            ->where('tenant_id', $tenantId)
+            ->whereBetween('started_at', [$monthStart, $monthEnd])
+            ->sum('estimated_cost') ?? 0);
+
+        $agentRunCount = (int) AIAgentRun::query()
+            ->where('tenant_id', $tenantId)
+            ->whereBetween('started_at', [$monthStart, $monthEnd])
+            ->count();
+
+        $meteredTotal = 0.0;
+        $meteredByFeature = [];
+        if (DB::getSchemaBuilder()->hasColumn('ai_usage', 'cost_usd')) {
+            $meteredTotal = (float) (DB::table('ai_usage')
+                ->where('tenant_id', $tenantId)
+                ->whereBetween('usage_date', [$monthStart->toDateString(), now()->toDateString()])
+                ->sum(DB::raw('COALESCE(cost_usd, 0)')) ?? 0);
+
+            $meteredByFeature = DB::table('ai_usage')
+                ->where('tenant_id', $tenantId)
+                ->whereBetween('usage_date', [$monthStart->toDateString(), now()->toDateString()])
+                ->select('feature', DB::raw('SUM(call_count) as calls'), DB::raw('SUM(COALESCE(cost_usd, 0)) as cost_usd'))
+                ->groupBy('feature')
+                ->orderByDesc(DB::raw('SUM(COALESCE(cost_usd, 0))'))
+                ->get()
+                ->map(fn ($row) => [
+                    'feature' => (string) $row->feature,
+                    'calls' => (int) $row->calls,
+                    'cost_usd' => round((float) $row->cost_usd, 4),
+                ])
+                ->values()
+                ->all();
+        }
+
+        $labelExpr = "COALESCE(NULLIF(TRIM(agent_name), ''), '(Unnamed agent)')";
+
+        $byAgent = DB::table('ai_agent_runs')
+            ->where('tenant_id', $tenantId)
+            ->whereBetween('started_at', [$monthStart, $monthEnd])
+            ->selectRaw("{$labelExpr} as label, SUM(estimated_cost) as cost_usd, COUNT(*) as run_count")
+            ->groupBy(DB::raw($labelExpr))
+            ->orderByDesc('cost_usd')
+            ->limit(40)
+            ->get()
+            ->map(fn ($row) => [
+                'label' => (string) $row->label,
+                'cost_usd' => round((float) $row->cost_usd, 4),
+                'run_count' => (int) $row->run_count,
+            ])
+            ->values()
+            ->all();
+
+        $taskLabel = "COALESCE(NULLIF(TRIM(task_type), ''), '(unspecified task)')";
+        $byTask = DB::table('ai_agent_runs')
+            ->where('tenant_id', $tenantId)
+            ->whereBetween('started_at', [$monthStart, $monthEnd])
+            ->selectRaw("{$taskLabel} as label, SUM(estimated_cost) as cost_usd, COUNT(*) as run_count")
+            ->groupBy(DB::raw($taskLabel))
+            ->orderByDesc('cost_usd')
+            ->limit(40)
+            ->get()
+            ->map(fn ($row) => [
+                'label' => (string) $row->label,
+                'cost_usd' => round((float) $row->cost_usd, 4),
+                'run_count' => (int) $row->run_count,
+            ])
+            ->values()
+            ->all();
+
+        $modelLabel = "COALESCE(NULLIF(TRIM(model_used), ''), '(model not recorded)')";
+        $byModel = DB::table('ai_agent_runs')
+            ->where('tenant_id', $tenantId)
+            ->whereBetween('started_at', [$monthStart, $monthEnd])
+            ->selectRaw("{$modelLabel} as label, SUM(estimated_cost) as cost_usd, COUNT(*) as run_count")
+            ->groupBy(DB::raw($modelLabel))
+            ->orderByDesc('cost_usd')
+            ->limit(40)
+            ->get()
+            ->map(fn ($row) => [
+                'label' => (string) $row->label,
+                'cost_usd' => round((float) $row->cost_usd, 4),
+                'run_count' => (int) $row->run_count,
+            ])
+            ->values()
+            ->all();
+
+        $byDay = DB::table('ai_agent_runs')
+            ->where('tenant_id', $tenantId)
+            ->whereBetween('started_at', [$monthStart, $monthEnd])
+            ->selectRaw("{$daySelect}, SUM(estimated_cost) as cost_usd, COUNT(*) as run_count")
+            ->groupBy(DB::raw($dayGroup))
+            ->orderBy('day')
+            ->get()
+            ->map(fn ($row) => [
+                'day' => (string) $row->day,
+                'cost_usd' => round((float) $row->cost_usd, 4),
+                'run_count' => (int) $row->run_count,
+            ])
+            ->values()
+            ->all();
+
+        $recentRuns = AIAgentRun::query()
+            ->where('tenant_id', $tenantId)
+            ->whereBetween('started_at', [$monthStart, $monthEnd])
+            ->orderByDesc('started_at')
+            ->limit(100)
+            ->get(['id', 'started_at', 'agent_name', 'task_type', 'model_used', 'estimated_cost', 'status', 'tokens_in', 'tokens_out'])
+            ->map(fn (AIAgentRun $r) => [
+                'id' => (string) $r->id,
+                'started_at' => $r->started_at?->toIso8601String(),
+                'agent_name' => $r->agent_name,
+                'task_type' => $r->task_type,
+                'model_used' => $r->model_used,
+                'estimated_cost_usd' => round((float) $r->estimated_cost, 4),
+                'status' => $r->status,
+                'tokens_in' => (int) ($r->tokens_in ?? 0),
+                'tokens_out' => (int) ($r->tokens_out ?? 0),
+            ])
+            ->values()
+            ->all();
+
+        $combined = $agentRunsTotal + $meteredTotal;
+
+        return [
+            'combined_total_usd' => round($combined, 4),
+            'agent_runs_total_usd' => round($agentRunsTotal, 4),
+            'metered_total_usd' => round($meteredTotal, 4),
+            'agent_run_count' => $agentRunCount,
+            'period_start' => $monthStart->toIso8601String(),
+            'period_end' => $monthEnd->toIso8601String(),
+            'by_agent' => $byAgent,
+            'by_task_type' => $byTask,
+            'by_model' => $byModel,
+            'by_day' => $byDay,
+            'metered_by_feature' => $meteredByFeature,
+            'recent_runs' => $recentRuns,
+            'methodology' => 'Dollar amounts are internal estimates recorded when each AI job ran (model pricing × tokens / provider quotes). They approximate your variable AI spend but are not Stripe invoices or provider bills. Metered rows add any per-call costs stored on the ai_usage ledger for capped features (tagging, suggestions, etc.).',
+        ];
     }
 
     /**

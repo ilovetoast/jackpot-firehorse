@@ -144,7 +144,11 @@ class EditorGenerateLayoutController extends Controller
      *
      * Filtering rules:
      *   - tenant scoped (tenant_id must match)
-     *   - entity_type='composition' with matching entity_id
+     *   - run is tied to the composition by either:
+     *       - entity_type='composition' with matching entity_id, or
+     *       - metadata.generative_audit.composition_id (legacy / asset-only rows). Studio
+     *         composition animation is excluded here — those credits are summed from
+     *         {@see StudioAnimationJob} so we do not double-count the companion ai_agent_runs row.
      *   - started_at within current calendar month
      *   - only successful runs count — failed/skipped shouldn't charge the user
      *   - task_type mapped to its ai_credits.weights entry
@@ -164,11 +168,23 @@ class EditorGenerateLayoutController extends Controller
 
         $rows = DB::table('ai_agent_runs')
             ->where('tenant_id', $tenant->id)
-            ->where('entity_type', 'composition')
-            ->where('entity_id', $compositionId)
             ->where('status', 'success')
             ->whereIn('task_type', array_keys($taskToFeature))
             ->whereBetween('started_at', [$start, $end])
+            ->where(function ($outer) use ($compositionId) {
+                $outer->where(function ($q) use ($compositionId) {
+                    $q->where('entity_type', 'composition')
+                        ->where('entity_id', $compositionId);
+                })->orWhere(function ($q) use ($compositionId) {
+                    // Companion rows for studio animation use generative_audit.composition_id but
+                    // credits are rolled up from studio_animation_jobs below.
+                    $q->where('task_type', '!=', AITaskType::STUDIO_COMPOSITION_ANIMATION)
+                        ->whereRaw(
+                            'CAST(JSON_UNQUOTE(JSON_EXTRACT(metadata, \'$.generative_audit.composition_id\')) AS CHAR) = ?',
+                            [$compositionId]
+                        );
+                });
+            })
             ->select('task_type', DB::raw('COUNT(*) as call_count'))
             ->groupBy('task_type')
             ->get();

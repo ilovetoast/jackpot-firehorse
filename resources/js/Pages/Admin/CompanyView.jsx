@@ -21,6 +21,8 @@ import {
     TrashIcon,
     RectangleStackIcon,
     CubeIcon,
+    XMarkIcon,
+    ChartPieIcon,
 } from '@heroicons/react/24/outline'
 
 function defaultCreatorExpiresLocal() {
@@ -74,6 +76,8 @@ export default function AdminCompanyView({
     const [extendReason, setExtendReason] = useState('')
     const [extendStatus, setExtendStatus] = useState(null)
     const [extendSubmitting, setExtendSubmitting] = useState(false)
+
+    const [aiCostModalOpen, setAiCostModalOpen] = useState(false)
 
     const [creatorExpires, setCreatorExpires] = useState('')
     const [creatorStatus, setCreatorStatus] = useState('active')
@@ -1306,11 +1310,21 @@ export default function AdminCompanyView({
                     <div className="mt-8">
                         <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
                             <div className="p-6">
-                                <div className="flex items-center justify-between mb-4">
+                                <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
                                     <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
                                         <SparklesIcon className="h-5 w-5 text-purple-500" />
                                         AI Usage & Billing Estimates
                                     </h2>
+                                    {aiUsage?.cost_detail && (
+                                        <button
+                                            type="button"
+                                            onClick={() => setAiCostModalOpen(true)}
+                                            className="inline-flex items-center gap-1.5 rounded-md border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-sm font-medium text-indigo-800 hover:bg-indigo-100"
+                                        >
+                                            <ChartPieIcon className="h-4 w-4" aria-hidden />
+                                            Cost breakdown / line items
+                                        </button>
+                                    )}
                                 </div>
 
                                 {aiUsage && aiUsage.status === 'success' ? (
@@ -1318,26 +1332,37 @@ export default function AdminCompanyView({
                                         {/* Current Month Overview */}
                                         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 mb-6">
                                             <div className="rounded-lg bg-purple-50 p-4">
-                                                <dt className="text-sm font-medium text-purple-800">Current Usage</dt>
+                                                <dt className="text-sm font-medium text-purple-800">Plan credits used</dt>
                                                 <dd className="mt-1 text-2xl font-semibold text-purple-900">
-                                                    {aiUsage.current_usage?.total_calls || 0}
+                                                    {Math.round(aiUsage.current_usage?.credits_used ?? 0).toLocaleString()}
                                                 </dd>
-                                                <div className="mt-1 text-xs text-purple-700">AI calls this month</div>
+                                                <div className="mt-1 text-xs text-purple-700">
+                                                    Weighted credits this month (caps / limits)
+                                                </div>
+                                                <div className="mt-2 border-t border-purple-200/80 pt-2 text-[11px] text-purple-800/90">
+                                                    Agent workflow runs logged:{' '}
+                                                    <span className="font-semibold">
+                                                        {aiUsage.current_usage?.total_runs ?? 0}
+                                                    </span>
+                                                </div>
                                             </div>
                                             <div className="rounded-lg bg-green-50 p-4">
-                                                <dt className="text-sm font-medium text-green-800">Cost to Date</dt>
+                                                <dt className="text-sm font-medium text-green-800">Cost to date (est.)</dt>
                                                 <dd className="mt-1 text-2xl font-semibold text-green-900">
                                                     {formatCurrency(aiUsage.current_usage?.cost_to_date || 0)}
                                                 </dd>
-                                                <div className="mt-1 text-xs text-green-700">This month so far</div>
+                                                <div className="mt-1 text-xs text-green-700">
+                                                    Agent runs + metered usage (see breakdown)
+                                                </div>
                                             </div>
                                             <div className="rounded-lg bg-blue-50 p-4">
-                                                <dt className="text-sm font-medium text-blue-800">Projected Monthly</dt>
+                                                <dt className="text-sm font-medium text-blue-800">Projected monthly</dt>
                                                 <dd className="mt-1 text-2xl font-semibold text-blue-900">
                                                     {formatCurrency(aiUsage.projections?.monthly_cost || 0)}
                                                 </dd>
                                                 <div className="mt-1 text-xs text-blue-700">
-                                                    ~{aiUsage.projections?.monthly_usage || 0} calls
+                                                    ~{Math.round(aiUsage.projections?.monthly_credits ?? 0).toLocaleString()}{' '}
+                                                    credits (linear extrapolation)
                                                 </div>
                                             </div>
                                             <div className={`rounded-lg p-4 ${
@@ -1376,6 +1401,13 @@ export default function AdminCompanyView({
                                                 </div>
                                             </div>
                                         </div>
+
+                                        {aiUsage.cost_detail?.methodology && (
+                                            <p className="mb-6 rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-xs leading-relaxed text-gray-700">
+                                                <span className="font-semibold text-gray-800">About these numbers: </span>
+                                                {aiUsage.cost_detail.methodology}
+                                            </p>
+                                        )}
 
                                         {/* Feature Breakdown */}
                                         {aiUsage.current_usage?.features && Object.keys(aiUsage.current_usage.features).length > 0 && (
@@ -1458,14 +1490,293 @@ export default function AdminCompanyView({
                     <div className="mt-6 text-xs text-gray-500 bg-gray-50 rounded-lg p-4">
                         <p className="font-semibold mb-2">Future Enhancements:</p>
                         <ul className="list-disc list-inside space-y-1">
-                            <li>Add detailed cost breakdown by AI model (GPT-4, Claude, etc.)</li>
-                            <li>Add AI cost optimization recommendations</li>
-                            <li>Add AI usage alerts and notifications</li>
-                            <li>Add export functionality for AI cost reports</li>
+                            <li>AI cost optimization recommendations from usage patterns</li>
+                            <li>Usage alerts when spend or credits cross thresholds</li>
+                            <li>Export AI cost / usage reports (CSV)</li>
                         </ul>
                     </div>
                 </div>
             </main>
+
+            {aiCostModalOpen && aiUsage?.status === 'success' && aiUsage?.cost_detail && (
+                <div className="fixed inset-0 z-50 overflow-y-auto">
+                    <div className="flex min-h-full items-end justify-center p-4 text-center sm:items-center sm:p-0">
+                        <div
+                            className="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity"
+                            role="presentation"
+                            onClick={() => setAiCostModalOpen(false)}
+                        />
+                        <div
+                            className="relative z-10 max-h-[90vh] w-full max-w-4xl transform overflow-hidden rounded-lg bg-white text-left shadow-xl transition-all"
+                            role="dialog"
+                            aria-modal="true"
+                            aria-labelledby="ai-cost-modal-title"
+                        >
+                            <div className="flex items-start justify-between border-b border-gray-200 px-5 py-4">
+                                <div>
+                                    <h3 id="ai-cost-modal-title" className="text-lg font-semibold text-gray-900">
+                                        AI spend detail — {company.name}
+                                    </h3>
+                                    <p className="mt-1 text-xs text-gray-500">
+                                        {aiUsage.cost_detail.period_start && aiUsage.cost_detail.period_end
+                                            ? `${new Date(aiUsage.cost_detail.period_start).toLocaleDateString()} → ${new Date(aiUsage.cost_detail.period_end).toLocaleDateString()}`
+                                            : 'Current calendar month'}
+                                    </p>
+                                </div>
+                                <button
+                                    type="button"
+                                    className="rounded-md p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+                                    onClick={() => setAiCostModalOpen(false)}
+                                >
+                                    <XMarkIcon className="h-6 w-6" aria-hidden />
+                                    <span className="sr-only">Close</span>
+                                </button>
+                            </div>
+                            <div className="max-h-[calc(90vh-5rem)] overflow-y-auto px-5 py-4 space-y-8">
+                                <section>
+                                    <h4 className="text-sm font-semibold text-gray-900">Summary</h4>
+                                    <dl className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                                        <div className="rounded-md border border-gray-100 bg-gray-50 p-3">
+                                            <dt className="text-xs text-gray-500">Combined (shown on overview)</dt>
+                                            <dd className="text-lg font-semibold text-gray-900">
+                                                {formatCurrency(aiUsage.cost_detail.combined_total_usd ?? 0)}
+                                            </dd>
+                                        </div>
+                                        <div className="rounded-md border border-gray-100 bg-gray-50 p-3">
+                                            <dt className="text-xs text-gray-500">Agent / workflow runs</dt>
+                                            <dd className="text-lg font-semibold text-gray-900">
+                                                {formatCurrency(aiUsage.cost_detail.agent_runs_total_usd ?? 0)}
+                                            </dd>
+                                            <dd className="text-xs text-gray-600">
+                                                {aiUsage.cost_detail.agent_run_count ?? 0} runs
+                                            </dd>
+                                        </div>
+                                        <div className="rounded-md border border-gray-100 bg-gray-50 p-3">
+                                            <dt className="text-xs text-gray-500">Metered (ai_usage ledger)</dt>
+                                            <dd className="text-lg font-semibold text-gray-900">
+                                                {formatCurrency(aiUsage.cost_detail.metered_total_usd ?? 0)}
+                                            </dd>
+                                        </div>
+                                    </dl>
+                                    <p className="mt-3 text-xs leading-relaxed text-gray-600">{aiUsage.cost_detail.methodology}</p>
+                                </section>
+
+                                {Array.isArray(aiUsage.cost_detail.metered_by_feature) &&
+                                    aiUsage.cost_detail.metered_by_feature.length > 0 && (
+                                        <section>
+                                            <h4 className="text-sm font-semibold text-gray-900">Metered usage by feature</h4>
+                                            <div className="mt-2 overflow-x-auto rounded-md border border-gray-200">
+                                                <table className="min-w-full divide-y divide-gray-200 text-sm">
+                                                    <thead className="bg-gray-50">
+                                                        <tr>
+                                                            <th className="px-3 py-2 text-left font-medium text-gray-700">Feature</th>
+                                                            <th className="px-3 py-2 text-right font-medium text-gray-700">Calls</th>
+                                                            <th className="px-3 py-2 text-right font-medium text-gray-700">Est. cost</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody className="divide-y divide-gray-100 bg-white">
+                                                        {aiUsage.cost_detail.metered_by_feature.map((row) => (
+                                                            <tr key={row.feature}>
+                                                                <td className="px-3 py-2 text-gray-900">{row.feature}</td>
+                                                                <td className="px-3 py-2 text-right tabular-nums text-gray-700">
+                                                                    {row.calls}
+                                                                </td>
+                                                                <td className="px-3 py-2 text-right tabular-nums text-gray-900">
+                                                                    {formatCurrency(row.cost_usd)}
+                                                                </td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        </section>
+                                    )}
+
+                                {Array.isArray(aiUsage.cost_detail.by_agent) && aiUsage.cost_detail.by_agent.length > 0 && (
+                                    <section>
+                                        <h4 className="text-sm font-semibold text-gray-900">Spend by agent name</h4>
+                                        <div className="mt-2 overflow-x-auto rounded-md border border-gray-200">
+                                            <table className="min-w-full divide-y divide-gray-200 text-sm">
+                                                <thead className="bg-gray-50">
+                                                    <tr>
+                                                        <th className="px-3 py-2 text-left font-medium text-gray-700">Agent</th>
+                                                        <th className="px-3 py-2 text-right font-medium text-gray-700">Runs</th>
+                                                        <th className="px-3 py-2 text-right font-medium text-gray-700">Est. cost</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody className="divide-y divide-gray-100 bg-white">
+                                                    {aiUsage.cost_detail.by_agent.map((row) => (
+                                                        <tr key={row.label}>
+                                                            <td className="px-3 py-2 text-gray-900">{row.label}</td>
+                                                            <td className="px-3 py-2 text-right tabular-nums text-gray-700">
+                                                                {row.run_count}
+                                                            </td>
+                                                            <td className="px-3 py-2 text-right tabular-nums text-gray-900">
+                                                                {formatCurrency(row.cost_usd)}
+                                                            </td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </section>
+                                )}
+
+                                {Array.isArray(aiUsage.cost_detail.by_model) && aiUsage.cost_detail.by_model.length > 0 && (
+                                    <section>
+                                        <h4 className="text-sm font-semibold text-gray-900">Spend by model</h4>
+                                        <div className="mt-2 overflow-x-auto rounded-md border border-gray-200">
+                                            <table className="min-w-full divide-y divide-gray-200 text-sm">
+                                                <thead className="bg-gray-50">
+                                                    <tr>
+                                                        <th className="px-3 py-2 text-left font-medium text-gray-700">Model</th>
+                                                        <th className="px-3 py-2 text-right font-medium text-gray-700">Runs</th>
+                                                        <th className="px-3 py-2 text-right font-medium text-gray-700">Est. cost</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody className="divide-y divide-gray-100 bg-white">
+                                                    {aiUsage.cost_detail.by_model.map((row) => (
+                                                        <tr key={row.label}>
+                                                            <td className="px-3 py-2 font-mono text-xs text-gray-900">{row.label}</td>
+                                                            <td className="px-3 py-2 text-right tabular-nums text-gray-700">
+                                                                {row.run_count}
+                                                            </td>
+                                                            <td className="px-3 py-2 text-right tabular-nums text-gray-900">
+                                                                {formatCurrency(row.cost_usd)}
+                                                            </td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </section>
+                                )}
+
+                                {Array.isArray(aiUsage.cost_detail.by_task_type) && aiUsage.cost_detail.by_task_type.length > 0 && (
+                                    <section>
+                                        <h4 className="text-sm font-semibold text-gray-900">Spend by task type</h4>
+                                        <div className="mt-2 overflow-x-auto rounded-md border border-gray-200">
+                                            <table className="min-w-full divide-y divide-gray-200 text-sm">
+                                                <thead className="bg-gray-50">
+                                                    <tr>
+                                                        <th className="px-3 py-2 text-left font-medium text-gray-700">Task</th>
+                                                        <th className="px-3 py-2 text-right font-medium text-gray-700">Runs</th>
+                                                        <th className="px-3 py-2 text-right font-medium text-gray-700">Est. cost</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody className="divide-y divide-gray-100 bg-white">
+                                                    {aiUsage.cost_detail.by_task_type.map((row) => (
+                                                        <tr key={row.label}>
+                                                            <td className="px-3 py-2 text-gray-900">{row.label}</td>
+                                                            <td className="px-3 py-2 text-right tabular-nums text-gray-700">
+                                                                {row.run_count}
+                                                            </td>
+                                                            <td className="px-3 py-2 text-right tabular-nums text-gray-900">
+                                                                {formatCurrency(row.cost_usd)}
+                                                            </td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </section>
+                                )}
+
+                                {Array.isArray(aiUsage.cost_detail.by_day) && aiUsage.cost_detail.by_day.length > 0 && (
+                                    <section>
+                                        <h4 className="text-sm font-semibold text-gray-900">Spend by day (agent runs)</h4>
+                                        <div className="mt-2 overflow-x-auto rounded-md border border-gray-200">
+                                            <table className="min-w-full divide-y divide-gray-200 text-sm">
+                                                <thead className="bg-gray-50">
+                                                    <tr>
+                                                        <th className="px-3 py-2 text-left font-medium text-gray-700">Date</th>
+                                                        <th className="px-3 py-2 text-right font-medium text-gray-700">Runs</th>
+                                                        <th className="px-3 py-2 text-right font-medium text-gray-700">Est. cost</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody className="divide-y divide-gray-100 bg-white">
+                                                    {aiUsage.cost_detail.by_day.map((row) => (
+                                                        <tr key={row.day}>
+                                                            <td className="px-3 py-2 text-gray-900">{row.day}</td>
+                                                            <td className="px-3 py-2 text-right tabular-nums text-gray-700">
+                                                                {row.run_count}
+                                                            </td>
+                                                            <td className="px-3 py-2 text-right tabular-nums text-gray-900">
+                                                                {formatCurrency(row.cost_usd)}
+                                                            </td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </section>
+                                )}
+
+                                {Array.isArray(aiUsage.cost_detail.recent_runs) && aiUsage.cost_detail.recent_runs.length > 0 && (
+                                    <section>
+                                        <h4 className="text-sm font-semibold text-gray-900">
+                                            Recent agent runs (line items, newest first)
+                                        </h4>
+                                        <p className="mt-1 text-xs text-gray-500">Showing up to 100 rows for this month.</p>
+                                        <div className="mt-2 max-h-72 overflow-auto rounded-md border border-gray-200">
+                                            <table className="min-w-full divide-y divide-gray-200 text-xs">
+                                                <thead className="sticky top-0 bg-gray-50">
+                                                    <tr>
+                                                        <th className="px-2 py-2 text-left font-medium text-gray-700">When</th>
+                                                        <th className="px-2 py-2 text-left font-medium text-gray-700">Agent</th>
+                                                        <th className="px-2 py-2 text-left font-medium text-gray-700">Task</th>
+                                                        <th className="px-2 py-2 text-left font-medium text-gray-700">Model</th>
+                                                        <th className="px-2 py-2 text-right font-medium text-gray-700">Cost</th>
+                                                        <th className="px-2 py-2 text-center font-medium text-gray-700">Status</th>
+                                                        <th className="px-2 py-2 text-right font-medium text-gray-700">Tok in/out</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody className="divide-y divide-gray-100 bg-white">
+                                                    {aiUsage.cost_detail.recent_runs.map((r) => (
+                                                        <tr key={r.id}>
+                                                            <td className="whitespace-nowrap px-2 py-1.5 text-gray-700">
+                                                                {formatDate(r.started_at)}
+                                                            </td>
+                                                            <td className="max-w-[10rem] truncate px-2 py-1.5 text-gray-900">
+                                                                {r.agent_name || '—'}
+                                                            </td>
+                                                            <td className="max-w-[8rem] truncate px-2 py-1.5 text-gray-700">
+                                                                {r.task_type || '—'}
+                                                            </td>
+                                                            <td className="max-w-[10rem] truncate font-mono px-2 py-1.5 text-gray-600">
+                                                                {r.model_used || '—'}
+                                                            </td>
+                                                            <td className="whitespace-nowrap px-2 py-1.5 text-right font-medium text-gray-900">
+                                                                {formatCurrency(r.estimated_cost_usd)}
+                                                            </td>
+                                                            <td className="whitespace-nowrap px-2 py-1.5 text-center text-gray-600">
+                                                                {r.status}
+                                                            </td>
+                                                            <td className="whitespace-nowrap px-2 py-1.5 text-right text-gray-500">
+                                                                {r.tokens_in}/{r.tokens_out}
+                                                            </td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </section>
+                                )}
+                            </div>
+                            <div className="border-t border-gray-200 bg-gray-50 px-5 py-3 text-right">
+                                <button
+                                    type="button"
+                                    className="rounded-md bg-white px-3 py-1.5 text-sm font-medium text-gray-700 ring-1 ring-gray-300 hover:bg-gray-100"
+                                    onClick={() => setAiCostModalOpen(false)}
+                                >
+                                    Close
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             <AppFooter />
 
             {/* Add-on modules: pick module, then configure (Creator today; Space placeholder) */}
