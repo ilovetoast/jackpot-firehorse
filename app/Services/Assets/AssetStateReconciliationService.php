@@ -3,8 +3,10 @@
 namespace App\Services\Assets;
 
 use App\Enums\ThumbnailStatus;
+use App\Jobs\ProcessAssetJob;
 use App\Models\Asset;
 use App\Services\Reliability\ReliabilityEngine;
+use App\Support\PipelineQueueResolver;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -86,6 +88,10 @@ class AssetStateReconciliationService
         if ($asset->visualMetadataReady()) {
             $this->resolveVisualMetadataIncidentIfExists($asset);
         }
+
+        // Rule 7 — Studio export / animation: version marked complete before pipeline ran → ProcessAssetJob no-ops forever
+        $promotions = $this->applyRule7($asset->fresh());
+        $changes = array_merge($changes, $promotions);
 
         return [
             'updated' => !empty($changes),
@@ -248,5 +254,57 @@ class AssetStateReconciliationService
             return ['analysis_status → complete'];
         }
         return [];
+    }
+
+    /**
+     * Rule 7: Studio composition video export / studio animation created the current version with
+     * pipeline_status=complete before any pipeline work, so {@see ProcessAssetJob} exits immediately
+     * and the asset stays analysis_status=uploading with thumbnails pending. Reset the version gate
+     * and re-dispatch the pipeline job.
+     *
+     * @return list<string>
+     */
+    protected function applyRule7(Asset $asset): array
+    {
+        $allowedSources = ['studio_composition_video_export', 'studio_animation'];
+        if (! in_array((string) ($asset->source ?? ''), $allowedSources, true)) {
+            return [];
+        }
+        if (($asset->analysis_status ?? '') !== 'uploading') {
+            return [];
+        }
+        $thumbEnum = $asset->thumbnail_status instanceof ThumbnailStatus
+            ? $asset->thumbnail_status
+            : ThumbnailStatus::tryFrom((string) ($asset->thumbnail_status ?? ''));
+        if ($thumbEnum !== ThumbnailStatus::PENDING) {
+            return [];
+        }
+        $metadata = $asset->metadata ?? [];
+        if (($metadata['thumbnails_generated'] ?? false) === true) {
+            return [];
+        }
+        if (isset($metadata['pipeline_completed_at'])) {
+            return [];
+        }
+        $version = $asset->currentVersion()->first();
+        if (! $version || $version->pipeline_status !== 'complete') {
+            return [];
+        }
+        $versionMeta = $version->metadata ?? [];
+        if (($versionMeta['processing_started'] ?? false) === true) {
+            return [];
+        }
+
+        $version->update(['pipeline_status' => 'pending']);
+        ProcessAssetJob::dispatch((string) $asset->id)
+            ->onQueue(PipelineQueueResolver::imagesQueueForAsset($asset));
+
+        Log::info('[AssetStateReconciliationService] Rule 7 applied (studio output version gate reset)', [
+            'asset_id' => $asset->id,
+            'version_id' => $version->id,
+            'source' => $asset->source,
+        ]);
+
+        return ['Rule 7: version.pipeline_status → pending; ProcessAssetJob dispatched'];
     }
 }

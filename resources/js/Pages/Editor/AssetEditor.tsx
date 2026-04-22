@@ -14448,14 +14448,14 @@ export default function AssetEditor() {
                                 {([0, 1, 2] as const).map((i) => (
                                     <motion.div
                                         key={i}
-                                        className="flex h-12 w-11 items-center justify-center overflow-hidden rounded-lg bg-indigo-50 ring-1 ring-indigo-200/60"
+                                        className="flex h-12 w-11 items-center justify-center overflow-hidden rounded-lg bg-gray-100 ring-1 ring-gray-300/90"
                                         animate={{ y: [0, -6, 0, -3, 0] }}
                                         transition={{ duration: 0.6, delay: i * 0.12, ease: 'easeInOut' }}
                                     >
                                         <img
                                             src="/jp-parts/diamond-slot.svg"
                                             alt=""
-                                            className="h-8 w-8 object-contain"
+                                            className="h-8 w-8 object-contain brightness-0"
                                             draggable={false}
                                         />
                                     </motion.div>

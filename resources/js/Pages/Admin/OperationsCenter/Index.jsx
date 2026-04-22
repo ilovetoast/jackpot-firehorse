@@ -121,6 +121,7 @@ function IncidentRow({ incident: i, onAction, selected, onSelect, onSourceClick 
 
 const TABS = [
     { id: 'overview', label: 'Overview', icon: ChartBarSquareIcon },
+    { id: 'queue', label: 'Queue', icon: QueueListIcon },
     { id: 'incidents', label: 'Incidents', icon: ExclamationTriangleIcon },
     { id: 'application-errors', label: 'Application errors', icon: BoltIcon },
     { id: 'reliability', label: 'Reliability Metrics', icon: ChartBarIcon },
@@ -381,6 +382,78 @@ export default function OperationsCenterIndex({
                                             View Incidents
                                         </button>
                                     )}
+                                </div>
+                            </div>
+                        )}
+
+                        {tab === 'queue' && (
+                            <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+                                <div className="overflow-hidden rounded-lg bg-white shadow ring-1 ring-gray-200 p-6">
+                                    <div className="flex items-center justify-between">
+                                        <div className="flex items-center">
+                                            <QueueListIcon className="h-6 w-6 text-gray-400 mr-3" />
+                                            <h3 className="text-sm font-medium text-gray-900">Queue</h3>
+                                        </div>
+                                        <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${queueStatus.className}`}>
+                                            <QueueStatusIcon className="h-4 w-4 mr-1" />
+                                            {queueStatus.label}
+                                        </span>
+                                    </div>
+                                    <div className="mt-4 grid grid-cols-2 gap-4">
+                                        <div>
+                                            <span className="text-sm text-gray-500">Pending</span>
+                                            <p className="text-lg font-semibold">{queueHealth?.pending_count ?? 0}</p>
+                                        </div>
+                                        <div>
+                                            <span className="text-sm text-gray-500">Failed</span>
+                                            <p className="text-lg font-semibold text-red-600">{queueHealth?.failed_count ?? 0}</p>
+                                        </div>
+                                    </div>
+                                    {horizonAvailable && horizonUrl && (
+                                        <a
+                                            href={horizonUrl}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="mt-4 inline-flex items-center text-sm text-indigo-600 hover:text-indigo-800"
+                                        >
+                                            <LinkIcon className="h-4 w-4 mr-1" /> Open Horizon
+                                        </a>
+                                    )}
+                                    {!horizonAvailable && (
+                                        <p className="mt-4 text-xs text-gray-500">
+                                            Horizon is not installed. Use <code className="rounded bg-gray-100 px-1">php artisan queue:work</code> or your
+                                            process manager for workers.
+                                        </p>
+                                    )}
+                                </div>
+                                <div className="overflow-hidden rounded-lg bg-white shadow ring-1 ring-gray-200 p-6">
+                                    <div className="flex items-center justify-between">
+                                        <div className="flex items-center">
+                                            <ClockIcon className="h-6 w-6 text-gray-400 mr-3" />
+                                            <h3 className="text-sm font-medium text-gray-900">Scheduler</h3>
+                                        </div>
+                                        <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${schedulerStatus.className}`}>
+                                            <SchedulerStatusIcon className="h-4 w-4 mr-1" />
+                                            {schedulerStatus.label}
+                                        </span>
+                                    </div>
+                                    <p className="mt-4 text-sm text-gray-500">
+                                        Last heartbeat: {schedulerHealth?.last_heartbeat ? formatDate(schedulerHealth.last_heartbeat) : 'Never'}
+                                    </p>
+                                </div>
+                                <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm text-gray-600 lg:col-span-2">
+                                    <p>
+                                        For per-job detail (payloads, retries, metrics), use{' '}
+                                        {horizonAvailable && horizonUrl ? (
+                                            <a href={horizonUrl} className="font-medium text-indigo-600 hover:text-indigo-800" target="_blank" rel="noopener noreferrer">
+                                                Horizon
+                                            </a>
+                                        ) : (
+                                            <span className="font-medium text-gray-800">Horizon</span>
+                                        )}
+                                        . The <span className="font-medium text-gray-800">Failed Jobs</span> tab lists recent hard failures from the{' '}
+                                        <code className="rounded bg-gray-200/80 px-1">failed_jobs</code> table.
+                                    </p>
                                 </div>
                             </div>
                         )}

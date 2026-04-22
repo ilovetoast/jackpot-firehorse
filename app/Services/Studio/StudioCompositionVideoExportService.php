@@ -16,6 +16,7 @@ use App\Models\User;
 use App\Services\AssetPathGenerator;
 use App\Support\EditorAssetOriginalBytesLoader;
 use App\Support\PipelineQueueResolver;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -322,14 +323,18 @@ final class StudioCompositionVideoExportService
                 'height' => $h,
                 'checksum' => hash('sha256', $bytes),
                 'is_current' => true,
-                'pipeline_status' => 'complete',
+                // Must NOT be `complete` here: {@see ProcessAssetJob} exits immediately when the current
+                // version is already complete, so the pipeline chain never runs (asset stuck on uploading).
+                'pipeline_status' => 'pending',
                 'uploaded_by' => $user->id,
             ]);
 
             // File is already on disk; without this the row stays on analysis_status=uploading forever
             // (no thumbnails / metadata / finalize). Mirrors {@see StudioAnimationCompletionService}.
-            ProcessAssetJob::dispatch((string) $asset->id)
-                ->onQueue(PipelineQueueResolver::imagesQueueForAsset($asset));
+            DB::afterCommit(function () use ($asset): void {
+                ProcessAssetJob::dispatch((string) $asset->id)
+                    ->onQueue(PipelineQueueResolver::imagesQueueForAsset($asset));
+            });
 
             $technical = [
                 'include_audio' => $includeAudioPref,

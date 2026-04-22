@@ -40,7 +40,11 @@ class OperationsCenterController extends Controller
     {
         $this->authorizeAdmin();
 
-        $tab = $request->get('tab', 'overview');
+        $tab = (string) $request->get('tab', 'overview');
+        $allowedTabs = ['overview', 'queue', 'incidents', 'application-errors', 'reliability', 'failed-jobs'];
+        if (! in_array($tab, $allowedTabs, true)) {
+            $tab = 'overview';
+        }
 
         $incidents = SystemIncident::whereNull('resolved_at')
             ->orderByRaw("CASE severity WHEN 'critical' THEN 1 WHEN 'error' THEN 2 WHEN 'warning' THEN 3 ELSE 4 END")

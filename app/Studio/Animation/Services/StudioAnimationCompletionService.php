@@ -249,7 +249,8 @@ final class StudioAnimationCompletionService
                 'height' => $outH,
                 'checksum' => hash('sha256', $binary),
                 'is_current' => true,
-                'pipeline_status' => 'complete',
+                // Same contract as {@see StudioCompositionVideoExportService}: {@see ProcessAssetJob} skips when complete.
+                'pipeline_status' => 'pending',
                 'uploaded_by' => $user->id,
             ]);
 

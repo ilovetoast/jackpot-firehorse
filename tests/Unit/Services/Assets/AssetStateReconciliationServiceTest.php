@@ -8,13 +8,17 @@ use App\Enums\StorageBucketStatus;
 use App\Enums\ThumbnailStatus;
 use App\Enums\UploadStatus;
 use App\Enums\UploadType;
+use App\Jobs\ProcessAssetJob;
 use App\Models\Asset;
+use App\Models\AssetVersion;
 use App\Models\Brand;
 use App\Models\StorageBucket;
 use App\Models\Tenant;
 use App\Models\UploadSession;
 use App\Services\Assets\AssetStateReconciliationService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Str;
 use Tests\TestCase;
 
 class AssetStateReconciliationServiceTest extends TestCase
@@ -73,5 +77,77 @@ class AssetStateReconciliationServiceTest extends TestCase
         $asset->refresh();
         $this->assertSame('complete', $asset->analysis_status);
         $this->assertSame(ThumbnailStatus::COMPLETED->value, $asset->thumbnail_status?->value);
+    }
+
+    public function test_rule_7_resets_studio_export_version_and_dispatches_process_job(): void
+    {
+        Bus::fake();
+
+        $tenant = Tenant::create(['name' => 'Test', 'slug' => 'test']);
+        $brand = Brand::create([
+            'tenant_id' => $tenant->id,
+            'name' => 'Test Brand',
+            'slug' => 'test-brand',
+        ]);
+        $bucket = StorageBucket::create([
+            'tenant_id' => $tenant->id,
+            'name' => 'test-bucket',
+            'status' => StorageBucketStatus::ACTIVE,
+            'region' => 'us-east-1',
+        ]);
+        $session = UploadSession::create([
+            'tenant_id' => $tenant->id,
+            'brand_id' => $brand->id,
+            'storage_bucket_id' => $bucket->id,
+            'status' => UploadStatus::COMPLETED,
+            'type' => UploadType::DIRECT,
+            'expected_size' => 1024,
+            'uploaded_size' => 1024,
+        ]);
+
+        $asset = Asset::create([
+            'tenant_id' => $tenant->id,
+            'brand_id' => $brand->id,
+            'upload_session_id' => $session->id,
+            'storage_bucket_id' => $bucket->id,
+            'storage_root_path' => 'temp/test/file.mp4',
+            'original_filename' => 'file.mp4',
+            'mime_type' => 'video/mp4',
+            'size_bytes' => 1024,
+            'status' => AssetStatus::VISIBLE,
+            'type' => AssetType::ASSET,
+            'analysis_status' => 'uploading',
+            'thumbnail_status' => ThumbnailStatus::PENDING,
+            'source' => 'studio_composition_video_export',
+            'metadata' => [],
+        ]);
+
+        $version = AssetVersion::query()->create([
+            'id' => (string) Str::uuid(),
+            'asset_id' => $asset->id,
+            'version_number' => 1,
+            'file_path' => 'temp/test/file.mp4',
+            'file_size' => 1024,
+            'mime_type' => 'video/mp4',
+            'width' => 1280,
+            'height' => 720,
+            'checksum' => 'abc',
+            'is_current' => true,
+            'pipeline_status' => 'complete',
+            'uploaded_by' => null,
+        ]);
+
+        $service = app(AssetStateReconciliationService::class);
+        $result = $service->reconcile($asset->fresh());
+
+        $this->assertTrue($result['updated']);
+        $this->assertContains('Rule 7: version.pipeline_status → pending; ProcessAssetJob dispatched', $result['changes']);
+
+        $version->refresh();
+        $this->assertSame('pending', $version->pipeline_status);
+
+        Bus::assertDispatched(ProcessAssetJob::class, function (ProcessAssetJob $job) use ($asset): bool {
+            return $job->assetId === $asset->id;
+        });
     }
 }
