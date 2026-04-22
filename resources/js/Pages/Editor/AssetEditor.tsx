@@ -2751,10 +2751,13 @@ export default function AssetEditor() {
                     return
                 }
                 const doc = parseDocumentFromApi(c.document)
+                const titleFromServer = typeof c.name === 'string' ? c.name.trim() : ''
+                const resolvedTitle =
+                    titleFromServer !== '' ? titleFromServer : defaultCompositionName(doc)
                 flushSync(() => {
                     setCompositionId(c.id)
-                    setCompositionName(c.name)
-                    setLastSavedName(c.name ?? '')
+                    setCompositionName(resolvedTitle)
+                    setLastSavedName(resolvedTitle)
                     const vis = compositionVisibilityFromApi(c.visibility)
                     setCompositionVisibility(vis)
                     setLastSavedVisibility(vis)
@@ -3042,7 +3045,11 @@ export default function AssetEditor() {
                     setSaveState('saving')
                     setSaveError(null)
                     const doc = documentRef.current
-                    const name = compositionName.trim() || defaultCompositionName(doc)
+                    // Read title from the ref at send time — `compositionName` in this closure can lag
+                    // behind `documentRef` during studio AI→video insert + thumbnail await, which used
+                    // to PUT `name: ""` and clear the composition row in the database.
+                    const name =
+                        compositionNameRef.current.trim() || defaultCompositionName(doc)
                     let thumb: string | null = null
                     if (stageRef.current) {
                         thumb = await captureCompositionThumbnailBase64(stageRef.current, doc)
@@ -3595,11 +3602,12 @@ export default function AssetEditor() {
         setSaveError(null)
         try {
             const docSnapshot = documentRef.current
-            let nameToSave = compositionName.trim() || defaultCompositionName(docSnapshot)
+            let nameToSave =
+                compositionNameRef.current.trim() || defaultCompositionName(docSnapshot)
 
             if (!compositionId) {
                 nameToSave = UNTITLED_DRAFT_NAME
-            } else if (isUntitledDraftName(compositionName)) {
+            } else if (isUntitledDraftName(compositionNameRef.current)) {
                 const suggested = defaultCompositionName(docSnapshot)
                 const entered = await promptForText({
                     title: 'Name this composition',
@@ -3795,10 +3803,13 @@ export default function AssetEditor() {
             try {
                 const c = await getComposition(nextCompositionId)
                 const doc = parseDocumentFromApi(c.document)
+                const titleFromServer = typeof c.name === 'string' ? c.name.trim() : ''
+                const resolvedTitle =
+                    titleFromServer !== '' ? titleFromServer : defaultCompositionName(doc)
                 flushSync(() => {
                     setCompositionId(c.id)
-                    setCompositionName(c.name)
-                    setLastSavedName(c.name ?? '')
+                    setCompositionName(resolvedTitle)
+                    setLastSavedName(resolvedTitle)
                     const vis = compositionVisibilityFromApi(c.visibility)
                     setCompositionVisibility(vis)
                     setLastSavedVisibility(vis)

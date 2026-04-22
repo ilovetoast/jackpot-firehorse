@@ -611,8 +611,10 @@ class EditorCompositionController extends Controller
         }
 
         DB::transaction(function () use ($composition, $validated, $createVersion, $versionKind, $thumbBinary, $user) {
-            if (isset($validated['name'])) {
-                $composition->name = $validated['name'];
+            // Never persist whitespace-only or empty `name` — some client paths (autosave races
+            // around studio video insert) could send "" and wipe a titled composition in DB.
+            if (array_key_exists('name', $validated) && trim((string) $validated['name']) !== '') {
+                $composition->name = trim((string) $validated['name']);
             }
             if (array_key_exists('visibility', $validated)) {
                 $composition->visibility = $this->normalizeVisibility($validated['visibility']);

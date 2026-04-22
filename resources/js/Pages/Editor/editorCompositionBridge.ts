@@ -106,21 +106,26 @@ export async function putComposition(
         folder?: string | null
     }
 ): Promise<CompositionDto> {
+    const trimmedName = typeof opts?.name === 'string' ? opts.name.trim() : ''
+    const body: Record<string, unknown> = {
+        document,
+        visibility: opts?.visibility,
+        folder: opts?.folder === undefined ? undefined : opts?.folder === '' ? null : opts?.folder,
+        version_label: opts?.versionLabel ?? null,
+        version_kind: opts?.versionKind ?? undefined,
+        create_version: opts?.createVersion ?? true,
+        thumbnail_png_base64: opts?.thumbnailPngBase64 ?? undefined,
+        telemetry: opts?.telemetry,
+    }
+    if (trimmedName !== '') {
+        body.name = trimmedName
+    }
+
     const res = await fetch(`/app/api/compositions/${encodeURIComponent(id)}`, {
         method: 'PUT',
         headers: csrfHeaders(),
         credentials: 'same-origin',
-        body: JSON.stringify({
-            name: opts?.name,
-            document,
-            visibility: opts?.visibility,
-            folder: opts?.folder === undefined ? undefined : opts?.folder === '' ? null : opts?.folder,
-            version_label: opts?.versionLabel ?? null,
-            version_kind: opts?.versionKind ?? undefined,
-            create_version: opts?.createVersion ?? true,
-            thumbnail_png_base64: opts?.thumbnailPngBase64 ?? undefined,
-            telemetry: opts?.telemetry,
-        }),
+        body: JSON.stringify(body),
     })
     const text = await res.text()
     let data: { composition?: CompositionDto; error?: string }
