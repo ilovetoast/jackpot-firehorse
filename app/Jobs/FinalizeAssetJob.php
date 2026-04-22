@@ -8,6 +8,7 @@ use App\Models\AssetEvent;
 use App\Services\AssetCompletionService;
 use App\Services\AssetProcessingFailureService;
 use App\Services\BrandIntelligence\BrandIntelligenceScheduleService;
+use App\Services\Studio\EditorStudioVideoPublishApplier;
 use App\Jobs\Concerns\QueuesOnImagesChannel;
 use App\Services\ImageEmbeddingService;
 use Illuminate\Bus\Queueable;
@@ -69,6 +70,17 @@ class FinalizeAssetJob implements ShouldQueue
                 return;
             }
 
+            // Studio MP4 exports are created unpublished; publish when the pipeline completes so the default
+            // library grid (lifecycle=null) can include them. Shelf category may still be missing if no editor_publish.
+            if (($asset->source ?? '') === 'studio_composition_video_export') {
+                $tenant = $asset->tenant;
+                $brand = $asset->brand;
+                if ($tenant && $brand) {
+                    app(EditorStudioVideoPublishApplier::class)->ensureShelfCategoryWhenMissing($asset, $tenant, $brand);
+                    $asset->refresh();
+                }
+            }
+
             // Sync from version - MERGE with asset metadata (never replace)
             // Version metadata: thumbnails, dimensions, version-scoped fields
             // Asset metadata: category_id, metadata_extracted, preview_generated, etc. (upload/processing)
@@ -99,6 +111,10 @@ class FinalizeAssetJob implements ShouldQueue
 
             if (! ImageEmbeddingService::isImageMimeType($currentVersion->mime_type, $asset->original_filename)) {
                 $updates['analysis_status'] = 'complete';
+            }
+
+            if (($asset->source ?? '') === 'studio_composition_video_export' && $asset->published_at === null) {
+                $updates['published_at'] = now();
             }
 
             $asset->update($updates);

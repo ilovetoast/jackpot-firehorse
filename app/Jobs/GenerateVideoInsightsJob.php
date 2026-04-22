@@ -35,7 +35,12 @@ class GenerateVideoInsightsJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public $tries = 2;
+    /**
+     * Must exceed the storage eventual-consistency release loop below (15) plus normal Laravel retries.
+     * Previously tries=2 while the handler called release() up to 14 times → MaxAttemptsExceededException
+     * before markFailed() could run; assets without storage_bucket_id never satisfied the old guard.
+     */
+    public $tries = 32;
 
     public int $maxExceptions = 1;
 
@@ -104,7 +109,9 @@ class GenerateVideoInsightsJob implements ShouldQueue
             return;
         }
 
-        if (! $asset->storage_root_path || ! $asset->storageBucket) {
+        // Wait only for object key; bucket row may be absent while the file is on s3 / output disk
+        // ({@see VideoPreviewGenerationService::downloadSourceToTemp} + {@see EditorAssetOriginalBytesLoader}).
+        if (! $asset->storage_root_path) {
             if ($this->attempts() < 15) {
                 $this->release(45);
 
@@ -295,6 +302,30 @@ class GenerateVideoInsightsJob implements ShouldQueue
         }
 
         $this->signalDeferredEbiIfVideoInsightsSettled($asset->fresh());
+    }
+
+    /**
+     * When the worker gives up (e.g. max attempts), leave a terminal metadata state so the asset does not
+     * appear stuck in "queued"/"processing" and deferred EBI can still run.
+     */
+    public function failed(?\Throwable $exception): void
+    {
+        try {
+            $asset = Asset::find($this->assetId);
+            if (! $asset) {
+                return;
+            }
+            $meta = $asset->metadata ?? [];
+            $status = $meta['ai_video_status'] ?? null;
+            if ($status === 'completed' || $status === 'skipped') {
+                return;
+            }
+            $suffix = $exception ? $exception->getMessage() : 'unknown';
+            $this->markFailed($asset, 'Video insights job stopped: '.AiErrorSanitizer::forUser($suffix));
+            $this->signalDeferredEbiIfVideoInsightsSettled($asset->fresh());
+        } catch (\Throwable) {
+            // best-effort
+        }
     }
 
     protected function signalDeferredEbiIfVideoInsightsSettled(Asset $asset): void

@@ -115,9 +115,13 @@ class AdminTicketController extends Controller
             ])
             ->forStaff(); // Include all ticket types
 
-        // Apply filters
-        if ($request->filled('status')) {
+        $engineeringFilter = $request->filled('engineering_only') || $request->get('type') === 'engineering';
+
+        // Apply filters (engineering queue defaults to non-terminal statuses unless status=all)
+        if ($request->filled('status') && $request->status !== 'all') {
             $query->where('status', $request->status);
+        } elseif ($engineeringFilter && $request->get('status') !== 'all') {
+            $query->whereNotIn('status', [TicketStatus::RESOLVED, TicketStatus::CLOSED]);
         }
 
         if ($request->filled('category')) {
@@ -157,7 +161,6 @@ class AdminTicketController extends Controller
         }
         
         // Filter for engineering tickets (type=internal, assigned_team=engineering)
-        $engineeringFilter = $request->filled('engineering_only') || $request->get('type') === 'engineering';
         if ($engineeringFilter) {
             $query->where('type', TicketType::INTERNAL)
                 ->where('assigned_team', TicketTeam::ENGINEERING);

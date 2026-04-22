@@ -631,6 +631,10 @@ export default function AdminAssetsIndex({
                 await axios.post(`/app/admin/assets/${assetId}/retry-pipeline`)
             } else if (action === 'reanalyze') {
                 await axios.post(`/app/admin/assets/${assetId}/reanalyze`)
+            } else if (action === 'publish') {
+                await axios.post(`/app/admin/assets/${assetId}/publish`)
+            } else if (action === 'unpublish') {
+                await axios.post(`/app/admin/assets/${assetId}/unpublish`)
             }
             if (detailAsset?.asset?.id === assetId) {
                 openDetail({ id: assetId })

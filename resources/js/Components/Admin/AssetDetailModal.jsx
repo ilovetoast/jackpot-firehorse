@@ -25,6 +25,8 @@ import {
     SparklesIcon,
     PlayCircleIcon,
     PhotoIcon,
+    CheckCircleIcon,
+    XCircleIcon,
 } from '@heroicons/react/24/outline'
 import { getPipelineStageTooltip } from '../../utils/pipelineStatusUtils'
 
@@ -92,6 +94,8 @@ export default function AssetDetailModal({ data, onClose, onAction, onRefresh, o
     const [restoreVersionLoading, setRestoreVersionLoading] = useState(false)
     const [classificationSaving, setClassificationSaving] = useState(false)
     const [classificationError, setClassificationError] = useState(null)
+    const [publishLoading, setPublishLoading] = useState(false)
+    const [unpublishLoading, setUnpublishLoading] = useState(false)
     const {
         asset,
         incidents,
@@ -187,16 +191,38 @@ export default function AssetDetailModal({ data, onClose, onAction, onRefresh, o
                             )}
                             {asset?.visibility && !asset.visibility.visible && (
                                 <div className="rounded-lg border-2 border-amber-500 bg-amber-50 p-4">
-                                    <div className="flex items-start gap-2">
-                                        <span className="rounded px-2 py-1 text-sm font-bold uppercase tracking-wide bg-amber-600 text-white shrink-0">
-                                            Not visible
-                                        </span>
-                                        <div>
-                                            <p className="text-sm font-medium text-amber-900">{asset.visibility.reason}</p>
-                                            {asset.visibility.recommended_action && (
-                                                <p className="mt-1 text-sm text-amber-800">{asset.visibility.recommended_action}</p>
-                                            )}
+                                    <div className="flex flex-wrap items-start justify-between gap-3">
+                                        <div className="flex items-start gap-2 min-w-0 flex-1">
+                                            <span className="rounded px-2 py-1 text-sm font-bold uppercase tracking-wide bg-amber-600 text-white shrink-0">
+                                                Not visible
+                                            </span>
+                                            <div className="min-w-0">
+                                                <p className="text-sm font-medium text-amber-900">{asset.visibility.reason}</p>
+                                                {asset.visibility.recommended_action && (
+                                                    <p className="mt-1 text-sm text-amber-800">{asset.visibility.recommended_action}</p>
+                                                )}
+                                            </div>
                                         </div>
+                                        {!asset?.deleted_at &&
+                                            asset?.status !== 'failed' &&
+                                            (asset.visibility.action_key === 'publish' || !asset.published_at) && (
+                                                <button
+                                                    type="button"
+                                                    disabled={publishLoading}
+                                                    onClick={async () => {
+                                                        setPublishLoading(true)
+                                                        try {
+                                                            await onAction(asset.id, 'publish')
+                                                        } finally {
+                                                            setPublishLoading(false)
+                                                        }
+                                                    }}
+                                                    className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
+                                                >
+                                                    <CheckCircleIcon className="h-4 w-4" aria-hidden />
+                                                    {publishLoading ? 'Publishing…' : 'Publish'}
+                                                </button>
+                                            )}
                                     </div>
                                 </div>
                             )}
@@ -437,6 +463,49 @@ export default function AssetDetailModal({ data, onClose, onAction, onRefresh, o
                                 </Link>
                             </div>
                             <div className="flex flex-wrap gap-2 pt-4">
+                                {!asset?.deleted_at && asset?.status !== 'failed' && !asset?.published_at && (
+                                    <button
+                                        type="button"
+                                        disabled={publishLoading}
+                                        onClick={async () => {
+                                            setPublishLoading(true)
+                                            try {
+                                                await onAction(asset.id, 'publish')
+                                            } finally {
+                                                setPublishLoading(false)
+                                            }
+                                        }}
+                                        className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
+                                    >
+                                        <CheckCircleIcon className="h-4 w-4" aria-hidden />
+                                        {publishLoading ? 'Publishing…' : 'Publish to library'}
+                                    </button>
+                                )}
+                                {asset?.published_at && !asset?.deleted_at && (
+                                    <button
+                                        type="button"
+                                        disabled={unpublishLoading}
+                                        onClick={async () => {
+                                            if (
+                                                !window.confirm(
+                                                    'Unpublish this asset? It will be hidden from the default library grid until published again.'
+                                                )
+                                            ) {
+                                                return
+                                            }
+                                            setUnpublishLoading(true)
+                                            try {
+                                                await onAction(asset.id, 'unpublish')
+                                            } finally {
+                                                setUnpublishLoading(false)
+                                            }
+                                        }}
+                                        className="inline-flex items-center gap-1 rounded-lg border border-slate-400 bg-white px-3 py-2 text-sm text-slate-800 hover:bg-slate-50 disabled:opacity-50"
+                                    >
+                                        <XCircleIcon className="h-4 w-4" aria-hidden />
+                                        {unpublishLoading ? 'Unpublishing…' : 'Unpublish'}
+                                    </button>
+                                )}
                                 <button
                                     onClick={() => onAction(asset.id, 'repair')}
                                     className="inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-3 py-2 text-sm text-white hover:bg-indigo-500"

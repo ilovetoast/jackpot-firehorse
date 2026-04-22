@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\Asset;
 use App\Models\StorageBucket;
+use App\Support\EditorAssetOriginalBytesLoader;
 use App\Support\VideoDisplayProbe;
 use Aws\S3\Exception\S3Exception;
 use Aws\S3\S3Client;
@@ -52,11 +53,25 @@ class VideoPreviewGenerationService
      */
     public function downloadSourceToTemp(Asset $asset): string
     {
-        if (! $asset->storage_root_path || ! $asset->storageBucket) {
-            throw new \RuntimeException('Asset missing storage path or bucket');
+        if (! $asset->storage_root_path) {
+            throw new \RuntimeException('Asset missing storage path');
         }
 
-        return $this->downloadFromS3($asset->storageBucket, $asset->storage_root_path);
+        $asset->loadMissing('storageBucket');
+
+        if ($asset->storageBucket !== null) {
+            return $this->downloadFromS3($asset->storageBucket, $asset->storage_root_path);
+        }
+
+        // Studio outputs and some pipeline rows omit storage_bucket_id while the object still exists on
+        // a configured disk — same resolution as {@see EditorAssetOriginalBytesLoader}.
+        $bytes = EditorAssetOriginalBytesLoader::loadFromStorage($asset, null);
+        $tempPath = tempnam(sys_get_temp_dir(), 'video_src_');
+        if ($tempPath === false || @file_put_contents($tempPath, $bytes) === false) {
+            throw new \RuntimeException('Failed to write downloaded video to temp file.');
+        }
+
+        return $tempPath;
     }
 
     /**
@@ -72,8 +87,13 @@ class VideoPreviewGenerationService
      */
     public function generatePreview(Asset $asset): string
     {
-        if (! $asset->storage_root_path || ! $asset->storageBucket) {
-            throw new \RuntimeException('Asset missing storage path or bucket');
+        if (! $asset->storage_root_path) {
+            throw new \RuntimeException('Asset missing storage path');
+        }
+
+        $asset->loadMissing('storageBucket');
+        if ($asset->storageBucket === null) {
+            throw new \RuntimeException('Hover preview generation requires a storage bucket (S3 tenant bucket).');
         }
 
         $bucket = $asset->storageBucket;

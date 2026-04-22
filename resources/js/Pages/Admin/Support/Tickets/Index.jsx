@@ -276,8 +276,8 @@ export default function AdminTicketsIndex({
                         )}
                     </div>
 
-                    {/* Round-Robin Bucket - Site Admin/Owner only */}
-                    {canManageRoundRobin && (
+                    {/* Round-Robin Bucket — support / tenant ticket assignment only (not engineering) */}
+                    {canManageRoundRobin && !engineeringQueueView && (
                         <div className="mb-6 bg-white shadow-sm ring-1 ring-gray-200 rounded-lg p-4">
                             <h3 className="text-sm font-semibold text-gray-900 mb-2">Round-Robin Assignment Bucket</h3>
                             <p className="text-xs text-gray-500 mb-3">
@@ -359,11 +359,34 @@ export default function AdminTicketsIndex({
                             {/* Status Filter */}
                             <div className="flex-shrink-0">
                                 <select
-                                    value={filters?.status || ''}
-                                    onChange={(e) => applyFilters({ status: e.target.value || null })}
+                                    value={
+                                        filters?.status === 'all'
+                                            ? 'all'
+                                            : filters?.status || ''
+                                    }
+                                    onChange={(e) => {
+                                        const v = e.target.value
+                                        applyFilters({
+                                            status:
+                                                v === ''
+                                                    ? null
+                                                    : v === 'all'
+                                                      ? 'all'
+                                                      : v,
+                                        })
+                                    }}
                                     className="block w-full min-w-[140px] rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm py-1.5"
                                 >
-                                    <option value="">All Statuses</option>
+                                    {engineeringQueueView ? (
+                                        <>
+                                            <option value="">
+                                                Active (excludes resolved & closed)
+                                            </option>
+                                            <option value="all">All statuses</option>
+                                        </>
+                                    ) : (
+                                        <option value="">All Statuses</option>
+                                    )}
                                     {filterOptions?.statuses?.map((status) => (
                                         <option key={status.value} value={status.value}>
                                             {status.label}

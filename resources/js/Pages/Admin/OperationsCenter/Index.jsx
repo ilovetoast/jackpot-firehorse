@@ -170,6 +170,10 @@ export default function OperationsCenterIndex({
                 await axios.post(`/app/admin/assets/${assetId}/restore`)
             } else if (action === 'reanalyze') {
                 await axios.post(`/app/admin/assets/${assetId}/reanalyze`)
+            } else if (action === 'publish') {
+                await axios.post(`/app/admin/assets/${assetId}/publish`)
+            } else if (action === 'unpublish') {
+                await axios.post(`/app/admin/assets/${assetId}/unpublish`)
             }
             closeQuickView()
             router.reload({ only: ['incidents'] })

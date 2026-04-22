@@ -68,8 +68,8 @@ class AssetVisibilityService
             return [
                 'visible' => false,
                 'reason' => 'Asset is not published',
-                'recommended_action' => 'Publish the asset from the brand asset view',
-                'action_key' => null,
+                'recommended_action' => 'Use Publish in Admin → Asset Operations (asset detail), or publish from the brand library.',
+                'action_key' => 'publish',
             ];
         }
 
@@ -77,8 +77,8 @@ class AssetVisibilityService
             return [
                 'visible' => false,
                 'reason' => 'Asset is hidden',
-                'recommended_action' => 'Publish or unhide from the brand asset view',
-                'action_key' => null,
+                'recommended_action' => 'Publish from the brand library, or use Publish in Asset Operations if the row should be visible.',
+                'action_key' => 'publish',
             ];
         }
 

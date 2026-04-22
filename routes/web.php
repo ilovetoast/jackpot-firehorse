@@ -399,6 +399,8 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
     Route::post('/admin/assets/recover-category-id', [\App\Http\Controllers\Admin\AdminAssetController::class, 'recoverCategoryId'])->name('admin.assets.recover-category-id');
     Route::get('/admin/assets/{asset}', [\App\Http\Controllers\Admin\AdminAssetController::class, 'show'])->name('admin.assets.show');
     Route::get('/admin/assets/{asset}/download-source', [\App\Http\Controllers\Admin\AdminAssetController::class, 'downloadSource'])->name('admin.assets.download-source');
+    Route::post('/admin/assets/{asset}/publish', [\App\Http\Controllers\Admin\AdminAssetController::class, 'publishAsset'])->name('admin.assets.publish');
+    Route::post('/admin/assets/{asset}/unpublish', [\App\Http\Controllers\Admin\AdminAssetController::class, 'unpublishAsset'])->name('admin.assets.unpublish');
     Route::post('/admin/assets/{asset}/repair', [\App\Http\Controllers\Admin\AdminAssetController::class, 'repair'])->name('admin.assets.repair');
     Route::post('/admin/assets/{asset}/restore', [\App\Http\Controllers\Admin\AdminAssetController::class, 'restore'])->name('admin.assets.restore');
     Route::post('/admin/assets/{asset}/retry-pipeline', [\App\Http\Controllers\Admin\AdminAssetController::class, 'retryPipeline'])->name('admin.assets.retry-pipeline');

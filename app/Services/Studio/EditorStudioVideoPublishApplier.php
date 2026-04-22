@@ -34,6 +34,32 @@ final class EditorStudioVideoPublishApplier
      * @param  array<string, mixed>  $editorPublish
      *  Keys: name, description, category_id, field_metadata, collection_ids, editor_provenance
      */
+    /**
+     * When no editor publish payload assigned a shelf category, pick the brand's default library category
+     * so the asset can appear in the category-filtered grid after pipeline + publish.
+     */
+    public function ensureShelfCategoryWhenMissing(Asset $asset, Tenant $tenant, Brand $brand): void
+    {
+        $meta = is_array($asset->metadata) ? $asset->metadata : [];
+        $existing = $meta['category_id'] ?? null;
+        if ($existing !== null && $existing !== '' && ! (is_string($existing) && strtolower(trim($existing)) === 'null')) {
+            return;
+        }
+        $category = $this->resolveCategory($tenant, $brand, null);
+        if (! $category) {
+            Log::warning('[EditorStudioVideoPublishApplier] ensureShelfCategoryWhenMissing: no default category', [
+                'asset_id' => $asset->id,
+                'tenant_id' => $tenant->id,
+                'brand_id' => $brand->id,
+            ]);
+
+            return;
+        }
+        $meta['category_id'] = $category->id;
+        $asset->metadata = $meta;
+        $asset->save();
+    }
+
     public function apply(
         Asset $asset,
         User $user,

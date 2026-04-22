@@ -312,6 +312,9 @@ final class StudioCompositionVideoExportService
                 }
             }
 
+            // Grid requires metadata.category_id; exports without editor_publish would never appear otherwise.
+            $this->videoPublishApplier->ensureShelfCategoryWhenMissing($asset->fresh(), $tenant, $brand);
+
             AssetVersion::query()->create([
                 'id' => (string) Str::uuid(),
                 'asset_id' => $asset->id,

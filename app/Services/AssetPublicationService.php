@@ -144,4 +144,95 @@ class AssetPublicationService
             }
         });
     }
+
+    /**
+     * Publish from Asset Operations / Operations Center. Caller must already enforce site-admin (or equivalent)
+     * access — this skips {@see AssetPolicy::publish()} tenant/brand membership checks.
+     */
+    public function publishFromAdminConsole(Asset $asset, User $actor): void
+    {
+        if ($asset->isArchived()) {
+            throw new \RuntimeException('Cannot publish archived assets.');
+        }
+        if ($asset->status === AssetStatus::FAILED) {
+            throw new \RuntimeException('Cannot publish failed assets.');
+        }
+        // Already published and visible — nothing to do.
+        if ($asset->published_at !== null && $asset->status === AssetStatus::VISIBLE) {
+            return;
+        }
+
+        DB::transaction(function () use ($asset, $actor) {
+            $firstPublish = $asset->published_at === null;
+            if ($firstPublish) {
+                $asset->published_at = now();
+                $asset->published_by_id = $actor->id;
+            }
+            if (! $asset->isArchived()) {
+                $asset->status = AssetStatus::VISIBLE;
+            }
+            $asset->save();
+
+            if ($firstPublish) {
+                try {
+                    ActivityRecorder::record(
+                        tenant: $asset->tenant,
+                        eventType: EventType::ASSET_PUBLISHED,
+                        subject: $asset,
+                        actor: $actor,
+                        brand: $asset->brand,
+                        metadata: [
+                            'published_at' => $asset->published_at->toIso8601String(),
+                            'published_by_id' => $actor->id,
+                            'via' => 'admin_console',
+                        ]
+                    );
+                } catch (\Exception $e) {
+                    Log::error('[AssetPublicationService] Failed to log admin publish event', [
+                        'asset_id' => $asset->id,
+                        'actor_id' => $actor->id,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+            }
+        });
+    }
+
+    /**
+     * Unpublish from trusted admin consoles (same contract as {@see self::publishFromAdminConsole()}).
+     */
+    public function unpublishFromAdminConsole(Asset $asset, User $actor): void
+    {
+        if (! $asset->isPublished()) {
+            return;
+        }
+
+        DB::transaction(function () use ($asset, $actor) {
+            $asset->published_at = null;
+            $asset->published_by_id = null;
+            $asset->status = AssetStatus::HIDDEN;
+            $asset->save();
+
+            try {
+                ActivityRecorder::record(
+                    tenant: $asset->tenant,
+                    eventType: EventType::ASSET_UNPUBLISHED,
+                    subject: $asset,
+                    actor: $actor,
+                    brand: $asset->brand,
+                    metadata: [
+                        'unpublished_at' => now()->toIso8601String(),
+                        'unpublished_by_id' => $actor->id,
+                        'via' => 'admin_console',
+                    ]
+                );
+            } catch (\Exception $e) {
+                Log::error('[AssetPublicationService] Failed to log admin unpublish event', [
+                    'asset_id' => $asset->id,
+                    'actor_id' => $actor->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        });
+    }
 }

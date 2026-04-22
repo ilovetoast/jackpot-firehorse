@@ -23,6 +23,7 @@ use App\Models\Composition;
 use App\Models\SystemIncident;
 use App\Models\Tenant;
 use App\Services\Assets\AssetStateReconciliationService;
+use App\Services\AssetPublicationService;
 use App\Services\FileTypeService;
 use App\Services\AssetUrlService;
 use App\Services\Reliability\ReliabilityEngine;
@@ -508,6 +509,40 @@ class AdminAssetController extends Controller
     /**
      * POST /app/admin/assets/{asset}/repair
      */
+    /**
+     * POST /app/admin/assets/{asset}/publish
+     *
+     * Site-admin publish for support (bypasses tenant asset.publish policy).
+     */
+    public function publishAsset(string $asset): JsonResponse
+    {
+        $this->authorizeAdmin();
+        $user = Auth::user();
+        if (! $user) {
+            abort(403);
+        }
+        $model = Asset::query()->findOrFail($asset);
+        app(AssetPublicationService::class)->publishFromAdminConsole($model, $user);
+
+        return response()->json(['ok' => true, 'published_at' => $model->fresh()->published_at?->toIso8601String()]);
+    }
+
+    /**
+     * POST /app/admin/assets/{asset}/unpublish
+     */
+    public function unpublishAsset(string $asset): JsonResponse
+    {
+        $this->authorizeAdmin();
+        $user = Auth::user();
+        if (! $user) {
+            abort(403);
+        }
+        $model = Asset::query()->findOrFail($asset);
+        app(AssetPublicationService::class)->unpublishFromAdminConsole($model, $user);
+
+        return response()->json(['ok' => true, 'published_at' => null]);
+    }
+
     public function repair(string $asset): JsonResponse
     {
         $this->authorizeAdmin();
@@ -1211,10 +1246,10 @@ class AdminAssetController extends Controller
                 \App\Jobs\AITaggingJob::dispatch($asset->id)->onQueue(config('queue.images_queue', 'images'));
                 break;
             case 'publish':
-                app(\App\Services\AssetPublicationService::class)->publish($asset);
+                app(AssetPublicationService::class)->publishFromAdminConsole($asset, Auth::user());
                 break;
             case 'unpublish':
-                app(\App\Services\AssetPublicationService::class)->unpublish($asset);
+                app(AssetPublicationService::class)->unpublishFromAdminConsole($asset, Auth::user());
                 break;
             case 'archive':
                 app(\App\Services\AssetArchiveService::class)->archive($asset, Auth::user());
@@ -1579,6 +1614,8 @@ class AdminAssetController extends Controller
 
         // Visibility in asset grid + recommended fix when not visible
         $list['visibility'] = app(\App\Services\AssetVisibilityService::class)->getVisibilityDetail($asset);
+        $list['published_at'] = $asset->published_at?->toIso8601String();
+        $list['status'] = $asset->status?->value ?? null;
 
         return $list;
     }

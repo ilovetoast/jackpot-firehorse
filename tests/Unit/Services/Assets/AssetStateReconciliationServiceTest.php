@@ -4,6 +4,7 @@ namespace Tests\Unit\Services\Assets;
 
 use App\Enums\AssetStatus;
 use App\Enums\AssetType;
+use App\Models\Category;
 use App\Enums\StorageBucketStatus;
 use App\Enums\ThumbnailStatus;
 use App\Enums\UploadStatus;
@@ -149,5 +150,71 @@ class AssetStateReconciliationServiceTest extends TestCase
         Bus::assertDispatched(ProcessAssetJob::class, function (ProcessAssetJob $job) use ($asset): bool {
             return $job->assetId === $asset->id;
         });
+    }
+
+    public function test_rule_8_sets_published_at_for_completed_studio_export_with_category(): void
+    {
+        $tenant = Tenant::create(['name' => 'Test', 'slug' => 'test']);
+        $brand = Brand::create([
+            'tenant_id' => $tenant->id,
+            'name' => 'Test Brand',
+            'slug' => 'test-brand',
+        ]);
+        $category = Category::create([
+            'tenant_id' => $tenant->id,
+            'brand_id' => $brand->id,
+            'name' => 'Video',
+            'slug' => 'video',
+            'asset_type' => AssetType::ASSET,
+            'is_system' => false,
+            'requires_approval' => false,
+            'is_hidden' => false,
+        ]);
+        $bucket = StorageBucket::create([
+            'tenant_id' => $tenant->id,
+            'name' => 'test-bucket',
+            'status' => StorageBucketStatus::ACTIVE,
+            'region' => 'us-east-1',
+        ]);
+        $session = UploadSession::create([
+            'tenant_id' => $tenant->id,
+            'brand_id' => $brand->id,
+            'storage_bucket_id' => $bucket->id,
+            'status' => UploadStatus::COMPLETED,
+            'type' => UploadType::DIRECT,
+            'expected_size' => 1024,
+            'uploaded_size' => 1024,
+        ]);
+
+        $asset = Asset::create([
+            'tenant_id' => $tenant->id,
+            'brand_id' => $brand->id,
+            'upload_session_id' => $session->id,
+            'storage_bucket_id' => $bucket->id,
+            'storage_root_path' => 'temp/test/file.mp4',
+            'original_filename' => 'studio-export-1.mp4',
+            'mime_type' => 'video/mp4',
+            'size_bytes' => 1024,
+            'status' => AssetStatus::VISIBLE,
+            'type' => AssetType::AI_GENERATED,
+            'analysis_status' => 'complete',
+            'thumbnail_status' => ThumbnailStatus::SKIPPED,
+            'source' => 'studio_composition_video_export',
+            'published_at' => null,
+            'metadata' => [
+                'category_id' => $category->id,
+                'pipeline_completed_at' => now()->toIso8601String(),
+            ],
+        ]);
+
+        $service = app(AssetStateReconciliationService::class);
+        $result = $service->reconcile($asset->fresh());
+
+        $this->assertTrue($result['updated']);
+        $this->assertContains('Rule 8: published_at set for studio composition video export', $result['changes']);
+
+        $asset->refresh();
+        $this->assertNotNull($asset->published_at);
+        $this->assertTrue($asset->isVisibleInGrid());
     }
 }

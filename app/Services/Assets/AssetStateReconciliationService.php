@@ -2,10 +2,14 @@
 
 namespace App\Services\Assets;
 
+use App\Enums\AssetStatus;
 use App\Enums\ThumbnailStatus;
 use App\Jobs\ProcessAssetJob;
 use App\Models\Asset;
+use App\Models\Brand;
+use App\Models\Tenant;
 use App\Services\Reliability\ReliabilityEngine;
+use App\Services\Studio\EditorStudioVideoPublishApplier;
 use App\Support\PipelineQueueResolver;
 use Illuminate\Support\Facades\Log;
 
@@ -91,6 +95,10 @@ class AssetStateReconciliationService
 
         // Rule 7 — Studio export / animation: version marked complete before pipeline ran → ProcessAssetJob no-ops forever
         $promotions = $this->applyRule7($asset->fresh());
+        $changes = array_merge($changes, $promotions);
+
+        // Rule 8 — Studio composition video export: completed pipeline but still unpublished → default grid hides asset
+        $promotions = $this->applyRule8($asset->fresh());
         $changes = array_merge($changes, $promotions);
 
         return [
@@ -306,5 +314,72 @@ class AssetStateReconciliationService
         ]);
 
         return ['Rule 7: version.pipeline_status → pending; ProcessAssetJob dispatched'];
+    }
+
+    /**
+     * Rule 8: Studio composition MP4 exports were created with published_at=null; the grid only shows published
+     * assets with metadata.category_id. After the pipeline completes, publish when a shelf category exists
+     * (assign default category if still missing).
+     *
+     * @return list<string>
+     */
+    protected function applyRule8(Asset $asset): array
+    {
+        if (($asset->source ?? '') !== 'studio_composition_video_export') {
+            return [];
+        }
+        if ($asset->published_at !== null) {
+            return [];
+        }
+        if ($asset->deleted_at !== null || $asset->archived_at !== null) {
+            return [];
+        }
+        if ($asset->status !== AssetStatus::VISIBLE) {
+            return [];
+        }
+        $meta = $asset->metadata ?? [];
+        $pipelineDone = ($asset->analysis_status ?? '') === 'complete' || isset($meta['pipeline_completed_at']);
+        if (! $pipelineDone) {
+            return [];
+        }
+
+        $tenant = Tenant::query()->find($asset->tenant_id);
+        $brand = Brand::query()->find($asset->brand_id);
+        if (! $tenant || ! $brand) {
+            return [];
+        }
+
+        if (! $this->assetHasGridCategoryId($asset)) {
+            app(EditorStudioVideoPublishApplier::class)->ensureShelfCategoryWhenMissing($asset, $tenant, $brand);
+            $asset = $asset->fresh();
+            if (! $asset || ! $this->assetHasGridCategoryId($asset)) {
+                return [];
+            }
+        }
+
+        if ($asset->published_at !== null) {
+            return [];
+        }
+
+        $asset->update(['published_at' => now()]);
+        Log::info('[AssetStateReconciliationService] Rule 8 applied (studio export published after pipeline)', [
+            'asset_id' => $asset->id,
+        ]);
+
+        return ['Rule 8: published_at set for studio composition video export'];
+    }
+
+    private function assetHasGridCategoryId(Asset $asset): bool
+    {
+        $meta = $asset->metadata ?? [];
+        $categoryId = $meta['category_id'] ?? null;
+        if ($categoryId === null || $categoryId === '') {
+            return false;
+        }
+        if (is_string($categoryId) && strtolower(trim($categoryId)) === 'null') {
+            return false;
+        }
+
+        return true;
     }
 }
