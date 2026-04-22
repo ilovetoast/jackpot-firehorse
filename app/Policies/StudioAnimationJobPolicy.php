@@ -48,4 +48,19 @@ class StudioAnimationJobPolicy
             \App\Studio\Animation\Enums\StudioAnimationStatus::Finalizing->value,
         ], true);
     }
+
+    /**
+     * Remove a terminal failed/canceled job from the Versions rail (DB row + cascaded pipeline rows only).
+     */
+    public function delete(User $user, StudioAnimationJob $job): bool
+    {
+        if (! $this->view($user, $job)) {
+            return false;
+        }
+
+        return in_array($job->status, [
+            \App\Studio\Animation\Enums\StudioAnimationStatus::Failed->value,
+            \App\Studio\Animation\Enums\StudioAnimationStatus::Canceled->value,
+        ], true);
+    }
 }

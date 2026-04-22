@@ -221,4 +221,27 @@ class StudioAnimationController extends Controller
 
         return response()->json($this->studioAnimationService->toApiPayload($animationJob));
     }
+
+    public function destroy(Request $request, StudioAnimationJob $animationJob): \Illuminate\Http\Response|JsonResponse
+    {
+        $user = $request->user();
+        if (! $user instanceof User) {
+            return response()->json(['message' => 'Unauthorized'], 401);
+        }
+
+        $tenant = app('tenant');
+        if (! $tenant instanceof Tenant) {
+            return response()->json(['message' => 'Tenant context required.'], 422);
+        }
+
+        Gate::authorize('delete', $animationJob);
+
+        try {
+            $this->studioAnimationService->discard($animationJob, $tenant);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json(['message' => 'Validation failed', 'errors' => $e->errors()], 422);
+        }
+
+        return response()->noContent();
+    }
 }

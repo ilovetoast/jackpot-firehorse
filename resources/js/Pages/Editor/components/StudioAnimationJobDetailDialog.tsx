@@ -1,8 +1,10 @@
 import { useState } from 'react'
 import { ExclamationTriangleIcon, InformationCircleIcon, XMarkIcon } from '@heroicons/react/24/outline'
 import {
+    getStudioAnimationFailureRecoveryLine,
     getStudioAnimationStallHints,
     postStudioAnimationRetry,
+    studioAnimationRailJobLabel,
     type StudioAnimationJobDto,
 } from '../editorStudioAnimationBridge'
 
@@ -35,11 +37,16 @@ type Props = {
     open: boolean
     onClose: () => void
     onJobsUpdated: () => void
+    /** Failed/canceled only; should confirm then DELETE; resolve true if removed. */
+    onRequestDiscardJob?: (jobId: string) => Promise<boolean>
+    /** Editor composition title — dialog heading matches Versions rail tiles. */
+    compositionTitleForLabel?: string
 }
 
 export function StudioAnimationJobDetailDialog(props: Props) {
-    const { job, open, onClose, onJobsUpdated } = props
+    const { job, open, onClose, onJobsUpdated, onRequestDiscardJob, compositionTitleForLabel = '' } = props
     const [retryBusy, setRetryBusy] = useState(false)
+    const [discardBusy, setDiscardBusy] = useState(false)
 
     if (!open || !job) {
         return null
@@ -59,6 +66,7 @@ export function StudioAnimationJobDetailDialog(props: Props) {
     const stall = getStudioAnimationStallHints(job)
     const queueHint =
         typeof job.rollout_diagnostics?.queue_ai === 'string' ? (job.rollout_diagnostics.queue_ai as string) : null
+    const headingLabel = studioAnimationRailJobLabel(compositionTitleForLabel, job.id)
 
     return (
         <div
@@ -78,7 +86,7 @@ export function StudioAnimationJobDetailDialog(props: Props) {
             >
                 <div className="flex items-start justify-between gap-2">
                     <h2 id="studio-anim-detail-title" className="text-lg font-semibold text-white">
-                        Video job #{job.id}
+                        {headingLabel}
                     </h2>
                     <button
                         type="button"
@@ -187,12 +195,7 @@ export function StudioAnimationJobDetailDialog(props: Props) {
 
                 {job.status === 'failed' && job.retry_kind ? (
                     <p className="mt-2 text-[11px] text-gray-500">
-                        Recovery:{' '}
-                        {job.retry_kind === 'finalize_only'
-                            ? 'Re-download and finalize the same provider result.'
-                            : job.retry_kind === 'poll_only'
-                              ? 'Resume provider polling only.'
-                              : 'Re-run from snapshot (new start frame).'}
+                        Recovery: {getStudioAnimationFailureRecoveryLine(job)}
                     </p>
                 ) : null}
 
@@ -234,23 +237,69 @@ export function StudioAnimationJobDetailDialog(props: Props) {
                 ) : null}
 
                 {job.status === 'failed' ? (
+                    <div className="mt-4 flex flex-col gap-2">
+                        <button
+                            type="button"
+                            disabled={retryBusy || discardBusy}
+                            className="w-full rounded-lg bg-gray-700 px-3 py-2 text-sm font-medium text-white hover:bg-gray-600 disabled:opacity-50"
+                            onClick={() => {
+                                setRetryBusy(true)
+                                void postStudioAnimationRetry(job.id)
+                                    .then(() => {
+                                        onJobsUpdated()
+                                        onClose()
+                                    })
+                                    .finally(() => {
+                                        setRetryBusy(false)
+                                    })
+                            }}
+                        >
+                            {retryBusy ? 'Retrying…' : retryLabel}
+                        </button>
+                        {onRequestDiscardJob ? (
+                            <button
+                                type="button"
+                                disabled={retryBusy || discardBusy}
+                                className="w-full rounded-lg border border-red-900/50 bg-red-950/30 px-3 py-2 text-sm font-medium text-red-100 hover:bg-red-950/50 disabled:opacity-50"
+                                onClick={() => {
+                                    setDiscardBusy(true)
+                                    void onRequestDiscardJob(job.id)
+                                        .then((removed) => {
+                                            if (removed) {
+                                                onJobsUpdated()
+                                                onClose()
+                                            }
+                                        })
+                                        .finally(() => {
+                                            setDiscardBusy(false)
+                                        })
+                                }}
+                            >
+                                {discardBusy ? 'Removing…' : 'Remove from Versions rail'}
+                            </button>
+                        ) : null}
+                    </div>
+                ) : null}
+                {job.status === 'canceled' && onRequestDiscardJob ? (
                     <button
                         type="button"
-                        disabled={retryBusy}
-                        className="mt-4 w-full rounded-lg bg-gray-700 px-3 py-2 text-sm font-medium text-white hover:bg-gray-600 disabled:opacity-50"
+                        disabled={discardBusy}
+                        className="mt-4 w-full rounded-lg border border-red-900/50 bg-red-950/30 px-3 py-2 text-sm font-medium text-red-100 hover:bg-red-950/50 disabled:opacity-50"
                         onClick={() => {
-                            setRetryBusy(true)
-                            void postStudioAnimationRetry(job.id)
-                                .then(() => {
-                                    onJobsUpdated()
-                                    onClose()
+                            setDiscardBusy(true)
+                            void onRequestDiscardJob(job.id)
+                                .then((removed) => {
+                                    if (removed) {
+                                        onJobsUpdated()
+                                        onClose()
+                                    }
                                 })
                                 .finally(() => {
-                                    setRetryBusy(false)
+                                    setDiscardBusy(false)
                                 })
                         }}
                     >
-                        {retryBusy ? 'Retrying…' : retryLabel}
+                        {discardBusy ? 'Removing…' : 'Remove from Versions rail'}
                     </button>
                 ) : null}
 

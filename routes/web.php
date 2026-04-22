@@ -778,6 +778,8 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
                     ->name('app.studio.animations.retry');
                 Route::post('/studio/animations/{animationJob}/cancel', [\App\Http\Controllers\Studio\StudioAnimationController::class, 'cancel'])
                     ->name('app.studio.animations.cancel');
+                Route::delete('/studio/animations/{animationJob}', [\App\Http\Controllers\Studio\StudioAnimationController::class, 'destroy'])
+                    ->name('app.studio.animations.destroy');
             });
 
             // Phase J.2.3: Tag UX API endpoints

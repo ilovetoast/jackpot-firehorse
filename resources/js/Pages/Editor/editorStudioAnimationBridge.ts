@@ -66,6 +66,40 @@ export type StudioAnimationJobDto = {
 
 const STUDIO_ANIM_TERMINAL_STATUSES = new Set(['complete', 'failed', 'canceled'])
 
+function looksLikeProviderSubmitAuthFailure(message: string | null | undefined): boolean {
+    if (message == null || message === '') {
+        return false
+    }
+    const m = message.toLowerCase()
+    return (
+        m.includes('authentication') ||
+        m.includes('cannot access application') ||
+        /\b401\b/.test(m)
+    )
+}
+
+/**
+ * Copy for the small "Recovery:" line on failed jobs. Auth detection here should match
+ * PHP friendlyFailureMessage for provider_submit_failed + Fal auth body errors.
+ */
+export function getStudioAnimationFailureRecoveryLine(
+    job: Pick<StudioAnimationJobDto, 'retry_kind' | 'error_code' | 'error_message'>,
+): string | null {
+    if (!job.retry_kind) {
+        return null
+    }
+    if (job.retry_kind === 'finalize_only') {
+        return 'Re-download and finalize the same provider result.'
+    }
+    if (job.retry_kind === 'poll_only') {
+        return 'Resume provider polling only.'
+    }
+    if (job.error_code === 'provider_submit_failed' && looksLikeProviderSubmitAuthFailure(job.error_message)) {
+        return 'After Fal authentication works on the server, use Retry. Retrying before that repeats the same error.'
+    }
+    return 'Re-run from snapshot (new start frame).'
+}
+
 /**
  * UX hints when a job sits in queue or runs longer than usual (workers, provider backlog).
  */
@@ -242,4 +276,29 @@ export async function postStudioAnimationRetry(jobId: string): Promise<StudioAni
         throw new Error((data as { message?: string })?.message || text)
     }
     return data as StudioAnimationJobDto
+}
+
+/** Versions-rail tile title: composition name + job id (falls back to “Video” if title empty). */
+export function studioAnimationRailJobLabel(compositionTitle: string, jobId: string): string {
+    const t = compositionTitle.trim()
+    return t !== '' ? `${t} #${jobId}` : `Video #${jobId}`
+}
+
+export async function deleteStudioAnimationJob(jobId: string): Promise<void> {
+    const res = await fetch(`/app/studio/animations/${encodeURIComponent(jobId)}`, {
+        method: 'DELETE',
+        headers: { Accept: 'application/json', 'X-CSRF-TOKEN': csrf() },
+        credentials: 'same-origin',
+    })
+    if (res.status === 204 || res.status === 200) {
+        return
+    }
+    const text = await res.text()
+    let data: unknown
+    try {
+        data = JSON.parse(text)
+    } catch {
+        throw new Error(text || `Remove job failed (${res.status})`)
+    }
+    throw new Error((data as { message?: string })?.message || text || `Remove job failed (${res.status})`)
 }

@@ -98,8 +98,12 @@ export function VersionsRail(props: {
     /** AI video jobs for the active composition — shown as tiles before static version tiles. */
     compositionAnimations?: StudioAnimationJobDto[]
     compositionAnimationsLoading?: boolean
+    /** Editor composition title for animation tile labels. */
+    compositionAnimationTitle?: string
     selectedStudioAnimationJobId?: string | null
     onSelectStudioAnimationJob?: (jobId: string) => void
+    /** Remove a failed/canceled animation job from the rail (parent runs confirm + API). */
+    onRequestDiscardStudioAnimationJob?: (jobId: string) => void
     /** Remove a non-base variant from the set (parent runs confirm + API). */
     onRequestRemoveVariant?: (variant: StudioCreativeSetVariantDto) => void
 }) {
@@ -132,8 +136,10 @@ export function VersionsRail(props: {
         onCollapsePanel,
         compositionAnimations = [],
         compositionAnimationsLoading = false,
+        compositionAnimationTitle = '',
         selectedStudioAnimationJobId = null,
         onSelectStudioAnimationJob,
+        onRequestDiscardStudioAnimationJob,
         onRequestRemoveVariant,
     } = props
 
@@ -417,6 +423,8 @@ export function VersionsRail(props: {
                     loading={compositionAnimationsLoading}
                     selectedJobId={selectedStudioAnimationJobId}
                     onSelectJob={(id) => onSelectStudioAnimationJob?.(id)}
+                    compositionTitle={compositionAnimationTitle}
+                    onRequestDiscardJob={onRequestDiscardStudioAnimationJob}
                 />
                 {creativeSet.variants.map((v: StudioCreativeSetVariantDto) => {
                     const active = activeCompositionId === v.composition_id

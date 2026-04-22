@@ -188,8 +188,11 @@ import { VersionBuilderModal } from './components/VersionsRail/VersionBuilderMod
 import { StudioAnimateCompositionModal } from './components/StudioAnimateCompositionModal'
 import { StudioAnimationJobDetailDialog } from './components/StudioAnimationJobDetailDialog'
 import {
+    deleteStudioAnimationJob,
     fetchStudioAnimations,
+    getStudioAnimationFailureRecoveryLine,
     postStudioAnimationRetry,
+    studioAnimationRailJobLabel,
     type StudioAnimationJobDto,
 } from './editorStudioAnimationBridge'
 import { VersionsRail, type StudioVersionsHandoffChrome } from './components/VersionsRail/VersionsRail'
@@ -3391,6 +3394,32 @@ export default function AssetEditor() {
             }
         },
         [studioCreativeSet, compositionId, editorConfirm, switchToSiblingComposition]
+    )
+
+    const requestDiscardStudioAnimationJob = useCallback(
+        async (jobId: string): Promise<boolean> => {
+            const ok = await editorConfirm({
+                title: 'Remove this video job?',
+                message:
+                    'This removes the failed or canceled animation run from your Versions list. It does not delete any finished video already saved as an asset.',
+                variant: 'danger',
+                confirmText: 'Remove',
+            })
+            if (!ok) {
+                return false
+            }
+            try {
+                await deleteStudioAnimationJob(jobId)
+                await refreshCompositionAnimations()
+                setStudioAnimationDetailJobId((prev) => (prev !== null && String(prev) === String(jobId) ? null : prev))
+                setActivityToast('Video job removed.')
+                return true
+            } catch (e) {
+                setActivityToast(e instanceof Error ? e.message : 'Could not remove animation job')
+                return false
+            }
+        },
+        [editorConfirm, refreshCompositionAnimations]
     )
 
     const bumpGenerateVersionsModal = useCallback(() => {
@@ -7411,7 +7440,18 @@ export default function AssetEditor() {
                                                     return (
                                                         <div key={a.id} className="mb-2 rounded-md border border-gray-800 bg-gray-900/40 px-2 py-2">
                                                             <div className="flex items-center justify-between gap-2">
-                                                                <span className="truncate text-[11px] font-medium text-gray-200">Job #{a.id}</span>
+                                                                <span
+                                                                    className="truncate text-[11px] font-medium text-gray-200"
+                                                                    title={studioAnimationRailJobLabel(
+                                                                        compositionName.trim() || defaultCompositionName(document),
+                                                                        a.id,
+                                                                    )}
+                                                                >
+                                                                    {studioAnimationRailJobLabel(
+                                                                        compositionName.trim() || defaultCompositionName(document),
+                                                                        a.id,
+                                                                    )}
+                                                                </span>
                                                                 <span
                                                                     className={`shrink-0 rounded px-1.5 py-[1px] text-[9px] font-semibold uppercase tracking-wide ${badgeClass}`}
                                                                 >
@@ -7475,12 +7515,7 @@ export default function AssetEditor() {
                                                             )}
                                                             {a.status === 'failed' && a.retry_kind && (
                                                                 <p className="mt-0.5 text-[9px] text-gray-500">
-                                                                    Recovery:{' '}
-                                                                    {a.retry_kind === 'finalize_only'
-                                                                        ? 'Re-download and finalize the same provider result.'
-                                                                        : a.retry_kind === 'poll_only'
-                                                                          ? 'Resume provider polling only.'
-                                                                          : 'Re-run from snapshot (new start frame).'}
+                                                                    Recovery: {getStudioAnimationFailureRecoveryLine(a)}
                                                                 </p>
                                                             )}
                                                             {a.status === 'failed' && (
@@ -7496,6 +7531,17 @@ export default function AssetEditor() {
                                                                     }}
                                                                 >
                                                                     {retryLabel}
+                                                                </button>
+                                                            )}
+                                                            {(a.status === 'failed' || a.status === 'canceled') && (
+                                                                <button
+                                                                    type="button"
+                                                                    className="mt-1 w-full rounded border border-red-900/40 bg-red-950/25 px-2 py-1 text-[10px] font-medium text-red-200/90 hover:bg-red-950/45"
+                                                                    onClick={() => {
+                                                                        void requestDiscardStudioAnimationJob(a.id)
+                                                                    }}
+                                                                >
+                                                                    Remove from list
                                                                 </button>
                                                             )}
                                                         </div>
@@ -8472,8 +8518,10 @@ export default function AssetEditor() {
                                     onCollapsePanel={() => setStudioVersionsPanelOpen(false)}
                                     compositionAnimations={compositionAnimations}
                                     compositionAnimationsLoading={animationsLoading}
+                                    compositionAnimationTitle={compositionName.trim() || defaultCompositionName(document)}
                                     selectedStudioAnimationJobId={studioAnimationDetailJobId}
                                     onSelectStudioAnimationJob={(jobId) => setStudioAnimationDetailJobId(jobId)}
+                                    onRequestDiscardStudioAnimationJob={requestDiscardStudioAnimationJob}
                                     onRequestRemoveVariant={removeStudioVariantFromSet}
                                 />
                                 <ApplyScopeBar
@@ -8569,6 +8617,8 @@ export default function AssetEditor() {
                         onJobsUpdated={() => {
                             void refreshCompositionAnimations()
                         }}
+                        onRequestDiscardJob={requestDiscardStudioAnimationJob}
+                        compositionTitleForLabel={compositionName.trim() || defaultCompositionName(document)}
                     />
                 )}
                 </div>

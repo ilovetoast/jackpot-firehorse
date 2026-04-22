@@ -458,6 +458,32 @@ final class StudioAnimationService
     }
 
     /**
+     * Hard-delete a failed or canceled job so it disappears from the editor Versions rail.
+     * Child renders/outputs cascade at the database; does not delete library assets.
+     */
+    public function discard(StudioAnimationJob $job, Tenant $tenant): void
+    {
+        if ((int) $job->tenant_id !== (int) $tenant->id) {
+            abort(403);
+        }
+
+        if (! in_array($job->status, [
+            StudioAnimationStatus::Failed->value,
+            StudioAnimationStatus::Canceled->value,
+        ], true)) {
+            throw ValidationException::withMessages([
+                'job' => 'Only failed or canceled animation jobs can be removed from the list.',
+            ]);
+        }
+
+        StudioAnimationObservability::log('user_discard', $job, []);
+
+        DB::transaction(function () use ($job): void {
+            $job->delete();
+        });
+    }
+
+    /**
      * Exposed for observability and API payloads; only meaningful when the job failed.
      */
     public function effectiveRetryKind(StudioAnimationJob $job): ?string

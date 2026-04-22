@@ -1,5 +1,5 @@
-import { ArrowPathIcon, FilmIcon } from '@heroicons/react/24/outline'
-import { getStudioAnimationStallHints, type StudioAnimationJobDto } from '../../editorStudioAnimationBridge'
+import { ArrowPathIcon, FilmIcon, TrashIcon } from '@heroicons/react/24/outline'
+import { getStudioAnimationStallHints, studioAnimationRailJobLabel, type StudioAnimationJobDto } from '../../editorStudioAnimationBridge'
 
 function animStatusLabel(status: string): string {
     if (status === 'queued') return 'Queued'
@@ -29,13 +29,16 @@ type Props = {
     loading: boolean
     selectedJobId: string | null
     onSelectJob: (jobId: string) => void
+    /** Current composition display name (editor title) for tile labels. */
+    compositionTitle?: string
+    onRequestDiscardJob?: (jobId: string) => void
 }
 
 /**
  * Horizontal “video version” tiles for the Studio Versions rail (matches ~76px version tile width).
  */
 export function StudioAnimationRailChips(props: Props) {
-    const { jobs, loading, selectedJobId, onSelectJob } = props
+    const { jobs, loading, selectedJobId, onSelectJob, compositionTitle = '', onRequestDiscardJob } = props
 
     if (!loading && jobs.length === 0) {
         return null
@@ -60,6 +63,9 @@ export function StudioAnimationRailChips(props: Props) {
                         : stall.level === 'notice'
                           ? 'ring-1 ring-sky-600/50'
                           : ''
+                const canDiscard =
+                    Boolean(onRequestDiscardJob) && (a.status === 'failed' || a.status === 'canceled')
+                const tileLabel = studioAnimationRailJobLabel(compositionTitle, a.id)
                 return (
                     <div
                         key={a.id}
@@ -88,10 +94,28 @@ export function StudioAnimationRailChips(props: Props) {
                                     {animStatusLabel(a.status)}
                                 </span>
                             </div>
-                            <span className="w-full truncate text-center text-[9px] font-semibold leading-tight text-violet-100/90">
-                                Video #{a.id}
+                            <span
+                                className="line-clamp-2 w-full break-words text-center text-[8px] font-semibold leading-tight text-violet-100/90"
+                                title={tileLabel}
+                            >
+                                {tileLabel}
                             </span>
                         </button>
+                        {canDiscard ? (
+                            <button
+                                type="button"
+                                data-testid={`studio-discard-animation-${a.id}`}
+                                title="Remove this failed run from the rail"
+                                onClick={(e) => {
+                                    e.stopPropagation()
+                                    onRequestDiscardJob?.(a.id)
+                                }}
+                                className="flex w-full items-center justify-center gap-0.5 rounded border border-gray-700/80 bg-gray-900/90 py-0.5 text-[8px] font-semibold text-gray-500 hover:border-red-900/50 hover:bg-red-950/30 hover:text-red-200"
+                            >
+                                <TrashIcon className="h-3 w-3 shrink-0" aria-hidden />
+                                Remove
+                            </button>
+                        ) : null}
                     </div>
                 )
             })}
