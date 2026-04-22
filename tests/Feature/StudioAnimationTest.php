@@ -787,6 +787,14 @@ class StudioAnimationTest extends TestCase
         $this->assertDatabaseMissing('studio_animation_jobs', ['id' => $job->id]);
     }
 
+    public function test_destroy_no_row_is_idempotent_no_content(): void
+    {
+        $this->actingAs($this->user)
+            ->withSession(['tenant_id' => $this->tenant->id, 'brand_id' => $this->brand->id])
+            ->deleteJson('/app/studio/animations/9999991')
+            ->assertNoContent();
+    }
+
     public function test_destroy_forbidden_when_session_brand_mismatches_job_brand(): void
     {
         $otherBrand = Brand::create([

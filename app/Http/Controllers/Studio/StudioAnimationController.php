@@ -15,6 +15,7 @@ use App\Studio\Animation\Support\AnimationCapabilityRegistry;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\Rule;
 
 class StudioAnimationController extends Controller
@@ -227,7 +228,7 @@ class StudioAnimationController extends Controller
         return response()->json($this->studioAnimationService->toApiPayload($animationJob));
     }
 
-    public function destroy(Request $request, StudioAnimationJob $animationJob): \Illuminate\Http\Response|JsonResponse
+    public function destroy(Request $request, int $animationJob): \Illuminate\Http\Response|JsonResponse
     {
         $user = $request->user();
         if (! $user instanceof User) {
@@ -239,10 +240,24 @@ class StudioAnimationController extends Controller
             return response()->json(['message' => 'Tenant context required.'], 422);
         }
 
-        Gate::authorize('delete', $animationJob);
+        $job = StudioAnimationJob::query()
+            ->whereKey($animationJob)
+            ->where('tenant_id', $tenant->id)
+            ->first();
+        if ($job === null) {
+            Log::info('StudioAnimationController.destroy not_found (treated as idempotent)', [
+                'requested_studio_animation_job_id' => $animationJob,
+                'tenant_id' => $tenant->id,
+                'user_id' => $user->id,
+            ]);
+
+            return response()->noContent();
+        }
+
+        Gate::authorize('delete', $job);
 
         try {
-            $this->studioAnimationService->discard($animationJob, $tenant);
+            $this->studioAnimationService->discard($job, $tenant);
         } catch (\Illuminate\Validation\ValidationException $e) {
             return response()->json(['message' => 'Validation failed', 'errors' => $e->errors()], 422);
         }

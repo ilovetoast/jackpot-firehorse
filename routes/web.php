@@ -779,6 +779,7 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
                 Route::post('/studio/animations/{animationJob}/cancel', [\App\Http\Controllers\Studio\StudioAnimationController::class, 'cancel'])
                     ->name('app.studio.animations.cancel');
                 Route::delete('/studio/animations/{animationJob}', [\App\Http\Controllers\Studio\StudioAnimationController::class, 'destroy'])
+                    ->whereNumber('animationJob')
                     ->name('app.studio.animations.destroy');
             });
 

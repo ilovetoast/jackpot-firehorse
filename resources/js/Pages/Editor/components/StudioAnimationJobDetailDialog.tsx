@@ -17,7 +17,7 @@ function fmtWhen(iso: string | null | undefined): string {
     }
 }
 
-function statusTitle(status: string): string {
+function statusTitle(status: string, playBackAvailable: boolean): string {
     const m: Record<string, string> = {
         queued: 'Waiting for a worker to start this job.',
         rendering: 'Preparing the locked start frame from your composition.',
@@ -25,7 +25,9 @@ function statusTitle(status: string): string {
         processing: 'The provider is generating your clip.',
         downloading: 'Downloading the finished video.',
         finalizing: 'Saving the file to your library.',
-        complete: 'Finished — video is saved as an asset.',
+        complete: playBackAvailable
+            ? 'Finished — video is saved as an asset.'
+            : 'Finished on the server, but no video is linked for playback. The library file may have been removed, or the output was never attached.',
         failed: 'This run did not complete.',
         canceled: 'Canceled.',
     }
@@ -55,6 +57,7 @@ export function StudioAnimationJobDetailDialog(props: Props) {
     const reserved = typeof job.credits_reserved === 'number' ? job.credits_reserved : 0
     const charged = Boolean(job.credits_charged)
     const units = typeof job.credits_charged_units === 'number' ? job.credits_charged_units : 0
+    const playBackAvailable = Boolean(job.output?.asset_view_url)
 
     const retryLabel =
         job.retry_kind === 'poll_only'
@@ -98,8 +101,8 @@ export function StudioAnimationJobDetailDialog(props: Props) {
                     </button>
                 </div>
                 <p className="mt-1 text-[11px] uppercase tracking-wide text-violet-300/90">{job.status}</p>
-                <p className="mt-1 text-xs text-gray-400" title={statusTitle(job.status)}>
-                    {statusTitle(job.status)}
+                <p className="mt-1 text-xs text-gray-400" title={statusTitle(job.status, playBackAvailable)}>
+                    {statusTitle(job.status, playBackAvailable)}
                 </p>
 
                 {stall.level !== 'none' ? (
@@ -180,9 +183,18 @@ export function StudioAnimationJobDetailDialog(props: Props) {
                     ) : null}
                 </dl>
 
-                {job.status === 'complete' && job.output?.asset_view_url ? (
+                {job.status === 'complete' && !playBackAvailable ? (
+                    <p className="mt-4 text-sm leading-snug text-amber-200/90" role="status">
+                        This run is marked done, but there is no video file to play. The library file may have been deleted after
+                        the job finished, or the save step did not complete. Create a <strong className="text-gray-100">new</strong>{' '}
+                        animation from the document to get another clip, and make sure the AI queue worker and storage (for example
+                        S3) are working if this keeps happening.
+                    </p>
+                ) : null}
+
+                {job.status === 'complete' && playBackAvailable ? (
                     <video
-                        src={job.output.asset_view_url}
+                        src={job.output?.asset_view_url ?? undefined}
                         className="mt-4 w-full rounded-md border border-gray-700"
                         controls
                         playsInline
