@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { PauseIcon, PlayIcon } from '@heroicons/react/24/solid'
 import type { DocumentModel, Layer } from '../documentModel'
 import { isVideoLayer } from '../documentModel'
@@ -35,6 +35,11 @@ export function EditorCompositionVideoPlaybackBar(props: {
         return [...stage.querySelectorAll<HTMLVideoElement>('video[data-jp-editor-layer]')]
     }, [getStageEl])
 
+    const queryVideosRef = useRef(queryVideos)
+    queryVideosRef.current = queryVideos
+    /** Only react to *new* autoplay requests — `getStageEl` is often an inline () => ref.current from the parent, so its identity changes every render and would otherwise re-fire this effect and undo pause. */
+    const lastAutoplayNonceAppliedRef = useRef(0)
+
     const syncVideosToMs = useCallback(
         (ms: number) => {
             const t = Math.max(0, Math.min(ms / 1000, durationMs / 1000))
@@ -69,9 +74,14 @@ export function EditorCompositionVideoPlaybackBar(props: {
 
     useEffect(() => {
         if (!autoplayNonce) {
+            lastAutoplayNonceAppliedRef.current = 0
             return undefined
         }
-        const vids = queryVideos()
+        if (autoplayNonce === lastAutoplayNonceAppliedRef.current) {
+            return undefined
+        }
+        lastAutoplayNonceAppliedRef.current = autoplayNonce
+        const vids = queryVideosRef.current()
         if (vids.length === 0) {
             return undefined
         }
@@ -87,7 +97,7 @@ export function EditorCompositionVideoPlaybackBar(props: {
             setPlaying(true)
         })()
         return undefined
-    }, [autoplayNonce, queryVideos])
+    }, [autoplayNonce])
 
     const togglePlay = useCallback(() => {
         const vids = queryVideos()

@@ -2024,6 +2024,8 @@ export default function AssetEditor() {
 
     const canvasContainerRef = useRef<HTMLDivElement>(null)
     const stageRef = useRef<HTMLDivElement>(null)
+    /** Stable for child hooks — inline `() => stageRef.current` changes every render and was retriggering composition video autoplay after pause. */
+    const getEditorStageEl = useCallback((): HTMLElement | null => stageRef.current, [])
     const studioAnimationCanvasPreviewVideoRef = useRef<HTMLVideoElement | null>(null)
     const dragRef = useRef<DragState | null>(null)
     const undoStackRef = useRef<string[]>([])
@@ -9936,7 +9938,7 @@ export default function AssetEditor() {
                             ) : (
                                 <EditorCompositionVideoPlaybackBar
                                     document={document}
-                                    getStageEl={() => stageRef.current}
+                                    getStageEl={getEditorStageEl}
                                     autoplayNonce={compositionPlaybackAutoplayNonce}
                                 />
                             )}
@@ -10124,7 +10126,7 @@ export default function AssetEditor() {
                         compositionId={compositionId}
                         document={document}
                         textLayerCount={document.layers.filter((l) => l.type === 'text').length}
-                        getStageEl={() => stageRef.current}
+                        getStageEl={getEditorStageEl}
                         initialSourceKind={studioAnimateOpenContext?.sourceKind ?? 'full_composition'}
                         initialLayerId={studioAnimateOpenContext?.layerId ?? null}
                         onClose={() => {
