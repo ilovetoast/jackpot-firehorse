@@ -133,7 +133,6 @@ export default function AdminDashboard({ auth, metrics: initialMetrics }) {
     const operationsItems = [
         { name: 'Operations Center', description: `Critical: ${incidents.critical ?? 0} | Errors: ${incidents.error ?? 0}`, href: '/app/admin/operations-center', icon: ExclamationTriangleIcon },
         { name: 'Asset Operations', description: 'Cross-tenant asset search, repair, restore', href: '/app/admin/assets', icon: FolderIcon },
-        { name: 'Brand Intelligence', description: 'EBI scores, breakdown, simulate (dev)', href: '/app/admin/brand-intelligence', icon: SparklesIcon },
         {
             name: 'AI content & analysis',
             description: 'Brand Intelligence, editor audit, video insights monitor',
@@ -167,7 +166,12 @@ export default function AdminDashboard({ auth, metrics: initialMetrics }) {
                 icon: Squares2X2Icon,
             },
             { name: 'AI Dashboard', description: 'Costs, models, agents', href: '/app/admin/ai', icon: BoltIcon },
-            { name: 'Editor image audit', description: 'Canvas + presentation preview — input/output', href: '/app/admin/ai/editor-image-audit', icon: SparklesIcon },
+            {
+                name: 'Editor / Studio video audit',
+                description: 'Canvas, presentation preview, Studio i2v — prompts, credits, output',
+                href: '/app/admin/ai/editor-image-audit',
+                icon: SparklesIcon,
+            },
             { name: 'AI Agent Health', description: `${ai.failures_24h ?? 0} failures (24h)`, href: '/app/admin/ai-agents', icon: BoltIcon },
             { name: 'AI Budgets', description: `$${ai.cost_24h_usd ?? 0} (24h)`, href: '/app/admin/ai/budgets', icon: ChartBarIcon },
         ]

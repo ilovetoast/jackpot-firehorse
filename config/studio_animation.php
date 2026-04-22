@@ -1,10 +1,8 @@
 <?php
 
-/** Official Kling API: Access Key + Secret Key (JWT). Not fal.ai. */
+/** Official Kling API: Access Key + Secret Key (JWT). */
 $klingNativeAccessKey = trim((string) env('KLING_API_KEY', ''));
 $klingNativeSecretKey = trim((string) env('KLING_SECRET_KEY', ''));
-/** fal.ai queue (only when STUDIO_ANIMATION_KLING_TRANSPORT=fal_queue). */
-$falKeyForStudioAnimation = trim((string) env('FAL_KEY', ''));
 
 return [
     'enabled' => (bool) env('STUDIO_ANIMATION_ENABLED', true),
@@ -15,6 +13,28 @@ return [
      * `php artisan queue:work` picks them up. Set to `ai` if you use a dedicated local worker for the AI queue.
      */
     'dispatch_queue' => env('STUDIO_ANIMATION_QUEUE', ''),
+
+    /**
+     * Non-terminal studio animation jobs (queued, processing, etc.) older than this many minutes (by `created_at`)
+     * may be removed from the Versions rail via DELETE. Set to 0 to disable (only failed/canceled jobs removable).
+     */
+    'stale_rail_removal' => [
+        'after_minutes' => (int) env('STUDIO_ANIMATION_STALE_RAIL_REMOVAL_MINUTES', 15),
+    ],
+
+    /**
+     * Before credits are charged, downloaded provider video is probed with ffprobe (required on the app host).
+     * Fails the job (no credit charge) if the file has no decodable video, tiny dimensions, or a near-zero duration.
+     */
+    'finalize_validation' => [
+        'min_size_bytes' => (int) env('STUDIO_ANIMATION_FINALIZE_MIN_BYTES', 256),
+        /** Timeline length must exceed this (seconds) using format/stream duration. */
+        'min_effective_duration_seconds' => (float) env('STUDIO_ANIMATION_FINALIZE_MIN_DURATION', 0.3),
+        'min_width' => (int) env('STUDIO_ANIMATION_FINALIZE_MIN_WIDTH', 16),
+        'min_height' => (int) env('STUDIO_ANIMATION_FINALIZE_MIN_HEIGHT', 16),
+        /** Non-empty: use this ffprobe binary instead of PATH. */
+        'ffprobe_path' => trim((string) env('STUDIO_ANIMATION_FFPROBE_PATH', '')),
+    ],
 
     /**
      * Structured logs: [sa] <event> with compact keys (render_engine, renderer_version, drift_*, webhook, retry, finalize).
@@ -52,6 +72,23 @@ return [
         'enabled' => (bool) env('STUDIO_ANIMATION_SERVER_LOCKED_FRAME', true),
         'font_path' => env('STUDIO_ANIMATION_LOCKED_FRAME_FONT'),
     ],
+
+    /**
+     * When true (default), the start frame sent to the video provider uses the **browser-captured** PNG
+     * (the same pixels the user sees), not a server re-render of locked_document_json. Server re-renders
+     * currently resolve image layers from asset storage / current file version, which can disagree with
+     * the editor when the user picked a different asset version (e.g. Original vs AI edit) or a
+     * signed URL in layer.src. Set to false to restore the previous "prefer server raster when
+     * available" behavior.
+     */
+    'prefer_client_snapshot_for_provider' => (bool) env('STUDIO_ANIMATION_PREFER_CLIENT_SNAPSHOT', true),
+
+    /**
+     * When true, run {@see \App\Jobs\GenerateThumbnailsJob} synchronously right after the MP4 is stored, so
+     * Staged / library grids get a static poster (video frame) without waiting for the async pipeline worker.
+     * If FFmpeg is missing, this no-ops and the queued pipeline still attempts thumbnails later.
+     */
+    'eager_video_thumbnails' => (bool) env('STUDIO_ANIMATION_EAGER_VIDEO_THUMBNAILS', true),
 
     /**
      * Optional headless/browser frame export: command_template must include {{DOCUMENT_JSON}} and {{OUTPUT_PNG}} placeholders (shell-escaped paths).
@@ -114,12 +151,32 @@ return [
     /*
     | Credits: feature key `studio_animation` uses weight 1 in ai_credits.php; each job consumes
     | N units via AiUsageService::checkUsage($tenant, 'studio_animation', N).
+    |
+    | Defaults price Studio video **above** lightweight editor calls (e.g. generative stills use 20 credits):
+    | ~$1 Kling COGS is covered by a retail credit charge with markup. Tune STUDIO_ANIMATION_CREDITS_*
+    | and list_price for your packs.
     */
     'credits' => [
-        'base' => (int) env('STUDIO_ANIMATION_CREDITS_BASE', 40),
-        'per_extra_second' => (int) env('STUDIO_ANIMATION_CREDITS_PER_EXTRA_SECOND', 5),
+        'base' => (int) env('STUDIO_ANIMATION_CREDITS_BASE', 60),
+        'per_extra_second' => (int) env('STUDIO_ANIMATION_CREDITS_PER_EXTRA_SECOND', 12),
         /** First N seconds are covered by base; beyond that, per_extra_second applies per second. */
         'base_covers_seconds' => (int) env('STUDIO_ANIMATION_BASE_COVERS_SECONDS', 5),
+        /**
+         * For audit / admin display only: implied USD when credits are valued at a list pack price
+         * (e.g. $29 / 500 ≈ 0.058). Does not change billing.
+         */
+        'list_price_usd_per_credit' => (float) env('STUDIO_ANIMATION_LIST_USD_PER_CREDIT', 0.058),
+    ],
+
+    /**
+     * Recorded on AI agent runs as estimated_cost (USD) for finance / admin dashboards.
+     * Kling’s API does not return per-invoice line items here — tune env to match your contract.
+     */
+    'cost_tracking' => [
+        'estimated_usd_per_job' => (float) env('STUDIO_ANIMATION_ESTIMATED_USD_PER_JOB', 1.0),
+        /** Vendor COGS for each second beyond base_covers_seconds (length add-on; same window as credits). */
+        'estimated_usd_per_extra_second' => (float) env('STUDIO_ANIMATION_ESTIMATED_USD_PER_EXTRA_SECOND', 0.2),
+        'disclaimer' => 'All USD figures are internal estimates (config), not Kling invoices. Update STUDIO_ANIMATION_ESTIMATED_USD_* to match your account.',
     ],
 
     'motion_presets' => [
@@ -156,22 +213,16 @@ return [
     'providers' => [
         'kling' => [
             'label' => 'Kling 3.0',
-            // kling_api = official Kling (JWT, KLING_API_KEY + KLING_SECRET_KEY). fal_queue = fal.ai (FAL_KEY). mock = tests.
-            'transport' => env('STUDIO_ANIMATION_KLING_TRANSPORT', 'kling_api'),
+            /** Official Kling API only. Use `mock` in tests via app config override. */
+            'transport' => 'kling_api',
             'native' => [
                 'base_url' => rtrim((string) env('KLING_API_BASE_URL', 'https://api-singapore.klingai.com'), '/'),
                 'access_key' => $klingNativeAccessKey,
                 'secret_key' => $klingNativeSecretKey,
                 'default_model' => (string) env('KLING_NATIVE_IMAGE2VIDEO_MODEL', 'kling-v2-5-turbo'),
             ],
-            'fal' => [
-                'api_key' => $falKeyForStudioAnimation,
-                'queue_base_url' => rtrim((string) env('FAL_QUEUE_BASE_URL', 'https://queue.fal.run'), '/'),
-                'model_path' => env('FAL_KLING_I2V_MODEL', 'fal-ai/kling-video/v3/standard/image-to-video'),
-            ],
             'models' => [
                 'kling_v3_standard_image_to_video' => [
-                    'fal_model_path' => 'fal-ai/kling-video/v3/standard/image-to-video',
                     'native_model_name' => env('KLING_NATIVE_MODEL_V3_STANDARD', 'kling-v2-5-turbo'),
                     'label' => 'Kling 3.0 Standard (image-to-video)',
                 ],

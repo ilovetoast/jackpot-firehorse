@@ -21,6 +21,7 @@ class Composition extends Model
         'user_id',
         'visibility',
         'name',
+        'folder',
         'document_json',
         'thumbnail_asset_id',
     ];

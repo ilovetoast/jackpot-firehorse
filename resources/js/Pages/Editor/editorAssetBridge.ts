@@ -88,6 +88,8 @@ export async function fetchEditorPublishCategories(): Promise<EditorPublishCateg
 export type FetchEditorAssetsOptions = {
     /** Library (default) vs executions / deliverables */
     assetType?: 'asset' | 'deliverable'
+    /** `image` (default) = raster/SVG in asset picker; `video` = video/* only */
+    contentType?: 'image' | 'video'
     /** Filter by DAM category (metadata.category_id), e.g. Photography, Print */
     categoryId?: number
     /** Server-side match on title / original filename (Studio asset picker search) */
@@ -102,6 +104,9 @@ export async function fetchEditorAssets(
     const params = new URLSearchParams({ limit: String(limit) })
     if (options?.assetType === 'deliverable') {
         params.set('asset_type', 'deliverable')
+    }
+    if (options?.contentType === 'video') {
+        params.set('content_type', 'video')
     }
     if (options?.categoryId != null && Number.isFinite(options.categoryId) && options.categoryId > 0) {
         params.set('category_id', String(Math.floor(options.categoryId)))
@@ -225,6 +230,7 @@ export function buildEditorProvenanceHints(doc: DocumentModel): Record<string, u
         layers_count: doc.layers.length,
         has_text: doc.layers.some((l) => l.type === 'text'),
         has_images: doc.layers.some((l) => l.type === 'image'),
+        has_video: doc.layers.some((l) => l.type === 'video' && l.visible !== false),
         has_generative: hasGenerative,
         has_brand_influence: hasBrandInfluence,
         reference_asset_ids: referenceAssetIds,

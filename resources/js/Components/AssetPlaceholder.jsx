@@ -9,6 +9,17 @@ function isImageAsset(asset) {
   return ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp', 'tif', 'tiff', 'heic', 'avif'].includes(ext)
 }
 
+/** Video grid placeholder: single frosted play (matches AssetCard poster overlay), not FileTypeIcon + label. */
+function isVideoAsset(asset) {
+  if (!asset) return false
+  const mime = (asset.mime_type || '').toLowerCase()
+  if (mime.startsWith('video/')) return true
+  const ext = (asset.file_extension || asset?.original_filename?.split?.('.')?.pop() || '')
+    .toLowerCase()
+    .replace(/^\./, '')
+  return ['mp4', 'mov', 'avi', 'webm', 'mkv', 'm4v'].includes(ext)
+}
+
 /** Match {@link AssetImagePickerField} empty state — outline photo, no circular badge */
 const PHOTO_ICON_SIZE = {
   sm: 'w-8 h-8',
@@ -35,6 +46,24 @@ export default function AssetPlaceholder({ asset, primaryColor = null, brand = n
     return (
       <div className="relative flex items-center justify-center w-full h-full rounded-lg overflow-hidden">
         <PhotoIcon className={`${photoClass} text-slate-400`} aria-hidden />
+      </div>
+    )
+  }
+
+  if (isVideoAsset(asset)) {
+    const playGlyph = size === 'sm' ? 'h-6 w-6' : 'h-8 w-8'
+    const frostedPad = size === 'sm' ? 'p-2' : 'p-3'
+    return (
+      <div
+        className={`relative flex h-full w-full min-h-0 items-center justify-center ${SPECIMEN_TILE_CLASS}`}
+      >
+        <div
+          className={`rounded-full bg-black/40 shadow-md ring-1 ring-white/25 backdrop-blur-sm ${frostedPad}`}
+        >
+          <svg className={`${playGlyph} text-white`} fill="currentColor" viewBox="0 0 24 24" aria-hidden>
+            <path d="M8 5v14l11-7z" />
+          </svg>
+        </div>
       </div>
     )
   }

@@ -25,6 +25,8 @@ final class StudioCreativeSetItemProcessor
         protected CreativeSetGenerationPlanner $planner,
         protected EditorGenerativeImageEditService $generativeImageEditService,
         protected StudioCompositionFormatReflowService $formatReflow,
+        protected LayoutVariantTransformService $layoutTransform,
+        protected StudioVariantGroupMemberSync $variantGroupMemberSync,
     ) {}
 
     public function process(GenerationJobItem $item): void
@@ -105,6 +107,13 @@ final class StudioCreativeSetItemProcessor
                 }
                 $label = implode(' · ', array_filter($labelParts)) ?: 'Generated';
 
+                $specJson = [
+                    'combination_key' => $item->combination_key,
+                    'color' => $parsed['color'] ?? null,
+                    'scene' => $parsed['scene'] ?? null,
+                    'format' => $parsed['format'] ?? null,
+                ];
+
                 if ($item->retried_from_item_id !== null) {
                     $parent = GenerationJobItem::query()->find($item->retried_from_item_id);
                     if (! $parent || $parent->superseded_at === null) {
@@ -134,6 +143,7 @@ final class StudioCreativeSetItemProcessor
                         'creative_set_variant_id' => $variant->id,
                         'composition_id' => $composition->id,
                     ]);
+                    $this->variantGroupMemberSync->attachForRetry($job, $item->fresh() ?? $item, $variant);
                 } else {
                     $composition = $this->compositionDuplicate->duplicate($baseline, $user, $baseline->name.' — '.$label, 'Duplicated');
 
@@ -146,7 +156,7 @@ final class StudioCreativeSetItemProcessor
                             $sw = (int) ($doc['width'] ?? 0);
                             $sh = (int) ($doc['height'] ?? 0);
                             if ($sw !== $tw || $sh !== $th) {
-                                $doc = $this->formatReflow->reflowToCanvasSize($doc, $tw, $th);
+                                $doc = $this->layoutTransform->reflowToTargetCanvasSize($doc, $tw, $th);
                                 $composition->document_json = $doc;
                                 $composition->save();
                                 CompositionVersion::query()
@@ -181,6 +191,13 @@ final class StudioCreativeSetItemProcessor
                         'creative_set_variant_id' => $variant->id,
                         'composition_id' => $composition->id,
                     ]);
+                    $this->variantGroupMemberSync->attachForNewVariant(
+                        $job,
+                        $item->fresh() ?? $item,
+                        $variant,
+                        $label,
+                        $specJson
+                    );
                 }
 
                 if (config('studio_creative_set_generation.fake_complete_generation')) {
@@ -189,6 +206,7 @@ final class StudioCreativeSetItemProcessor
                         'status' => GenerationJobItem::STATUS_COMPLETED,
                         'error' => null,
                     ]);
+                    $this->variantGroupMemberSync->afterVariantReady($job, $item->fresh() ?? $item, $specJson);
 
                     return;
                 }
@@ -230,6 +248,7 @@ final class StudioCreativeSetItemProcessor
                     'status' => GenerationJobItem::STATUS_COMPLETED,
                     'error' => null,
                 ]);
+                $this->variantGroupMemberSync->afterVariantReady($job, $item->fresh() ?? $item, $specJson);
 
                 RefreshCompositionThumbnailFromProductLayerJob::dispatch((int) $composition->id, (int) $user->id);
             } catch (\Throwable $e) {
@@ -244,6 +263,10 @@ final class StudioCreativeSetItemProcessor
                     } catch (\Throwable) {
                         /* ignore */
                     }
+                }
+
+                if (isset($job) && $job instanceof GenerationJob) {
+                    $this->variantGroupMemberSync->afterVariantFailed($job, $item->fresh() ?? $item);
                 }
 
                 $this->failItem($item, $e->getMessage() !== '' ? $e->getMessage() : 'Generation failed');

@@ -21,6 +21,7 @@ class GenerationJobItem extends Model
         'combination_key',
         'status',
         'creative_set_variant_id',
+        'studio_variant_group_member_id',
         'composition_id',
         'attempts',
         'error',
@@ -53,5 +54,10 @@ class GenerationJobItem extends Model
     public function composition(): BelongsTo
     {
         return $this->belongsTo(Composition::class);
+    }
+
+    public function studioVariantGroupMember(): BelongsTo
+    {
+        return $this->belongsTo(StudioVariantGroupMember::class, 'studio_variant_group_member_id');
     }
 }

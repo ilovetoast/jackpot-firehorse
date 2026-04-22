@@ -10,15 +10,16 @@ import {
     EyeIcon,
     PhotoIcon,
 } from '@heroicons/react/24/outline'
+import {
+    formatUsd6,
+    isStudioAnimationRun,
+    StudioRunCostBreakdown,
+    StudioRunTokensNotApplicable,
+} from './studioAnimationRunDisplay'
 
 const AUDIT_PAGE_PATH = '/app/admin/ai/editor-image-audit'
 
 const METADATA_KEYS_HIDDEN_FROM_RAW = ['prompt', 'response', 'generative_audit', 'editor_admin_request', 'image_ref']
-
-function formatUsd6(value) {
-    const n = Number(value)
-    return Number.isFinite(n) ? n.toFixed(6) : '0.000000'
-}
 
 /**
  * Brand context digest may include stringified JSON (e.g. `preview` as an escaped string).
@@ -92,6 +93,30 @@ function imageSrcForPreview(ref, maxChars = MAX_INLINE_IMAGE_SRC_CHARS) {
 
 function buildRequestResponsePayload(run) {
     const m = run?.metadata || {}
+    const ga = m.generative_audit
+    if (ga?.audit_kind === 'studio_composition_animation') {
+        return {
+            request: {
+                note: 'Studio i2v: request payload is summarized under generative_audit; provider request bytes are not duplicated here.',
+                generative_audit: ga,
+                provider: m.provider,
+                provider_model: m.provider_model,
+                composition_id: m.composition_id,
+                entity_type: run?.entity_type,
+                entity_id: run?.entity_id,
+            },
+            response: {
+                plan_credits_charged: m.credits,
+                output_asset_id: m.asset_id ?? ga.output_asset_id,
+                duration_seconds: m.duration_seconds,
+                generative_audit: ga,
+                response_metadata: m.response_metadata ?? null,
+                output_asset: run?.output_asset ?? null,
+                storage_note: 'Final MP4 is a normal DAM asset (source studio_animation, not a staged upload session).',
+            },
+        }
+    }
+
     const request =
         m.editor_admin_request ||
         (m.generative_audit || m.options
@@ -262,7 +287,7 @@ export default function EditorImageAudit({ runs, filters, filterOptions }) {
 
     return (
         <div className="min-h-full">
-            <AppHead title="Editor image AI audit" suffix="Admin" />
+            <AppHead title="Editor & Studio video AI audit" suffix="Admin" />
             <AppNav brand={auth.activeBrand} tenant={null} />
             <main className="bg-gray-50">
                 <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
@@ -276,13 +301,15 @@ export default function EditorImageAudit({ runs, filters, filterOptions }) {
                                 All AI activity
                             </Link>
                         </div>
-                        <h1 className="text-3xl font-bold tracking-tight text-gray-900">Editor image AI audit</h1>
+                        <h1 className="text-3xl font-bold tracking-tight text-gray-900">Editor &amp; Studio video AI audit</h1>
                         <p className="mt-2 text-sm text-gray-700">
-                            Canvas text-to-image, canvas image edit, and DAM <strong>presentation preview</strong> runs. Structured
-                            fields live in <code className="text-xs bg-gray-100 px-1 rounded">generative_audit</code>. Raw source
-                            bytes are not stored on the run; when an <code className="text-xs bg-gray-100 px-1 rounded">asset_id</code>{' '}
-                            is recorded, the preview dialog loads that asset&apos;s current thumbnail as the best stand-in for
-                            &quot;what went in.&quot;
+                            Canvas text-to-image, canvas image edit, DAM <strong>presentation preview</strong>, and{' '}
+                            <strong>Studio composition video</strong> (Kling, direct API) completions. Structured fields for images live in{' '}
+                            <code className="text-xs bg-gray-100 px-1 rounded">generative_audit</code>; video rows include{' '}
+                            <code className="text-xs bg-gray-100 px-1 rounded">audit_kind: studio_composition_animation</code>, prompt,
+                            credits, <strong>estimated provider USD</strong> (config-based COGS), output asset id, and model id.{' '}
+                            <strong>Tokens</strong> are N/A for video. List <strong>Cost (USD)</strong> is the internal estimate; see also
+                            plan <strong>credits</strong> in the table when shown.
                         </p>
                     </div>
 
@@ -447,10 +474,18 @@ export default function EditorImageAudit({ runs, filters, filterOptions }) {
                                     <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider max-w-xs">
                                         Prompt preview
                                     </th>
-                                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    <th
+                                        scope="col"
+                                        className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                                        title="LLM-style token usage; not applicable to Studio video rows"
+                                    >
                                         Tokens
                                     </th>
-                                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    <th
+                                        scope="col"
+                                        className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                                        title="Plan credits (Studio video) or estimated API $ (image flows where recorded)"
+                                    >
                                         Cost
                                     </th>
                                     <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -506,11 +541,46 @@ export default function EditorImageAudit({ runs, filters, filterOptions }) {
                                                 )}
                                             </td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                                <div>In: {run.tokens_in.toLocaleString()}</div>
-                                                <div>Out: {run.tokens_out.toLocaleString()}</div>
+                                                {isStudioAnimationRun(run) ? (
+                                                    <span className="text-gray-400" title="Video providers: no OpenAI-style token stats on this row">
+                                                        —
+                                                    </span>
+                                                ) : (
+                                                    <>
+                                                        <div>In: {run.tokens_in.toLocaleString()}</div>
+                                                        <div>Out: {run.tokens_out.toLocaleString()}</div>
+                                                    </>
+                                                )}
                                             </td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                                                ${formatUsd6(run.estimated_cost)}
+                                            <td
+                                                className="px-6 py-4 whitespace-nowrap text-sm text-gray-900"
+                                                title={
+                                                    isStudioAnimationRun(run) && run.audit_summary?.credits_charged != null
+                                                        ? 'Plan AI credits + internal COGS estimate (Kling; config STUDIO_ANIMATION_ESTIMATED_USD_*)'
+                                                        : 'Estimated API $ (image flows) or 0 if not available'
+                                                }
+                                            >
+                                                {isStudioAnimationRun(run) && run.audit_summary?.credits_charged != null
+                                                    ? (() => {
+                                                          const c = Number(run.audit_summary.credits_charged)
+                                                          const u = Number(run.estimated_cost ?? 0)
+                                                          return (
+                                                              <div>
+                                                                  <div>{c} credits</div>
+                                                                  {u > 0 && (
+                                                                      <div className="text-xs text-gray-500">
+                                                                          Est. ${formatUsd6(u)} COGS
+                                                                      </div>
+                                                                  )}
+                                                              </div>
+                                                          )
+                                                      })()
+                                                    : !isStudioAnimationRun(run) &&
+                                                        run.audit_summary?.has_audit &&
+                                                        run.audit_summary.credits_charged != null &&
+                                                        Number(run.audit_summary.credits_charged) > 0
+                                                      ? `${Number(run.audit_summary.credits_charged)} credits`
+                                                      : `$${formatUsd6(run.estimated_cost)}`}
                                             </td>
                                             <td className="px-6 py-4 whitespace-nowrap">
                                                 {getStatusBadge(run.status)}
@@ -554,7 +624,7 @@ export default function EditorImageAudit({ runs, filters, filterOptions }) {
                                                         className="inline-flex items-center justify-center rounded-md bg-indigo-50 px-2.5 py-1.5 text-xs font-semibold text-indigo-800 shadow-sm ring-1 ring-inset ring-indigo-200 hover:bg-indigo-100"
                                                     >
                                                         <PhotoIcon className="h-3 w-3 mr-1 shrink-0" />
-                                                        Request / image
+                                                        {isStudioAnimationRun(run) ? 'Request / output' : 'Request / image'}
                                                     </button>
                                                 </div>
                                             </td>
@@ -563,7 +633,7 @@ export default function EditorImageAudit({ runs, filters, filterOptions }) {
                                 ) : (
                                     <tr>
                                         <td colSpan="11" className="px-6 py-4 text-center text-sm text-gray-500">
-                                            No editor image AI runs found.
+                                            No editor or studio video AI runs found.
                                         </td>
                                     </tr>
                                 )}
@@ -625,7 +695,9 @@ export default function EditorImageAudit({ runs, filters, filterOptions }) {
                                 <div className="inline-block w-full max-w-5xl transform overflow-hidden rounded-lg bg-white text-left align-bottom shadow-xl transition-all sm:my-8 sm:align-middle">
                                     <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3 sm:px-6">
                                         <h3 id="preview-modal-title" className="text-lg font-medium text-gray-900">
-                                            Input vs model output
+                                            {previewRun && isStudioAnimationRun(previewRun)
+                                                ? 'Studio video: request vs output'
+                                                : 'Input vs model output'}
                                         </h3>
                                         <button
                                             type="button"
@@ -640,108 +712,186 @@ export default function EditorImageAudit({ runs, filters, filterOptions }) {
                                             <p className="text-sm text-gray-500">Loading…</p>
                                         ) : previewRun ? (
                                             <div className="space-y-6">
-                                                <div className="grid gap-6 lg:grid-cols-2">
-                                                    <div>
-                                                        <p className="text-xs font-medium uppercase tracking-wide text-gray-500 mb-2">
-                                                            Input (sent to the model)
-                                                        </p>
-                                                        {previewRun.source_asset?.thumbnail_url ? (
-                                                            <div className="space-y-2">
-                                                                <img
-                                                                    src={previewRun.source_asset.thumbnail_url}
-                                                                    alt=""
-                                                                    className="max-h-80 w-full rounded border border-gray-200 object-contain bg-gray-50"
-                                                                />
-                                                                <p className="text-xs text-gray-600">
-                                                                    Linked asset{' '}
-                                                                    <span className="font-mono text-gray-800">{previewRun.source_asset.id}</span>
-                                                                    {previewRun.source_asset.title ? (
-                                                                        <>
-                                                                            {' '}
-                                                                            — {previewRun.source_asset.title}
-                                                                        </>
-                                                                    ) : null}
-                                                                    . Thumbnail is the asset&apos;s current delivery URL (may differ
-                                                                    slightly from the exact raster sent if the file changed since the
-                                                                    run).
+                                                {isStudioAnimationRun(previewRun) ? (
+                                                    <>
+                                                        <div className="grid gap-6 lg:grid-cols-2">
+                                                            <div>
+                                                                <p className="text-xs font-medium uppercase tracking-wide text-gray-500 mb-2">
+                                                                    Input (composition → provider)
                                                                 </p>
-                                                                {previewRun.source_asset.admin_url ? (
-                                                                    <Link
-                                                                        href={previewRun.source_asset.admin_url}
-                                                                        className="text-xs font-medium text-indigo-600 hover:text-indigo-500"
-                                                                    >
-                                                                        Open in admin asset console →
-                                                                    </Link>
-                                                                ) : null}
-                                                            </div>
-                                                        ) : previewRun.source_asset?.missing ? (
-                                                            <div className="space-y-2">
-                                                                <p className="text-sm text-amber-800">
-                                                                    Recorded asset id{' '}
-                                                                    <span className="font-mono">{previewRun.source_asset.id}</span>{' '}
-                                                                    was not found (deleted or wrong tenant).
+                                                                <p className="text-sm text-gray-600">
+                                                                    Image-to-video is driven from a rendered frame and prompt. Canonical
+                                                                    fields (credits, duration, model id) are in{' '}
+                                                                    <code className="text-xs">generative_audit</code> in the JSON
+                                                                    below.
                                                                 </p>
-                                                                {previewRun.source_asset.admin_url ? (
-                                                                    <Link
-                                                                        href={previewRun.source_asset.admin_url}
-                                                                        className="text-xs font-medium text-indigo-600 hover:text-indigo-500"
-                                                                    >
-                                                                        Try admin asset console →
-                                                                    </Link>
-                                                                ) : null}
-                                                            </div>
-                                                        ) : previewRun.task_type === 'editor_generative_image' ? (
-                                                            <p className="text-sm text-gray-600">
-                                                                Text-to-image: there is no source raster.{' '}
-                                                                {previewRun.metadata?.editor_admin_request?.reference_asset_count !=
-                                                                null ? (
-                                                                    <>
-                                                                        Reference assets in request:{' '}
-                                                                        <span className="font-mono">
-                                                                            {previewRun.metadata.editor_admin_request.reference_asset_count}
+                                                                <ul className="mt-3 text-sm text-gray-800 space-y-1.5 list-disc list-inside">
+                                                                    <li>
+                                                                        Composition id:{' '}
+                                                                        <span className="font-mono text-gray-900">
+                                                                            {previewRun.metadata?.composition_id ?? '—'}
                                                                         </span>
-                                                                        .
-                                                                    </>
-                                                                ) : null}
-                                                            </p>
-                                                        ) : (
-                                                            <p className="text-sm text-gray-600">
-                                                                Raw image bytes are not stored on AI runs. No{' '}
-                                                                <code className="text-xs">asset_id</code> / entity link was recorded,
-                                                                so we can&apos;t show a stand-in thumbnail. Use{' '}
-                                                                <strong>Details</strong> for prompts and audit fields, or enable asset
-                                                                attribution on the client when calling edit endpoints.
-                                                            </p>
-                                                        )}
-                                                    </div>
-                                                    <div>
-                                                        <p className="text-xs font-medium uppercase tracking-wide text-gray-500 mb-2">
-                                                            Output (model response)
-                                                        </p>
-                                                        {(() => {
-                                                            const src = imageSrcForPreview(
-                                                                previewRun.metadata?.image_ref,
-                                                                MAX_DETAILS_MODAL_IMAGE_REF_CHARS,
-                                                            )
-                                                            if (src) {
-                                                                return (
+                                                                    </li>
+                                                                    <li>
+                                                                        Studio job id:{' '}
+                                                                        <span className="font-mono text-gray-900">
+                                                                            {previewRun.metadata?.generative_audit
+                                                                                ?.studio_animation_job_id ??
+                                                                                previewRun.entity_id ??
+                                                                                '—'}
+                                                                        </span>
+                                                                    </li>
+                                                                </ul>
+                                                            </div>
+                                                            <div>
+                                                                <p className="text-xs font-medium uppercase tracking-wide text-gray-500 mb-2">
+                                                                    Output (DAM video asset)
+                                                                </p>
+                                                                {previewRun.output_asset?.missing ? (
+                                                                    <p className="text-sm text-amber-800">
+                                                                        Recorded output asset id is missing from the database (deleted or
+                                                                        wrong id).
+                                                                    </p>
+                                                                ) : previewRun.output_asset?.playback_url ? (
+                                                                    <video
+                                                                        key={previewRun.output_asset.id}
+                                                                        src={previewRun.output_asset.playback_url}
+                                                                        controls
+                                                                        className="max-h-80 w-full rounded border border-gray-200 bg-black/[0.03]"
+                                                                        poster={previewRun.output_asset.poster_url || undefined}
+                                                                    />
+                                                                ) : previewRun.output_asset?.poster_url ? (
                                                                     <img
-                                                                        src={src}
-                                                                        alt="Model output"
+                                                                        src={previewRun.output_asset.poster_url}
+                                                                        alt="Video frame"
                                                                         className="max-h-80 w-full rounded border border-gray-200 object-contain bg-gray-50"
                                                                     />
-                                                                )
-                                                            }
-                                                            return (
+                                                                ) : (
+                                                                    <p className="text-sm text-gray-600">
+                                                                        Signed playback URL not available (open the asset in admin).
+                                                                        Id:{' '}
+                                                                        <span className="font-mono">
+                                                                            {previewRun.metadata?.asset_id ??
+                                                                                previewRun.metadata?.generative_audit?.output_asset_id ??
+                                                                                '—'}
+                                                                        </span>
+                                                                    </p>
+                                                                )}
+                                                                {previewRun.output_asset?.admin_url ? (
+                                                                    <Link
+                                                                        href={previewRun.output_asset.admin_url}
+                                                                        className="mt-2 inline-block text-xs font-medium text-indigo-600 hover:text-indigo-500"
+                                                                    >
+                                                                        Open output in asset console →
+                                                                    </Link>
+                                                                ) : null}
+                                                            </div>
+                                                        </div>
+                                                    </>
+                                                ) : (
+                                                    <div className="grid gap-6 lg:grid-cols-2">
+                                                        <div>
+                                                            <p className="text-xs font-medium uppercase tracking-wide text-gray-500 mb-2">
+                                                                Input (sent to the model)
+                                                            </p>
+                                                            {previewRun.source_asset?.thumbnail_url ? (
+                                                                <div className="space-y-2">
+                                                                    <img
+                                                                        src={previewRun.source_asset.thumbnail_url}
+                                                                        alt=""
+                                                                        className="max-h-80 w-full rounded border border-gray-200 object-contain bg-gray-50"
+                                                                    />
+                                                                    <p className="text-xs text-gray-600">
+                                                                        Linked asset{' '}
+                                                                        <span className="font-mono text-gray-800">{previewRun.source_asset.id}</span>
+                                                                        {previewRun.source_asset.title ? (
+                                                                            <>
+                                                                                {' '}
+                                                                                — {previewRun.source_asset.title}
+                                                                            </>
+                                                                        ) : null}
+                                                                        . Thumbnail is the asset&apos;s current delivery URL (may differ
+                                                                        slightly from the exact raster sent if the file changed since the
+                                                                        run).
+                                                                    </p>
+                                                                    {previewRun.source_asset.admin_url ? (
+                                                                        <Link
+                                                                            href={previewRun.source_asset.admin_url}
+                                                                            className="text-xs font-medium text-indigo-600 hover:text-indigo-500"
+                                                                        >
+                                                                            Open in admin asset console →
+                                                                        </Link>
+                                                                    ) : null}
+                                                                </div>
+                                                            ) : previewRun.source_asset?.missing ? (
+                                                                <div className="space-y-2">
+                                                                    <p className="text-sm text-amber-800">
+                                                                        Recorded asset id{' '}
+                                                                        <span className="font-mono">{previewRun.source_asset.id}</span>{' '}
+                                                                        was not found (deleted or wrong tenant).
+                                                                    </p>
+                                                                    {previewRun.source_asset.admin_url ? (
+                                                                        <Link
+                                                                            href={previewRun.source_asset.admin_url}
+                                                                            className="text-xs font-medium text-indigo-600 hover:text-indigo-500"
+                                                                        >
+                                                                            Try admin asset console →
+                                                                        </Link>
+                                                                    ) : null}
+                                                                </div>
+                                                            ) : previewRun.task_type === 'editor_generative_image' ? (
                                                                 <p className="text-sm text-gray-600">
-                                                                    No inline preview (missing{' '}
-                                                                    <code className="text-xs">image_ref</code>, non-HTTP/data URL, or
-                                                                    reference too large). See JSON for length and kind.
+                                                                    Text-to-image: there is no source raster.{' '}
+                                                                    {previewRun.metadata?.editor_admin_request?.reference_asset_count !=
+                                                                    null ? (
+                                                                        <>
+                                                                            Reference assets in request:{' '}
+                                                                            <span className="font-mono">
+                                                                                {previewRun.metadata.editor_admin_request.reference_asset_count}
+                                                                            </span>
+                                                                            .
+                                                                        </>
+                                                                    ) : null}
                                                                 </p>
-                                                            )
-                                                        })()}
+                                                            ) : (
+                                                                <p className="text-sm text-gray-600">
+                                                                    Raw image bytes are not stored on AI runs. No{' '}
+                                                                    <code className="text-xs">asset_id</code> / entity link was recorded,
+                                                                    so we can&apos;t show a stand-in thumbnail. Use{' '}
+                                                                    <strong>Details</strong> for prompts and audit fields, or enable asset
+                                                                    attribution on the client when calling edit endpoints.
+                                                                </p>
+                                                            )}
+                                                        </div>
+                                                        <div>
+                                                            <p className="text-xs font-medium uppercase tracking-wide text-gray-500 mb-2">
+                                                                Output (model response)
+                                                            </p>
+                                                            {(() => {
+                                                                const src = imageSrcForPreview(
+                                                                    previewRun.metadata?.image_ref,
+                                                                    MAX_DETAILS_MODAL_IMAGE_REF_CHARS,
+                                                                )
+                                                                if (src) {
+                                                                    return (
+                                                                        <img
+                                                                            src={src}
+                                                                            alt="Model output"
+                                                                            className="max-h-80 w-full rounded border border-gray-200 object-contain bg-gray-50"
+                                                                        />
+                                                                    )
+                                                                }
+                                                                return (
+                                                                    <p className="text-sm text-gray-600">
+                                                                        No inline preview (missing{' '}
+                                                                        <code className="text-xs">image_ref</code>, non-HTTP/data URL, or
+                                                                        reference too large). See JSON for length and kind.
+                                                                    </p>
+                                                                )
+                                                            })()}
+                                                        </div>
                                                     </div>
-                                                </div>
+                                                )}
                                                 <div className="grid gap-4 lg:grid-cols-2">
                                                     <div>
                                                         <p className="text-xs font-medium uppercase tracking-wide text-gray-500 mb-1">
@@ -790,7 +940,7 @@ export default function EditorImageAudit({ runs, filters, filterOptions }) {
                                         <div className="flex items-start justify-between gap-4 border-b border-gray-200 pb-4 mb-4">
                                             <div>
                                                 <h3 className="text-lg font-semibold leading-6 text-gray-900" id="modal-title">
-                                                    Editor image run details
+                                                    {isStudioAnimationRun(runDetails) ? 'Studio video run details' : 'Editor image run details'}
                                                 </h3>
                                                 <p className="mt-1 text-xs text-gray-500 font-mono">Run #{runDetails?.id ?? selectedRun}</p>
                                                 <p className="mt-2 text-sm text-gray-600">
@@ -844,16 +994,20 @@ export default function EditorImageAudit({ runs, filters, filterOptions }) {
                                                         </div>
                                                         <div>
                                                             <label className="text-xs font-medium text-gray-500">Tokens</label>
-                                                            <p className="text-sm text-gray-900">
-                                                                In: {runDetails.tokens_in.toLocaleString()} | Out: {runDetails.tokens_out.toLocaleString()}
-                                                                {runDetails.total_tokens != null && (
-                                                                    <> | Total: {runDetails.total_tokens.toLocaleString()}</>
-                                                                )}
-                                                            </p>
+                                                            {isStudioAnimationRun(runDetails) ? (
+                                                                <StudioRunTokensNotApplicable />
+                                                            ) : (
+                                                                <p className="text-sm text-gray-900">
+                                                                    In: {runDetails.tokens_in.toLocaleString()} | Out: {runDetails.tokens_out.toLocaleString()}
+                                                                    {runDetails.total_tokens != null && (
+                                                                        <> | Total: {runDetails.total_tokens.toLocaleString()}</>
+                                                                    )}
+                                                                </p>
+                                                            )}
                                                         </div>
                                                         <div>
                                                             <label className="text-xs font-medium text-gray-500">Cost (USD)</label>
-                                                            <p className="text-sm text-gray-900">${formatUsd6(runDetails.estimated_cost)}</p>
+                                                            <StudioRunCostBreakdown runDetails={runDetails} />
                                                         </div>
                                                     </div>
                                                 </section>
@@ -867,8 +1021,11 @@ export default function EditorImageAudit({ runs, filters, filterOptions }) {
                                                         <span className="font-medium text-gray-800">Original</span> uses the linked
                                                         asset&apos;s current thumbnail when available.{' '}
                                                         <span className="font-medium text-gray-800">New</span> is the stored model
-                                                        output (<code className="text-[10px] bg-white/80 px-1 rounded">image_ref</code>
-                                                        ). Very large data URLs may still be skipped for browser safety.
+                                                        output: editor image runs use{' '}
+                                                        <code className="text-[10px] bg-white/80 px-1 rounded">image_ref</code>; studio
+                                                        i2v uses the output DAM asset (see{' '}
+                                                        <code className="text-[10px] bg-white/80 px-1 rounded">output_asset</code> from
+                                                        the API). Very large data URLs may still be skipped for browser safety.
                                                     </p>
                                                     <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
                                                         <div>
@@ -928,6 +1085,12 @@ export default function EditorImageAudit({ runs, filters, filterOptions }) {
                                                                         </>
                                                                     ) : null}
                                                                 </p>
+                                                            ) : isStudioAnimationRun(runDetails) ? (
+                                                                <p className="text-sm text-gray-600">
+                                                                    Image-to-video is driven from a server-rendered composition frame (and
+                                                                    prompt), not a single linked “source asset” row on this audit. Use
+                                                                    composition id and studio job id in Generative audit for context.
+                                                                </p>
                                                             ) : (
                                                                 <p className="text-sm text-gray-600">
                                                                     No linked asset on this run — raw input bytes are not stored. Check{' '}
@@ -941,6 +1104,91 @@ export default function EditorImageAudit({ runs, filters, filterOptions }) {
                                                                 New (model output)
                                                             </p>
                                                             {(() => {
+                                                                const oa = runDetails.output_asset
+                                                                if (oa && typeof oa === 'object' && oa.id) {
+                                                                    if (oa.missing) {
+                                                                        return (
+                                                                            <p className="text-sm text-amber-800">
+                                                                                Output asset id in metadata was not found in the database
+                                                                                (deleted or wrong id).{' '}
+                                                                                {oa.admin_url ? (
+                                                                                    <Link
+                                                                                        href={oa.admin_url}
+                                                                                        className="font-medium text-indigo-600 hover:text-indigo-500"
+                                                                                    >
+                                                                                        Open asset id in admin
+                                                                                    </Link>
+                                                                                ) : null}
+                                                                            </p>
+                                                                        )
+                                                                    }
+                                                                    if (oa.playback_url) {
+                                                                        return (
+                                                                            <div className="space-y-2">
+                                                                                <video
+                                                                                    key={oa.id}
+                                                                                    src={oa.playback_url}
+                                                                                    controls
+                                                                                    className="max-h-72 w-full rounded-lg border border-gray-200 bg-black object-contain shadow-sm"
+                                                                                    poster={oa.poster_url || undefined}
+                                                                                />
+                                                                                {oa.title ? (
+                                                                                    <p className="text-xs text-gray-600">
+                                                                                        {oa.title}
+                                                                                        {oa.mime_type ? ` · ${oa.mime_type}` : ''}
+                                                                                    </p>
+                                                                                ) : null}
+                                                                                {oa.admin_url ? (
+                                                                                    <Link
+                                                                                        href={oa.admin_url}
+                                                                                        className="text-xs font-medium text-indigo-600 hover:text-indigo-500"
+                                                                                    >
+                                                                                        Open output in asset console →
+                                                                                    </Link>
+                                                                                ) : null}
+                                                                            </div>
+                                                                        )
+                                                                    }
+                                                                    if (oa.poster_url) {
+                                                                        return (
+                                                                            <div className="space-y-2">
+                                                                                <img
+                                                                                    src={oa.poster_url}
+                                                                                    alt="Video poster"
+                                                                                    className="max-h-72 w-full rounded-lg border border-gray-200 object-contain bg-gray-50 shadow-sm"
+                                                                                />
+                                                                                <p className="text-sm text-gray-600">
+                                                                                    No signed video URL; poster only. Open the asset for
+                                                                                    the full file.
+                                                                                </p>
+                                                                                {oa.admin_url ? (
+                                                                                    <Link
+                                                                                        href={oa.admin_url}
+                                                                                        className="text-xs font-medium text-indigo-600 hover:text-indigo-500"
+                                                                                    >
+                                                                                        Open output in asset console →
+                                                                                    </Link>
+                                                                                ) : null}
+                                                                            </div>
+                                                                        )
+                                                                    }
+                                                                    return (
+                                                                        <p className="text-sm text-gray-600">
+                                                                            Output DAM asset is recorded (id{' '}
+                                                                            <span className="font-mono text-gray-800">{oa.id}</span>)
+                                                                            but no playback or poster URL could be built.{' '}
+                                                                            {oa.admin_url ? (
+                                                                                <Link
+                                                                                    href={oa.admin_url}
+                                                                                    className="font-medium text-indigo-600 hover:text-indigo-500"
+                                                                                >
+                                                                                    Open in asset console
+                                                                                </Link>
+                                                                            ) : null}
+                                                                        </p>
+                                                                    )
+                                                                }
+
                                                                 const outSrc = imageSrcForPreview(
                                                                     runDetails.metadata?.image_ref,
                                                                     MAX_DETAILS_MODAL_IMAGE_REF_CHARS,
@@ -969,8 +1217,10 @@ export default function EditorImageAudit({ runs, filters, filterOptions }) {
                                                                 }
                                                                 return (
                                                                     <p className="text-sm text-gray-600">
-                                                                        No <code className="text-xs">image_ref</code> on this run
-                                                                        (failed before save, or older record).
+                                                                        No <code className="text-xs">image_ref</code> or output asset
+                                                                        preview (failed before save, or older record). Studio runs store
+                                                                        video on the output asset, not in{' '}
+                                                                        <code className="text-xs">image_ref</code>.
                                                                     </p>
                                                                 )
                                                             })()}
@@ -1015,24 +1265,59 @@ export default function EditorImageAudit({ runs, filters, filterOptions }) {
                                                             Fields recorded for this run. Long text is split into tabs below.
                                                         </p>
                                                         <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2 text-sm">
-                                                            {[
-                                                                ['Registry model key', runDetails.metadata.generative_audit.registry_model_key],
-                                                                ['Resolved API model', runDetails.metadata.generative_audit.resolved_api_model],
-                                                                ['Provider', runDetails.metadata.generative_audit.provider],
-                                                                ['Brand context included', runDetails.metadata.generative_audit.brand_context_included === true ? 'Yes' : runDetails.metadata.generative_audit.brand_context_included === false ? 'No' : '—'],
-                                                                ['Composition id', runDetails.metadata.generative_audit.composition_id],
-                                                                ['Generative layer uuid', runDetails.metadata.generative_audit.generative_layer_uuid],
-                                                                ['Source asset id', runDetails.metadata.generative_audit.source_asset_id],
-                                                                ['Prompt SHA-256', runDetails.metadata.generative_audit.prompt_sha256],
-                                                                ['Prompt length', runDetails.metadata.generative_audit.prompt_length],
-                                                                ['Output ref kind', runDetails.metadata.generative_audit.output_image_ref_kind],
-                                                                ['Output ref length', runDetails.metadata.generative_audit.output_image_ref_length],
-                                                            ].map(([label, val]) => (
-                                                                <div key={label} className="min-w-0">
-                                                                    <dt className="text-xs font-medium text-gray-500">{label}</dt>
-                                                                    <dd className="text-gray-900 break-all">{val != null && val !== '' ? String(val) : '—'}</dd>
-                                                                </div>
-                                                            ))}
+                                                            {(() => {
+                                                                const ga = runDetails.metadata.generative_audit
+                                                                const isStudio = ga.audit_kind === 'studio_composition_animation'
+                                                                const imageRows = isStudio
+                                                                    ? []
+                                                                    : [
+                                                                          ['Registry model key', ga.registry_model_key],
+                                                                          ['Resolved API model', ga.resolved_api_model],
+                                                                          ['Provider', ga.provider],
+                                                                          [
+                                                                              'Brand context included',
+                                                                              ga.brand_context_included === true
+                                                                                  ? 'Yes'
+                                                                                  : ga.brand_context_included === false
+                                                                                    ? 'No'
+                                                                                    : '—',
+                                                                          ],
+                                                                          ['Composition id', ga.composition_id],
+                                                                          ['Generative layer uuid', ga.generative_layer_uuid],
+                                                                          ['Source asset id', ga.source_asset_id],
+                                                                          ['Prompt SHA-256', ga.prompt_sha256],
+                                                                          ['Prompt length', ga.prompt_length],
+                                                                          ['Output ref kind', ga.output_image_ref_kind],
+                                                                          ['Output ref length', ga.output_image_ref_length],
+                                                                      ]
+                                                                const commonLead = [
+                                                                    ['Audit kind', ga.audit_kind],
+                                                                    ...imageRows,
+                                                                ]
+                                                                const studioRows = isStudio
+                                                                    ? [
+                                                                          ['Provider', ga.provider],
+                                                                          ['Registry model key', ga.registry_model_key],
+                                                                          ['Composition id', ga.composition_id],
+                                                                          ['Studio animation job id', ga.studio_animation_job_id],
+                                                                          ['Output video asset id', ga.output_asset_id],
+                                                                          ['Credits charged', ga.credits_charged],
+                                                                          ['Credits reserved', ga.credits_reserved],
+                                                                          ['Output duration (seconds)', ga.output_duration_seconds],
+                                                                          ['Provider request id', ga.provider_job_id],
+                                                                          ['Motion preset', ga.motion_preset],
+                                                                          ['Aspect ratio', ga.aspect_ratio],
+                                                                      ]
+                                                                    : []
+                                                                return [...commonLead, ...studioRows].map(([label, val]) => (
+                                                                    <div key={label} className="min-w-0">
+                                                                        <dt className="text-xs font-medium text-gray-500">{label}</dt>
+                                                                        <dd className="text-gray-900 break-all">
+                                                                            {val != null && val !== '' ? String(val) : '—'}
+                                                                        </dd>
+                                                                    </div>
+                                                                ))
+                                                            })()}
                                                         </dl>
 
                                                         {(runDetails.metadata.generative_audit.brand_context_digest ||

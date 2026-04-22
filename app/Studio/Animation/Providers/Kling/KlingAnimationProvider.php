@@ -7,7 +7,6 @@ use App\Studio\Animation\Data\ProviderAnimationRequestData;
 use App\Studio\Animation\Data\ProviderAnimationResultData;
 use App\Studio\Animation\Support\AnimationCapabilityRegistry;
 use App\Studio\Animation\Support\AnimationPromptBuilder;
-use Illuminate\Support\Facades\Log;
 
 final class KlingAnimationProvider implements AnimationProviderInterface
 {
@@ -41,7 +40,7 @@ final class KlingAnimationProvider implements AnimationProviderInterface
         $tmpPath = null;
 
         try {
-            $absolute = FalKlingQueueTransport::materializeToTempFile(
+            $absolute = KlingStartImageFile::materializeToTempFile(
                 $request->startImageDisk,
                 $request->startImageStoragePath,
             );
@@ -82,7 +81,7 @@ final class KlingAnimationProvider implements AnimationProviderInterface
                         remoteHeight: null,
                         remoteDurationSeconds: null,
                         errorCode: 'missing_api_key',
-                        errorMessage: 'Set KLING_API_KEY (Access Key) and KLING_SECRET_KEY for official Kling API, or use STUDIO_ANIMATION_KLING_TRANSPORT=fal_queue with FAL_KEY.',
+                        errorMessage: 'Set KLING_API_KEY (Access Key) and KLING_SECRET_KEY for the official Kling API.',
                         rawRequestDebug: null,
                         rawResponseDebug: null,
                         normalizedProviderStatus: 'submit_failed',
@@ -165,98 +164,6 @@ final class KlingAnimationProvider implements AnimationProviderInterface
                     providerPhaseDebug: ['request_id' => $taskId, 'transport' => 'kling_api'],
                 );
             }
-
-            if ($transportKind === 'fal_queue') {
-                $apiKey = (string) ($cfg['fal']['api_key'] ?? '');
-                if ($apiKey === '') {
-                    return new ProviderAnimationResultData(
-                        phase: 'failed',
-                        providerJobId: null,
-                        remoteVideoUrl: null,
-                        remoteWidth: null,
-                        remoteHeight: null,
-                        remoteDurationSeconds: null,
-                        errorCode: 'missing_api_key',
-                        errorMessage: 'FAL_KEY is not set (required for STUDIO_ANIMATION_KLING_TRANSPORT=fal_queue).',
-                        rawRequestDebug: null,
-                        rawResponseDebug: null,
-                        normalizedProviderStatus: 'submit_failed',
-                        providerPhaseDebug: ['reason' => 'missing_fal_key'],
-                    );
-                }
-
-                $modelPath = $this->resolveFalModelPath($request->providerModelKey);
-                $baseUrl = (string) ($cfg['fal']['queue_base_url'] ?? 'https://queue.fal.run');
-                $dataUri = FalKlingQueueTransport::buildStartImageDataUri(
-                    $absolute,
-                    $request->startImageMimeType
-                );
-                $input = [
-                    'prompt' => $prompt,
-                    'start_image_url' => $dataUri,
-                    'duration' => (string) max(3, min(15, $request->durationSeconds)),
-                    'generate_audio' => $request->generateAudio,
-                ];
-                if ($request->negativePrompt !== null && trim($request->negativePrompt) !== '') {
-                    $input['negative_prompt'] = trim($request->negativePrompt);
-                }
-
-                $fal = new FalKlingQueueTransport;
-                $submit = $fal->submit($modelPath, $input, $apiKey, $baseUrl);
-                if (! ($submit['ok'] ?? false)) {
-                    return new ProviderAnimationResultData(
-                        phase: 'failed',
-                        providerJobId: null,
-                        remoteVideoUrl: null,
-                        remoteWidth: null,
-                        remoteHeight: null,
-                        remoteDurationSeconds: null,
-                        errorCode: (string) ($submit['error'] ?? 'submit_failed'),
-                        errorMessage: (string) ($submit['message'] ?? 'Submit failed'),
-                        rawRequestDebug: ['model_path' => $modelPath, 'input_keys' => array_keys($input)],
-                        rawResponseDebug: is_array($submit['raw'] ?? null) ? $submit['raw'] : ['raw' => $submit],
-                        normalizedProviderStatus: 'submit_failed',
-                        providerPhaseDebug: ['provider_error' => (string) ($submit['error'] ?? '')],
-                    );
-                }
-                $rid = (string) ($submit['request_id'] ?? '');
-                if ($rid === '') {
-                    return new ProviderAnimationResultData(
-                        phase: 'failed',
-                        providerJobId: null,
-                        remoteVideoUrl: null,
-                        remoteWidth: null,
-                        remoteHeight: null,
-                        remoteDurationSeconds: null,
-                        errorCode: 'missing_request_id',
-                        errorMessage: 'Provider returned no request id.',
-                        rawRequestDebug: null,
-                        rawResponseDebug: is_array($submit['raw'] ?? null) ? $submit['raw'] : null,
-                        normalizedProviderStatus: 'submit_failed',
-                        providerPhaseDebug: ['reason' => 'missing_request_id'],
-                    );
-                }
-
-                return new ProviderAnimationResultData(
-                    phase: 'submitted',
-                    providerJobId: json_encode([
-                        'transport' => 'fal_queue',
-                        'request_id' => $rid,
-                        'status_url' => (string) ($submit['status_url'] ?? ''),
-                        'response_url' => (string) ($submit['response_url'] ?? ''),
-                    ], JSON_THROW_ON_ERROR),
-                    remoteVideoUrl: null,
-                    remoteWidth: null,
-                    remoteHeight: null,
-                    remoteDurationSeconds: null,
-                    errorCode: null,
-                    errorMessage: null,
-                    rawRequestDebug: ['model_path' => $modelPath],
-                    rawResponseDebug: is_array($submit['raw'] ?? null) ? $submit['raw'] : null,
-                    normalizedProviderStatus: 'submitted_to_provider',
-                    providerPhaseDebug: ['request_id' => $rid, 'transport' => 'fal_queue'],
-                );
-            }
         } catch (\JsonException) {
             return new ProviderAnimationResultData(
                 phase: 'failed',
@@ -286,7 +193,7 @@ final class KlingAnimationProvider implements AnimationProviderInterface
             remoteHeight: null,
             remoteDurationSeconds: null,
             errorCode: 'unknown_transport',
-            errorMessage: 'STUDIO_ANIMATION_KLING_TRANSPORT must be kling_api, fal_queue, or mock.',
+            errorMessage: 'STUDIO_ANIMATION_KLING_TRANSPORT must be kling_api or mock.',
             rawRequestDebug: null,
             rawResponseDebug: null,
             normalizedProviderStatus: 'submit_failed',
@@ -357,7 +264,7 @@ final class KlingAnimationProvider implements AnimationProviderInterface
             return $this->pollKlingNative((string) $meta['task_id'], $providerJobId);
         }
 
-        if (empty($meta['request_id']) || empty($meta['status_url'])) {
+        if (($meta['transport'] ?? null) === 'fal_queue' || isset($meta['status_url'])) {
             return new ProviderAnimationResultData(
                 phase: 'failed',
                 providerJobId: $providerJobId,
@@ -365,187 +272,28 @@ final class KlingAnimationProvider implements AnimationProviderInterface
                 remoteWidth: null,
                 remoteHeight: null,
                 remoteDurationSeconds: null,
-                errorCode: 'invalid_provider_job_ref',
-                errorMessage: 'Stored provider job reference is invalid.',
+                errorCode: 'deprecated_provider',
+                errorMessage: 'This job was created with a removed third-party queue. Create a new Studio animation; only the official Kling API is supported.',
                 rawRequestDebug: null,
-                rawResponseDebug: null,
+                rawResponseDebug: $meta,
                 normalizedProviderStatus: 'provider_failed',
-                providerPhaseDebug: ['reason' => 'invalid_provider_job_ref'],
-            );
-        }
-
-        $apiKey = (string) (config('studio_animation.providers.kling.fal.api_key') ?? '');
-        if ($apiKey === '') {
-            return new ProviderAnimationResultData(
-                phase: 'failed',
-                providerJobId: $providerJobId,
-                remoteVideoUrl: null,
-                remoteWidth: null,
-                remoteHeight: null,
-                remoteDurationSeconds: null,
-                errorCode: 'missing_api_key',
-                errorMessage: 'FAL_KEY is not configured.',
-                rawRequestDebug: null,
-                rawResponseDebug: null,
-                normalizedProviderStatus: 'provider_failed',
-                providerPhaseDebug: ['reason' => 'missing_api_key'],
-            );
-        }
-
-        $fal = new FalKlingQueueTransport;
-        $statusUrl = (string) $meta['status_url'];
-        $responseUrl = (string) ($meta['response_url'] ?? '');
-
-        $st = $fal->fetchStatus($statusUrl.'?logs=0', $apiKey);
-        if (! ($st['ok'] ?? false)) {
-            $norm = KlingFalStatusNormalizer::fromQueueStatus(null, true);
-
-            return new ProviderAnimationResultData(
-                phase: 'processing',
-                providerJobId: $providerJobId,
-                remoteVideoUrl: null,
-                remoteWidth: null,
-                remoteHeight: null,
-                remoteDurationSeconds: null,
-                errorCode: null,
-                errorMessage: null,
-                rawRequestDebug: null,
-                rawResponseDebug: ['status_error' => $st],
-                normalizedProviderStatus: $norm['normalized_provider_status'],
-                providerPhaseDebug: array_merge(['transport' => 'fal_queue'], $norm),
-            );
-        }
-
-        $json = is_array($st['json'] ?? null) ? $st['json'] : [];
-        $norm = KlingFalStatusNormalizer::fromQueueStatus($json, false);
-        $state = strtoupper((string) ($json['status'] ?? ''));
-
-        if ($state === 'IN_QUEUE' || $state === 'IN_PROGRESS') {
-            return new ProviderAnimationResultData(
-                phase: 'processing',
-                providerJobId: $providerJobId,
-                remoteVideoUrl: null,
-                remoteWidth: null,
-                remoteHeight: null,
-                remoteDurationSeconds: null,
-                errorCode: null,
-                errorMessage: null,
-                rawRequestDebug: null,
-                rawResponseDebug: $json,
-                normalizedProviderStatus: $norm['normalized_provider_status'],
-                providerPhaseDebug: array_merge(['transport' => 'fal_queue'], $norm),
-            );
-        }
-
-        if ($state === 'FAILED') {
-            return new ProviderAnimationResultData(
-                phase: 'failed',
-                providerJobId: $providerJobId,
-                remoteVideoUrl: null,
-                remoteWidth: null,
-                remoteHeight: null,
-                remoteDurationSeconds: null,
-                errorCode: (string) ($json['error_type'] ?? 'provider_failed'),
-                errorMessage: (string) ($json['error'] ?? 'Provider reported failure.'),
-                rawRequestDebug: null,
-                rawResponseDebug: $json,
-                normalizedProviderStatus: $norm['normalized_provider_status'],
-                providerPhaseDebug: array_merge(['transport' => 'fal_queue'], $norm),
-            );
-        }
-
-        if ($state !== 'COMPLETED') {
-            Log::info('[KlingAnimationProvider] unexpected status', ['status' => $state]);
-
-            return new ProviderAnimationResultData(
-                phase: 'processing',
-                providerJobId: $providerJobId,
-                remoteVideoUrl: null,
-                remoteWidth: null,
-                remoteHeight: null,
-                remoteDurationSeconds: null,
-                errorCode: null,
-                errorMessage: null,
-                rawRequestDebug: null,
-                rawResponseDebug: $json,
-                normalizedProviderStatus: $norm['normalized_provider_status'],
-                providerPhaseDebug: array_merge(['transport' => 'fal_queue', 'unexpected_state' => $state], $norm),
-            );
-        }
-
-        if ($responseUrl === '') {
-            return new ProviderAnimationResultData(
-                phase: 'failed',
-                providerJobId: $providerJobId,
-                remoteVideoUrl: null,
-                remoteWidth: null,
-                remoteHeight: null,
-                remoteDurationSeconds: null,
-                errorCode: 'missing_response_url',
-                errorMessage: 'Completed without response URL.',
-                rawRequestDebug: null,
-                rawResponseDebug: $json,
-                normalizedProviderStatus: 'provider_failed',
-                providerPhaseDebug: ['reason' => 'missing_response_url'],
-            );
-        }
-
-        $res = $fal->fetchResult($responseUrl, $apiKey);
-        if (! ($res['ok'] ?? false)) {
-            return new ProviderAnimationResultData(
-                phase: 'failed',
-                providerJobId: $providerJobId,
-                remoteVideoUrl: null,
-                remoteWidth: null,
-                remoteHeight: null,
-                remoteDurationSeconds: null,
-                errorCode: 'result_fetch_failed',
-                errorMessage: (string) ($res['message'] ?? ''),
-                rawRequestDebug: null,
-                rawResponseDebug: is_array($res['json'] ?? null) ? $res['json'] : null,
-                normalizedProviderStatus: 'provider_failed',
-                providerPhaseDebug: ['reason' => 'result_fetch_failed'],
-            );
-        }
-
-        $out = is_array($res['json'] ?? null) ? $res['json'] : [];
-        $video = is_array($out['video'] ?? null) ? $out['video'] : [];
-        $url = (string) ($video['url'] ?? '');
-
-        if ($url === '') {
-            return new ProviderAnimationResultData(
-                phase: 'failed',
-                providerJobId: $providerJobId,
-                remoteVideoUrl: null,
-                remoteWidth: null,
-                remoteHeight: null,
-                remoteDurationSeconds: null,
-                errorCode: 'missing_video_url',
-                errorMessage: 'Provider result missing video url.',
-                rawRequestDebug: null,
-                rawResponseDebug: $out,
-                normalizedProviderStatus: 'provider_failed',
-                providerPhaseDebug: ['reason' => 'missing_video_url'],
+                providerPhaseDebug: ['reason' => 'deprecated_queue_transport'],
             );
         }
 
         return new ProviderAnimationResultData(
-            phase: 'complete',
+            phase: 'failed',
             providerJobId: $providerJobId,
-            remoteVideoUrl: $url,
-            remoteWidth: isset($video['width']) ? (int) $video['width'] : null,
-            remoteHeight: isset($video['height']) ? (int) $video['height'] : null,
-            remoteDurationSeconds: isset($out['duration']) ? (int) $out['duration'] : null,
-            errorCode: null,
-            errorMessage: null,
+            remoteVideoUrl: null,
+            remoteWidth: null,
+            remoteHeight: null,
+            remoteDurationSeconds: null,
+            errorCode: 'invalid_provider_job_ref',
+            errorMessage: 'Stored provider job reference is not a Kling API task.',
             rawRequestDebug: null,
-            rawResponseDebug: $out,
-            normalizedProviderStatus: 'provider_complete',
-            providerPhaseDebug: [
-                'transport' => 'fal_queue',
-                'normalized_provider_status' => 'provider_complete',
-                'provider_queue_state' => 'COMPLETED',
-            ],
+            rawResponseDebug: $meta,
+            normalizedProviderStatus: 'provider_failed',
+            providerPhaseDebug: ['reason' => 'invalid_provider_job_ref'],
         );
     }
 
@@ -737,16 +485,5 @@ final class KlingAnimationProvider implements AnimationProviderInterface
         }
 
         return (string) config('studio_animation.providers.kling.native.default_model', 'kling-v2-5-turbo');
-    }
-
-    private function resolveFalModelPath(string $providerModelKey): string
-    {
-        $models = config('studio_animation.providers.kling.models', []);
-        $path = $models[$providerModelKey]['fal_model_path'] ?? null;
-        if (is_string($path) && $path !== '') {
-            return $path;
-        }
-
-        return (string) config('studio_animation.providers.kling.fal.model_path');
     }
 }

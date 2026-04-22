@@ -21,7 +21,7 @@
     <meta property="og:title" content="{{ ($title ?? $code ?? 'Error') . ' | ' . config('app.name', 'Jackpot') }}">
     <meta property="og:description" content="{{ $message ?? 'Brand execution, not asset management.' }}">
     <meta property="og:url" content="{{ url()->current() }}">
-    <meta property="og:image" content="{{ url('/og-image-1200x630.png') }}">
+    <meta property="og:image" content="{{ url('/jp-og.png') }}">
     <meta property="og:image:type" content="image/png">
     <meta property="og:image:width" content="1200">
     <meta property="og:image:height" content="630">
@@ -29,7 +29,7 @@
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="{{ ($title ?? $code ?? 'Error') . ' | ' . config('app.name', 'Jackpot') }}">
     <meta name="twitter:description" content="{{ $message ?? 'Brand execution, not asset management.' }}">
-    <meta name="twitter:image" content="{{ url('/og-image-1200x630.png') }}">
+    <meta name="twitter:image" content="{{ url('/jp-og.png') }}">
     <link rel="preconnect" href="https://fonts.bunny.net">
     <link href="https://fonts.bunny.net/css?family=figtree:400,500,600,700&display=swap" rel="stylesheet" />
     <script src="https://cdn.tailwindcss.com"></script>

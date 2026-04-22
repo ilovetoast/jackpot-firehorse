@@ -249,10 +249,11 @@ class EditorAssetBridgeController extends Controller
     }
 
     /**
-     * GET /app/api/assets?limit=50&asset_type=asset|deliverable&category_id=
+     * GET /app/api/assets?limit=50&asset_type=asset|deliverable&category_id=&content_type=image|video
      *
-     * Image assets for the editor picker: library (ASSET) or executions (DELIVERABLE).
+     * Assets for the editor picker: library (ASSET) or executions (DELIVERABLE).
      * Optional category_id filters metadata.category_id (Photography, Print, etc.).
+     * `content_type` defaults to `image` (raster/SVG). Use `video` for video/* rows (add video layer).
      */
     public function index(Request $request): JsonResponse
     {
@@ -277,13 +278,19 @@ class EditorAssetBridgeController extends Controller
             $search = mb_substr($search, 0, 200);
         }
 
+        $contentType = strtolower((string) $request->query('content_type', 'image'));
+
         $query = Asset::query()
             ->where('tenant_id', $tenant->id)
             ->where('brand_id', $brand->id)
             ->where('type', $assetType)
             ->normalIntakeOnly()
-            ->excludeBuilderStaged()
-            ->where(function ($q) {
+            ->excludeBuilderStaged();
+
+        if ($contentType === 'video') {
+            $query->where('mime_type', 'like', 'video/%');
+        } else {
+            $query->where(function ($q) {
                 // SVG logos are often ingested with a non-image mime (application/octet-stream,
                 // application/svg+xml, or null). Match by mime OR by .svg filename so they don't
                 // silently disappear from the editor's asset picker.
@@ -291,6 +298,7 @@ class EditorAssetBridgeController extends Controller
                     ->orWhere('mime_type', 'image/svg+xml')
                     ->orWhere('original_filename', 'like', '%.svg');
             });
+        }
 
         $categoryFilterId = $request->query('category_id');
         if ($categoryFilterId !== null && $categoryFilterId !== '') {

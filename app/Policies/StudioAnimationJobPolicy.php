@@ -5,6 +5,7 @@ namespace App\Policies;
 use App\Models\Brand;
 use App\Models\StudioAnimationJob;
 use App\Models\User;
+use App\Studio\Animation\Services\StudioAnimationService;
 
 class StudioAnimationJobPolicy
 {
@@ -50,7 +51,8 @@ class StudioAnimationJobPolicy
     }
 
     /**
-     * Remove a terminal failed/canceled job from the Versions rail (DB row + cascaded pipeline rows only).
+     * Remove a terminal failed/canceled job from the Versions rail (DB row + cascaded pipeline rows only),
+     * or a non-terminal job that has exceeded the configured stale age.
      */
     public function delete(User $user, StudioAnimationJob $job): bool
     {
@@ -58,9 +60,13 @@ class StudioAnimationJobPolicy
             return false;
         }
 
-        return in_array($job->status, [
+        if (in_array($job->status, [
             \App\Studio\Animation\Enums\StudioAnimationStatus::Failed->value,
             \App\Studio\Animation\Enums\StudioAnimationStatus::Canceled->value,
-        ], true);
+        ], true)) {
+            return true;
+        }
+
+        return app(StudioAnimationService::class)->isJobStaleForRailRemoval($job);
     }
 }

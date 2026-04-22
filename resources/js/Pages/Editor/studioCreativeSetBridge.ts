@@ -87,6 +87,22 @@ export async function postCreativeSetVariant(
     return { creative_set: data.creative_set, variant: data.variant }
 }
 
+/**
+ * Delete the whole Versions (creative) set. Compositions stay in the library; only
+ * the grouping, variant links, and related generation job rows are removed.
+ */
+export async function deleteCreativeSet(creativeSetId: string): Promise<void> {
+    const res = await fetch(`/app/api/creative-sets/${encodeURIComponent(creativeSetId)}`, {
+        method: 'DELETE',
+        headers: csrfHeaders(),
+        credentials: 'same-origin',
+    })
+    if (!res.ok) {
+        const data = (await res.json().catch(() => ({}))) as { error?: string }
+        throw new Error(data.error || 'Could not remove Versions set')
+    }
+}
+
 export async function deleteCreativeSetVariant(
     creativeSetId: string,
     variantId: string

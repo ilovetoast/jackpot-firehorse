@@ -31,5 +31,8 @@ final readonly class CreateStudioAnimationData
         public ?int $sourceCompositionVersionId = null,
         public bool $highFidelitySubmit = false,
         public array $settings = [],
+        public ?string $sourceLayerId = null,
+        /** @var array{x?: int, y?: int, width?: int, height?: int}|null */
+        public ?array $layerBounds = null,
     ) {}
 }

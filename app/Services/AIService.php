@@ -1045,11 +1045,14 @@ class AIService
         if (isset($options['upload_id'])) {
             return ['entity_type' => 'upload', 'entity_id' => (string) $options['upload_id']];
         }
-        if (isset($options['asset_id'])) {
-            return ['entity_type' => 'asset', 'entity_id' => (string) $options['asset_id']];
-        }
+        // Editor image generate/edit often passes both asset_id (source) and composition_id. Prefer the
+        // composition so per-composition credit rollups and ai-credit-status `this_composition_used` match
+        // what users see in the editor (the +N chip for saved compositions).
         if (isset($options['composition_id'])) {
             return ['entity_type' => 'composition', 'entity_id' => (string) $options['composition_id']];
+        }
+        if (isset($options['asset_id'])) {
+            return ['entity_type' => 'asset', 'entity_id' => (string) $options['asset_id']];
         }
         if (isset($options['derivative_failure_id'])) {
             return ['entity_type' => 'asset', 'entity_id' => (string) ($options['asset_id'] ?? $options['derivative_failure_id'])];

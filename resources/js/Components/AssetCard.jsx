@@ -162,6 +162,8 @@ export default function AssetCard({
     // Phase V-1: Detect if asset is a video
     const videoExtensions = ['mp4', 'mov', 'avi', 'mkv', 'webm', 'm4v']
     const isVideo = Boolean(asset?.mime_type?.startsWith('video/') || videoExtensions.includes(extLower))
+    /** Poster or preview frame — when absent, ThumbnailPreview shows the frosted play placeholder (no double overlay). */
+    const videoHasPosterFrame = Boolean(asset?.final_thumbnail_url || asset?.preview_thumbnail_url)
 
     const highlightTokens = useMemo(() => searchTokensForHighlight(gridSearchQuery), [gridSearchQuery])
     const videoSummary =
@@ -742,11 +744,11 @@ export default function AssetCard({
                             </>
                         )}
 
-                        {/* Phase V-1: Play icon overlay for videos */}
-                        {isVideo && (
+                        {/* Phase V-1: Play overlay on real frames only — pending video uses frosted play in AssetPlaceholder */}
+                        {isVideo && videoHasPosterFrame && (
                             <div className="absolute inset-0 flex items-center justify-center z-20 pointer-events-none">
-                                <div className="bg-black/40 backdrop-blur-sm rounded-full p-3">
-                                    <svg className="h-8 w-8 text-white" fill="currentColor" viewBox="0 0 24 24">
+                                <div className="rounded-full bg-black/40 p-3 shadow-md ring-1 ring-white/25 backdrop-blur-sm">
+                                    <svg className="h-8 w-8 text-white" fill="currentColor" viewBox="0 0 24 24" aria-hidden>
                                         <path d="M8 5v14l11-7z" />
                                     </svg>
                                 </div>

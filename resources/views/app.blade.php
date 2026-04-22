@@ -34,7 +34,7 @@
             $ogDescription = trim($page['props']['meta']['og_description'] ?? '') !== ''
                 ? $page['props']['meta']['og_description']
                 : 'Not another digital asset manager — a brand asset manager built for execution. Every asset, every brand, every deliverable lined up and ready to hit.';
-            $ogImage = url('/og-image-1200x630.png');
+            $ogImage = url('/jp-og.png');
         @endphp
         <meta name="description" content="{{ $ogDescription }}">
         <meta property="og:type" content="website">

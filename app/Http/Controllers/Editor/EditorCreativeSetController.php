@@ -14,6 +14,10 @@ use App\Services\Editor\CompositionDuplicateService;
 use App\Services\Studio\CreativeSetApplyCommandsService;
 use App\Services\Studio\StudioCreativeSetGenerationItemRetryService;
 use App\Services\Studio\StudioCreativeSetGenerationService;
+use App\Services\Studio\StudioVariantGroupResolver;
+use App\Enums\StudioVariantGroupType;
+use App\Models\StudioVariantGroup;
+use App\Models\StudioVariantGroupMember;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -32,6 +36,7 @@ class EditorCreativeSetController extends Controller
         protected StudioCreativeSetGenerationService $creativeSetGeneration,
         protected CreativeSetApplyCommandsService $applyCommands,
         protected StudioCreativeSetGenerationItemRetryService $generationItemRetry,
+        protected StudioVariantGroupResolver $variantGroupResolver,
     ) {}
 
     private function resolveCreativeSet(Request $request, int $id): ?CreativeSet
@@ -94,7 +99,7 @@ class EditorCreativeSetController extends Controller
                 ->value('id');
         }
 
-        return [
+        $out = [
             'id' => (string) $v->id,
             'composition_id' => (string) $v->composition_id,
             'label' => $v->label,
@@ -104,13 +109,25 @@ class EditorCreativeSetController extends Controller
             'thumbnail_url' => $this->resolveThumbnailUrl($v->composition?->thumbnail_asset_id),
             'retryable_generation_job_item_id' => $retryableItemId !== null ? (string) $retryableItemId : null,
         ];
+        if (config('studio.variant_groups_v1', false)) {
+            $out['studio_variant_group_id'] = $v->studio_variant_group_id !== null ? (string) $v->studio_variant_group_id : null;
+            $out['legacy_ungrouped_label'] = $this->variantGroupResolver->virtualLegacyUngroupedLabel($v);
+        }
+
+        return $out;
     }
 
     private function setJson(CreativeSet $set): array
     {
         $set->loadMissing('variants.composition');
+        $tenant = app('tenant');
+        $brand = app('brand');
+        $variantGroups = [];
+        if (config('studio.variant_groups_v1', false) && $tenant && $brand) {
+            $variantGroups = $this->variantGroupResolver->groupsForCreativeSet((int) $tenant->id, (int) $brand->id, $set);
+        }
 
-        return [
+        $base = [
             'id' => (string) $set->id,
             'name' => $set->name,
             'status' => $set->status,
@@ -121,6 +138,11 @@ class EditorCreativeSetController extends Controller
                 ->map(fn (CreativeSetVariant $v) => $this->variantJson($v))
                 ->all(),
         ];
+        if (config('studio.variant_groups_v1', false)) {
+            $base['variant_groups'] = $variantGroups;
+        }
+
+        return $base;
     }
 
     private function generationJobJson(GenerationJob $job): array
@@ -499,6 +521,10 @@ class EditorCreativeSetController extends Controller
             ]);
         });
 
+        if (config('studio.variant_groups_v1', false) && config('studio.auto_generic_group', false)) {
+            $this->attachGenericVariantGroupForDuplicate($set, $user, $sourceComposition, $variant);
+        }
+
         return response()->json([
             'variant' => $this->variantJson($variant->fresh()->load('composition')),
             'creative_set' => $this->setJson($set->fresh(['variants'])),
@@ -554,6 +580,30 @@ class EditorCreativeSetController extends Controller
         });
 
         return response()->json(['creative_set' => $this->setJson($set->fresh(['variants']))]);
+    }
+
+    /**
+     * DELETE /app/api/creative-sets/{id}
+     *
+     * Removes the Versions set and all variant link rows. Does not delete the underlying
+     * {@link Composition} records; they remain in the brand library. Cascades to related
+     * generation job rows. Studio variant groups keep their row but get `creative_set_id` nulled.
+     */
+    public function destroy(Request $request, int $id): JsonResponse
+    {
+        $user = $request->user();
+        if (! $user) {
+            return response()->json(['error' => 'Unauthorized'], 403);
+        }
+
+        $set = $this->resolveCreativeSet($request, $id);
+        if (! $set) {
+            return response()->json(['error' => 'Not found'], 404);
+        }
+
+        $set->delete();
+
+        return response()->json(['ok' => true]);
     }
 
     /**
@@ -749,5 +799,53 @@ class EditorCreativeSetController extends Controller
         }
 
         return $out;
+    }
+
+    private function attachGenericVariantGroupForDuplicate(
+        CreativeSet $set,
+        User $user,
+        Composition $sourceComposition,
+        CreativeSetVariant $newVariant,
+    ): void {
+        try {
+            DB::transaction(function () use ($set, $user, $sourceComposition, $newVariant): void {
+                $newComposition = $newVariant->composition;
+                if (! $newComposition) {
+                    return;
+                }
+                $sort = (int) StudioVariantGroup::query()
+                    ->where('creative_set_id', $set->id)
+                    ->max('sort_order') + 1;
+                $group = StudioVariantGroup::query()->create([
+                    'tenant_id' => $set->tenant_id,
+                    'brand_id' => $set->brand_id,
+                    'source_composition_id' => $sourceComposition->id,
+                    'source_composition_version_id' => null,
+                    'creative_set_id' => $set->id,
+                    'type' => StudioVariantGroupType::Generic,
+                    'label' => 'Duplicate',
+                    'status' => StudioVariantGroup::STATUS_ACTIVE,
+                    'settings_json' => ['origin' => 'manual_duplicate', 'inferred' => true],
+                    'target_spec_json' => null,
+                    'shared_mask_asset_id' => null,
+                    'sort_order' => $sort,
+                    'created_by_user_id' => $user->id,
+                ]);
+                StudioVariantGroupMember::query()->create([
+                    'studio_variant_group_id' => $group->id,
+                    'composition_id' => $newComposition->id,
+                    'slot_key' => 'duplicate',
+                    'label' => $newVariant->label ?? 'Copy',
+                    'status' => StudioVariantGroupMember::STATUS_ACTIVE,
+                    'generation_status' => null,
+                    'spec_json' => ['source_composition_id' => (string) $sourceComposition->id],
+                    'generation_job_item_id' => null,
+                    'sort_order' => 0,
+                ]);
+                $newVariant->update(['studio_variant_group_id' => $group->id]);
+            });
+        } catch (\Throwable) {
+            /* best-effort; duplicate flow must not fail */
+        }
     }
 }

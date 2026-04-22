@@ -27,7 +27,13 @@ final class CompositionSnapshotRenderer implements CompositionAnimationRendererI
 
     public function renderStartFrame(StudioAnimationJob $job): StudioAnimationRenderData
     {
-        if ($job->source_strategy !== StudioAnimationSourceStrategy::CompositionSnapshot->value) {
+        $strategy = StudioAnimationSourceStrategy::tryFrom((string) $job->source_strategy);
+        $allowed = [
+            StudioAnimationSourceStrategy::CompositionSnapshot,
+            StudioAnimationSourceStrategy::SelectedLayerWithContext,
+            StudioAnimationSourceStrategy::SelectedLayerIsolated,
+        ];
+        if ($strategy === null || ! in_array($strategy, $allowed, true)) {
             throw new \InvalidArgumentException('Unsupported source strategy for composition snapshot renderer.');
         }
 
@@ -137,9 +143,41 @@ final class CompositionSnapshotRenderer implements CompositionAnimationRendererI
             $serverSkip = 'no_locked_document_json';
         }
 
-        $binaryForSubmit = $canonicalOrigin === 'server_locked_state' && $serverBinary !== null
-            ? $serverBinary
-            : $clientBinary;
+        $preferClientPixels = (bool) config('studio_animation.prefer_client_snapshot_for_provider', true);
+        if ($preferClientPixels) {
+            // Always submit what the user actually saw in the editor. Server-side rasterization of
+            // locked_document_json uses Asset storage paths and can differ from the canvas when
+            // layer.src points at a different version than the asset’s “current” file.
+            $binaryForSubmit = $clientBinary;
+        } else {
+            $binaryForSubmit = $canonicalOrigin === 'server_locked_state' && $serverBinary !== null
+                ? $serverBinary
+                : $clientBinary;
+        }
+        $providerSubmitsFromClientBuffer = $preferClientPixels || $binaryForSubmit === $clientBinary;
+
+        if ($strategy === StudioAnimationSourceStrategy::SelectedLayerIsolated) {
+            $binaryForSubmit = $this->cropPngBinaryToLayerBounds($binaryForSubmit, $job);
+            $dimsCrop = @getimagesizefromstring($binaryForSubmit);
+            if ($dimsCrop && isset($dimsCrop[0], $dimsCrop[1])) {
+                $width = (int) $dimsCrop[0];
+                $height = (int) $dimsCrop[1];
+                $imageType = isset($dimsCrop[2]) ? (int) $dimsCrop[2] : \IMAGETYPE_PNG;
+                $mimeType = @image_type_to_mime_type($imageType) ?: 'image/png';
+                if (! is_string($mimeType) || ! str_starts_with($mimeType, 'image/')) {
+                    $mimeType = 'image/png';
+                }
+                $pathExt = match (true) {
+                    str_contains($mimeType, 'jpeg') => 'jpg',
+                    str_contains($mimeType, 'png') => 'png',
+                    str_contains($mimeType, 'webp') => 'webp',
+                    default => 'png',
+                };
+                $path = "studio-animation/{$uuid}/{$job->id}/start_frame_".Str::random(8).'.'.$pathExt;
+            }
+        }
+
+        $providerPixelOrigin = $providerSubmitsFromClientBuffer ? 'client_snapshot' : 'server_locked_state';
 
         Storage::disk($disk)->put($path, $binaryForSubmit);
 
@@ -171,7 +209,8 @@ final class CompositionSnapshotRenderer implements CompositionAnimationRendererI
             'drift_summary' => $drift['drift_summary'],
             'drift_level' => $drift['drift_level'],
             'mismatch_reasons' => $drift['mismatch_reasons'],
-            'provider_submit_start_image_origin' => $canonicalOrigin,
+            'provider_submit_start_image_origin' => $providerPixelOrigin,
+            'prefer_client_snapshot_for_provider' => $preferClientPixels,
             'server_render_fallback_reason' => $canonicalOrigin === 'client_snapshot' ? $serverSkip : null,
             'auxiliary_client_snapshot_disk_path' => $auxPath,
             'renderer_version' => self::RENDERER_VERSION,
@@ -187,7 +226,7 @@ final class CompositionSnapshotRenderer implements CompositionAnimationRendererI
             'render_engine' => $renderEngine,
             'renderer_version' => self::RENDERER_VERSION,
             'drift_level' => (string) ($drift['drift_level'] ?? ''),
-            'provider_submission_used_frame' => (string) ($canonicalFrame['provider_submit_start_image_origin'] ?? ''),
+            'provider_submission_used_frame' => $providerPixelOrigin,
         ]);
 
         return new StudioAnimationRenderData(
@@ -200,7 +239,7 @@ final class CompositionSnapshotRenderer implements CompositionAnimationRendererI
             sha256: $sha256,
             assetId: null,
             metadata: [
-                'source' => $canonicalOrigin === 'server_locked_state' ? 'server_locked_state' : 'client_stage_export',
+                'source' => $providerPixelOrigin === 'client_snapshot' ? 'client_stage_export' : 'server_locked_state',
                 'aspect_ratio' => $job->aspect_ratio,
                 'renderer_version' => self::RENDERER_VERSION,
                 'render_engine' => $renderEngine,
@@ -216,6 +255,7 @@ final class CompositionSnapshotRenderer implements CompositionAnimationRendererI
                 'client_snapshot_hash' => $clientSha256,
                 'frame_drift_status' => $drift['frame_drift_status'],
                 'drift_level' => $drift['drift_level'],
+                'provider_start_frame' => $providerPixelOrigin,
             ],
             jobSettingsPatch: $jobSettingsPatch,
         );
@@ -270,5 +310,35 @@ final class CompositionSnapshotRenderer implements CompositionAnimationRendererI
         $preset = $doc['preset'] ?? null;
 
         return is_string($preset) && $preset !== '' ? $preset : 'custom';
+    }
+
+    /**
+     * @param  array<string, mixed>  $settings
+     */
+    private function cropPngBinaryToLayerBounds(string $binary, StudioAnimationJob $job): string
+    {
+        $settings = is_array($job->settings_json) ? $job->settings_json : [];
+        $b = $settings['layer_bounds'] ?? null;
+        if (! is_array($b)) {
+            throw new \RuntimeException('Missing layer_bounds for isolated layer render.');
+        }
+        $x = max(0, (int) ($b['x'] ?? 0));
+        $y = max(0, (int) ($b['y'] ?? 0));
+        $w = max(2, (int) ($b['width'] ?? 0));
+        $h = max(2, (int) ($b['height'] ?? 0));
+        if (! class_exists(\Imagick::class)) {
+            throw new \RuntimeException('Imagick is required for layer isolation crop.');
+        }
+        $img = new \Imagick;
+        try {
+            $img->readImageBlob($binary);
+            $img->setImageFormat('png');
+            $img->cropImage($w, $h, $x, $y);
+            $out = $img->getImageBlob();
+        } finally {
+            $img->destroy();
+        }
+
+        return $out !== false && $out !== '' ? $out : $binary;
     }
 }

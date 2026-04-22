@@ -105,65 +105,74 @@ export function ApplyScopeBar(props: Props) {
     }
 
     return (
-        <div className="pointer-events-none absolute inset-x-0 bottom-[120px] z-30 flex justify-center px-4">
-            <div className="pointer-events-auto flex max-w-xl flex-col items-center gap-2 rounded-lg border border-gray-700/90 bg-gray-900/95 px-2 py-2 shadow-lg backdrop-blur-sm sm:flex-row sm:flex-wrap sm:px-1 sm:py-1">
-                <div className="flex flex-wrap items-center gap-1">
-                    <span className="hidden pl-2 text-[10px] font-semibold uppercase tracking-wide text-gray-500 sm:inline">
-                        Edits
-                    </span>
-                    <button
-                        type="button"
-                        onClick={() => onApplyScopeChange('this_version')}
-                        className={`rounded-md px-2.5 py-1 text-[11px] font-semibold transition-colors ${
-                            applyScope === 'this_version'
-                                ? 'bg-gray-700 text-white'
-                                : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200'
-                        }`}
-                    >
-                        This version
-                    </button>
-                    <button
-                        type="button"
-                        disabled={siblingCompositionCount < 1}
-                        title={
-                            siblingCompositionCount < 1
-                                ? 'Add another version to sync across the set'
-                                : 'Apply to every other version in this set'
-                        }
-                        onClick={() => onApplyScopeChange('all_versions')}
-                        className={`rounded-md px-2.5 py-1 text-[11px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
-                            applyScope === 'all_versions'
-                                ? 'bg-indigo-900/50 text-indigo-100 ring-1 ring-indigo-500/40'
-                                : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200'
-                        }`}
-                    >
-                        All versions
-                    </button>
-                    <button
-                        type="button"
-                        disabled={siblingCompositionCount < 1}
-                        title={
-                            siblingCompositionCount < 1
-                                ? 'Add another version to pick targets'
-                                : 'Pick specific versions in the Versions strip below'
-                        }
-                        onClick={() => onApplyScopeChange('selected_versions')}
-                        className={`rounded-md px-2.5 py-1 text-[11px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
-                            applyScope === 'selected_versions'
-                                ? 'bg-indigo-900/50 text-indigo-100 ring-1 ring-indigo-500/40'
-                                : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200'
-                        }`}
-                    >
-                        Selected versions
-                    </button>
+        <div
+            className="w-full border-b border-gray-800/90 bg-gray-900/95 px-2 py-1.5"
+            data-testid="studio-apply-scope-bar"
+        >
+            <div className="mx-auto flex max-w-5xl flex-col gap-1.5 sm:flex-row sm:flex-wrap sm:items-end sm:gap-x-2 sm:gap-y-1">
+                <div className="min-w-0 flex flex-1 flex-col gap-1 sm:flex-row sm:items-center sm:gap-2">
+                    <div className="flex flex-wrap items-center gap-1">
+                        <span className="shrink-0 pl-0.5 text-[10px] font-semibold uppercase tracking-wide text-gray-500 sm:pl-0">
+                            Edits
+                        </span>
+                        <button
+                            type="button"
+                            onClick={() => onApplyScopeChange('this_version')}
+                            className={`rounded-md px-2.5 py-1 text-[11px] font-semibold transition-colors ${
+                                applyScope === 'this_version'
+                                    ? 'bg-gray-700 text-white'
+                                    : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200'
+                            }`}
+                        >
+                            This version
+                        </button>
+                        <button
+                            type="button"
+                            disabled={siblingCompositionCount < 1}
+                            title={
+                                siblingCompositionCount < 1
+                                    ? 'Add another version to sync across the set'
+                                    : 'Apply to every other version in this set'
+                            }
+                            onClick={() => onApplyScopeChange('all_versions')}
+                            className={`rounded-md px-2.5 py-1 text-[11px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+                                applyScope === 'all_versions'
+                                    ? 'bg-indigo-900/50 text-indigo-100 ring-1 ring-indigo-500/40'
+                                    : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200'
+                            }`}
+                        >
+                            All versions
+                        </button>
+                        <button
+                            type="button"
+                            disabled={siblingCompositionCount < 1}
+                            title={
+                                siblingCompositionCount < 1
+                                    ? 'Add another version to pick targets'
+                                    : 'Pick specific versions in the Versions strip below'
+                            }
+                            onClick={() => onApplyScopeChange('selected_versions')}
+                            className={`rounded-md px-2.5 py-1 text-[11px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+                                applyScope === 'selected_versions'
+                                    ? 'bg-indigo-900/50 text-indigo-100 ring-1 ring-indigo-500/40'
+                                    : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200'
+                            }`}
+                        >
+                            Selected versions
+                        </button>
+                    </div>
+                    <p className="min-w-0 max-w-prose text-[9px] leading-snug text-gray-500 sm:text-[8px]">
+                        Syncs text/logo-type layers across <span className="text-gray-400">compositions</span> — not the
+                        AI video tiles in the strip.
+                    </p>
                 </div>
                 {applyScope === 'selected_versions' && siblingCompositionCount > 0 && (
-                    <span className="text-[10px] font-medium text-gray-400">
+                    <span className="shrink-0 text-[10px] font-medium text-gray-400 sm:ml-auto">
                         {selectedCount === 0 ? 'Pick targets in Versions' : `${selectedCount} selected`}
                     </span>
                 )}
                 {applyScope === 'all_versions' && (
-                    <div className="flex flex-col items-stretch gap-1 sm:flex-row sm:items-center">
+                    <div className="flex w-full min-w-0 flex-col items-stretch gap-1 sm:ml-auto sm:w-auto sm:flex-row sm:items-center">
                         <button
                             type="button"
                             disabled={!canPushAll}
@@ -188,21 +197,21 @@ export function ApplyScopeBar(props: Props) {
                                     }
                                 })()
                             }}
-                            className="rounded-md bg-indigo-600 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-40"
+                            className="shrink-0 rounded-md bg-indigo-600 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-40"
                         >
                             Push to all versions
                         </button>
                         {selectedLayer && commands.length === 0 && (
                             <p className="max-w-[240px] text-center text-[10px] leading-snug text-amber-200/90 sm:text-left">
-                                This layer is not on the sync list (Headline, Subheadline, CTA, Disclaimer, Logo, Badge)
-                                — rename or use a template role, or keep edits on this version only. Product shots and
+                                This layer is not on the sync list (Headline, Subheadline, CTA, Disclaimer, Logo, Badge) —
+                                rename or use a template role, or keep edits on this version only. Product shots and
                                 generative backgrounds never sync.
                             </p>
                         )}
                     </div>
                 )}
                 {applyScope === 'selected_versions' && (
-                    <div className="flex flex-col items-stretch gap-1 sm:flex-row sm:items-center">
+                    <div className="flex w-full min-w-0 flex-col items-stretch gap-1 sm:ml-auto sm:w-auto sm:flex-row sm:items-center">
                         <button
                             type="button"
                             disabled={!canPushSelected}
@@ -227,16 +236,14 @@ export function ApplyScopeBar(props: Props) {
                                     }
                                 })()
                             }}
-                            className="rounded-md bg-indigo-600 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-40"
+                            className="shrink-0 rounded-md bg-indigo-600 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-40"
                         >
-                            {selectedCount > 0
-                                ? `Push to selected (${selectedCount})`
-                                : 'Push to selected'}
+                            {selectedCount > 0 ? `Push to selected (${selectedCount})` : 'Push to selected'}
                         </button>
                         {selectedLayer && commands.length === 0 && (
                             <p className="max-w-[240px] text-center text-[10px] leading-snug text-amber-200/90 sm:text-left">
-                                This layer is not on the sync list (Headline, Subheadline, CTA, Disclaimer, Logo, Badge)
-                                — rename or use a template role, or keep edits on this version only. Product shots and
+                                This layer is not on the sync list (Headline, Subheadline, CTA, Disclaimer, Logo, Badge) —
+                                rename or use a template role, or keep edits on this version only. Product shots and
                                 generative backgrounds never sync.
                             </p>
                         )}

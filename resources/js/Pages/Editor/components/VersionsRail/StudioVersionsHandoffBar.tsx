@@ -121,6 +121,10 @@ export function StudioVersionsHandoffBar(props: Props) {
                     <p className="text-[8px] leading-snug text-sky-200/55">
                         One file when a single version is selected; otherwise one ZIP (hero first when marked).
                     </p>
+                    <p className="mt-1 text-[8px] leading-snug text-sky-200/45">
+                        Design versions only (PNG/JPG from the canvas). AI video runs are separate — use the video tile, then
+                        &quot;Open in library&quot; in the job detail, or download the MP4 from the asset.
+                    </p>
                 </div>
                 <button
                     type="button"

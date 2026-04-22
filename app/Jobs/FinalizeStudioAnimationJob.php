@@ -64,6 +64,7 @@ class FinalizeStudioAnimationJob implements ShouldQueue
             $msg = $e->getMessage();
             $code = match (true) {
                 str_starts_with($msg, 'DOWNLOAD_FAILED:') => 'download_failed',
+                str_contains($msg, 'FINALIZE_INVALID_VIDEO') => 'invalid_video',
                 str_contains($msg, 'FINALIZE_FAILED:') && (str_contains($msg, 'Storage') || str_contains($msg, 'Unable to write') || str_contains($msg, 'disk')) => 'finalize_failed_after_download',
                 str_contains($msg, 'FINALIZE_FAILED:') => 'finalize_failed_before_download',
                 default => 'finalize_failed',

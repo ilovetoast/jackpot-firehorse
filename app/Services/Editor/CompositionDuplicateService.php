@@ -39,6 +39,7 @@ class CompositionDuplicateService
                 'user_id' => $user->id,
                 'visibility' => $visibility,
                 'name' => $resolvedName,
+                'folder' => $source->folder,
                 'document_json' => $doc,
             ]);
 

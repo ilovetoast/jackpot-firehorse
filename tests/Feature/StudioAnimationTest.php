@@ -3,8 +3,10 @@
 namespace Tests\Feature;
 
 use App\Jobs\FinalizeStudioAnimationJob;
+use App\Jobs\ProcessAssetJob;
 use App\Jobs\PollStudioAnimationJob;
 use App\Jobs\ProcessStudioAnimationJob;
+use App\Models\Asset;
 use App\Models\Brand;
 use App\Models\Composition;
 use App\Models\CompositionVersion;
@@ -20,6 +22,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -48,8 +51,13 @@ class StudioAnimationTest extends TestCase
             'studio_animation.output_disk' => 'local',
         ]);
 
+        $fixture = __DIR__.'/../fixtures/studio_animation_valid_1s.mp4';
+        $mp4 = is_file($fixture) ? (string) file_get_contents($fixture) : '';
+        if ($mp4 === '') {
+            $this->markTestSkipped('Add tests/fixtures/studio_animation_valid_1s.mp4 (1s H.264) for HTTP fake finalize body.');
+        }
         Http::fake([
-            'https://studio-animation.mock/*' => Http::response(str_repeat('x', 4000), 200, ['Content-Type' => 'video/mp4']),
+            'https://studio-animation.mock/*' => Http::response($mp4, 200, ['Content-Type' => 'video/mp4']),
         ]);
 
         $this->tenant = Tenant::create([
@@ -396,6 +404,7 @@ class StudioAnimationTest extends TestCase
 
     public function test_finalize_twice_does_not_duplicate_outputs_or_double_charge_credits(): void
     {
+        Queue::fake();
         $this->mock(AiUsageService::class, function ($mock): void {
             $mock->shouldReceive('trackUsage')->once();
         });
@@ -428,7 +437,14 @@ class StudioAnimationTest extends TestCase
 
         $svc = app(StudioAnimationCompletionService::class);
         $svc->finalizeFromRemoteUrl($job, $url);
+        Queue::assertPushed(ProcessAssetJob::class, 1);
         $this->assertSame(1, StudioAnimationOutput::query()->where('studio_animation_job_id', $job->id)->count());
+        $out = StudioAnimationOutput::query()->where('studio_animation_job_id', $job->id)->first();
+        $this->assertNotNull($out?->asset_id);
+        $created = Asset::query()->find($out->asset_id);
+        $this->assertSame('staged', $created?->intake_state);
+        $this->assertSame('uploading', $created?->analysis_status);
+        $this->assertNotEmpty($created?->metadata['_studio_staged_defer_ai'] ?? null);
         $job->refresh();
         $this->assertTrue((bool) (($job->settings_json ?? [])['credits_tracked'] ?? false));
 
@@ -438,6 +454,52 @@ class StudioAnimationTest extends TestCase
         $this->assertSame('finalize_reused_existing_output', $job->settings_json['finalize_last_outcome'] ?? null);
         $this->assertSame('fingerprint', $job->settings_json['finalize_reuse_mode'] ?? null);
         $this->assertTrue((bool) ($job->settings_json['was_reused_existing_output'] ?? false));
+    }
+
+    public function test_finalize_fails_on_non_video_payload_without_charging_credits(): void
+    {
+        Http::fake([
+            'https://studio-animation.mock/bogus-not-video.dat' => Http::response(str_repeat('x', 4000), 200, ['Content-Type' => 'video/mp4']),
+        ]);
+
+        $this->mock(AiUsageService::class, function ($mock): void {
+            $mock->shouldNotReceive('trackUsage');
+        });
+
+        $job = StudioAnimationJob::query()->create([
+            'tenant_id' => $this->tenant->id,
+            'brand_id' => $this->brand->id,
+            'user_id' => $this->user->id,
+            'studio_document_id' => null,
+            'composition_id' => $this->composition->id,
+            'source_composition_version_id' => null,
+            'source_document_revision_hash' => null,
+            'animation_intent_json' => null,
+            'provider' => 'kling',
+            'provider_model' => 'kling_v3_standard_image_to_video',
+            'status' => 'finalizing',
+            'source_strategy' => 'composition_snapshot',
+            'prompt' => null,
+            'negative_prompt' => null,
+            'motion_preset' => 'cinematic_pan',
+            'duration_seconds' => 5,
+            'aspect_ratio' => '16:9',
+            'generate_audio' => false,
+            'settings_json' => ['credit_cost_reserved' => 40],
+            'provider_job_id' => 'x',
+            'started_at' => now(),
+        ]);
+
+        try {
+            app(StudioAnimationCompletionService::class)
+                ->finalizeFromRemoteUrl($job, 'https://studio-animation.mock/bogus-not-video.dat');
+            $this->fail('Expected RuntimeException for invalid video payload');
+        } catch (\RuntimeException $e) {
+            $this->assertStringContainsString('FINALIZE_FAILED', $e->getMessage());
+            $this->assertStringContainsString('FINALIZE_INVALID_VIDEO', $e->getMessage());
+        }
+
+        $this->assertSame(0, StudioAnimationOutput::query()->where('studio_animation_job_id', $job->id)->count());
     }
 
     public function test_duplicate_output_row_same_job_hits_unique_constraint(): void
@@ -556,6 +618,10 @@ class StudioAnimationTest extends TestCase
             'provider_job_id' => json_encode(['request_id' => 'rid-legacy', 'status_url' => 'http://x', 'response_url' => 'http://y']),
             'started_at' => now(),
         ]);
+
+        $fixture = __DIR__.'/../fixtures/studio_animation_valid_1s.mp4';
+        $mp4Bytes = (string) file_get_contents($fixture);
+        \Illuminate\Support\Facades\Storage::disk('local')->put('legacy.mp4', $mp4Bytes);
 
         StudioAnimationOutput::query()->create([
             'studio_animation_job_id' => $job->id,
@@ -887,5 +953,76 @@ class StudioAnimationTest extends TestCase
             ->assertForbidden();
 
         $this->assertDatabaseHas('studio_animation_jobs', ['id' => $job->id]);
+    }
+
+    public function test_destroy_rejects_queued_job_when_not_stale(): void
+    {
+        $job = StudioAnimationJob::query()->create([
+            'tenant_id' => $this->tenant->id,
+            'brand_id' => $this->brand->id,
+            'user_id' => $this->user->id,
+            'studio_document_id' => null,
+            'composition_id' => $this->composition->id,
+            'source_composition_version_id' => null,
+            'source_document_revision_hash' => null,
+            'animation_intent_json' => null,
+            'provider' => 'kling',
+            'provider_model' => 'kling_v3_standard_image_to_video',
+            'status' => 'queued',
+            'source_strategy' => 'composition_snapshot',
+            'prompt' => null,
+            'negative_prompt' => null,
+            'motion_preset' => 'cinematic_pan',
+            'duration_seconds' => 5,
+            'aspect_ratio' => '16:9',
+            'generate_audio' => false,
+            'settings_json' => [],
+            'started_at' => now(),
+        ]);
+
+        $this->actingAs($this->user)
+            ->withSession(['tenant_id' => $this->tenant->id, 'brand_id' => $this->brand->id])
+            ->deleteJson("/app/studio/animations/{$job->id}")
+            ->assertForbidden();
+
+        $this->assertDatabaseHas('studio_animation_jobs', ['id' => $job->id]);
+    }
+
+    public function test_destroy_discards_queued_job_when_stale_by_age(): void
+    {
+        config(['studio_animation.stale_rail_removal.after_minutes' => 10]);
+
+        $job = StudioAnimationJob::query()->create([
+            'tenant_id' => $this->tenant->id,
+            'brand_id' => $this->brand->id,
+            'user_id' => $this->user->id,
+            'studio_document_id' => null,
+            'composition_id' => $this->composition->id,
+            'source_composition_version_id' => null,
+            'source_document_revision_hash' => null,
+            'animation_intent_json' => null,
+            'provider' => 'kling',
+            'provider_model' => 'kling_v3_standard_image_to_video',
+            'status' => 'queued',
+            'source_strategy' => 'composition_snapshot',
+            'prompt' => null,
+            'negative_prompt' => null,
+            'motion_preset' => 'cinematic_pan',
+            'duration_seconds' => 5,
+            'aspect_ratio' => '16:9',
+            'generate_audio' => false,
+            'settings_json' => [],
+            'started_at' => now(),
+        ]);
+        $job->forceFill(['created_at' => now()->subMinutes(11)])->save();
+
+        $this->assertTrue(app(StudioAnimationService::class)->isJobStaleForRailRemoval($job->fresh()));
+
+        $this->actingAs($this->user)
+            ->withSession(['tenant_id' => $this->tenant->id, 'brand_id' => $this->brand->id])
+            ->deleteJson("/app/studio/animations/{$job->id}")
+            ->assertNoContent();
+
+        $this->assertDatabaseMissing('studio_animation_jobs', ['id' => $job->id]);
     }
 }

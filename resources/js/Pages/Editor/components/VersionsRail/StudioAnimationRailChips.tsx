@@ -65,7 +65,8 @@ export function StudioAnimationRailChips(props: Props) {
                           ? 'ring-1 ring-sky-600/50'
                           : ''
                 const canDiscard =
-                    Boolean(onRequestDiscardJob) && (a.status === 'failed' || a.status === 'canceled')
+                    Boolean(onRequestDiscardJob) &&
+                    (a.status === 'failed' || a.status === 'canceled' || a.stale_removable === true)
                 const tileLabel = studioAnimationRailJobLabel(compositionTitle, a.id)
                 return (
                     <div
@@ -79,7 +80,7 @@ export function StudioAnimationRailChips(props: Props) {
                                 type="button"
                                 data-testid={`studio-discard-animation-${a.id}`}
                                 title="Remove this run from the rail"
-                                aria-label="Remove failed video from rail"
+                                aria-label="Remove this video from the rail"
                                 onClick={(e) => {
                                     e.stopPropagation()
                                     void onRequestDiscardJob?.(a.id)

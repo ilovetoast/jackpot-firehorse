@@ -301,7 +301,7 @@ class AssetController extends Controller
                 $categoryIds,
                 $normalizedLifecycle,
                 $isTrashView,
-                AssetType::ASSET,
+                [AssetType::ASSET, AssetType::AI_GENERATED],
                 true,
                 false
             );
@@ -331,7 +331,7 @@ class AssetController extends Controller
                     ->onlyTrashed()
                     ->where('tenant_id', $tenant->id)
                     ->where('brand_id', $brand->id)
-                    ->where('type', AssetType::ASSET)
+                    ->forAssetLibraryTypes()
                     ->whereNotNull('metadata')
                     ->whereIn(DB::raw(Asset::categoryIdMetadataCastExpression()), array_map('intval', $viewableCategoryIds))
                     ->count();
@@ -367,13 +367,14 @@ class AssetController extends Controller
         // Phase B2: lifecycle=deleted shows trash (onlyTrashed); otherwise exclude deleted (default scope).
         // AssetStatus and published_at filtering is handled by LifecycleResolver (single source of truth).
         // Intake: main grid excludes staged (intake_state=normal); staged view shows intake_state=staged only.
+        // Type: standard uploads (ASSET) + AI outputs (e.g. studio MP4) until filed; non-reference library rows use forAssetLibraryTypes.
         $assetsQuery = Asset::query()
             ->when($isStagedView, fn ($q) => $q->stagedOnly(), fn ($q) => $q->when(! $isReferenceMaterialsView, fn ($q2) => $q2->normalIntakeOnly()))
             ->when($isReferenceMaterialsView, fn ($q) => $q->referenceMaterialsOnly(), fn ($q) => $q->when(! $isStagedView, fn ($q2) => $q2->excludeBuilderStaged()))
             ->when($isTrashView, fn ($q) => $q->onlyTrashed(), fn ($q) => $q)
             ->where('tenant_id', $tenant->id)
             ->where('brand_id', $brand->id)
-            ->when($isReferenceMaterialsView, fn ($q) => $q, fn ($q) => $q->where('type', AssetType::ASSET));
+            ->when($isReferenceMaterialsView, fn ($q) => $q, fn ($q) => $q->forAssetLibraryTypes());
 
         // Staged view: no category filter (staged assets have no category)
         // Reference materials: no category filter (builder-staged assets have no category)
@@ -425,7 +426,7 @@ class AssetController extends Controller
                 ->stagedOnly()
                 ->where('tenant_id', $tenant->id)
                 ->where('brand_id', $brand->id)
-                ->where('type', AssetType::ASSET)
+                ->forAssetLibraryTypes()
                 ->count();
         }
 
@@ -451,7 +452,7 @@ class AssetController extends Controller
                 ->excludeBuilderStaged()
                 ->where('tenant_id', $tenant->id)
                 ->where('brand_id', $brand->id)
-                ->where('type', AssetType::ASSET)
+                ->forAssetLibraryTypes()
                 ->whereNotNull('metadata')
                 ->whereIn(DB::raw(Asset::categoryIdMetadataCastExpression()), array_map('intval', $viewableCategoryIds));
 
@@ -1697,9 +1698,13 @@ class AssetController extends Controller
         try {
             // CRITICAL: Only this user's uploads — not tenant-wide (avoids tray for every member)
             // Terminal states (failed, skipped, completed) are automatically excluded
+            // Studio composition video assets are "done" for users once the job completes; thumbnail generation
+            // can lag and wrongly keeps the global tray on "Preparing video preview…". Status is shown in the
+            // editor Versions / studio job UI instead.
             $processingAssets = Asset::where('tenant_id', $tenant->id)
                 ->where('brand_id', $brand->id)
                 ->where('user_id', $user->id)
+                ->where('source', '!=', 'studio_animation')
                 ->where(function ($query) {
                     // Only include actively processing states: pending, processing, or null (legacy)
                     $query->where('thumbnail_status', \App\Enums\ThumbnailStatus::PENDING->value)
@@ -3223,7 +3228,7 @@ class AssetController extends Controller
             ->excludeBuilderStaged()
             ->where('tenant_id', $tenant->id)
             ->where('brand_id', $brand->id)
-            ->where('type', AssetType::ASSET)
+            ->forAssetLibraryTypes()
             ->whereNotNull('metadata')
             ->whereRaw(
                 'CAST(JSON_UNQUOTE(JSON_EXTRACT(metadata, "$.category_id")) AS UNSIGNED) = ?',

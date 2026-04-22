@@ -84,6 +84,23 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Video queues (light UX vs heavy / export)
+    |--------------------------------------------------------------------------
+    |
+    | Target topology (see docs/environments/PRODUCTION_ARCHITECTURE_AWS.md):
+    | - video-light: poster extraction, short previews, fast post-process on returned clips
+    | - video-heavy: long / high-RAM work — final composited Studio export, long ffmpeg graphs
+    |
+    | No jobs are routed here until feature code calls ->onQueue(config('queue.video_light_queue')).
+    | Horizon supervisors listen to these names so staging/production workers stay ready.
+    |
+    */
+    'video_light_queue' => env('QUEUE_VIDEO_LIGHT_QUEUE', 'video-light'),
+
+    'video_heavy_queue' => env('QUEUE_VIDEO_HEAVY_QUEUE', 'video-heavy'),
+
+    /*
+    |--------------------------------------------------------------------------
     | Queue Connections
     |--------------------------------------------------------------------------
     |

@@ -35,7 +35,7 @@ Enable:
 
 - `STUDIO_ANIMATION_WEBHOOK_INGEST_ENABLED`
 - Shared secret header `X-Studio-Animation-Secret` when `STUDIO_ANIMATION_WEBHOOK_SECRET` is set
-- Optional FAL HMAC: `STUDIO_ANIMATION_FAL_WEBHOOK_SECRET` + `X-Fal-Signature` (canonical body supported)
+- Optional inbound webhook HMAC: `STUDIO_ANIMATION_FAL_WEBHOOK_SECRET` + `X-Fal-Signature` (legacy header name; canonical body supported)
 
 ## Manual validation helpers
 
@@ -50,7 +50,7 @@ Enable:
 
 ## Known limitations
 
-- Single provider integration in app code paths (Kling/fal); transport `mock` for CI.
+- Direct Kling API only; transport `mock` in CI via config override.
 - Locked-frame parity vs editor snapshot is drift-classified, not pixel-guaranteed without official/browser success.
 - Webhook + poll can both be enabled; first successful finalize wins; idempotent finalize prevents duplicate assets.
 - Metrics are log-based only (no separate APM counters in this release).

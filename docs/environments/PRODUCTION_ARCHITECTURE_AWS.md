@@ -153,7 +153,7 @@ Keep Jackpot’s **tenant-scoped CloudFront** model (see `config/cloudfront.php`
 | **video-light-workers** | `video-light` *(target)* | Poster frames, quick previews, common post-upload UX | **1** | 3 | Always warm |
 | **video-heavy-workers** | `video-heavy` *(target)* | Large/long video, high RAM / temp storage | **0** | 2 | Burst; cold-start acceptable |
 
-Horizon supervisors in code today: `supervisor-default`, `supervisor-images`, `supervisor-images-heavy`, `supervisor-pdf-processing`, `supervisor-ai` — see `config/horizon.php`. **Video queues** are part of the **target** topology; add queues + supervisors when the pipeline is wired.
+Horizon supervisors in `config/horizon.php` include: `supervisor-default`, `supervisor-images`, `supervisor-images-heavy`, `supervisor-pdf-processing`, `supervisor-ai`, **`supervisor-video-light`** (`video-light`), **`supervisor-video-heavy`** (`video-heavy`). **Route jobs** to those queue names from application code when the Studio video pipeline is implemented; until then, workers remain idle. Queue names: `config('queue.video_light_queue')` / `config('queue.video_heavy_queue')`.
 
 **Scaling signal:** Prefer **queue age / wait time** over CPU alone for workers. Keep **heavy** lanes from competing for RAM with normal image work. Route oversized PSD/PSB/TIFF/raster jobs to **heavy-image** explicitly.
 

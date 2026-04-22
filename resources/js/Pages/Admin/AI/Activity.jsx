@@ -9,6 +9,12 @@ import {
     XMarkIcon,
     EyeIcon,
 } from '@heroicons/react/24/outline'
+import {
+    formatUsd6,
+    isStudioAnimationRun,
+    StudioRunCostBreakdown,
+    StudioRunTokensNotApplicable,
+} from './studioAnimationRunDisplay'
 
 export default function AIActivity({ runs, filters, filterOptions }) {
     const { auth } = usePage().props
@@ -99,7 +105,7 @@ export default function AIActivity({ runs, filters, filterOptions }) {
                                 href="/app/admin/ai/editor-image-audit"
                                 className="text-sm font-medium text-indigo-600 hover:text-indigo-800 shrink-0"
                             >
-                                Editor image audit →
+                                Editor / Studio video audit →
                             </Link>
                         </div>
                     </div>
@@ -274,11 +280,22 @@ export default function AIActivity({ runs, filters, filterOptions }) {
                                                 {run.model_used}
                                             </td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                                <div>In: {run.tokens_in.toLocaleString()}</div>
-                                                <div>Out: {run.tokens_out.toLocaleString()}</div>
+                                                {isStudioAnimationRun(run) ? (
+                                                    <span className="text-gray-500" title="Studio i2v uses plan credits, not LLM tokens">
+                                                        N/A
+                                                    </span>
+                                                ) : (
+                                                    <>
+                                                        <div>In: {run.tokens_in.toLocaleString()}</div>
+                                                        <div>Out: {run.tokens_out.toLocaleString()}</div>
+                                                    </>
+                                                )}
                                             </td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                                                ${run.estimated_cost.toFixed(6)}
+                                                <div>${formatUsd6(run.estimated_cost)}</div>
+                                                {isStudioAnimationRun(run) && (
+                                                    <div className="text-xs text-gray-500">est. provider COGS</div>
+                                                )}
                                             </td>
                                             <td className="px-6 py-4 whitespace-nowrap">
                                                 {getStatusBadge(run.status)}
@@ -421,13 +438,19 @@ export default function AIActivity({ runs, filters, filterOptions }) {
                                                     </div>
                                                     <div>
                                                         <label className="text-xs font-medium text-gray-500">Tokens</label>
-                                                        <p className="text-sm text-gray-900">
-                                                            In: {runDetails.tokens_in.toLocaleString()} | Out: {runDetails.tokens_out.toLocaleString()} | Total: {runDetails.total_tokens.toLocaleString()}
-                                                        </p>
+                                                        {isStudioAnimationRun(runDetails) ? (
+                                                            <StudioRunTokensNotApplicable />
+                                                        ) : (
+                                                            <p className="text-sm text-gray-900">
+                                                                In: {runDetails.tokens_in.toLocaleString()} | Out:{' '}
+                                                                {runDetails.tokens_out.toLocaleString()} | Total:{' '}
+                                                                {runDetails.total_tokens.toLocaleString()}
+                                                            </p>
+                                                        )}
                                                     </div>
                                                     <div>
-                                                        <label className="text-xs font-medium text-gray-500">Cost</label>
-                                                        <p className="text-sm text-gray-900">${runDetails.estimated_cost.toFixed(6)}</p>
+                                                        <label className="text-xs font-medium text-gray-500">Cost (USD)</label>
+                                                        <StudioRunCostBreakdown runDetails={runDetails} />
                                                     </div>
                                                 </div>
 

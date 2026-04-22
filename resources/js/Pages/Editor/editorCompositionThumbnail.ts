@@ -48,6 +48,44 @@ function reencodePngDataUrlAsJpegBase64(
 }
 
 /**
+ * Rasterize a single layer node for Studio Animate "One layer (cropped)".
+ * The full-canvas path plus document-space crop can still include text/logos when the
+ * selected layer is full-bleed; this captures only that layer’s subtree.
+ */
+export async function captureStudioAnimationLayerIsolatedBase64(
+    layerEl: HTMLElement,
+    width: number,
+    height: number
+): Promise<string | null> {
+    if (!Number.isFinite(width) || !Number.isFinite(height) || width < 2 || height < 2) {
+        return null
+    }
+    try {
+        const pngDataUrl = await toPng(layerEl, {
+            cacheBust: true,
+            skipFonts: true,
+            pixelRatio: 1,
+            width,
+            height,
+            backgroundColor: '#ffffff',
+            fetchRequestInit: editorHtmlToImageFetchRequestInit,
+            style: {
+                width: `${width}px`,
+                height: `${height}px`,
+                boxSizing: 'border-box',
+            },
+        })
+        const jpeg = await reencodePngDataUrlAsJpegBase64(pngDataUrl, width, height, 0.87)
+        if (jpeg) {
+            return jpeg
+        }
+        return pngDataUrl.replace(/^data:image\/png;base64,/, '')
+    } catch {
+        return null
+    }
+}
+
+/**
  * Full-resolution snapshot for Studio Animate: same pixel size as the document, JPEG-compressed for smaller uploads.
  */
 export async function captureCompositionStudioAnimationSnapshotBase64(

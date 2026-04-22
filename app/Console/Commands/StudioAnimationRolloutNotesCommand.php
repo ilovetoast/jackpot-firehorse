@@ -31,7 +31,7 @@ final class StudioAnimationRolloutNotesCommand extends Command
         $this->newLine();
         $this->line('Completion drivers');
         $this->line('  • Polling: PollStudioAnimationJob on queue '.StudioAnimationQueue::name().' (primary when webhooks off; local defaults to default list when unset)');
-        $this->line('  • API smoke test: php artisan studio-animation:test-kling-connection (kling_api = Kling native; fal_queue = fal)');
+        $this->line('  • API smoke test: php artisan studio-animation:test-kling-connection (official Kling API only)');
         $this->line('  • Webhook: STUDIO_ANIMATION_WEBHOOK_INGEST_ENABLED=true + shared secret / FAL HMAC; sets last_webhook_verified');
         $this->newLine();
         $this->line('Finalize retry idempotency');

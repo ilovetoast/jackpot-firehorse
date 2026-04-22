@@ -8,6 +8,8 @@ interface ConfirmOptions {
     message: string
     confirmText?: string
     cancelText?: string
+    /** When false, only the primary action is shown (e.g. informational OK). */
+    showCancel?: boolean
     variant?: ConfirmVariant
     icon?: React.ComponentType<React.SVGProps<SVGSVGElement>>
 }
@@ -75,6 +77,7 @@ export default function EditorConfirmDialog({ state, onClose }: EditorConfirmDia
     const Icon = state.icon ?? styles.DefaultIcon
     const confirmText = state.confirmText ?? 'Confirm'
     const cancelText = state.cancelText ?? 'Cancel'
+    const showCancel = state.showCancel !== false
 
     return (
         <div
@@ -111,13 +114,15 @@ export default function EditorConfirmDialog({ state, onClose }: EditorConfirmDia
 
                 {/* Actions */}
                 <div className="flex items-center justify-end gap-2 px-5 pb-4 pt-5">
-                    <button
-                        type="button"
-                        onClick={() => onClose(false)}
-                        className="rounded-lg border border-gray-700 bg-gray-800 px-3.5 py-2 text-xs font-semibold text-gray-300 transition-colors hover:bg-gray-700 hover:text-white"
-                    >
-                        {cancelText}
-                    </button>
+                    {showCancel && (
+                        <button
+                            type="button"
+                            onClick={() => onClose(false)}
+                            className="rounded-lg border border-gray-700 bg-gray-800 px-3.5 py-2 text-xs font-semibold text-gray-300 transition-colors hover:bg-gray-700 hover:text-white"
+                        >
+                            {cancelText}
+                        </button>
+                    )}
                     <button
                         type="button"
                         onClick={() => onClose(true)}

@@ -184,6 +184,22 @@ class Asset extends Model
             // This allows future authorized services without hardcoding them all
         });
 
+        static::updated(function (Asset $asset) {
+            if (! $asset->wasChanged('intake_state')) {
+                return;
+            }
+            if ((string) $asset->getOriginal('intake_state') !== 'staged') {
+                return;
+            }
+            if ((string) ($asset->intake_state ?? '') !== 'normal') {
+                return;
+            }
+            if (($asset->source ?? '') !== 'studio_animation') {
+                return;
+            }
+            app(\App\Services\Assets\StagedFiledAssetAiService::class)->runIfDeferred($asset);
+        });
+
         /**
          * Dev-only assertion: Harden status mutation contract
          *
@@ -1217,6 +1233,14 @@ class Asset extends Model
     public function scopeStagedOnly(\Illuminate\Database\Eloquent\Builder $query): void
     {
         $query->where('intake_state', 'staged');
+    }
+
+    /**
+     * Standard DAM grid + Staged: uploads and AI outputs (e.g. studio MP4) before/after category filing.
+     */
+    public function scopeForAssetLibraryTypes(\Illuminate\Database\Eloquent\Builder $query): void
+    {
+        $query->whereIn('type', [AssetType::ASSET, AssetType::AI_GENERATED]);
     }
 
     /**

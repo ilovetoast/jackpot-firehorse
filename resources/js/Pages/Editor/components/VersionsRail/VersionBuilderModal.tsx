@@ -117,6 +117,10 @@ export function VersionBuilderModal(props: Props) {
                                 <p className="text-sm font-semibold text-white">Animate video</p>
                                 <p className="mt-0.5 text-[11px] leading-snug text-violet-100/85">
                                     One clip from this composition — appears in the Versions rail; usually a few minutes.
+                                    In Animate, a <strong className="font-semibold text-violet-50">background-only</strong>{' '}
+                                    start frame (no type in the shot) often looks best; you can still send the{' '}
+                                    <strong className="font-semibold text-violet-50">full canvas</strong> if you need the
+                                    full layout.
                                 </p>
                             </div>
                         </div>

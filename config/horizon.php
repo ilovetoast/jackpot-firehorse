@@ -110,6 +110,8 @@ return [
         'redis:pdf-processing' => 300,
         'redis:ai' => 600,
         'redis:ai-low' => 900,
+        'redis:video-light' => 300,
+        'redis:video-heavy' => 900,
     ],
 
     /*
@@ -292,6 +294,34 @@ return [
             'timeout' => (int) env('HORIZON_AI_WORKER_TIMEOUT', 960),
             'nice' => 0,
         ],
+        'supervisor-video-light' => [
+            'connection' => 'redis',
+            'queue' => [env('QUEUE_VIDEO_LIGHT_QUEUE', 'video-light')],
+            'balance' => 'auto',
+            'autoScalingStrategy' => 'time',
+            'maxProcesses' => 1,
+            'minProcesses' => 1,
+            'maxTime' => 3600,
+            'maxJobs' => 200,
+            'memory' => (int) env('HORIZON_VIDEO_LIGHT_MEMORY', 512),
+            'tries' => 2,
+            'timeout' => (int) env('HORIZON_VIDEO_LIGHT_WORKER_TIMEOUT', 600),
+            'nice' => 0,
+        ],
+        'supervisor-video-heavy' => [
+            'connection' => 'redis',
+            'queue' => [env('QUEUE_VIDEO_HEAVY_QUEUE', 'video-heavy')],
+            'balance' => 'auto',
+            'autoScalingStrategy' => 'time',
+            'maxProcesses' => 1,
+            'minProcesses' => 1,
+            'maxTime' => 3600,
+            'maxJobs' => 50,
+            'memory' => (int) env('HORIZON_VIDEO_HEAVY_MEMORY', 2048),
+            'tries' => 1,
+            'timeout' => (int) env('HORIZON_VIDEO_HEAVY_WORKER_TIMEOUT', 3600),
+            'nice' => 0,
+        ],
     ],
 
     'environments' => [
@@ -323,6 +353,18 @@ return [
                 'balanceMaxShift' => 1,
                 'balanceCooldown' => 3,
             ],
+            'supervisor-video-light' => [
+                'maxProcesses' => 3,
+                'minProcesses' => 1,
+                'balanceMaxShift' => 1,
+                'balanceCooldown' => 3,
+            ],
+            'supervisor-video-heavy' => [
+                'maxProcesses' => 2,
+                'minProcesses' => 1,
+                'balanceMaxShift' => 1,
+                'balanceCooldown' => 5,
+            ],
         ] : [],
 
         'staging' => $horizonQueueWorkersEnabled ? [
@@ -347,6 +389,14 @@ return [
                 'maxProcesses' => 1,
                 'minProcesses' => 1,
             ],
+            'supervisor-video-light' => [
+                'maxProcesses' => 1,
+                'minProcesses' => 1,
+            ],
+            'supervisor-video-heavy' => [
+                'maxProcesses' => 1,
+                'minProcesses' => 1,
+            ],
         ] : [],
 
         'local' => [
@@ -364,6 +414,12 @@ return [
                 'maxProcesses' => 1,
             ],
             'supervisor-ai' => [
+                'maxProcesses' => 1,
+            ],
+            'supervisor-video-light' => [
+                'maxProcesses' => 1,
+            ],
+            'supervisor-video-heavy' => [
                 'maxProcesses' => 1,
             ],
         ],

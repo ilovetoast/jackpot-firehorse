@@ -22,6 +22,7 @@ class BrandLibraryCategoryCountService
     ) {}
 
     /**
+     * @param  AssetType|list<AssetType>  $assetType  Single type (e.g. deliverables) or list (e.g. ASSET + AI_GENERATED for the main DAM).
      * @return array{total: int, by_category: array<int, int>}
      */
     public function getCounts(
@@ -32,7 +33,7 @@ class BrandLibraryCategoryCountService
         array $categoryIdsForGrouping,
         ?string $normalizedLifecycle,
         bool $isTrashView,
-        AssetType $assetType,
+        AssetType|array $assetType,
         bool $normalIntakeOnly,
         bool $explicitSoftDeleteWhenNotTrash
     ): array {
@@ -65,11 +66,14 @@ class BrandLibraryCategoryCountService
         array $categoryIdsForGrouping,
         ?string $normalizedLifecycle,
         bool $isTrashView,
-        AssetType $assetType,
+        AssetType|array $assetType,
         bool $normalIntakeOnly,
         bool $explicitSoftDeleteWhenNotTrash
     ): array {
         $cast = Asset::categoryIdMetadataCastExpression();
+
+        /** @var list<AssetType> $types */
+        $types = is_array($assetType) ? $assetType : [$assetType];
 
         $countQuery = Asset::query()
             ->when($normalIntakeOnly, fn ($q) => $q->normalIntakeOnly())
@@ -81,7 +85,7 @@ class BrandLibraryCategoryCountService
             })
             ->where('tenant_id', $tenant->id)
             ->where('brand_id', $brand->id)
-            ->where('type', $assetType)
+            ->whereIn('type', $types)
             ->whereNotNull('metadata')
             ->whereIn(DB::raw($cast), array_map('intval', $viewableCategoryIds));
 

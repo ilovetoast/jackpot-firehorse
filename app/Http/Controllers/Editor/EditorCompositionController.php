@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Editor;
 
 use App\Http\Controllers\Controller;
 use App\Models\Asset;
+use App\Models\Brand;
 use App\Models\Composition;
 use App\Models\CompositionVersion;
 use App\Models\User;
@@ -37,21 +38,44 @@ class EditorCompositionController extends Controller
         protected CompositionDuplicateService $compositionDuplicate,
     ) {}
 
+    /**
+     * Brand role `admin` may list and open any composition in the brand (incl. others' private);
+     * other roles are limited to {@see Composition::scopeVisibleToUser()}.
+     */
+    private function userIsBrandEditorAdmin(\Illuminate\Contracts\Auth\Authenticatable $user, Brand $brand): bool
+    {
+        if (! $user instanceof User) {
+            return false;
+        }
+
+        return $user->getRoleForBrand($brand) === 'admin';
+    }
+
     private function resolveComposition(Request $request, int $id): ?Composition
     {
         $tenant = app('tenant');
         $brand = app('brand');
         $user = $request->user();
-        if (! $tenant || ! $brand || ! $user) {
+        if (! $tenant || ! $brand || ! $user || ! $user instanceof User) {
             return null;
         }
 
-        return Composition::query()
+        $c = Composition::query()
             ->where('id', $id)
             ->where('tenant_id', $tenant->id)
             ->where('brand_id', $brand->id)
-            ->visibleToUser($user)
             ->first();
+        if (! $c) {
+            return null;
+        }
+        if ($c->isVisibleToUser($user)) {
+            return $c;
+        }
+        if ($this->userIsBrandEditorAdmin($user, $brand)) {
+            return $c;
+        }
+
+        return null;
     }
 
     private function resolveThumbnailUrl(?string $assetId): ?string
@@ -127,6 +151,7 @@ class EditorCompositionController extends Controller
         return [
             'id' => (string) $c->id,
             'name' => $c->name,
+            'folder' => $c->folder !== null && $c->folder !== '' ? (string) $c->folder : null,
             'visibility' => $visibility,
             'owner_user_id' => $c->user_id !== null ? (string) $c->user_id : null,
             'document' => $c->document_json ?? [],
@@ -141,6 +166,19 @@ class EditorCompositionController extends Controller
         return $value === Composition::VISIBILITY_SHARED
             ? Composition::VISIBILITY_SHARED
             : Composition::VISIBILITY_PRIVATE;
+    }
+
+    private function normalizeFolder(?string $value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+        $t = trim($value);
+        if ($t === '') {
+            return null;
+        }
+
+        return strlen($t) > 64 ? substr($t, 0, 64) : $t;
     }
 
     private function versionMetaJson(CompositionVersion $v): array
@@ -288,35 +326,90 @@ class EditorCompositionController extends Controller
 
     /**
      * GET /app/api/compositions — list saved compositions for this brand (no full document payload).
+     *
+     * Query: filter=team|mine|all — `all` includes every private draft in the brand, only for brand role `admin`.
+     *        folder=__unfiled__|{label} — optional folder filter; omit for all folders.
      */
     public function index(Request $request): JsonResponse
     {
         $tenant = app('tenant');
         $brand = app('brand');
         $user = $request->user();
-        if (! $tenant || ! $brand || ! $user) {
+        if (! $tenant || ! $brand || ! $user || ! $user instanceof User) {
             return response()->json(['error' => 'Unauthorized', 'compositions' => []], 403);
         }
 
-        $rows = Composition::query()
+        $isBrandAdmin = $this->userIsBrandEditorAdmin($user, $brand);
+        $filter = strtolower((string) $request->query('filter', 'team'));
+        if (! in_array($filter, ['team', 'mine', 'all'], true)) {
+            $filter = 'team';
+        }
+        if ($filter === 'all' && ! $isBrandAdmin) {
+            $filter = 'team';
+        }
+
+        $folderParam = $request->query('folder');
+        $folderParam = is_string($folderParam) ? $folderParam : null;
+
+        $listQuery = Composition::query()
             ->where('tenant_id', $tenant->id)
-            ->where('brand_id', $brand->id)
-            ->visibleToUser($user)
+            ->where('brand_id', $brand->id);
+
+        if ($filter === 'all') {
+            // brand admin: entire brand
+        } elseif ($filter === 'mine') {
+            $listQuery->where('user_id', $user->id);
+        } else {
+            $listQuery->visibleToUser($user);
+        }
+
+        if ($folderParam === '__unfiled__' || $folderParam === '__none__') {
+            $listQuery->where(function ($q) {
+                $q->whereNull('folder')->orWhere('folder', '');
+            });
+        } elseif ($folderParam !== null && $folderParam !== '') {
+            $listQuery->where('folder', $folderParam);
+        }
+
+        $rows = (clone $listQuery)
             ->orderByDesc('updated_at')
-            ->limit(100)
-            ->get(['id', 'name', 'thumbnail_asset_id', 'updated_at', 'visibility']);
+            ->limit(200)
+            ->get(['id', 'name', 'thumbnail_asset_id', 'updated_at', 'visibility', 'user_id', 'folder']);
 
         $items = $rows->map(function (Composition $c) {
             return [
                 'id' => (string) $c->id,
                 'name' => $c->name,
+                'folder' => $c->folder !== null && $c->folder !== '' ? (string) $c->folder : null,
+                'owner_user_id' => $c->user_id !== null ? (string) $c->user_id : null,
                 'visibility' => $c->visibility ?? Composition::VISIBILITY_SHARED,
                 'thumbnail_url' => $this->resolveThumbnailUrl($c->thumbnail_asset_id),
                 'updated_at' => $c->updated_at?->toIso8601String() ?? '',
             ];
         });
 
-        return response()->json(['compositions' => $items]);
+        $folderIndexBase = Composition::query()
+            ->where('tenant_id', $tenant->id)
+            ->where('brand_id', $brand->id);
+        if (! $isBrandAdmin) {
+            $folderIndexBase->visibleToUser($user);
+        }
+        $folders = $folderIndexBase
+            ->whereNotNull('folder')
+            ->where('folder', '!=', '')
+            ->orderBy('folder')
+            ->distinct()
+            ->pluck('folder')
+            ->values()
+            ->all();
+
+        return response()->json([
+            'compositions' => $items,
+            'meta' => [
+                'can_list_all' => $isBrandAdmin,
+                'folders' => $folders,
+            ],
+        ]);
     }
 
     /**
@@ -335,6 +428,7 @@ class EditorCompositionController extends Controller
             'name' => 'required|string|max:255',
             'document' => 'required|array',
             'visibility' => 'nullable|string|in:private,shared',
+            'folder' => 'nullable|string|max:64',
             'thumbnail_png_base64' => 'nullable|string|max:6000000',
             'telemetry' => 'nullable|array',
             'telemetry.duration_ms' => 'nullable|integer|min:0|max:172800000',
@@ -342,14 +436,16 @@ class EditorCompositionController extends Controller
 
         $thumbBinary = $this->decodeThumbnailPayload($validated['thumbnail_png_base64'] ?? null);
         $visibility = $this->normalizeVisibility($validated['visibility'] ?? null);
+        $folder = $this->normalizeFolder($validated['folder'] ?? null);
 
-        $composition = DB::transaction(function () use ($tenant, $brand, $user, $validated, $thumbBinary, $visibility) {
+        $composition = DB::transaction(function () use ($tenant, $brand, $user, $validated, $thumbBinary, $visibility, $folder) {
             $c = Composition::query()->create([
                 'tenant_id' => $tenant->id,
                 'brand_id' => $brand->id,
                 'user_id' => $user->id,
                 'visibility' => $visibility,
                 'name' => $validated['name'],
+                'folder' => $folder,
                 'document_json' => $validated['document'],
             ]);
 
@@ -421,6 +517,7 @@ class EditorCompositionController extends Controller
             'compositions.*.name' => 'required|string|max:255',
             'compositions.*.document' => 'required|array',
             'compositions.*.visibility' => 'nullable|string|in:private,shared',
+            'compositions.*.folder' => 'nullable|string|max:64',
             'telemetry' => 'nullable|array',
             'telemetry.duration_ms' => 'nullable|integer|min:0|max:172800000',
         ]);
@@ -429,12 +526,14 @@ class EditorCompositionController extends Controller
             $out = [];
             foreach ($validated['compositions'] as $item) {
                 $visibility = $this->normalizeVisibility($item['visibility'] ?? null);
+                $folder = $this->normalizeFolder($item['folder'] ?? null);
                 $c = Composition::query()->create([
                     'tenant_id' => $tenant->id,
                     'brand_id' => $brand->id,
                     'user_id' => $user->id,
                     'visibility' => $visibility,
                     'name' => $item['name'],
+                    'folder' => $folder,
                     'document_json' => $item['document'],
                 ]);
 
@@ -489,6 +588,7 @@ class EditorCompositionController extends Controller
             'name' => 'sometimes|string|max:255',
             'document' => 'required|array',
             'visibility' => 'sometimes|string|in:private,shared',
+            'folder' => 'nullable|string|max:64',
             'version_label' => 'nullable|string|max:255',
             'version_kind' => 'nullable|string|in:manual,autosave',
             'thumbnail_png_base64' => 'nullable|string|max:6000000',
@@ -516,6 +616,9 @@ class EditorCompositionController extends Controller
             }
             if (array_key_exists('visibility', $validated)) {
                 $composition->visibility = $this->normalizeVisibility($validated['visibility']);
+            }
+            if (array_key_exists('folder', $validated)) {
+                $composition->folder = $this->normalizeFolder($validated['folder']);
             }
             $composition->document_json = $validated['document'];
 
@@ -733,17 +836,11 @@ class EditorCompositionController extends Controller
             return response()->json(['error' => 'Unauthorized'], 403);
         }
 
-        $composition = Composition::query()
-            ->with('versions')
-            ->where('id', $id)
-            ->where('tenant_id', $tenant->id)
-            ->where('brand_id', $brand->id)
-            ->visibleToUser($user)
-            ->first();
-
+        $composition = $this->resolveComposition($request, $id);
         if (! $composition) {
             return response()->json(['error' => 'Not found'], 404);
         }
+        $composition->load('versions');
 
         if (! $composition->userCanDelete($user)) {
             return response()->json(['error' => 'Forbidden'], 403);

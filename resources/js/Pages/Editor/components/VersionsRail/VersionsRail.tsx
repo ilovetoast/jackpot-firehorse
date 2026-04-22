@@ -1,5 +1,5 @@
 import type { RefObject } from 'react'
-import { ChevronDownIcon, TrashIcon } from '@heroicons/react/24/outline'
+import { InformationCircleIcon, TrashIcon, XMarkIcon } from '@heroicons/react/24/outline'
 import { CheckIcon, PlusIcon, StarIcon } from '@heroicons/react/24/solid'
 import { StudioVersionsHandoffBar } from './StudioVersionsHandoffBar'
 import { StudioAnimationRailChips } from './StudioAnimationRailChips'
@@ -17,6 +17,22 @@ import {
     shouldShowVersionHints,
     variantHasAxisMetadata,
 } from '../../../../utils/studioVersionRailHelpers.mjs'
+
+function variantGroupTypeLabel(type: string): { title: string; short: string } {
+    if (type === 'color') {
+        return { title: 'Color family', short: 'Color' }
+    }
+    if (type === 'layout_size') {
+        return { title: 'Size & layout family', short: 'Size' }
+    }
+    if (type === 'generic') {
+        return { title: 'Variant set', short: 'Set' }
+    }
+    if (type === 'motion') {
+        return { title: 'Motion family', short: 'Motion' }
+    }
+    return { title: type, short: type }
+}
 
 function statusRingClass(status: string, isActive: boolean): string {
     if (isActive) {
@@ -106,6 +122,11 @@ export function VersionsRail(props: {
     onRequestDiscardStudioAnimationJob?: (jobId: string) => void | Promise<unknown>
     /** Remove a non-base variant from the set (parent runs confirm + API). */
     onRequestRemoveVariant?: (variant: StudioCreativeSetVariantDto) => void
+    /** Delete the entire Versions set (compositions remain; parent runs confirm + API). */
+    onDissolveSet?: () => void
+    dissolveSetBusy?: boolean
+    /** When false, hide AI image-to-video job chips in the rail (use layer Properties instead). */
+    showCompositionAnimationChips?: boolean
 }) {
     const {
         creativeSet,
@@ -141,6 +162,9 @@ export function VersionsRail(props: {
         onSelectStudioAnimationJob,
         onRequestDiscardStudioAnimationJob,
         onRequestRemoveVariant,
+        onDissolveSet,
+        dissolveSetBusy = false,
+        showCompositionAnimationChips = true,
     } = props
 
     const showPickChrome = applyScope === 'selected_versions'
@@ -194,7 +218,10 @@ export function VersionsRail(props: {
                 : `Same format${sameFormatPreset.ref?.label ? `: ${sameFormatPreset.ref.label}` : sameFormatPreset.ref?.id ? `: ${sameFormatPreset.ref.id}` : ''}`
 
     return (
-        <div className="flex shrink-0 flex-col border-t border-gray-800 bg-gray-950 px-3 py-2" data-testid="studio-versions-rail-root">
+        <div
+            className="flex shrink-0 flex-col bg-gray-950 px-3 py-2"
+            data-testid="studio-versions-rail-root"
+        >
             {showHints && (
                 <div className="mb-1.5 rounded-md border border-indigo-900/30 bg-indigo-950/15 px-2 py-1.5 text-[10px] leading-snug text-gray-400">
                     <span className="font-semibold text-indigo-100/90">Grow this set.</span> Try{' '}
@@ -258,11 +285,23 @@ export function VersionsRail(props: {
                                 type="button"
                                 data-testid="studio-versions-panel-collapse"
                                 onClick={() => onCollapsePanel()}
-                                className="rounded-md p-1 text-gray-500 hover:bg-gray-800 hover:text-gray-300"
-                                title="Hide versions panel"
-                                aria-label="Hide versions panel"
+                                className="inline-flex items-center gap-1 rounded-md border border-gray-700/80 px-1.5 py-1 text-[10px] font-medium text-gray-400 hover:border-gray-600 hover:bg-gray-800 hover:text-gray-200"
+                                title="Hide the Versions bar — you can show it again from the strip at the bottom"
                             >
-                                <ChevronDownIcon className="h-4 w-4" aria-hidden />
+                                <XMarkIcon className="h-3.5 w-3.5" aria-hidden />
+                                <span>Close</span>
+                            </button>
+                        )}
+                        {onDissolveSet && (
+                            <button
+                                type="button"
+                                data-testid="studio-versions-exit"
+                                onClick={() => onDissolveSet()}
+                                disabled={dissolveSetBusy}
+                                className="inline-flex items-center gap-1 rounded-md border border-red-500/45 bg-red-950/35 px-2 py-1 text-[10px] font-semibold text-red-100 hover:border-red-400/60 hover:bg-red-950/50 disabled:cursor-not-allowed disabled:opacity-50"
+                                title="Leave the Versions workspace for this composition. Compositions stay in your library; use File → Create versions to attach again."
+                            >
+                                {dissolveSetBusy ? 'Exiting…' : 'Exit versions'}
                             </button>
                         )}
                     <div className="flex shrink-0 flex-col items-end gap-1">
@@ -307,7 +346,7 @@ export function VersionsRail(props: {
                                 title={
                                     showPickChrome
                                         ? 'Finish choosing semantic apply targets first'
-                                        : 'Select versions to export together'
+                                        : 'Select design versions to export as PNG or JPG (not AI video).'
                                 }
                             >
                                 {studioHandoff.selectionMode ? 'Handoff on' : 'Handoff'}
@@ -316,6 +355,12 @@ export function VersionsRail(props: {
                     </div>
                     </div>
                 </div>
+                {onDissolveSet && (
+                    <p className="border-t border-gray-800/50 pt-1.5 text-[9px] leading-snug text-gray-500">
+                        Need this workspace again? Use <span className="font-semibold text-gray-400">File → Create versions</span>{' '}
+                        to reattach a set.
+                    </p>
+                )}
             </div>
             {studioHandoff?.selectionMode && (
                 <StudioVersionsHandoffBar
@@ -412,12 +457,54 @@ export function VersionsRail(props: {
                     )}
                 </div>
             )}
+            {creativeSet.variant_groups && creativeSet.variant_groups.length > 0 && (
+                <div className="mb-1.5 space-y-1 rounded-md border border-gray-800 bg-gray-900/50 px-2 py-1.5">
+                    <p className="text-[9px] font-semibold uppercase tracking-wide text-gray-500">Variant sets</p>
+                    <p className="text-[9px] leading-snug text-gray-500">
+                        Color and size groups link sibling compositions from generation (read-only in the rail for now).
+                    </p>
+                    {creativeSet.variant_groups.map((g) => {
+                        const t = variantGroupTypeLabel(String(g.type))
+                        return (
+                            <div
+                                key={g.id}
+                                className="flex flex-wrap items-center gap-1.5 text-[10px] text-gray-300"
+                                title={g.label ? `${t.title}: ${g.label}` : t.title}
+                            >
+                                <span
+                                    className="rounded bg-gray-800 px-1.5 py-0.5 text-[9px] font-semibold text-indigo-200"
+                                >
+                                    {t.short}
+                                </span>
+                                <span className="truncate text-gray-400">{g.label || t.title}</span>
+                                <span className="text-gray-500">
+                                    {g.member_count} member{g.member_count === 1 ? '' : 's'}
+                                </span>
+                            </div>
+                        )
+                    })}
+                </div>
+            )}
+            {showCompositionAnimationChips ? (
+            <div
+                className="mb-1.5 flex gap-1.5 rounded-md border border-violet-900/35 bg-violet-950/20 px-2 py-1.5 text-[9px] leading-snug text-violet-100/90"
+                title="In Animate composition: use a background-only layer (no type in frame) for cleaner motion, or full canvas for the exact layout."
+            >
+                <InformationCircleIcon className="mt-0.5 h-3.5 w-3.5 shrink-0 text-violet-300/90" aria-hidden />
+                <p>
+                    <span className="font-semibold text-violet-200">Video versions</span> — best results when the start
+                    frame is <strong className="text-violet-50">just the background</strong> (no text). You can still run{' '}
+                    <strong className="text-violet-50">full composition</strong> to match your ad exactly.
+                </p>
+            </div>
+            ) : null}
             <div
                 ref={railScrollRef}
                 data-testid="studio-versions-rail-scroll"
                 className="flex gap-2 overflow-x-auto pb-1 pt-0.5"
                 style={{ scrollbarWidth: 'thin' }}
             >
+                {showCompositionAnimationChips ? (
                 <StudioAnimationRailChips
                     jobs={compositionAnimations}
                     loading={compositionAnimationsLoading}
@@ -426,6 +513,7 @@ export function VersionsRail(props: {
                     compositionTitle={compositionAnimationTitle}
                     onRequestDiscardJob={onRequestDiscardStudioAnimationJob}
                 />
+                ) : null}
                 {creativeSet.variants.map((v: StudioCreativeSetVariantDto) => {
                     const active = activeCompositionId === v.composition_id
                     const retryId = v.retryable_generation_job_item_id ?? null

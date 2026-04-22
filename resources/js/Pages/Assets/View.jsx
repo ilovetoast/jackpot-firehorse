@@ -101,6 +101,17 @@ export default function AssetView({ asset }) {
                         ← Back to collection
                     </Link>
                 )}
+                {!asset?.collection_only && (
+                    <div className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-1">
+                        <Link
+                            href={route('assets.index')}
+                            className="text-sm font-medium text-indigo-600 hover:text-indigo-800"
+                        >
+                            ← Library grid
+                        </Link>
+                        <span className="text-xs text-gray-500">This page is a full-screen preview; your file also appears in the main asset list.</span>
+                    </div>
+                )}
 
                 <div className="bg-white rounded-lg shadow overflow-hidden">
                     <div className="p-4 border-b border-gray-200 flex items-center justify-between flex-wrap gap-2">
@@ -193,39 +204,82 @@ export default function AssetView({ asset }) {
                                     </div>
                                 )}
                                 {/* Always show thumbnail when available (any file type) */}
-                                {!isPdf && asset.thumbnail_url && (
-                                    <div className="flex-shrink-0 max-w-full max-h-[60vh] flex justify-center">
+                                {/* Video: play inline (download URL redirects to signed storage — same pattern as the editor). */}
+                                {!isPdf && isVideo && asset.download_url && (
+                                    <div className="w-full max-w-4xl">
+                                        <video
+                                            src={asset.download_url}
+                                            controls
+                                            playsInline
+                                            preload="metadata"
+                                            poster={asset.thumbnail_url || undefined}
+                                            className="w-full max-h-[70vh] rounded border border-gray-200 bg-black/5 object-contain shadow-sm"
+                                        >
+                                            Your browser does not support embedded video.
+                                        </video>
+                                        {!asset.thumbnail_url && (
+                                            <p className="mt-2 text-center text-xs text-gray-500">
+                                                Thumbnail is still processing — video playback should work.
+                                            </p>
+                                        )}
+                                    </div>
+                                )}
+                                {!isPdf && isVideo && !asset.download_url && (
+                                    <p className="text-center text-gray-500">
+                                        Video file is not available to stream. If this persists, contact support.
+                                    </p>
+                                )}
+                                {/* Images: show raster preview (not used for video — avoids broken img when video thumb is pending). */}
+                                {!isPdf && !isVideo && isImage && asset.thumbnail_url && (
+                                    <div className="flex max-h-[60vh] w-full max-w-4xl flex-shrink-0 justify-center">
                                         <img
                                             src={asset.thumbnail_url}
-                                            alt={asset.title || asset.original_filename || 'Asset thumbnail'}
-                                            className="max-w-full max-h-[60vh] w-auto h-auto object-contain rounded border border-gray-200 shadow-sm"
+                                            alt={asset.title || asset.original_filename || 'Asset'}
+                                            className="max-h-[60vh] w-auto max-w-full object-contain rounded border border-gray-200 shadow-sm"
                                         />
                                     </div>
                                 )}
-                                {/* Full preview for images (thumbnail already shown above if no larger preview); message for others */}
-                                {isPdf ? null : isImage && asset.thumbnail_url ? null : isVideo ? (
-                                    <p className="text-gray-500 text-center">
-                                        Video preview not available in this view. Use Download to get the file.
-                                    </p>
-                                ) : !asset.thumbnail_url ? (
-                                    <div className="text-center text-gray-500">
-                                        <p className="mb-2">No thumbnail available.</p>
+                                {/* Non-image, non-video (e.g. font): thumbnail + note */}
+                                {!isPdf && !isVideo && !isImage && asset.thumbnail_url && (
+                                    <div className="w-full max-w-4xl text-center">
+                                        <div className="flex max-h-[60vh] w-full justify-center">
+                                            <img
+                                                src={asset.thumbnail_url}
+                                                alt={asset.title || asset.original_filename || 'Asset thumbnail'}
+                                                className="max-h-[60vh] w-auto max-w-full object-contain rounded border border-gray-200 shadow-sm"
+                                            />
+                                        </div>
+                                        <p className="mt-2 text-sm text-gray-500">Preview is thumbnail only for this file type.</p>
                                         {asset.download_url && (
                                             <a
                                                 href={asset.download_url}
-                                                className="text-indigo-600 hover:text-indigo-800 font-medium"
+                                                className="mt-1 inline-block font-medium text-indigo-600 hover:text-indigo-800"
                                             >
                                                 Download file
                                             </a>
                                         )}
                                     </div>
-                                ) : (
+                                )}
+                                {!isPdf && !isVideo && !isImage && !asset.thumbnail_url && (
                                     <div className="text-center text-gray-500">
-                                        <p className="mb-2">Preview not available for this file type.</p>
+                                        <p className="mb-2">No preview available.</p>
                                         {asset.download_url && (
                                             <a
                                                 href={asset.download_url}
-                                                className="text-indigo-600 hover:text-indigo-800 font-medium"
+                                                className="font-medium text-indigo-600 hover:text-indigo-800"
+                                            >
+                                                Download file
+                                            </a>
+                                        )}
+                                    </div>
+                                )}
+                                {!isPdf && !isVideo && isImage && !asset.thumbnail_url && (
+                                    <div className="text-center text-gray-500">
+                                        <p className="mb-2">No thumbnail yet.</p>
+                                        {asset.download_url && (
+                                            <a
+                                                href={asset.download_url}
+                                                className="font-medium text-indigo-600 hover:text-indigo-800"
                                             >
                                                 Download file
                                             </a>

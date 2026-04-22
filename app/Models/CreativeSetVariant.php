@@ -19,6 +19,7 @@ class CreativeSetVariant extends Model
 
     protected $fillable = [
         'creative_set_id',
+        'studio_variant_group_id',
         'composition_id',
         'sort_order',
         'label',
@@ -47,6 +48,11 @@ class CreativeSetVariant extends Model
     public function generationJobItem(): BelongsTo
     {
         return $this->belongsTo(GenerationJobItem::class, 'generation_job_item_id');
+    }
+
+    public function studioVariantGroup(): BelongsTo
+    {
+        return $this->belongsTo(StudioVariantGroup::class, 'studio_variant_group_id');
     }
 
     public function isReady(): bool

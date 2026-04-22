@@ -9,6 +9,7 @@ use App\Models\Collection;
 use App\Models\DeletionError;
 use App\Models\OwnershipTransfer;
 use App\Models\StudioAnimationJob;
+use App\Models\StudioVariantGroup;
 use App\Models\Tenant;
 use App\Models\Ticket;
 use App\Policies\AssetPolicy;
@@ -19,6 +20,7 @@ use App\Policies\CompanyPolicy;
 use App\Policies\DeletionErrorPolicy;
 use App\Policies\OwnershipTransferPolicy;
 use App\Policies\StudioAnimationJobPolicy;
+use App\Policies\StudioVariantGroupPolicy;
 use App\Policies\TicketPolicy;
 use Illuminate\Foundation\Support\Providers\AuthServiceProvider as ServiceProvider;
 use Illuminate\Support\Facades\Gate;
@@ -40,6 +42,7 @@ class AuthServiceProvider extends ServiceProvider
         OwnershipTransfer::class => OwnershipTransferPolicy::class,
         Ticket::class => TicketPolicy::class,
         StudioAnimationJob::class => StudioAnimationJobPolicy::class,
+        StudioVariantGroup::class => StudioVariantGroupPolicy::class,
     ];
 
     /**

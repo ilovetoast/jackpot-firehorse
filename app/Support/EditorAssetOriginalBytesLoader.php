@@ -8,23 +8,40 @@ use Illuminate\Support\Facades\Storage;
 
 /**
  * Loads original asset bytes from object storage — no HTTP to the app (avoids HTML/auth failures).
- * Uses {@see Asset::storage_root_path} (canonical original), never thumbnail paths.
+ * Defaults to {@see Asset::storage_root_path}; pass $objectKey for the current version file path when it differs.
+ *
+ * Some pipeline rows (e.g. studio_animation) omit storage_bucket_id while still
+ * storing the object on the shared output disk — see {@see self::loadViaFallbackDisks()}.
  */
 final class EditorAssetOriginalBytesLoader
 {
     /**
-     * Disk name from config when the asset uses the default app bucket; otherwise a dynamic disk is built.
+     * Resolve bytes via {@see Asset::storageBucket} + configured / dynamic S3 disk (never pass a model into {@see Storage::disk()}).
+     *
+     * @param  ?string  $objectKey  Object key in bucket; null/empty uses {@see Asset::storage_root_path}.
      *
      * @throws \InvalidArgumentException
      */
-    public static function loadFromStorage(Asset $asset): string
+    public static function loadFromStorage(Asset $asset, ?string $objectKey = null): string
     {
         $asset->loadMissing('storageBucket');
-        $key = $asset->storage_root_path;
-        if (! is_string($key) || $key === '' || ! $asset->storageBucket) {
+        $key = ($objectKey !== null && $objectKey !== '') ? $objectKey : $asset->storage_root_path;
+        if (! is_string($key) || $key === '') {
             throw new \InvalidArgumentException('Original file is not available in storage.');
         }
 
+        if ($asset->storageBucket !== null) {
+            return self::loadViaBucket($asset, $key);
+        }
+
+        return self::loadViaFallbackDisks($asset, $key);
+    }
+
+    /**
+     * @throws \InvalidArgumentException
+     */
+    private static function loadViaBucket(Asset $asset, string $key): string
+    {
         $bucketName = $asset->storageBucket->name;
         $diskName = $asset->storage_disk ?? null;
         if (is_string($diskName) && $diskName !== '' && config("filesystems.disks.{$diskName}")) {
@@ -73,12 +90,57 @@ final class EditorAssetOriginalBytesLoader
             throw new \InvalidArgumentException('Empty file from storage');
         }
 
-        Log::info('Loaded image from storage', [
+        Log::info('Loaded asset bytes from storage', [
             'bytes' => strlen($contents),
             'path' => $key,
             'bucket' => $bucketName,
         ]);
 
         return $contents;
+    }
+
+    /**
+     * Studio animation (and similar) assets are written with Storage::disk() but may not set storage_bucket_id.
+     *
+     * @throws \InvalidArgumentException
+     */
+    private static function loadViaFallbackDisks(Asset $asset, string $key): string
+    {
+        $candidates = [];
+        $outputDisk = config('studio_animation.output_disk');
+        if (is_string($outputDisk) && $outputDisk !== '') {
+            $candidates[] = $outputDisk;
+        }
+        $candidates[] = 's3';
+
+        foreach (array_unique($candidates) as $diskName) {
+            if (! is_string($diskName) || $diskName === '' || ! config("filesystems.disks.{$diskName}")) {
+                continue;
+            }
+            try {
+                $contents = Storage::disk($diskName)->get($key);
+                if (is_string($contents) && $contents !== '') {
+                    Log::info('Loaded asset bytes from storage (no storage_bucket row)', [
+                        'asset_id' => $asset->id,
+                        'disk' => $diskName,
+                        'path' => $key,
+                        'bytes' => strlen($contents),
+                    ]);
+
+                    return $contents;
+                }
+            } catch (\Throwable $e) {
+                Log::debug('[EditorAssetOriginalBytesLoader] fallback disk read miss', [
+                    'asset_id' => $asset->id,
+                    'disk' => $diskName,
+                    'path' => $key,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
+        throw new \InvalidArgumentException(
+            'Original file is not available in storage (asset has no storage bucket; tried configured output and s3 disks).',
+        );
     }
 }

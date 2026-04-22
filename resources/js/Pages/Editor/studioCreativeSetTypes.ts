@@ -1,5 +1,35 @@
 /** Studio UI: "Versions" — backend {@link CreativeSet} / {@link CreativeSetVariant}. */
 
+export type StudioVariantGroupMemberDto = {
+    id: string
+    composition_id: string | null
+    slot_key: string | null
+    label: string | null
+    status: string
+    generation_status: string | null
+    spec_json: Record<string, unknown>
+    generation_job_item_id: string | null
+    result_asset_id: string | null
+    sort_order: number
+}
+
+export type StudioVariantGroupDto = {
+    id: string
+    uuid: string
+    type: string
+    label: string | null
+    status: string
+    source_composition_id: string
+    source_composition_version_id: string | null
+    creative_set_id: string | null
+    settings_json: Record<string, unknown>
+    target_spec_json: unknown
+    shared_mask_asset_id: string | null
+    sort_order: number
+    member_count: number
+    members: StudioVariantGroupMemberDto[]
+}
+
 export type StudioCreativeSetVariantDto = {
     id: string
     composition_id: string
@@ -10,6 +40,8 @@ export type StudioCreativeSetVariantDto = {
     thumbnail_url: string | null
     /** Present when status is `failed` and a retry can be enqueued for the latest failed job item. */
     retryable_generation_job_item_id?: string | null
+    studio_variant_group_id?: string | null
+    legacy_ungrouped_label?: string | null
 }
 
 export type StudioCreativeSetDto = {
@@ -19,6 +51,8 @@ export type StudioCreativeSetDto = {
     /** Marked “hero” composition for this set (export / best-version cue); at most one. */
     hero_composition_id?: string | null
     variants: StudioCreativeSetVariantDto[]
+    /** When {@code STUDIO_VARIANT_GROUPS_V1} is on — sibling families (color / layout / generic). */
+    variant_groups?: StudioVariantGroupDto[]
 }
 
 export type StudioGenerationPresetColor = { id: string; label: string; hex?: string | null }

@@ -14,8 +14,8 @@ const TILES = [
         icon: SparklesIcon,
     },
     {
-        name: 'Editor image audit',
-        description: 'Canvas + presentation preview — input/output',
+        name: 'Editor / Studio video audit',
+        description: 'Canvas, presentation preview, Studio composition video — prompts, credits',
         href: '/app/admin/ai/editor-image-audit',
         icon: PhotoIcon,
     },

@@ -69,6 +69,13 @@ export type DocumentModel = {
      * {@link migrateDocumentIfNeeded}.
      */
     groups?: Group[]
+    /**
+     * Optional Studio timeline: total composition length for video layers / export.
+     * Extended without breaking older clients.
+     */
+    studio_timeline?: {
+        duration_ms: number
+    }
     created_at?: string
     updated_at?: string
 }
@@ -96,7 +103,7 @@ export type Group = {
 
 export type BaseLayer = {
     id: string
-    type: 'image' | 'text' | 'generative_image' | 'fill' | 'mask'
+    type: 'image' | 'text' | 'generative_image' | 'fill' | 'mask' | 'video'
     name?: string
     visible: boolean
     locked: boolean
@@ -461,6 +468,38 @@ export type GenerativeImageLayer = BaseLayer & {
  *   - 'below_all'  → clips every layer beneath this mask.
  *   - 'group'      → clips all members of {@link groupId}.
  */
+/** Raster/video asset placed on the canvas (Studio: AI video result or uploaded clip). */
+export type VideoLayer = BaseLayer & {
+    type: 'video'
+    assetId?: string
+    src: string
+    fit?: 'cover' | 'contain' | 'fill'
+    naturalWidth?: number
+    naturalHeight?: number
+    /**
+     * V1: when multiple video layers exist, the one used as the base for baked export.
+     * If unset, export falls back to the lowest-`z` visible video layer.
+     */
+    primaryForExport?: boolean
+    /** Provenance for Studio-generated or inserted clips (properties display + debugging). */
+    studioProvenance?: {
+        sourceMode?: string
+        provider?: string
+        model?: string
+        jobId?: string
+        outputAssetId?: string
+        durationMs?: number
+    }
+    /** Timeline within the composition (V1: start/end relative to comp timeline, single playhead). */
+    timeline?: {
+        start_ms: number
+        end_ms: number
+        trim_in_ms?: number
+        trim_out_ms?: number
+        muted?: boolean
+    }
+}
+
 export type MaskLayer = BaseLayer & {
     type: 'mask'
     shape: 'rect' | 'ellipse' | 'rounded_rect' | 'gradient_linear' | 'gradient_radial'
@@ -479,9 +518,9 @@ export type MaskLayer = BaseLayer & {
     groupId?: string
 }
 
-export type Layer = ImageLayer | TextLayer | GenerativeImageLayer | FillLayer | MaskLayer
+export type Layer = ImageLayer | TextLayer | GenerativeImageLayer | FillLayer | MaskLayer | VideoLayer
 
-const ALLOWED_LAYER_TYPES = new Set(['image', 'text', 'generative_image', 'fill', 'mask'])
+const ALLOWED_LAYER_TYPES = new Set(['image', 'text', 'generative_image', 'fill', 'mask', 'video'])
 
 export function isFillLayer(l: Layer): l is FillLayer {
     return l.type === 'fill'
@@ -499,6 +538,25 @@ export function isCtaButtonFillLayer(layer: FillLayer): boolean {
 
 export function isMaskLayer(l: Layer): l is MaskLayer {
     return l.type === 'mask'
+}
+
+export function isVideoLayer(l: Layer): l is VideoLayer {
+    return l.type === 'video'
+}
+
+/** Same primary rules as the composition MP4 export job (for preview / publish UI). */
+export function getPrimaryVideoLayerForDocumentExport(layers: Layer[]): VideoLayer | null {
+    const candidates = layers.filter(
+        (l): l is VideoLayer => isVideoLayer(l) && l.visible !== false && Boolean((l.assetId ?? '').toString().trim()) && Boolean((l.src ?? '').trim())
+    )
+    if (candidates.length === 0) {
+        return null
+    }
+    const primary = candidates.find((v) => v.primaryForExport)
+    if (primary) {
+        return primary
+    }
+    return [...candidates].sort((a, b) => (a.z ?? 0) - (b.z ?? 0))[0] ?? null
 }
 
 /**
@@ -1074,6 +1132,14 @@ export function parseDocumentFromApi(raw: unknown): DocumentModel {
         }
     }
 
+    let studio_timeline: DocumentModel['studio_timeline']
+    if (o.studio_timeline && typeof o.studio_timeline === 'object') {
+        const st = o.studio_timeline as Record<string, unknown>
+        if (typeof st.duration_ms === 'number' && st.duration_ms > 0) {
+            studio_timeline = { duration_ms: st.duration_ms }
+        }
+    }
+
     const parsed: DocumentModel = {
         id: typeof o.id === 'string' ? o.id : generateId(),
         width: w,
@@ -1085,6 +1151,7 @@ export function parseDocumentFromApi(raw: unknown): DocumentModel {
         layers,
         groups,
         studioBrief,
+        studio_timeline,
         created_at: typeof o.created_at === 'string' ? o.created_at : undefined,
         updated_at: typeof o.updated_at === 'string' ? o.updated_at : undefined,
     }

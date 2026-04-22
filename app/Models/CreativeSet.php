@@ -57,6 +57,14 @@ class CreativeSet extends Model
         return $this->hasMany(GenerationJob::class);
     }
 
+    /**
+     * Studio variant families (color / layout / generic) attached to this Versions set.
+     */
+    public function studioVariantGroups(): HasMany
+    {
+        return $this->hasMany(StudioVariantGroup::class, 'creative_set_id')->orderBy('sort_order')->orderBy('id');
+    }
+
     public function scopeActive($query)
     {
         return $query->where('status', self::STATUS_ACTIVE);

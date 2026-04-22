@@ -36,7 +36,7 @@
     <meta property="og:site_name" content="{{ config('app.name', 'Jackpot') }}">
     <meta property="og:title" content="{{ config('app.name', 'Jackpot') }} — Back shortly">
     <meta property="og:description" content="We're performing a quick update. Service will be restored momentarily.">
-    <meta property="og:image" content="{{ url('/og-image-1200x630.png') }}">
+    <meta property="og:image" content="{{ url('/jp-og.png') }}">
     <meta name="twitter:card" content="summary_large_image">
 
     <style>

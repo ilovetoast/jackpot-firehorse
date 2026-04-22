@@ -26,6 +26,8 @@ final class AnimationIntentBuilder
             'mode' => 'animate_composition',
             'source_kind' => match ($sourceStrategy) {
                 StudioAnimationSourceStrategy::CompositionSnapshot => 'composition_snapshot',
+                StudioAnimationSourceStrategy::SelectedLayerWithContext => 'selected_layer_with_context',
+                StudioAnimationSourceStrategy::SelectedLayerIsolated => 'selected_layer_isolated',
                 default => $sourceStrategy->value,
             },
             'motion_style' => $motionPresetKey,

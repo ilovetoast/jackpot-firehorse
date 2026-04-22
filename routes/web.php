@@ -723,9 +723,26 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
                 Route::post('/api/compositions/{id}/versions', [\App\Http\Controllers\Editor\EditorCompositionController::class, 'versionsStore'])->whereNumber('id')->name('api.editor.compositions.versions.store');
                 Route::get('/api/compositions/{id}/versions/{versionId}', [\App\Http\Controllers\Editor\EditorCompositionController::class, 'versionsShow'])->whereNumber('id')->whereNumber('versionId')->name('api.editor.compositions.versions.show');
 
+                Route::post('/api/compositions/{id}/studio/video-layer', [\App\Http\Controllers\Editor\EditorCompositionStudioVideoController::class, 'storeVideoLayer'])
+                    ->whereNumber('id')
+                    ->name('api.editor.compositions.studio.video-layer');
+                Route::post('/api/compositions/{id}/studio/video-export', [\App\Http\Controllers\Editor\EditorCompositionStudioVideoController::class, 'requestExport'])
+                    ->whereNumber('id')
+                    ->name('api.editor.compositions.studio.video-export');
+                Route::get('/api/compositions/{id}/studio/video-export/{exportJobId}', [\App\Http\Controllers\Editor\EditorCompositionStudioVideoController::class, 'exportStatus'])
+                    ->whereNumber('id')
+                    ->whereNumber('exportJobId')
+                    ->name('api.editor.compositions.studio.video-export.status');
+
                 // Studio "Versions" (Creative Sets) — static paths before /api/creative-sets/{id}
                 Route::get('/api/creative-sets/generation-presets', [\App\Http\Controllers\Editor\EditorCreativeSetController::class, 'generationPresets'])
                     ->name('api.editor.creative-sets.generation-presets');
+                Route::get('/api/compositions/{compositionId}/variant-groups', [\App\Http\Controllers\Editor\EditorStudioVariantGroupController::class, 'forComposition'])
+                    ->whereNumber('compositionId')
+                    ->name('api.editor.compositions.variant-groups');
+                Route::get('/api/creative-sets/{id}/variant-groups', [\App\Http\Controllers\Editor\EditorStudioVariantGroupController::class, 'forCreativeSet'])
+                    ->whereNumber('id')
+                    ->name('api.editor.creative-sets.variant-groups');
                 Route::get('/api/creative-sets/for-composition/{compositionId}', [\App\Http\Controllers\Editor\EditorCreativeSetController::class, 'forComposition'])
                     ->whereNumber('compositionId')
                     ->name('api.editor.creative-sets.for-composition');
@@ -734,6 +751,9 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
                     ->name('api.editor.creative-sets.show');
                 Route::post('/api/creative-sets', [\App\Http\Controllers\Editor\EditorCreativeSetController::class, 'store'])
                     ->name('api.editor.creative-sets.store');
+                Route::delete('/api/creative-sets/{id}', [\App\Http\Controllers\Editor\EditorCreativeSetController::class, 'destroy'])
+                    ->whereNumber('id')
+                    ->name('api.editor.creative-sets.destroy');
                 Route::post('/api/creative-sets/{id}/variants', [\App\Http\Controllers\Editor\EditorCreativeSetController::class, 'storeVariant'])
                     ->whereNumber('id')
                     ->name('api.editor.creative-sets.variants.store');

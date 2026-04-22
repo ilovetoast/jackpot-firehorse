@@ -12,6 +12,8 @@ export type CompositionVisibility = 'private' | 'shared'
 export type CompositionDto = {
     id: string
     name: string
+    /** Optional campaign / theme folder label (e.g. Twitter, Christmas). */
+    folder?: string | null
     visibility: CompositionVisibility
     /** User id of the creator; visibility changes are allowed only for this user. */
     owner_user_id: string | null
@@ -52,6 +54,7 @@ export async function postComposition(
         thumbnailPngBase64?: string | null
         telemetry?: CompositionTelemetry
         visibility?: CompositionVisibility
+        folder?: string | null
     }
 ): Promise<CompositionDto> {
     const res = await fetch('/app/api/compositions', {
@@ -62,6 +65,7 @@ export async function postComposition(
             name,
             document,
             visibility: opts?.visibility,
+            folder: opts?.folder === '' ? null : opts?.folder,
             thumbnail_png_base64: opts?.thumbnailPngBase64 ?? undefined,
             telemetry: opts?.telemetry,
         }),
@@ -99,6 +103,7 @@ export async function putComposition(
         thumbnailPngBase64?: string | null
         telemetry?: CompositionTelemetry
         visibility?: CompositionVisibility
+        folder?: string | null
     }
 ): Promise<CompositionDto> {
     const res = await fetch(`/app/api/compositions/${encodeURIComponent(id)}`, {
@@ -109,6 +114,7 @@ export async function putComposition(
             name: opts?.name,
             document,
             visibility: opts?.visibility,
+            folder: opts?.folder === undefined ? undefined : opts?.folder === '' ? null : opts?.folder,
             version_label: opts?.versionLabel ?? null,
             version_kind: opts?.versionKind ?? undefined,
             create_version: opts?.createVersion ?? true,
@@ -156,28 +162,65 @@ export async function getComposition(id: string): Promise<CompositionDto> {
 export type CompositionSummaryDto = {
     id: string
     name: string
+    folder?: string | null
+    owner_user_id?: string | null
     visibility?: CompositionVisibility
     thumbnail_url?: string | null
     updated_at: string
 }
 
+export type CompositionListMeta = {
+    can_list_all: boolean
+    folders: string[]
+}
+
+export type FetchCompositionSummariesResult = {
+    compositions: CompositionSummaryDto[]
+    meta: CompositionListMeta
+}
+
+export type CompositionListFilter = 'team' | 'mine' | 'all'
+
 /** GET /app/api/compositions — lightweight list for “Open” (no full document JSON). */
-export async function fetchCompositionSummaries(): Promise<CompositionSummaryDto[]> {
-    const res = await fetch('/app/api/compositions', {
+export async function fetchCompositionSummaries(opts?: {
+    filter?: CompositionListFilter
+    /** Empty = all folders; `__unfiled__` = no folder. */
+    folder?: string
+}): Promise<FetchCompositionSummariesResult> {
+    const p = new URLSearchParams()
+    if (opts?.filter) {
+        p.set('filter', opts.filter)
+    }
+    if (opts?.folder) {
+        p.set('folder', opts.folder)
+    }
+    const q = p.toString()
+    const res = await fetch(q ? `/app/api/compositions?${q}` : '/app/api/compositions', {
         headers: csrfHeaders(),
         credentials: 'same-origin',
     })
     const text = await res.text()
-    let data: { compositions?: CompositionSummaryDto[]; error?: string }
+    let data: {
+        compositions?: CompositionSummaryDto[]
+        meta?: CompositionListMeta
+        error?: string
+    }
     try {
-        data = JSON.parse(text) as { compositions?: CompositionSummaryDto[]; error?: string }
+        data = JSON.parse(text) as {
+            compositions?: CompositionSummaryDto[]
+            meta?: CompositionListMeta
+            error?: string
+        }
     } catch {
         throw new Error(text || 'Failed to list compositions')
     }
     if (!res.ok) {
         throw new Error(data.error || text || 'Failed to list compositions')
     }
-    return data.compositions ?? []
+    return {
+        compositions: data.compositions ?? [],
+        meta: data.meta ?? { can_list_all: false, folders: [] },
+    }
 }
 
 export async function fetchCompositionVersions(compositionId: string): Promise<CompositionVersionMeta[]> {
@@ -308,9 +351,9 @@ export async function duplicateCompositionApi(
 export async function postCompositionFromDocument(
     name: string,
     document: DocumentModel,
-    opts?: { visibility?: CompositionVisibility }
+    opts?: { visibility?: CompositionVisibility; folder?: string | null }
 ): Promise<CompositionDto> {
-    return postComposition(name, document, { visibility: opts?.visibility })
+    return postComposition(name, document, { visibility: opts?.visibility, folder: opts?.folder })
 }
 
 /**

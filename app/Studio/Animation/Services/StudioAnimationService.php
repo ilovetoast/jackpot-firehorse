@@ -29,9 +29,46 @@ use Illuminate\Validation\ValidationException;
 
 final class StudioAnimationService
 {
+    /**
+     * In-flight states that may be discarded after {@see isJobStaleForRailRemoval} age threshold.
+     */
+    private const STALE_REMOVABLE_STATUSES = [
+        StudioAnimationStatus::Queued,
+        StudioAnimationStatus::Rendering,
+        StudioAnimationStatus::Submitting,
+        StudioAnimationStatus::Processing,
+        StudioAnimationStatus::Downloading,
+        StudioAnimationStatus::Finalizing,
+    ];
+
     public function __construct(
         protected AiUsageService $aiUsageService,
     ) {}
+
+    public function isJobStaleForRailRemoval(StudioAnimationJob $job): bool
+    {
+        $minutes = (int) config('studio_animation.stale_rail_removal.after_minutes', 15);
+        if ($minutes <= 0) {
+            return false;
+        }
+
+        $status = StudioAnimationStatus::tryFrom((string) $job->status);
+        if ($status === null) {
+            return false;
+        }
+
+        $staleSet = self::STALE_REMOVABLE_STATUSES;
+        if (! in_array($status, $staleSet, true)) {
+            return false;
+        }
+
+        $created = $job->created_at;
+        if ($created === null) {
+            return false;
+        }
+
+        return $created->copy()->addMinutes($minutes)->isPast();
+    }
 
     public function create(CreateStudioAnimationData $data, Tenant $tenant, User $user): StudioAnimationJob
     {
@@ -58,8 +95,23 @@ final class StudioAnimationService
             throw ValidationException::withMessages(['aspect_ratio' => 'Unsupported aspect ratio.']);
         }
 
-        if ($data->sourceStrategy !== StudioAnimationSourceStrategy::CompositionSnapshot) {
-            throw ValidationException::withMessages(['source_strategy' => 'Only composition_snapshot is available.']);
+        $supportedSnapshotStrategies = [
+            StudioAnimationSourceStrategy::CompositionSnapshot,
+            StudioAnimationSourceStrategy::SelectedLayerWithContext,
+            StudioAnimationSourceStrategy::SelectedLayerIsolated,
+        ];
+        if (! in_array($data->sourceStrategy, $supportedSnapshotStrategies, true)) {
+            throw ValidationException::withMessages(['source_strategy' => 'This source strategy is not available.']);
+        }
+
+        if ($data->sourceStrategy === StudioAnimationSourceStrategy::SelectedLayerIsolated) {
+            $b = $data->layerBounds;
+            if (! is_array($b)
+                || ! isset($b['x'], $b['y'], $b['width'], $b['height'])
+                || (int) $b['width'] < 2
+                || (int) $b['height'] < 2) {
+                throw ValidationException::withMessages(['layer_bounds' => 'Valid layer_bounds {x,y,width,height} is required for selected_layer_isolated.']);
+            }
         }
 
         $motion = $data->motionPreset ?? MotionPresetCatalog::defaultKey();
@@ -130,7 +182,15 @@ final class StudioAnimationService
             $data->providerModel,
         );
 
-        $settings = array_merge($data->settings, $lockPayload['settings_fragment'], [
+        $layerMeta = [];
+        if ($data->sourceLayerId !== null && $data->sourceLayerId !== '') {
+            $layerMeta['source_layer_id'] = $data->sourceLayerId;
+        }
+        if (is_array($data->layerBounds) && $data->layerBounds !== []) {
+            $layerMeta['layer_bounds'] = $data->layerBounds;
+        }
+
+        $settings = array_merge($data->settings, $lockPayload['settings_fragment'], $layerMeta, [
             'composition_snapshot_png_base64' => $data->compositionSnapshotPngBase64,
             'snapshot_width' => $data->snapshotWidth,
             'snapshot_height' => $data->snapshotHeight,
@@ -185,7 +245,9 @@ final class StudioAnimationService
         $out = $job->output;
         $assetViewUrl = null;
         if ($out && $out->asset_id) {
-            $assetViewUrl = route('assets.view', ['asset' => $out->asset_id], true);
+            // Use download route: it redirects to signed storage bytes. `assets.view` serves an Inertia HTML page
+            // for normal GETs — putting that URL in <video src> loads HTML and the player stays black.
+            $assetViewUrl = route('assets.download', ['asset' => $out->asset_id], true);
         }
 
         $settings = is_array($job->settings_json) ? $job->settings_json : [];
@@ -199,6 +261,7 @@ final class StudioAnimationService
             'source_strategy' => $job->source_strategy,
             'composition_id' => $job->composition_id !== null ? (string) $job->composition_id : null,
             'source_composition_version_id' => $job->source_composition_version_id !== null ? (string) $job->source_composition_version_id : null,
+            'source_layer_id' => $settings['source_layer_id'] ?? null,
             'source_document_revision_hash' => $job->source_document_revision_hash,
             'prompt' => $job->prompt,
             'motion_preset' => $job->motion_preset,
@@ -226,6 +289,7 @@ final class StudioAnimationService
             'finalize_last_outcome' => $settings['finalize_last_outcome'] ?? null,
             'credits_charged' => (bool) ($settings['credits_tracked'] ?? false),
             'credits_charged_units' => (int) ($settings['credits_charged'] ?? 0),
+            'stale_removable' => $this->isJobStaleForRailRemoval($job),
             /** Reserved at job creation; charged only after a successful finalize. */
             'credits_reserved' => (int) ($settings['credit_cost_reserved'] ?? 0),
             'finalize_reuse_mode' => $settings['finalize_reuse_mode'] ?? null,
@@ -468,16 +532,19 @@ final class StudioAnimationService
             abort(403);
         }
 
-        if (! in_array($job->status, [
+        $isTerminalDeletable = in_array($job->status, [
             StudioAnimationStatus::Failed->value,
             StudioAnimationStatus::Canceled->value,
-        ], true)) {
+        ], true);
+        $isStale = $this->isJobStaleForRailRemoval($job);
+
+        if (! $isTerminalDeletable && ! $isStale) {
             throw ValidationException::withMessages([
-                'job' => 'Only failed or canceled animation jobs can be removed from the list.',
+                'job' => 'Only failed, canceled, or stale in-progress animation jobs can be removed from the list.',
             ]);
         }
 
-        StudioAnimationObservability::log('user_discard', $job, []);
+        StudioAnimationObservability::log('user_discard', $job, $isStale ? ['reason' => 'stale_rail'] : []);
 
         DB::transaction(function () use ($job): void {
             $job->delete();
@@ -534,7 +601,7 @@ final class StudioAnimationService
             if (str_contains($em, 'authentication')
                 || str_contains($em, '401')
                 || str_contains($em, 'cannot access application')) {
-                return 'The video API rejected authentication. For official Kling (STUDIO_ANIMATION_KLING_TRANSPORT=kling_api), set KLING_API_KEY and KLING_SECRET_KEY from the Kling API platform. For fal, use FAL_KEY and transport fal_queue. Restart PHP/queue workers, then use Retry.';
+                return 'The video API rejected authentication. Set KLING_API_KEY and KLING_SECRET_KEY from the Kling API platform. Restart PHP/queue workers, then use Retry.';
             }
         }
 

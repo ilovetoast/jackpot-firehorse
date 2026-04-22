@@ -211,6 +211,23 @@ export function GenerateStudioVersionsModal(props: Props) {
                     each combination.
                 </p>
 
+                <ol className="mt-3 list-inside list-decimal space-y-1 rounded-md border border-gray-800 bg-gray-950/70 px-3 py-2 text-[11px] leading-snug text-gray-300">
+                    <li>
+                        <span className="font-semibold text-gray-200">Color &amp; scene (look)</span> — pick one or more
+                        brand colorways and/or background scenes. Skipping both keeps the look close to the current
+                        creative.
+                    </li>
+                    <li>
+                        <span className="font-semibold text-gray-200">Output sizes (formats)</span> — each format is a
+                        different canvas &amp; reflow, not a simple stretch. You can run colors only, sizes only, or
+                        both—every combination you enable is generated.
+                    </li>
+                    <li>
+                        <span className="font-semibold text-gray-200">Review</span> — trim the &quot;Selected
+                        outputs&quot; list if you don&apos;t need every mix, then generate.
+                    </li>
+                </ol>
+
                 {loadError && <p className="mt-3 text-sm text-red-400">{loadError}</p>}
 
                 {!presets && !loadError && (
@@ -224,7 +241,11 @@ export function GenerateStudioVersionsModal(props: Props) {
                 {presets && !loadError && (
                     <>
                         <div className="mt-4">
-                            <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Colors</p>
+                            <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Colors (variant)</p>
+                            <p className="mt-0.5 text-[11px] text-gray-500">
+                                Phase 1 — Each selection applies that colorway in the product edit. Combine with sizes
+                                below for a full matrix, or use colors only.
+                            </p>
                             <div className="mt-2 flex flex-wrap gap-2">
                                 {presets.preset_colors.map((c: StudioGenerationPresetColor) => (
                                     <button
@@ -249,6 +270,9 @@ export function GenerateStudioVersionsModal(props: Props) {
                         </div>
                         <div className="mt-4">
                             <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Scenes</p>
+                            <p className="mt-0.5 text-[11px] text-gray-500">
+                                Optional backplate / environment hints paired with the same color + size pipeline.
+                            </p>
                             <div className="mt-2 flex flex-wrap gap-2">
                                 {presets.preset_scenes.map((s: StudioGenerationPresetScene) => (
                                     <button
@@ -268,10 +292,18 @@ export function GenerateStudioVersionsModal(props: Props) {
                         </div>
                         {presetFormats.length > 0 && (
                             <div className="mt-4" data-testid="generate-versions-formats-section">
-                                <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Formats</p>
+                                <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                                    Output sizes (formats)
+                                </p>
+                                <p className="mt-0.5 text-[11px] text-gray-500">
+                                    Phase 2 — Each format is a <strong className="font-medium text-gray-400">real layout</strong>{' '}
+                                    at that width × height (role-aware reflow), not a squashed resize. Omit formats to
+                                    keep the current canvas. Select up to {maxFormats} per request; group names are
+                                    shortcuts (social, print, etc.).
+                                </p>
                                 <p className="mt-1 text-[11px] text-gray-500">
-                                    Optional — omit formats to keep the current canvas size. Select up to {maxFormats}{' '}
-                                    curated presets (role-aware reflow, not simple scaling). Grouped by use case.
+                                    Tip: a <strong className="font-medium text-gray-400">size-only</strong> run (no
+                                    colors) produces format siblings; add colors to get both size and color variations.
                                 </p>
                                 {recommendedFormatPresets.length > 0 && (
                                     <div className="mt-3" data-testid="generate-versions-formats-recommended">

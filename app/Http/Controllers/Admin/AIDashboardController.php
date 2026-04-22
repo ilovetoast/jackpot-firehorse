@@ -575,8 +575,8 @@ class AIDashboardController extends Controller
     }
 
     /**
-     * Image AI audit: canvas generative + editor edit + DAM presentation preview runs
-     * (structured {@see AIService::buildGenerativeAuditForRun} metadata where applicable).
+     * Image / Studio media AI audit: canvas generative, editor edit, presentation preview, and
+     * Studio composition video (Kling, etc.) — structured `generative_audit` on each run where recorded.
      */
     public function editorImageAudit(Request $request): Response
     {
@@ -588,9 +588,10 @@ class AIDashboardController extends Controller
             'editor_generative_image',
             'editor_edit_image',
             AITaskType::THUMBNAIL_PRESENTATION_PREVIEW,
+            AITaskType::STUDIO_COMPOSITION_ANIMATION,
         ];
 
-        $allowedAgentIds = ['editor_generative_image', 'editor_edit_image', 'presentation_preview'];
+        $allowedAgentIds = ['editor_generative_image', 'editor_edit_image', 'presentation_preview', 'studio_animate_composition'];
 
         $query = AIAgentRun::query()
             ->forAdminActivityList()
@@ -643,12 +644,17 @@ class AIDashboardController extends Controller
             $auditSummary = null;
             if (is_array($ga)) {
                 $auditSummary = [
+                    'audit_kind' => $ga['audit_kind'] ?? null,
                     'registry_model_key' => $ga['registry_model_key'] ?? null,
                     'provider' => $ga['provider'] ?? null,
                     'prompt_preview' => isset($ga['prompt_preview']) ? mb_substr((string) $ga['prompt_preview'], 0, 160) : null,
                     'generative_layer_uuid' => $ga['generative_layer_uuid'] ?? null,
                     'composition_id' => $ga['composition_id'] ?? null,
                     'source_asset_id' => $ga['source_asset_id'] ?? null,
+                    'studio_animation_job_id' => $ga['studio_animation_job_id'] ?? null,
+                    'output_asset_id' => $ga['output_asset_id'] ?? null,
+                    'credits_charged' => $ga['credits_charged'] ?? null,
+                    'output_duration_seconds' => $ga['output_duration_seconds'] ?? null,
                     'has_audit' => true,
                 ];
             } else {
@@ -695,12 +701,14 @@ class AIDashboardController extends Controller
                 ['value' => 'editor_generative_image', 'label' => $this->getAgentName('editor_generative_image')],
                 ['value' => 'editor_edit_image', 'label' => $this->getAgentName('editor_edit_image')],
                 ['value' => 'presentation_preview', 'label' => $this->getAgentName('presentation_preview')],
+                ['value' => 'studio_animate_composition', 'label' => $this->getAgentName('studio_animate_composition')],
             ],
             'models' => $this->getModelOptions(),
             'task_types' => [
                 ['value' => 'editor_generative_image', 'label' => 'editor_generative_image'],
                 ['value' => 'editor_edit_image', 'label' => 'editor_edit_image'],
                 ['value' => AITaskType::THUMBNAIL_PRESENTATION_PREVIEW, 'label' => AITaskType::THUMBNAIL_PRESENTATION_PREVIEW],
+                ['value' => AITaskType::STUDIO_COMPOSITION_ANIMATION, 'label' => AITaskType::STUDIO_COMPOSITION_ANIMATION],
             ],
             'environments' => $this->getEnvironmentOptions(),
         ];
@@ -1127,6 +1135,7 @@ class AIDashboardController extends Controller
         $relatedTickets = $this->relatedTicketsForAiAgentRun($run);
 
         $sourceAssetSummary = $this->sourceAssetSummaryForAiRun($run);
+        $outputVideoAsset = $this->outputVideoAssetSummaryForAiRun($run);
 
         return response()->json([
             'id' => $run->id,
@@ -1134,6 +1143,8 @@ class AIDashboardController extends Controller
             'agent_id' => $run->agent_id,
             'agent_name' => $this->getAgentName($run->agent_id),
             'task_type' => $run->task_type,
+            'entity_type' => $run->entity_type,
+            'entity_id' => $run->entity_id,
             'triggering_context' => $run->triggering_context,
             'model_used' => $run->model_used,
             'tokens_in' => $run->tokens_in,
@@ -1165,7 +1176,67 @@ class AIDashboardController extends Controller
             })->values(),
             'metadata' => $run->metadata, // Includes prompts and responses if store_prompts is enabled
             'source_asset' => $sourceAssetSummary,
+            'output_asset' => $outputVideoAsset,
         ]);
+    }
+
+    /**
+     * For Studio composition video completions: link the output MP4 in DAM and optional signed playback URL.
+     *
+     * @return array<string, mixed>|null
+     */
+    protected function outputVideoAssetSummaryForAiRun(AIAgentRun $run): ?array
+    {
+        $meta = is_array($run->metadata) ? $run->metadata : [];
+        $ga = is_array($meta['generative_audit'] ?? null) ? $meta['generative_audit'] : [];
+        if (($ga['audit_kind'] ?? null) !== 'studio_composition_animation') {
+            return null;
+        }
+
+        $rawId = $ga['output_asset_id'] ?? $meta['asset_id'] ?? null;
+        if ($rawId === null || $rawId === '') {
+            return null;
+        }
+
+        $assetId = is_string($rawId) ? trim($rawId) : (string) $rawId;
+        $asset = Asset::query()->find($assetId);
+        if (! $asset) {
+            return [
+                'id' => $assetId,
+                'missing' => true,
+                'admin_url' => url('/app/admin/assets/'.$assetId),
+            ];
+        }
+
+        $playbackUrl = null;
+        $posterUrl = null;
+        if (is_string($asset->mime_type) && str_starts_with($asset->mime_type, 'video/')) {
+            try {
+                $playbackUrl = $asset->deliveryUrl(AssetVariant::ORIGINAL, DeliveryContext::AUTHENTICATED);
+            } catch (\Throwable $e) {
+                Log::debug('[AIDashboardController] output video playback URL failed', [
+                    'asset_id' => $asset->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+        try {
+            $posterUrl = $asset->deliveryUrl(AssetVariant::THUMB_MEDIUM, DeliveryContext::AUTHENTICATED);
+        } catch (\Throwable $e) {
+            Log::debug('[AIDashboardController] output video poster URL failed', [
+                'asset_id' => $asset->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        return [
+            'id' => $asset->id,
+            'title' => $asset->title ?: $asset->original_filename,
+            'mime_type' => $asset->mime_type,
+            'admin_url' => url('/app/admin/assets/'.$asset->id),
+            'playback_url' => $playbackUrl !== '' ? $playbackUrl : null,
+            'poster_url' => $posterUrl !== '' ? $posterUrl : null,
+        ];
     }
 
     /**

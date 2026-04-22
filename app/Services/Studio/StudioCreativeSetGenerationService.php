@@ -18,6 +18,7 @@ final class StudioCreativeSetGenerationService
 {
     public function __construct(
         protected CreativeSetGenerationPlanner $planner,
+        protected StudioVariantGroupBinder $variantGroupBinder,
     ) {}
 
     /**
@@ -146,7 +147,7 @@ final class StudioCreativeSetGenerationService
 
         $snapshot = $planned['snapshot'];
 
-        $job = DB::transaction(function () use ($set, $user, $snapshot, $keys): GenerationJob {
+        $job = DB::transaction(function () use ($set, $user, $snapshot, $keys, $baseline, $colorIds, $sceneIds, $formatIds): GenerationJob {
             $job = GenerationJob::query()->create([
                 'creative_set_id' => $set->id,
                 'user_id' => $user->id,
@@ -163,6 +164,17 @@ final class StudioCreativeSetGenerationService
                     'attempts' => 0,
                 ]);
             }
+
+            $job = $job->fresh(['items']);
+            $this->variantGroupBinder->bindForGeneration(
+                $set,
+                $user,
+                $job,
+                $baseline,
+                $colorIds,
+                $sceneIds,
+                $formatIds
+            );
 
             return $job->fresh(['items']);
         });

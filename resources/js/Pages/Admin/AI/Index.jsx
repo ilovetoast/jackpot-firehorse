@@ -66,7 +66,7 @@ export default function AIDashboardIndex({ stats, environment, canManage, budget
         {
             name: 'Total Cost',
             value: `$${Number(stats.total_cost || 0).toFixed(4)}`,
-            subtitle: 'Estimated AI usage cost',
+            subtitle: 'Sum of run estimates (incl. Studio video COGS from config) — not vendor invoices',
             icon: CurrencyDollarIcon,
         },
         {

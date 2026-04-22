@@ -15,6 +15,8 @@ export type StudioAnimationJobDto = {
     source_strategy: string
     composition_id: string | null
     source_composition_version_id?: string | null
+    /** Layer in `document_json.layers` when the job used a selected-layer or crop strategy. */
+    source_layer_id?: string | null
     source_document_revision_hash?: string | null
     prompt: string | null
     motion_preset: string | null
@@ -41,6 +43,8 @@ export type StudioAnimationJobDto = {
     finalize_last_outcome?: string | null
     credits_charged?: boolean
     credits_charged_units?: number
+    /** True when the job is still in progress but older than the server stale threshold; DELETE allowed. */
+    stale_removable?: boolean
     /** Expected credit cost held at create time; charged only after successful finalize. */
     credits_reserved?: number
     intent_version?: string | null
@@ -65,6 +69,16 @@ export type StudioAnimationJobDto = {
 }
 
 const STUDIO_ANIM_TERMINAL_STATUSES = new Set(['complete', 'failed', 'canceled'])
+
+/** True when the job is finished (success or terminal failure). */
+export function isStudioAnimationStatusTerminal(status: string): boolean {
+    return STUDIO_ANIM_TERMINAL_STATUSES.has(status)
+}
+
+/** True while the job is still in the queue or provider pipeline. */
+export function isStudioAnimationStatusActive(status: string): boolean {
+    return !isStudioAnimationStatusTerminal(status)
+}
 
 function looksLikeProviderSubmitAuthFailure(message: string | null | undefined): boolean {
     if (message == null || message === '') {
@@ -239,6 +253,10 @@ export type PostStudioAnimationPayload = {
     snapshot_height: number
     document_json?: unknown
     source_composition_version_id?: string | number | null
+    /** For selected-layer strategies — layer id in `document_json.layers`. */
+    source_layer_id?: string | null
+    /** Isolated: crop rect in document/canvas space (integers). */
+    layer_bounds?: { x: number; y: number; width: number; height: number } | null
 }
 
 export async function postStudioAnimation(

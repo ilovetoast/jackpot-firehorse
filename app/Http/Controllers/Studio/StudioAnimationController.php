@@ -107,7 +107,15 @@ class StudioAnimationController extends Controller
         $validated = $request->validate([
             'provider' => 'required|string|max:64',
             'provider_model' => 'required|string|max:128',
-            'source_strategy' => 'required|string|max:48',
+            'source_strategy' => [
+                'required',
+                'string',
+                Rule::in([
+                    StudioAnimationSourceStrategy::CompositionSnapshot->value,
+                    StudioAnimationSourceStrategy::SelectedLayerWithContext->value,
+                    StudioAnimationSourceStrategy::SelectedLayerIsolated->value,
+                ]),
+            ],
             'prompt' => 'nullable|string|max:4000',
             'negative_prompt' => 'nullable|string|max:2000',
             'motion_preset' => 'nullable|string|max:128',
@@ -124,9 +132,16 @@ class StudioAnimationController extends Controller
                 Rule::exists('composition_versions', 'id')->where('composition_id', $document),
             ],
             'high_fidelity_submit' => 'sometimes|boolean',
+            'source_layer_id' => 'nullable|string|max:128',
+            'layer_bounds' => 'nullable|array',
+            'layer_bounds.x' => 'nullable|integer|min:0',
+            'layer_bounds.y' => 'nullable|integer|min:0',
+            'layer_bounds.width' => 'nullable|integer|min:2|max:8192',
+            'layer_bounds.height' => 'nullable|integer|min:2|max:8192',
         ]);
 
-        if ($validated['source_strategy'] !== StudioAnimationSourceStrategy::CompositionSnapshot->value) {
+        $sourceStrategy = StudioAnimationSourceStrategy::tryFrom((string) $validated['source_strategy']);
+        if ($sourceStrategy === null) {
             return response()->json(['message' => 'Unsupported source strategy.'], 422);
         }
 
@@ -142,6 +157,7 @@ class StudioAnimationController extends Controller
 
         $doc = $validated['document_json'] ?? null;
 
+        $bounds = $validated['layer_bounds'] ?? null;
         $data = new CreateStudioAnimationData(
             tenantId: $tenant->id,
             brandId: (int) $brand->id,
@@ -149,7 +165,7 @@ class StudioAnimationController extends Controller
             compositionId: $document,
             provider: (string) $validated['provider'],
             providerModel: (string) $validated['provider_model'],
-            sourceStrategy: StudioAnimationSourceStrategy::CompositionSnapshot,
+            sourceStrategy: $sourceStrategy,
             prompt: $validated['prompt'] ?? null,
             negativePrompt: $validated['negative_prompt'] ?? null,
             motionPreset: $validated['motion_preset'] ?? null,
@@ -167,6 +183,8 @@ class StudioAnimationController extends Controller
             settings: [
                 'capabilities' => AnimationCapabilityRegistry::forProvider((string) $validated['provider']),
             ],
+            sourceLayerId: $validated['source_layer_id'] ?? null,
+            layerBounds: is_array($bounds) ? $bounds : null,
         );
 
         try {

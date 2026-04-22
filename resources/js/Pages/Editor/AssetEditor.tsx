@@ -5,9 +5,11 @@ import {
     useMemo,
     useRef,
     useState,
+    type ComponentType,
     type CSSProperties,
+    type SVGProps,
 } from 'react'
-import { router, usePage } from '@inertiajs/react'
+import { Link, router, usePage } from '@inertiajs/react'
 import { flushSync } from 'react-dom'
 import { AnimatePresence, motion } from 'framer-motion'
 import AppNav from '../../Components/AppNav'
@@ -24,9 +26,11 @@ import {
     ChevronDownIcon,
     ChevronRightIcon,
     ChevronUpIcon,
+    ChevronLeftIcon,
     ClockIcon,
     CloudArrowUpIcon,
     DocumentDuplicateIcon,
+    PlusIcon,
     DocumentIcon,
     ExclamationTriangleIcon,
     RectangleGroupIcon,
@@ -36,11 +40,18 @@ import {
     FolderOpenIcon,
     LockClosedIcon,
     LockOpenIcon,
+    AdjustmentsHorizontalIcon,
+    BoltIcon,
+    PaintBrushIcon,
     PhotoIcon,
+    ScissorsIcon,
     SparklesIcon,
+    SunIcon,
     SwatchIcon,
     Bars3BottomLeftIcon,
     Bars3Icon,
+    ArrowsPointingInIcon,
+    ArrowsPointingOutIcon,
     Square2StackIcon,
     Squares2X2Icon,
     TrashIcon,
@@ -60,6 +71,7 @@ import type {
     LayerBlendMode,
     MaskLayer,
     TextLayer,
+    VideoLayer,
 } from './documentModel'
 import {
     buildBrandAugmentedPrompt,
@@ -93,6 +105,7 @@ import {
     isFillLayer,
     isCtaButtonFillLayer,
     isMaskLayer,
+    isVideoLayer,
     buildMaskStyleForLayer,
     findGroupForLayer,
     groupMemberLayers,
@@ -107,6 +120,7 @@ import {
     PLACEHOLDER_IMAGE_SRC,
     resolvedFillGradientStops,
     editorBridgeFileUrlForAssetId,
+    getPrimaryVideoLayerForDocumentExport,
 } from './documentModel'
 import FillGradientStopField, { BrandColorSwatchStrip } from './FillGradientStopField'
 import { TEMPLATE_CATEGORIES, allFormats, blueprintToLayers, blueprintToLayersAndGroups, buildLayersForStyle, getAllLayoutStyles, textBoostToFillFields, inferTextBoostStyle, type LayerBlueprint, type TemplateFormat, type TemplateCategory, type LayoutStyleId } from './templateConfig'
@@ -129,6 +143,7 @@ import {
     type SnapMode,
 } from '../../utils/snapEngine'
 import EditorConfirmDialog, { useEditorConfirm } from './EditorConfirmDialog'
+import EditorTextInputDialog, { useEditorTextInput } from './EditorTextInputDialog'
 import {
     confirmDamAssetDimensions,
     fetchEditorAssetById,
@@ -138,6 +153,7 @@ import {
     fetchEditorPublishCategories,
     fetchEditorPublishMetadataSchema,
     promoteCompositionToAsset,
+    buildEditorProvenanceHints,
     type EditorPublishCategory,
     type EditorPublishMetadataSchema,
 } from './editorAssetBridge'
@@ -170,6 +186,7 @@ import {
 } from './editorCompositionBridge'
 import type { CompositionSummaryDto, CompositionVisibility } from './editorCompositionBridge'
 import {
+    deleteCreativeSet,
     deleteCreativeSetVariant,
     fetchCreativeSetForComposition,
     fetchCreativeSetGenerationJob,
@@ -186,17 +203,28 @@ import {
     type GenerateStudioVersionsInitialAxes,
 } from './components/VersionsRail/GenerateStudioVersionsModal'
 import { VersionBuilderModal } from './components/VersionsRail/VersionBuilderModal'
-import { StudioAnimateCompositionModal } from './components/StudioAnimateCompositionModal'
-import { StudioAnimationJobDetailDialog } from './components/StudioAnimationJobDetailDialog'
+import {
+    StudioAnimateCompositionModal,
+    type SourceKind as StudioAnimateSourceKind,
+} from './components/StudioAnimateCompositionModal'
+import { StudioAnimationJobDetailDialog, type InsertAnimationVideoArgs } from './components/StudioAnimationJobDetailDialog'
 import {
     deleteStudioAnimationJob,
     fetchStudioAnimations,
     getStudioAnimationFailureRecoveryLine,
+    isStudioAnimationStatusActive,
     postStudioAnimationRetry,
     studioAnimationRailJobLabel,
     type StudioAnimationJobDto,
 } from './editorStudioAnimationBridge'
+import {
+    pollVideoExportUntilTerminal,
+    postRequestVideoExport,
+    postStoreVideoLayer,
+} from './editorStudioVideoBridge'
 import { VersionsRail, type StudioVersionsHandoffChrome } from './components/VersionsRail/VersionsRail'
+import { EditorCompositionVideoPlaybackBar } from './components/EditorCompositionVideoPlaybackBar'
+import { EditorStudioAnimationCanvasPreviewBar } from './components/EditorStudioAnimationCanvasPreviewBar'
 import {
     firstScrollTargetCompositionId,
     nextNewCompositionId,
@@ -225,7 +253,6 @@ import {
     fetchGenerateImageUsage,
     generateEditorImage,
     GENERATIVE_ADVANCED_MODEL_OPTIONS,
-    GENERATIVE_EDIT_MODEL_OPTIONS,
     GENERATIVE_MODEL_OPTIONS,
     MODEL_MAP,
     normalizeEditModelKey,
@@ -244,24 +271,62 @@ import {
 } from './editorHardening'
 
 /** Preset instructions for Modify image (AI) — same monthly budget as custom edits. */
-const IMAGE_LAYER_QUICK_ACTIONS: ReadonlyArray<{ id: string; label: string; instruction: string }> = [
+const IMAGE_LAYER_QUICK_ACTIONS: ReadonlyArray<{
+    id: string
+    label: string
+    instruction: string
+    Icon: ComponentType<SVGProps<SVGSVGElement>>
+}> = [
     {
         id: 'remove_bg',
         label: 'Remove background',
+        Icon: ScissorsIcon,
         instruction:
             'Remove the studio or white background completely. Keep only the product or garment with a clean transparent cutout using a real PNG alpha channel (fully transparent pixels outside the subject). Do not draw a gray-and-white checkerboard, grid, or pattern where the background was—those must be true transparency, not picture content. Preserve true colors, fabric texture, and sharp edges. Avoid halo or gray fringe.',
     },
     {
         id: 'soft_studio',
         label: 'Soft studio',
+        Icon: PaintBrushIcon,
         instruction:
             'Replace the background with a smooth neutral light-gray studio sweep. Add a subtle soft shadow under the product. Keep the product natural and catalog-ready.',
     },
     {
         id: 'warmer',
         label: 'Warmer tone',
+        Icon: SunIcon,
         instruction:
             'Apply a subtle warmer color grade to the product—slightly richer highlights without oversaturating. Keep exposure balanced.',
+    },
+]
+
+/**
+ * Edit routing: user picks speed/quality tier; copy still names “Nano Banana” for Gemini routes.
+ * Values must stay in sync with {@link GENERATIVE_EDIT_MODEL_OPTIONS} / {@link normalizeEditModelKey}.
+ */
+const IMAGE_EDIT_MODEL_PRESETS: ReadonlyArray<{
+    value: string
+    title: string
+    subtitle: string
+    Icon: ComponentType<SVGProps<SVGSVGElement>>
+}> = [
+    {
+        value: 'gemini-3-pro-image-preview',
+        title: 'High quality',
+        subtitle: 'Nano Banana Pro · Gemini 3',
+        Icon: SparklesIcon,
+    },
+    {
+        value: 'gemini-2.5-flash-image',
+        title: 'Fast',
+        subtitle: 'Nano Banana · Gemini 2.5',
+        Icon: BoltIcon,
+    },
+    {
+        value: 'gpt-image-1',
+        title: 'Balanced',
+        subtitle: 'GPT Image 1 · OpenAI',
+        Icon: AdjustmentsHorizontalIcon,
     },
 ]
 
@@ -288,6 +353,35 @@ const ASSET_EDITOR_GRID_DENSITY_KEY = 'asset-editor:grid-density'
  * the layer editing workflow, but stays sticky once the user opens it.
  */
 const ASSET_EDITOR_CANVAS_SECTION_KEY = 'asset-editor:canvas-section-open'
+/** Layer name / source / visible-lock — collapsed by default so “On canvas” and AI sit higher. */
+const ASSET_EDITOR_LAYER_DETAILS_SECTION_KEY = 'asset-editor:layer-details-open'
+
+/** On-canvas image / generative: maps to CSS `object-fit` within the layer’s transform box. */
+const OBJECT_FIT_CHOICES: ReadonlyArray<{
+    value: 'cover' | 'contain' | 'fill'
+    short: string
+    title: string
+    Icon: ComponentType<SVGProps<SVGSVGElement>>
+}> = [
+    {
+        value: 'cover',
+        short: 'Cover',
+        title: 'Cover — fill the layer box; may crop. Same as the layer’s bounding “frame”.',
+        Icon: ArrowsPointingOutIcon,
+    },
+    {
+        value: 'contain',
+        short: 'Fit',
+        title: 'Contain — show the full image inside the box (letterbox if needed).',
+        Icon: ArrowsPointingInIcon,
+    },
+    {
+        value: 'fill',
+        short: 'Fill',
+        title: 'Fill — stretch the image to the layer width and height (may distort).',
+        Icon: ArrowsRightLeftIcon,
+    },
+]
 /** Target pixels (screen space) for line_align snap threshold — converted to doc space per-drag. */
 const SNAP_THRESHOLD_SCREEN_PX = 8
 
@@ -321,7 +415,7 @@ function readStoredPropertiesPanelWidth(): number {
         return 288
     }
     const n = Number(window.localStorage.getItem(ASSET_EDITOR_PROPERTIES_WIDTH_KEY))
-    return Number.isFinite(n) && n >= 240 && n <= 720 ? Math.round(n) : 288
+    return Number.isFinite(n) && n >= 240 && n <= 960 ? Math.round(n) : 288
 }
 
 const GENERATE_DEBOUNCE_MS = 400
@@ -598,6 +692,100 @@ function isImageLayer(l: Layer): l is ImageLayer {
 
 function isGenerativeImageLayer(l: Layer): l is GenerativeImageLayer {
     return l.type === 'generative_image'
+}
+
+/** CSS object-fit for canvas `<img>` — Tailwind class names (JIT-safe) + canonical value. */
+function canvasImageObjectFit(
+    fit: ImageLayer['fit'] | GenerativeImageLayer['fit'] | VideoLayer['fit'] | undefined,
+): { className: 'object-contain' | 'object-cover' | 'object-fill'; value: 'contain' | 'cover' | 'fill' } {
+    if (fit === 'contain') {
+        return { className: 'object-contain', value: 'contain' }
+    }
+    if (fit === 'fill') {
+        return { className: 'object-fill', value: 'fill' }
+    }
+    return { className: 'object-cover', value: 'cover' }
+}
+
+type AddLayerMenuChoice = 'text' | 'image' | 'video' | 'ai_video' | 'generative' | 'fill' | 'mask'
+
+/** Shared grid for "Add layer" — used at the top and bottom of the layer stack panel. */
+function AddLayerTypeMenu({ onPick }: { onPick: (choice: AddLayerMenuChoice) => void }) {
+    return (
+        <div className="w-64 rounded-lg bg-gray-900 p-4 shadow-xl ring-1 ring-gray-700">
+            <p className="mb-3 text-[10px] font-semibold uppercase tracking-wider text-gray-400">Add layer</p>
+            <div className="grid grid-cols-2 gap-3">
+                <button
+                    type="button"
+                    onClick={() => onPick('text')}
+                    className="flex flex-col items-center gap-1.5 rounded-md border border-gray-700 bg-gray-800 px-2 py-2.5 text-gray-300 transition-colors hover:border-gray-500 hover:bg-gray-700 hover:text-white"
+                >
+                    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
+                        <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            d="M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6 1.123 2.994 2.707 3.227 1.087.16 2.185.283 3.293.369V21l4.076-4.076a1.526 1.526 0 011.037-.443 48.282 48.282 0 005.68-.494c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z"
+                        />
+                    </svg>
+                    <span className="text-[11px] font-medium">Text</span>
+                </button>
+                <button
+                    type="button"
+                    onClick={() => onPick('image')}
+                    className="flex flex-col items-center gap-1.5 rounded-md border border-gray-700 bg-gray-800 px-2 py-2.5 text-gray-300 transition-colors hover:border-gray-500 hover:bg-gray-700 hover:text-white"
+                >
+                    <PhotoIcon className="h-5 w-5" />
+                    <span className="text-[11px] font-medium">Image</span>
+                </button>
+                <button
+                    type="button"
+                    onClick={() => onPick('video')}
+                    className="flex flex-col items-center gap-1.5 rounded-md border border-gray-700 bg-gray-800 px-2 py-2.5 text-gray-300 transition-colors hover:border-gray-500 hover:bg-gray-700 hover:text-white"
+                    title="From library (MP4, etc.). Requires a saved composition."
+                >
+                    <FilmIcon className="h-5 w-5" />
+                    <span className="text-[11px] font-medium">Video</span>
+                </button>
+                <button
+                    type="button"
+                    onClick={() => onPick('generative')}
+                    className="flex flex-col items-center gap-1.5 rounded-md border border-gray-700 bg-gray-800 px-2 py-2.5 text-gray-300 transition-colors hover:border-gray-500 hover:bg-gray-700 hover:text-white"
+                >
+                    <SparklesIcon className="h-5 w-5" />
+                    <span className="text-[11px] font-medium">AI Image</span>
+                </button>
+                <button
+                    type="button"
+                    onClick={() => onPick('fill')}
+                    className="flex flex-col items-center gap-1.5 rounded-md border border-gray-700 bg-gray-800 px-2 py-2.5 text-gray-300 transition-colors hover:border-gray-500 hover:bg-gray-700 hover:text-white"
+                >
+                    <SwatchIcon className="h-5 w-5" />
+                    <span className="text-[11px] font-medium">Fill</span>
+                </button>
+                <button
+                    type="button"
+                    onClick={() => onPick('mask')}
+                    className="flex flex-col items-center gap-1.5 rounded-md border border-gray-700 bg-gray-800 px-2 py-2.5 text-gray-300 transition-colors hover:border-gray-500 hover:bg-gray-700 hover:text-white"
+                    title="Clip the layer directly beneath with a shape or gradient"
+                >
+                    <span className="flex h-5 w-5 items-center justify-center text-lg leading-none">◑</span>
+                    <span className="text-[11px] font-medium">Mask</span>
+                </button>
+                <button
+                    type="button"
+                    onClick={() => onPick('ai_video')}
+                    className="col-span-2 flex flex-row items-center justify-center gap-2 rounded-md border border-violet-800/80 bg-violet-950/40 px-2 py-2.5 text-violet-100 transition-colors hover:border-violet-500 hover:bg-violet-900/50"
+                    title="Turn a still layer into an AI video clip (library Video is for uploaded MP4s)"
+                >
+                    <span className="flex items-center gap-0.5" aria-hidden>
+                        <FilmIcon className="h-5 w-5" />
+                        <SparklesIcon className="h-4 w-4 -ml-0.5 opacity-90" />
+                    </span>
+                    <span className="text-[11px] font-medium">AI video (still → clip)</span>
+                </button>
+            </div>
+        </div>
+    )
 }
 
 function isTextLayer(l: Layer): l is TextLayer {
@@ -1069,6 +1257,83 @@ function deleteLayerFromDoc(doc: DocumentModel, layerId: string): DocumentModel 
     }
 }
 
+function findVideoLayerIdForStudioAnimationJob(doc: DocumentModel, jobId: string): string | null {
+    for (const l of doc.layers) {
+        if (!isVideoLayer(l)) {
+            continue
+        }
+        if (l.studioProvenance?.jobId === jobId) {
+            return l.id
+        }
+    }
+    return null
+}
+
+function buildInsertArgsForStudioAnimationJob(
+    job: StudioAnimationJobDto,
+    doc: DocumentModel,
+): InsertAnimationVideoArgs | null {
+    const url = job.output?.asset_view_url
+    const outputAssetId =
+        job.output?.asset_id && job.output.asset_id !== '' ? String(job.output.asset_id) : null
+    if (!url || !outputAssetId) {
+        return null
+    }
+    const sourceReplaceable = Boolean(
+        job.source_layer_id && doc.layers.some((l) => l.id === job.source_layer_id),
+    )
+    const endMs = Math.min(
+        3_600_000,
+        Math.max(1000, Math.round((job.output?.duration_seconds ?? job.duration_seconds ?? 5) * 1000)),
+    )
+    const rawLabel = job.motion_preset?.replace(/_/g, ' ') ?? 'AI clip'
+    const name =
+        rawLabel.length > 0 ? rawLabel.charAt(0).toUpperCase() + rawLabel.slice(1) : 'AI clip'
+    const prov = {
+        sourceMode: job.source_strategy,
+        provider: job.provider,
+        model: job.provider_model,
+        jobId: job.id,
+        outputAssetId,
+        durationMs: endMs,
+    }
+    return {
+        assetId: outputAssetId,
+        fileUrl: String(url),
+        name,
+        endMs,
+        mode: sourceReplaceable ? 'replace_source' : 'add_back',
+        replaceLayerId: job.source_layer_id ?? undefined,
+        provenance: prov,
+    }
+}
+
+/** Completed studio clip tied to this still — used to gate image AI vs video mode. */
+function findStudioAiVideoLayerForSourceStill(
+    doc: DocumentModel,
+    sourceLayerId: string,
+    animations: StudioAnimationJobDto[],
+): { videoLayerId: string; job: StudioAnimationJobDto } | null {
+    for (const l of doc.layers) {
+        if (!isVideoLayer(l) || !l.studioProvenance?.jobId) {
+            continue
+        }
+        const job = animations.find((j) => j.id === l.studioProvenance.jobId)
+        if (
+            job &&
+            job.status === 'complete' &&
+            job.source_layer_id === sourceLayerId &&
+            job.output?.asset_view_url
+        ) {
+            return { videoLayerId: l.id, job }
+        }
+    }
+    return null
+}
+
+/** Fired after `history.replaceState` updates the composition query so React can re-read `window.location`. */
+const JP_COMPOSITION_SEARCH_UPDATED_EVENT = 'jackpot:composition-search-updated'
+
 function replaceUrlCompositionParam(id: string | null) {
     const url = new URL(window.location.href)
     if (id) {
@@ -1077,6 +1342,7 @@ function replaceUrlCompositionParam(id: string | null) {
         url.searchParams.delete('composition')
     }
     window.history.replaceState({}, '', url)
+    window.dispatchEvent(new Event(JP_COMPOSITION_SEARCH_UPDATED_EVENT))
 }
 
 /** GET /app/api/editor/ai-credit-status JSON — shared by state + refresh helper. */
@@ -1109,14 +1375,38 @@ export default function AssetEditor() {
     }
     const aiEnabled = auth?.permissions?.ai_enabled !== false
     const activeBrandId = auth?.activeBrand?.id
+    /** Bumps when the address bar’s `composition` query changes without an Inertia navigation (save, replaceState, back/forward). */
+    const [compositionUrlEpoch, setCompositionUrlEpoch] = useState(0)
+    useEffect(() => {
+        if (typeof window === 'undefined') {
+            return
+        }
+        const bump = () => setCompositionUrlEpoch((e) => e + 1)
+        window.addEventListener('popstate', bump)
+        window.addEventListener(JP_COMPOSITION_SEARCH_UPDATED_EVENT, bump)
+        return () => {
+            window.removeEventListener('popstate', bump)
+            window.removeEventListener(JP_COMPOSITION_SEARCH_UPDATED_EVENT, bump)
+        }
+    }, [])
     const compositionIdFromUrl = useMemo(() => {
+        if (typeof window !== 'undefined') {
+            try {
+                const fromBar = new URL(window.location.href).searchParams.get('composition')
+                if (fromBar) {
+                    return fromBar
+                }
+            } catch {
+                /* ignore */
+            }
+        }
         try {
-            const u = new URL(page.url, window.location.origin)
+            const u = new URL(page.url, typeof window !== 'undefined' ? window.location.origin : 'http://localhost')
             return u.searchParams.get('composition')
         } catch {
             return null
         }
-    }, [page.url])
+    }, [page.url, compositionUrlEpoch])
 
     const initialDocumentRef = useRef<DocumentModel | null>(null)
     const [document, setDocument] = useState<DocumentModel>(() => {
@@ -1162,7 +1452,7 @@ export default function AssetEditor() {
     }, [])
     const [editingTextLayerId, setEditingTextLayerId] = useState<string | null>(null)
     const [pickerOpen, setPickerOpen] = useState(false)
-    const [pickerMode, setPickerMode] = useState<'add' | 'replace' | 'references' | null>(null)
+    const [pickerMode, setPickerMode] = useState<'add' | 'add_video' | 'replace' | 'references' | null>(null)
     /**
      * Guards against double-clicks on a picker tile: `handlePickDamAsset`
      * awaits an image-probe network hop before mutating state and closing
@@ -1227,6 +1517,9 @@ export default function AssetEditor() {
     const [publishCollectionsList, setPublishCollectionsList] = useState<Array<{ id: number; name: string; is_public?: boolean }>>([])
     const [publishCollectionsLoading, setPublishCollectionsLoading] = useState(false)
     const [publishCollectionIds, setPublishCollectionIds] = useState<number[]>([])
+    const [publishIncludeAudio, setPublishIncludeAudio] = useState(true)
+    const [publishSuccessCelebration, setPublishSuccessCelebration] = useState(false)
+    const [publishModalStillPreviewUrl, setPublishModalStillPreviewUrl] = useState<string | null>(null)
     const [compositionId, setCompositionId] = useState<string | null>(null)
     const [compositionName, setCompositionName] = useState(() => defaultCompositionName(createInitialDocument()))
     const [lastSavedSerialized, setLastSavedSerialized] = useState(() =>
@@ -1243,6 +1536,17 @@ export default function AssetEditor() {
     /** New saves default to private until the author shares with the brand. */
     const [compositionVisibility, setCompositionVisibility] = useState<CompositionVisibility>('private')
     const [lastSavedVisibility, setLastSavedVisibility] = useState<CompositionVisibility>('private')
+    /**
+     * Optional “folder” label for the composition (campaign / theme, e.g. Christmas, Twitter).
+     * Shown in Open dialog filters; persisted on save.
+     */
+    const [compositionFolder, setCompositionFolder] = useState('')
+    const [lastSavedFolder, setLastSavedFolder] = useState('')
+    /** Folders for the top-bar picker (and synced when the Open dialog lists compositions). */
+    const [headerFolderList, setHeaderFolderList] = useState<string[]>([])
+    const [folderMenuOpen, setFolderMenuOpen] = useState(false)
+    const [showFolderCreateRow, setShowFolderCreateRow] = useState(false)
+    const [folderNewNameDraft, setFolderNewNameDraft] = useState('')
     const [compositionOwnerUserId, setCompositionOwnerUserId] = useState<string | null>(null)
     const canChangeCompositionVisibility = useMemo(() => {
         if (!compositionId) {
@@ -1288,6 +1592,13 @@ export default function AssetEditor() {
         if (typeof window === 'undefined') return
         window.localStorage.setItem(ASSET_EDITOR_CANVAS_SECTION_KEY, canvasSectionOpen ? '1' : '0')
     }, [canvasSectionOpen])
+    const [layerDetailsSectionOpen, setLayerDetailsSectionOpen] = useState<boolean>(() =>
+        readStoredFlag(ASSET_EDITOR_LAYER_DETAILS_SECTION_KEY, false),
+    )
+    useEffect(() => {
+        if (typeof window === 'undefined') return
+        window.localStorage.setItem(ASSET_EDITOR_LAYER_DETAILS_SECTION_KEY, layerDetailsSectionOpen ? '1' : '0')
+    }, [layerDetailsSectionOpen])
     const [snapHits, setSnapHits] = useState<SnapHit[]>([])
     const snapHitsClearTimerRef = useRef<number | null>(null)
     useEffect(() => {
@@ -1313,7 +1624,7 @@ export default function AssetEditor() {
         const startW = propertiesPanelWidthRef.current
         const onMove = (ev: PointerEvent) => {
             setPropertiesPanelWidth(
-                Math.min(720, Math.max(240, startW + (startX - ev.clientX)))
+                Math.min(960, Math.max(240, startW + (startX - ev.clientX)))
             )
         }
         const onUp = () => {
@@ -1347,6 +1658,8 @@ export default function AssetEditor() {
     const [compositionDeleteBusy, setCompositionDeleteBusy] = useState(false)
     /** Studio "Versions" — backend Creative Set wrapping sibling compositions. */
     const [studioCreativeSet, setStudioCreativeSet] = useState<StudioCreativeSetDto | null>(null)
+    /** After the first for-composition fetch for the current comp id, so we can show a "no set" CTA without flashing. */
+    const [studioVersionsEntryFetchDone, setStudioVersionsEntryFetchDone] = useState(false)
     const [studioCreativeSetDuplicateBusy, setStudioCreativeSetDuplicateBusy] = useState(false)
     const [studioVersionsPanelOpen, setStudioVersionsPanelOpen] = useState(() => {
         if (typeof window === 'undefined') {
@@ -1369,7 +1682,20 @@ export default function AssetEditor() {
     const [studioGenerationPollJobId, setStudioGenerationPollJobId] = useState<string | null>(null)
     const [studioRetryGenerationItemBusy, setStudioRetryGenerationItemBusy] = useState<string | null>(null)
     const [studioAnimateModalOpen, setStudioAnimateModalOpen] = useState(false)
+    /** Initial modal source when opening from File, Add → AI Video, or a layer action (mount key resets form). */
+    const [studioAnimateOpenContext, setStudioAnimateOpenContext] = useState<{
+        sourceKind: StudioAnimateSourceKind
+        layerId: string | null
+    } | null>(null)
+    const [studioAnimateModalMountKey, setStudioAnimateModalMountKey] = useState(0)
     const [studioAnimationDetailJobId, setStudioAnimationDetailJobId] = useState<string | null>(null)
+    /**
+     * When set, the image/generative still’s finished AI job is shown full-frame on the canvas;
+     * {@link EditorStudioAnimationCanvasPreviewBar} drives the element below the artboard.
+     */
+    const [studioAnimationCanvasPreviewJobId, setStudioAnimationCanvasPreviewJobId] = useState<string | null>(null)
+    /** Bumped when the user selects a video layer so composition playback starts under the stack. */
+    const [compositionPlaybackAutoplayNonce, setCompositionPlaybackAutoplayNonce] = useState(0)
     const [compositionAnimations, setCompositionAnimations] = useState<StudioAnimationJobDto[]>([])
     const [animationsLoading, setAnimationsLoading] = useState(false)
     const [studioApplyScope, setStudioApplyScope] = useState<StudioApplyScope>('this_version')
@@ -1390,6 +1716,13 @@ export default function AssetEditor() {
     const [studioHandoffExportDetail, setStudioHandoffExportDetail] = useState('')
     const [pickerSearch, setPickerSearch] = useState('')
     const [pickerView, setPickerView] = useState<'grid' | 'list'>('grid')
+    /** Open-dialog list scope: team = default visibility rules, mine = only my comps, all = every private+shared (brand admin only). */
+    const [pickerListFilter, setPickerListFilter] = useState<'team' | 'mine' | 'all'>('team')
+    const [pickerFolderFilter, setPickerFolderFilter] = useState<string>('')
+    const [pickerListMeta, setPickerListMeta] = useState<{ can_list_all: boolean; folders: string[] }>({
+        can_list_all: false,
+        folders: [],
+    })
     const [versions, setVersions] = useState<
         import('./editorCompositionBridge').CompositionVersionMeta[]
     >([])
@@ -1409,6 +1742,11 @@ export default function AssetEditor() {
     compositionIdRef.current = compositionId
     /** Lets {@link refreshVersions} ignore stale completions when multiple fetches overlap. */
     const compositionVersionsFetchSeqRef = useRef(0)
+    /** Bumps on each `compositionId` change so in-flight studio animation list fetches don't apply stale data. */
+    const studioAnimFetchGenRef = useRef(0)
+    /** Last seen `status` per job id — detects transitions to `complete` without treating initial fetch as “just finished”. */
+    const studioAnimJobStatusByIdRef = useRef<Record<string, string>>({})
+    const prevSelectedLayerForPlaybackRef = useRef<string | null>(null)
     const compositionNameRef = useRef(compositionName)
     compositionNameRef.current = compositionName
     const studioCreativeSetRef = useRef<StudioCreativeSetDto | null>(null)
@@ -1427,6 +1765,7 @@ export default function AssetEditor() {
         undoStackRef.current = []
         redoStackRef.current = []
         dragUndoBaselineRef.current = null
+        prevSelectedLayerForPlaybackRef.current = null
     }, [compositionId])
     const studioCreativeSetIdRef = useRef<string | null>(null)
     studioCreativeSetIdRef.current = studioCreativeSet?.id ?? null
@@ -1510,10 +1849,12 @@ export default function AssetEditor() {
     const [leftPanel, setLeftPanel] = useState<'layers' | 'assets' | 'templates' | 'menu' | 'history' | null>('layers')
     const leftPanelRef = useRef(leftPanel)
     leftPanelRef.current = leftPanel
-    const [addLayerOpen, setAddLayerOpen] = useState(false)
+    /** Add-layer menu: `null` closed; which control opened it (popover position). */
+    const [addLayerUI, setAddLayerUI] = useState<null | 'header' | 'footer'>(null)
     const [shortcutsOpen, setShortcutsOpen] = useState(false)
     const [templateCategory, setTemplateCategory] = useState<TemplateCategory | 'all'>('all')
     const { confirmState, confirm: editorConfirm, handleClose: handleConfirmClose } = useEditorConfirm()
+    const { textInputState, promptForText, handleTextInputClose } = useEditorTextInput()
     const [wizardStep, setWizardStep] = useState(1)
     const [wizardCategory, setWizardCategory] = useState<TemplateCategory | 'all'>('all')
     const [wizardPlatform, setWizardPlatform] = useState<string | null>(null)
@@ -1683,6 +2024,7 @@ export default function AssetEditor() {
 
     const canvasContainerRef = useRef<HTMLDivElement>(null)
     const stageRef = useRef<HTMLDivElement>(null)
+    const studioAnimationCanvasPreviewVideoRef = useRef<HTMLVideoElement | null>(null)
     const dragRef = useRef<DragState | null>(null)
     const undoStackRef = useRef<string[]>([])
     const redoStackRef = useRef<string[]>([])
@@ -1804,6 +2146,30 @@ export default function AssetEditor() {
         [document.layers, selectedLayerId]
     )
 
+    const studioAiVideoForSelectedStill = useMemo(() => {
+        if (!selectedLayerId || !selectedLayer) {
+            return null
+        }
+        if (!isImageLayer(selectedLayer) && !isGenerativeImageLayer(selectedLayer)) {
+            return null
+        }
+        return findStudioAiVideoLayerForSourceStill(document, selectedLayerId, compositionAnimations)
+    }, [compositionAnimations, document, selectedLayer, selectedLayerId])
+
+    useEffect(() => {
+        if (selectedLayerId === prevSelectedLayerForPlaybackRef.current) {
+            return
+        }
+        prevSelectedLayerForPlaybackRef.current = selectedLayerId
+        if (!selectedLayerId) {
+            return
+        }
+        const ly = document.layers.find((l) => l.id === selectedLayerId)
+        if (ly && isVideoLayer(ly) && ly.src) {
+            setCompositionPlaybackAutoplayNonce((n) => n + 1)
+        }
+    }, [document.layers, selectedLayerId])
+
     /**
      * Shared renderer for layer rows (orphan + grouped).
      * `indented` = true when the row lives under a group header; we drop the
@@ -1822,7 +2188,20 @@ export default function AssetEditor() {
     const renderLayerPanelRow = (layer: Layer, indented: boolean) => {
         const selected = layer.id === selectedLayerId
         const inGroupingSet = groupingSelection.has(layer.id)
-        const layerIcon = layer.type === 'text' ? 'T' : layer.type === 'image' ? '🖼' : layer.type === 'generative_image' ? '✦' : layer.type === 'fill' ? '◼' : layer.type === 'mask' ? '◑' : '▣'
+        const layerIcon =
+            layer.type === 'text'
+                ? 'T'
+                : layer.type === 'image'
+                  ? '🖼'
+                  : layer.type === 'generative_image'
+                    ? '✦'
+                    : layer.type === 'fill'
+                      ? '◼'
+                      : layer.type === 'mask'
+                        ? '◑'
+                        : layer.type === 'video'
+                          ? '🎬'
+                          : '▣'
         return (
             <li
                 key={layer.id}
@@ -2031,8 +2410,9 @@ export default function AssetEditor() {
         () =>
             JSON.stringify(document) !== lastSavedSerialized
             || compositionName.trim() !== lastSavedName.trim()
-            || compositionVisibility !== lastSavedVisibility,
-        [document, lastSavedSerialized, compositionName, lastSavedName, compositionVisibility, lastSavedVisibility]
+            || compositionVisibility !== lastSavedVisibility
+            || compositionFolder.trim() !== lastSavedFolder.trim(),
+        [document, lastSavedSerialized, compositionName, lastSavedName, compositionVisibility, lastSavedVisibility, compositionFolder, lastSavedFolder]
     )
 
     /** True when there is something worth warning about before navigate / reset (not a fresh empty canvas). */
@@ -2119,16 +2499,114 @@ export default function AssetEditor() {
             setCompositionAnimations([])
             return
         }
+        const gen = studioAnimFetchGenRef.current
         setAnimationsLoading(true)
         try {
             const { animations } = await fetchStudioAnimations(id)
+            if (gen !== studioAnimFetchGenRef.current || compositionIdRef.current !== id) {
+                return
+            }
             setCompositionAnimations(animations)
         } catch {
-            setCompositionAnimations([])
+            // Transient errors (same composition): keep the last successful list. After a composition switch,
+            // the list was already cleared above — a failed first fetch leaves the rail empty until the next poll.
         } finally {
-            setAnimationsLoading(false)
+            if (gen === studioAnimFetchGenRef.current) {
+                setAnimationsLoading(false)
+            }
         }
     }, [])
+
+    /** New composition = new studio-animation job list (jobs are per `composition_id`). */
+    useEffect(() => {
+        if (!compositionId) {
+            studioAnimFetchGenRef.current += 1
+            studioAnimJobStatusByIdRef.current = {}
+            setCompositionAnimations([])
+            return
+        }
+        studioAnimFetchGenRef.current += 1
+        studioAnimJobStatusByIdRef.current = {}
+        setCompositionAnimations([])
+        void refreshCompositionAnimations()
+    }, [compositionId, refreshCompositionAnimations])
+
+    const handleInsertStudioAnimationAsVideoLayer = useCallback(
+        async (args: InsertAnimationVideoArgs): Promise<DocumentModel | null> => {
+            const id = compositionId
+            if (!id) {
+                return null
+            }
+            setActivityToast('Adding video to composition…')
+            const body: Parameters<typeof postStoreVideoLayer>[1] = {
+                asset_id: args.assetId,
+                file_url: args.fileUrl,
+                name: args.name,
+                start_ms: 0,
+                end_ms: args.endMs,
+                provenance: args.provenance,
+            }
+            if (args.mode === 'replace_source' && args.replaceLayerId) {
+                body.insert_mode = 'replace_layer'
+                body.replace_layer_id = args.replaceLayerId
+            } else {
+                body.insert_mode = 'add'
+                body.stacking = args.mode === 'add_front' ? 'front' : 'back'
+            }
+            const r = await postStoreVideoLayer(id, body)
+            let doc = parseDocumentFromApi(r.document_json)
+            if (args.mode === 'add_back' && args.replaceLayerId) {
+                const hideId = args.replaceLayerId
+                doc = {
+                    ...doc,
+                    layers: doc.layers.map((ly) => {
+                        if (ly.id !== hideId) {
+                            return ly
+                        }
+                        if (!isImageLayer(ly) && !isGenerativeImageLayer(ly)) {
+                            return ly
+                        }
+                        return { ...ly, visible: false }
+                    }),
+                    updated_at: new Date().toISOString(),
+                }
+            }
+            setDocument(doc)
+            const ser = JSON.stringify(doc)
+            setLastSavedSerialized(ser)
+            lastAutosaveSnapshotSerializedRef.current = ser
+            setActivityToast('Video added to the composition')
+            return doc
+        },
+        [compositionId]
+    )
+
+    const handleRequestBakedCompositionVideoExport = useCallback(async (): Promise<string | null> => {
+        const id = compositionId
+        if (!id) {
+            return null
+        }
+        setActivityToast('Queuing final video export…')
+        const created = await postRequestVideoExport(id)
+        setActivityToast('Baking video — you can keep working…')
+        const final = await pollVideoExportUntilTerminal(id, created.id, { intervalMs: 2500, queuedStallMs: 120_000 })
+        if (final.status === 'failed') {
+            const err = final.error
+            const msg =
+                err && typeof err === 'object' && 'message' in err
+                    ? String((err as { message?: unknown }).message)
+                    : 'Video export failed'
+            throw new Error(msg || 'Video export failed')
+        }
+        if (final.status === 'complete' && final.output_asset_id) {
+            setActivityToast('Final video is ready in your library')
+            return final.output_asset_id
+        }
+        if (final.status === 'complete' && !final.output_asset_id) {
+            throw new Error('Video export finished but no output file was recorded. Try again or contact support.')
+        }
+        return null
+    }, [compositionId])
 
     /** Used by the poll effect: boolean dep avoids re-subscribing the interval on every list refresh. */
     const hasActiveNonTerminalAnimation = useMemo(
@@ -2138,6 +2616,62 @@ export default function AssetEditor() {
             ),
         [compositionAnimations],
     )
+
+    const activeLayerAnimationBySourceLayerId = useMemo(() => {
+        const m = new Map<string, StudioAnimationJobDto>()
+        for (const j of compositionAnimations) {
+            if (!j.source_layer_id) continue
+            if (!isStudioAnimationStatusActive(j.status)) continue
+            m.set(String(j.source_layer_id), j)
+        }
+        return m
+    }, [compositionAnimations])
+
+    const hasFullFrameActiveAnimation = useMemo(
+        () =>
+            compositionAnimations.some(
+                (j) => !j.source_layer_id && isStudioAnimationStatusActive(j.status),
+            ),
+        [compositionAnimations],
+    )
+
+    const hasVisibleVideoLayerInDoc = useMemo(
+        () => document.layers.some((l) => l.visible && isVideoLayer(l)),
+        [document.layers],
+    )
+
+    const publishModalPrimaryVideo = useMemo(
+        () => getPrimaryVideoLayerForDocumentExport(document.layers),
+        [document.layers],
+    )
+
+    const studioAnimCanvasPreviewInfo = useMemo(() => {
+        if (!studioAnimationCanvasPreviewJobId) {
+            return null
+        }
+        const j = compositionAnimations.find((x) => x.id === studioAnimationCanvasPreviewJobId)
+        if (!j || j.status !== 'complete' || !j.output?.asset_view_url) {
+            return null
+        }
+        if (j.source_layer_id && selectedLayerId && j.source_layer_id !== selectedLayerId) {
+            return null
+        }
+        const durS = j.output.duration_seconds ?? j.duration_seconds
+        const sec = typeof durS === 'number' && durS > 0 ? durS : 5
+        return {
+            jobId: j.id,
+            url: j.output.asset_view_url,
+            durationMs: Math.max(1000, Math.round(sec * 1000)),
+        }
+    }, [studioAnimationCanvasPreviewJobId, compositionAnimations, selectedLayerId])
+
+    const showStudioAnimCanvasPreview = Boolean(studioAnimCanvasPreviewInfo)
+
+    useEffect(() => {
+        if (studioAnimationCanvasPreviewJobId && !studioAnimCanvasPreviewInfo) {
+            setStudioAnimationCanvasPreviewJobId(null)
+        }
+    }, [studioAnimationCanvasPreviewJobId, studioAnimCanvasPreviewInfo])
 
     const snapshotCheckpoint = useCallback(
         async (label: string, doc: DocumentModel) => {
@@ -2206,6 +2740,11 @@ export default function AssetEditor() {
             setCompositionBootstrapping(false)
             return
         }
+        // URL caught up via replaceState (or Inertia lag) while this composition is already in memory — avoid a redundant fetch and loading overlay.
+        if (compositionId === id) {
+            setCompositionBootstrapping(false)
+            return
+        }
         let cancelled = false
         setCompositionBootstrapping(true)
         setCompositionLoadError(null)
@@ -2222,6 +2761,9 @@ export default function AssetEditor() {
                     const vis = compositionVisibilityFromApi(c.visibility)
                     setCompositionVisibility(vis)
                     setLastSavedVisibility(vis)
+                    const fd = (c.folder ?? '').trim()
+                    setCompositionFolder(fd)
+                    setLastSavedFolder(fd)
                     setCompositionOwnerUserId(c.owner_user_id ?? null)
                     setDocument(doc)
                     setLastSavedSerialized(JSON.stringify(doc))
@@ -2243,7 +2785,7 @@ export default function AssetEditor() {
         return () => {
             cancelled = true
         }
-    }, [compositionIdFromUrl, refreshVersions])
+    }, [compositionIdFromUrl, compositionId, refreshVersions])
 
     // Reset the rolling autosave-snapshot clock whenever we switch to a different composition.
     // Otherwise a long-idle editor would instantly create an autosave the moment a new comp is opened.
@@ -2257,18 +2799,22 @@ export default function AssetEditor() {
     useEffect(() => {
         if (!compositionId) {
             setStudioCreativeSet(null)
+            setStudioVersionsEntryFetchDone(false)
             return
         }
+        setStudioVersionsEntryFetchDone(false)
         let cancelled = false
         void fetchCreativeSetForComposition(compositionId)
             .then(({ creative_set }) => {
                 if (!cancelled) {
                     setStudioCreativeSet(creative_set)
+                    setStudioVersionsEntryFetchDone(true)
                 }
             })
             .catch(() => {
                 if (!cancelled) {
                     setStudioCreativeSet(null)
+                    setStudioVersionsEntryFetchDone(true)
                 }
             })
         return () => {
@@ -2414,6 +2960,7 @@ export default function AssetEditor() {
                     )
                 }
             }
+            void refreshAfterAiAndBumpDraftCredits()
         }
         const runTick = async (): Promise<boolean> => {
             if (studioGenerationPollLockRef.current) {
@@ -2463,7 +3010,7 @@ export default function AssetEditor() {
             cancelled = true
             clearPollInterval()
         }
-    }, [studioGenerationPollJobId])
+    }, [studioGenerationPollJobId, refreshAfterAiAndBumpDraftCredits])
 
     useLayoutEffect(() => {
         const n = studioPackNewcomerCompositionIds.length
@@ -2519,10 +3066,14 @@ export default function AssetEditor() {
                         versionKind: shouldSnapshot ? 'autosave' : undefined,
                         thumbnailPngBase64: thumb,
                         visibility: compositionVisibility,
+                        folder: compositionFolder.trim() || null,
                     })
                     const vis = compositionVisibilityFromApi(updated.visibility)
                     setCompositionVisibility(vis)
                     setLastSavedVisibility(vis)
+                    const fd = (updated.folder ?? '').trim()
+                    setCompositionFolder(fd)
+                    setLastSavedFolder(fd)
 
                     if (shouldSnapshot) {
                         lastAutosaveSnapshotAtRef.current = Date.now()
@@ -2542,7 +3093,7 @@ export default function AssetEditor() {
             })()
         }, AUTOSAVE_MS)
         return () => window.clearTimeout(t)
-    }, [document, compositionId, dirty, compositionName, compositionVisibility, refreshVersions])
+    }, [document, compositionId, dirty, compositionName, compositionVisibility, compositionFolder, refreshVersions])
 
     useEffect(() => {
         setVariationHoverIdx(null)
@@ -3053,7 +3604,14 @@ export default function AssetEditor() {
                 nameToSave = UNTITLED_DRAFT_NAME
             } else if (isUntitledDraftName(compositionName)) {
                 const suggested = defaultCompositionName(docSnapshot)
-                const entered = window.prompt('Name this composition', suggested)
+                const entered = await promptForText({
+                    title: 'Name this composition',
+                    message: 'Give this design a name so you can find it later in your library.',
+                    label: 'Composition name',
+                    initialValue: suggested,
+                    confirmText: 'Save',
+                    placeholder: suggested,
+                })
                 if (entered === null) {
                     setSaveState('idle')
                     return
@@ -3070,6 +3628,7 @@ export default function AssetEditor() {
                 const c = await postComposition(nameToSave, docSnapshot, {
                     thumbnailPngBase64: thumb,
                     visibility: compositionVisibility,
+                    folder: compositionFolder.trim() || null,
                 })
                 const doc = parseDocumentFromApi(c.document)
                 setCompositionId(c.id)
@@ -3079,6 +3638,9 @@ export default function AssetEditor() {
                 const vis = compositionVisibilityFromApi(c.visibility)
                 setCompositionVisibility(vis)
                 setLastSavedVisibility(vis)
+                const fd = (c.folder ?? '').trim()
+                setCompositionFolder(fd)
+                setLastSavedFolder(fd)
                 setCompositionOwnerUserId(c.owner_user_id ?? null)
                 setDocument(doc)
                 const serialized = JSON.stringify(doc)
@@ -3093,10 +3655,14 @@ export default function AssetEditor() {
                     versionKind: 'manual',
                     thumbnailPngBase64: thumb,
                     visibility: compositionVisibility,
+                    folder: compositionFolder.trim() || null,
                 })
                 const vis = compositionVisibilityFromApi(updated.visibility)
                 setCompositionVisibility(vis)
                 setLastSavedVisibility(vis)
+                const fd2 = (updated.folder ?? '').trim()
+                setCompositionFolder(fd2)
+                setLastSavedFolder(fd2)
                 const serialized = JSON.stringify(documentRef.current)
                 setLastSavedSerialized(serialized)
                 setLastSavedName(nameToSave)
@@ -3114,7 +3680,7 @@ export default function AssetEditor() {
             setSaveState('error')
             setSaveError(handleAIError(e))
         }
-    }, [compositionId, compositionName, compositionVisibility, refreshVersions])
+    }, [compositionId, compositionName, compositionVisibility, compositionFolder, refreshVersions, promptForText])
 
     const handleSave = useCallback(() => {
         void performManualSave()
@@ -3168,6 +3734,9 @@ export default function AssetEditor() {
                 setCompositionVisibility(vis)
                 setLastSavedVisibility(vis)
                 setCompositionOwnerUserId(c.owner_user_id ?? null)
+                const fd = (c.folder ?? '').trim()
+                setCompositionFolder(fd)
+                setLastSavedFolder(fd)
                 setDocument(d)
                 setLastSavedSerialized(JSON.stringify(d))
                 replaceUrlCompositionParam(c.id)
@@ -3194,6 +3763,9 @@ export default function AssetEditor() {
             setCompositionVisibility(vis)
             setLastSavedVisibility(vis)
             setCompositionOwnerUserId(c.owner_user_id ?? null)
+            const fd = (c.folder ?? '').trim()
+            setCompositionFolder(fd)
+            setLastSavedFolder(fd)
             setDocument(d)
             setLastSavedSerialized(JSON.stringify(d))
             replaceUrlCompositionParam(c.id)
@@ -3234,6 +3806,9 @@ export default function AssetEditor() {
                     setCompositionVisibility(vis)
                     setLastSavedVisibility(vis)
                     setCompositionOwnerUserId(c.owner_user_id ?? null)
+                    const fd = (c.folder ?? '').trim()
+                    setCompositionFolder(fd)
+                    setLastSavedFolder(fd)
                     setDocument(doc)
                     setLastSavedSerialized(JSON.stringify(doc))
                     setSelectedLayerId(null)
@@ -3330,6 +3905,7 @@ export default function AssetEditor() {
         try {
             const { creative_set } = await postCreativeSet({ composition_id: compositionId })
             setStudioCreativeSet(creative_set)
+            setStudioVersionsPanelOpen(true)
             setActivityToast('Versions set created')
         } catch (e) {
             setActivityToast(e instanceof Error ? e.message : 'Could not create Versions set')
@@ -3417,6 +3993,40 @@ export default function AssetEditor() {
         },
         [studioCreativeSet, compositionId, editorConfirm, switchToSiblingComposition]
     )
+
+    const [studioDissolveSetBusy, setStudioDissolveSetBusy] = useState(false)
+    const dissolveStudioVersionsSet = useCallback(async () => {
+        if (!studioCreativeSet) {
+            return
+        }
+        const setName = studioCreativeSet.name?.trim() || 'this Versions set'
+        const ok = await editorConfirm({
+            title: 'Remove Versions workspace?',
+            message: `"${setName}" will be deleted. All compositions stay in your library, but the Versions rail, handoff, and apply-to-sibling links go away. This cannot be undone.`,
+            variant: 'danger',
+            confirmText: 'Remove workspace',
+        })
+        if (!ok) {
+            return
+        }
+        setStudioDissolveSetBusy(true)
+        try {
+            await deleteCreativeSet(studioCreativeSet.id)
+            setStudioCreativeSet(null)
+            setStudioHandoffSelectionMode(false)
+            setStudioHandoffSelectedCompositionIds([])
+            setStudioHandoffExportPhase('idle')
+            setStudioHandoffExportDetail('')
+            setStudioVersionPickMode(false)
+            setStudioApplySelectedCompositionIds([])
+            setStudioApplyScope('this_version')
+            setActivityToast('Versions workspace removed — you have a single-composition layout again.')
+        } catch (e) {
+            setActivityToast(e instanceof Error ? e.message : 'Could not remove workspace')
+        } finally {
+            setStudioDissolveSetBusy(false)
+        }
+    }, [studioCreativeSet, editorConfirm])
 
     const requestDiscardStudioAnimationJob = useCallback(
         async (jobId: string): Promise<boolean> => {
@@ -3538,11 +4148,59 @@ export default function AssetEditor() {
         setGenerateVersionsModalOpen(true)
     }, [bumpGenerateVersionsModal])
 
+    const openStudioAnimateModal = useCallback(
+        (ctx?: { sourceKind: StudioAnimateSourceKind; layerId: string | null }) => {
+            if (!aiEnabled) {
+                setActivityToast('AI features are disabled for this workspace.')
+                return
+            }
+            if (!compositionId) {
+                if (compositionIdFromUrl && compositionBootstrapping) {
+                    setActivityToast('Still loading your composition…')
+                    return
+                }
+                void editorConfirm({
+                    title: 'Save your composition first',
+                    message:
+                        'Please save this composition before generating a video from an image. Save the composition, then use Image → video (AI) or Animate composition again.',
+                    confirmText: 'OK',
+                    variant: 'info',
+                    showCancel: false,
+                })
+                return
+            }
+            setStudioAnimateOpenContext(ctx ?? { sourceKind: 'full_composition', layerId: null })
+            setStudioAnimateModalMountKey((k) => k + 1)
+            setStudioAnimateModalOpen(true)
+        },
+        [aiEnabled, compositionId, compositionIdFromUrl, compositionBootstrapping, editorConfirm],
+    )
+
+    const openStudioAnimateFromAddLayer = useCallback(() => {
+        const doc = documentRef.current
+        const selected =
+            selectedLayerId &&
+            doc.layers.find(
+                (l) => l.id === selectedLayerId && (l.type === 'image' || l.type === 'generative_image'),
+            )
+        const firstStack = doc.layers.find((l) => l.type === 'image' || l.type === 'generative_image')
+        if (selected) {
+            openStudioAnimateModal({ sourceKind: 'layer_isolated', layerId: selected.id })
+            return
+        }
+        if (firstStack) {
+            openStudioAnimateModal({ sourceKind: 'layer_isolated', layerId: firstStack.id })
+            setActivityToast('Using the first image in the stack — select a layer to target a different still.')
+            return
+        }
+        openStudioAnimateModal({ sourceKind: 'full_composition', layerId: null })
+        setActivityToast('No still layer yet — animating the full canvas. Add an image to start from a layer.')
+    }, [openStudioAnimateModal, selectedLayerId])
+
     const handleVersionBuilderAnimateVideo = useCallback(() => {
         setVersionBuilderOpen(false)
-        setStudioVersionsPanelOpen(true)
-        setStudioAnimateModalOpen(true)
-    }, [])
+        openStudioAnimateModal()
+    }, [openStudioAnimateModal])
 
     const runCompareCapture = useCallback(async () => {
         if (!compositionId || !compareLeftId || !compareRightId || compareLeftId === compareRightId) {
@@ -4039,9 +4697,58 @@ export default function AssetEditor() {
             setWelcomeDismissed(false)
             setDraftCompositionCreditsUsed(0)
             setStudioCreativeSet(null)
+            setCompositionFolder('')
+            setLastSavedFolder('')
+            setFolderMenuOpen(false)
+            setShowFolderCreateRow(false)
+            setFolderNewNameDraft('')
         })
         replaceUrlCompositionParam(null)
     }, [discardRequiresConfirmation, editorConfirm])
+
+    const refetchOpenCompositionList = useCallback(() => {
+        setCompositionListLoading(true)
+        setCompositionListError(null)
+        return fetchCompositionSummaries({
+            filter: pickerListFilter,
+            folder: pickerFolderFilter || undefined,
+        })
+            .then(({ compositions, meta }) => {
+                setCompositionSummaries(compositions)
+                setPickerListMeta(meta)
+                setHeaderFolderList(meta.folders)
+            })
+            .catch((e: unknown) => {
+                setCompositionSummaries([])
+                setPickerListMeta({ can_list_all: false, folders: [] })
+                setCompositionListError(handleAIError(e))
+            })
+            .finally(() => {
+                setCompositionListLoading(false)
+            })
+    }, [pickerListFilter, pickerFolderFilter])
+
+    const openCompositionPickerAndLoad = useCallback(() => {
+        setOpenCompositionPicker(true)
+        setPickerSearch('')
+        setPickerListFilter('team')
+        setPickerFolderFilter('')
+    }, [])
+
+    useEffect(() => {
+        if (!openCompositionPicker) {
+            return
+        }
+        void refetchOpenCompositionList()
+    }, [openCompositionPicker, refetchOpenCompositionList])
+
+    useEffect(() => {
+        void fetchCompositionSummaries({ filter: 'team' })
+            .then(({ meta }) => setHeaderFolderList(meta.folders))
+            .catch(() => {
+                /* list optional for folder picker */
+            })
+    }, [])
 
     const deleteCompositionById = useCallback(
         async (targetId: string) => {
@@ -4062,10 +4769,7 @@ export default function AssetEditor() {
                 if (compositionId === targetId) {
                     startNewComposition({ skipDiscardConfirm: true })
                 }
-                void fetchCompositionSummaries()
-                    .then((rows) => {
-                        setCompositionSummaries(rows)
-                    })
+                void refetchOpenCompositionList()
                     .catch(() => {
                         /* list refresh best-effort */
                     })
@@ -4075,26 +4779,8 @@ export default function AssetEditor() {
                 setCompositionDeleteBusy(false)
             }
         },
-        [compositionId, startNewComposition, editorConfirm]
+        [compositionId, startNewComposition, editorConfirm, refetchOpenCompositionList]
     )
-
-    const openCompositionPickerAndLoad = useCallback(() => {
-        setOpenCompositionPicker(true)
-        setPickerSearch('')
-        setCompositionListLoading(true)
-        setCompositionListError(null)
-        void fetchCompositionSummaries()
-            .then((rows) => {
-                setCompositionSummaries(rows)
-            })
-            .catch((e: unknown) => {
-                setCompositionSummaries([])
-                setCompositionListError(handleAIError(e))
-            })
-            .finally(() => {
-                setCompositionListLoading(false)
-            })
-    }, [])
 
     const navigateToComposition = useCallback(
         async (id: string) => {
@@ -4154,10 +4840,13 @@ export default function AssetEditor() {
         if (!studioAnimationDetailJobId) {
             return
         }
+        if (animationsLoading) {
+            return
+        }
         if (!compositionAnimations.some((j) => j.id === studioAnimationDetailJobId)) {
             setStudioAnimationDetailJobId(null)
         }
-    }, [compositionAnimations, studioAnimationDetailJobId])
+    }, [compositionAnimations, studioAnimationDetailJobId, animationsLoading])
 
     useEffect(() => {
         if (compareOpen && versions.length >= 2 && !compareLeftId && !compareRightId) {
@@ -4286,7 +4975,7 @@ export default function AssetEditor() {
     }, [])
 
     useEffect(() => {
-        if (!pickerOpen) {
+        if (!pickerOpen && leftPanel !== 'assets') {
             return
         }
         let cancelled = false
@@ -4310,7 +4999,7 @@ export default function AssetEditor() {
         return () => {
             cancelled = true
         }
-    }, [pickerOpen])
+    }, [pickerOpen, leftPanel])
 
     useEffect(() => {
         const t = window.setTimeout(() => setPickerSearchDebounced(pickerSearchInput.trim()), 320)
@@ -4318,7 +5007,7 @@ export default function AssetEditor() {
     }, [pickerSearchInput])
 
     useEffect(() => {
-        if (!pickerOpen) {
+        if (!pickerOpen && leftPanel !== 'assets') {
             return
         }
         setDamLoading(true)
@@ -4327,18 +5016,34 @@ export default function AssetEditor() {
         const categoryId =
             pickerCategoryFilterId === '' ? undefined : Math.floor(Number(pickerCategoryFilterId))
         const search = pickerSearchDebounced.length > 0 ? pickerSearchDebounced : undefined
+        const contentType = pickerMode === 'add_video' ? 'video' : 'image'
         fetchEditorAssets(80, {
             assetType,
+            contentType,
             categoryId: categoryId !== undefined && categoryId > 0 ? categoryId : undefined,
             search,
         })
             .then((r) => setDamAssets(r.assets))
             .catch((e) => setDamError(e instanceof Error ? e.message : 'Failed to load assets'))
             .finally(() => setDamLoading(false))
-    }, [pickerOpen, pickerScope, pickerCategoryFilterId, pickerSearchDebounced, pickerListRefreshKey])
+    }, [pickerOpen, leftPanel, pickerScope, pickerMode, pickerCategoryFilterId, pickerSearchDebounced, pickerListRefreshKey])
 
     const openPickerForAddImage = useCallback(() => {
         setPickerMode('add')
+        setReplaceLayerId(null)
+        setReferencePickerLayerId(null)
+        setReferenceSelectionIds([])
+        setPickerSearchInput('')
+        setPickerSearchDebounced('')
+        setPickerOpen(true)
+    }, [])
+
+    const openPickerForAddVideo = useCallback(() => {
+        if (!compositionIdRef.current) {
+            setActivityToast('Save your composition first, then you can add a video from the library.')
+            return
+        }
+        setPickerMode('add_video')
         setReplaceLayerId(null)
         setReferencePickerLayerId(null)
         setReferenceSelectionIds([])
@@ -4443,6 +5148,45 @@ export default function AssetEditor() {
             if (pickerPickingRef.current) {
                 return
             }
+            if (pickerMode === 'add_video') {
+                const cid = compositionIdRef.current
+                if (!cid) {
+                    setActivityToast('Save your composition first, then you can add a video from the library.')
+                    return
+                }
+                pickerPickingRef.current = asset.id
+                setPickerPickingAssetId(asset.id)
+                setActivityToast('Adding video…')
+                try {
+                    const endMs = Math.min(
+                        3_600_000,
+                        Math.max(1000, documentRef.current.studio_timeline?.duration_ms ?? 30_000)
+                    )
+                    const r = await postStoreVideoLayer(cid, {
+                        asset_id: asset.id,
+                        file_url: asset.file_url,
+                        name: asset.name?.trim() ? asset.name : 'Video',
+                        start_ms: 0,
+                        end_ms: endMs,
+                        stacking: 'back',
+                    })
+                    const doc = parseDocumentFromApi(r.document_json)
+                    setDocument(doc)
+                    const ser = JSON.stringify(doc)
+                    setLastSavedSerialized(ser)
+                    lastAutosaveSnapshotSerializedRef.current = ser
+                    setPickerOpen(false)
+                    setPickerMode(null)
+                    setReplaceLayerId(null)
+                    setActivityToast('Video added to the composition')
+                } catch (e) {
+                    setActivityToast(e instanceof Error ? e.message : 'Could not add video')
+                } finally {
+                    pickerPickingRef.current = null
+                    setPickerPickingAssetId(null)
+                }
+                return
+            }
             pickerPickingRef.current = asset.id
             setPickerPickingAssetId(asset.id)
             setActivityToast(pickerMode === 'replace' ? 'Replacing image…' : 'Adding image…')
@@ -4510,7 +5254,7 @@ export default function AssetEditor() {
                 setPickerPickingAssetId(null)
             }
         },
-        [pickerMode, replaceLayerId, updateLayer, document.layers]
+        [pickerMode, replaceLayerId, updateLayer, document.layers, setDocument, setLastSavedSerialized]
     )
 
     const runPickerLibraryUpload = useCallback(
@@ -4572,6 +5316,8 @@ export default function AssetEditor() {
         setPublishDescription('')
         setPublishMetadataValues({})
         setPublishCollectionIds([])
+        setPublishIncludeAudio(true)
+        setPublishModalStillPreviewUrl(null)
         setPublishMetadataShowErrors(false)
         setPublishMetadataSchema(null)
         setPublishMetadataError(null)
@@ -4630,6 +5376,54 @@ export default function AssetEditor() {
         return () => ac.abort()
     }, [publishModalOpen, publishCategoryId])
 
+    useEffect(() => {
+        if (!publishModalOpen || hasVisibleVideoLayerInDoc) {
+            setPublishModalStillPreviewUrl(null)
+            return
+        }
+        const node = stageRef.current
+        if (!node) {
+            return
+        }
+        let cancelled = false
+        void (async () => {
+            try {
+                const doc = documentRef.current
+                await waitForImagesToLoad(node)
+                const maxEdge = 640
+                const docMax = Math.max(doc.width, doc.height, 1)
+                const layoutScale = docMax > maxEdge ? maxEdge / docMax : 1
+                const outW = Math.round(doc.width * layoutScale)
+                const outH = Math.round(doc.height * layoutScale)
+                const dataUrl = await toJpeg(node, {
+                    cacheBust: true,
+                    skipFonts: true,
+                    pixelRatio: 1,
+                    backgroundColor: '#ffffff',
+                    width: outW,
+                    height: outH,
+                    fetchRequestInit: editorHtmlToImageFetchRequestInit,
+                    style: {
+                        transform: 'none',
+                        width: `${outW}px`,
+                        height: `${outH}px`,
+                    },
+                    quality: 0.82,
+                })
+                if (!cancelled) {
+                    setPublishModalStillPreviewUrl(dataUrl)
+                }
+            } catch {
+                if (!cancelled) {
+                    setPublishModalStillPreviewUrl(null)
+                }
+            }
+        })()
+        return () => {
+            cancelled = true
+        }
+    }, [publishModalOpen, hasVisibleVideoLayerInDoc, document.width, document.height, waitForImagesToLoad, editorHtmlToImageFetchRequestInit])
+
     const runPublishToLibrary = useCallback(
         async (opts: {
             title: string
@@ -4644,6 +5438,7 @@ export default function AssetEditor() {
             setPromoteSaving(true)
             setPromoteError(null)
             setPromoteOk(false)
+            setPublishSuccessCelebration(false)
 
             const exportStageForPublish = async () => {
                 const node = stageRef.current
@@ -4658,7 +5453,7 @@ export default function AssetEditor() {
                 const layoutScale = docMax > maxEdge ? maxEdge / docMax : 1
                 const outW = Math.round(doc.width * layoutScale)
                 const outH = Math.round(doc.height * layoutScale)
-                const opts = {
+                const cap = {
                     cacheBust: true,
                     skipFonts: true,
                     pixelRatio: 1,
@@ -4672,37 +5467,91 @@ export default function AssetEditor() {
                         height: `${outH}px`,
                     },
                 } as const
-                return toJpeg(node, { ...opts, quality: 0.88 })
+                return toJpeg(node, { ...cap, quality: 0.88 })
             }
 
+            const isVideoPublish = Boolean(compositionId) && hasVisibleVideoLayerInDoc
+
             try {
-                let dataUrl: string
-                try {
-                    dataUrl = await exportStageForPublish()
-                } catch (e) {
-                    console.warn('Retry export...', e)
-                    dataUrl = await exportStageForPublish()
+                if (isVideoPublish) {
+                    const compId = compositionId as string
+                    const name = opts.title.trim() || buildPromotionAssetName(documentRef.current)
+                    const created = await postRequestVideoExport(compId, {
+                        include_audio: publishIncludeAudio,
+                        editor_publish: {
+                            name,
+                            description: opts.description.trim(),
+                            category_id: opts.categoryId,
+                            field_metadata: opts.fieldMetadata,
+                            collection_ids: opts.collectionIds,
+                            editor_provenance: buildEditorProvenanceHints(documentRef.current),
+                        },
+                    })
+                    const final = await pollVideoExportUntilTerminal(compId, created.id, {
+                        intervalMs: 2000,
+                        queuedStallMs: 120_000,
+                    })
+                    if (final.status === 'failed') {
+                        const err = final.error
+                        const msg =
+                            err && typeof err === 'object' && 'message' in err
+                                ? String((err as { message?: unknown }).message)
+                                : 'Video export failed'
+                        throw new Error(msg || 'Video export failed')
+                    }
+                    if (final.status !== 'complete' || !final.output_asset_id) {
+                        throw new Error(
+                            final.status === 'complete'
+                                ? 'Video export finished but no output file was recorded. Try again or contact support.'
+                                : `Video export ended unexpectedly (status: ${final.status}).`,
+                        )
+                    }
+                    void snapshotCheckpoint('Published video to library', documentRef.current)
+                    setPromoteOk(true)
+                    setPublishModalOpen(false)
+                    setPublishSuccessCelebration(true)
+                    setActivityToast('Your asset has been sent to Jackpot and will be processed.')
+                    window.setTimeout(() => setPublishSuccessCelebration(false), 4000)
+                    window.setTimeout(() => setPromoteOk(false), 5000)
+                } else {
+                    let dataUrl: string
+                    try {
+                        dataUrl = await exportStageForPublish()
+                    } catch (e) {
+                        console.warn('Retry export...', e)
+                        dataUrl = await exportStageForPublish()
+                    }
+                    let blob = await (await fetch(dataUrl)).blob()
+                    blob = await compressImageBlobForLegacyUploadLimit(blob, editorPublishFileByteBudget())
+                    const name = opts.title.trim() || buildPromotionAssetName(documentRef.current)
+                    await promoteCompositionToAsset(blob, name, documentRef.current, {
+                        categoryId: opts.categoryId,
+                        description: opts.description.trim() || undefined,
+                        fieldMetadata: opts.fieldMetadata,
+                        collectionIds: opts.collectionIds,
+                    })
+                    void snapshotCheckpoint('Published to library', documentRef.current)
+                    setPromoteOk(true)
+                    setPublishModalOpen(false)
+                    setPublishSuccessCelebration(true)
+                    setActivityToast('Your asset has been sent to Jackpot and will be processed.')
+                    window.setTimeout(() => setPublishSuccessCelebration(false), 4000)
+                    window.setTimeout(() => setPromoteOk(false), 5000)
                 }
-                let blob = await (await fetch(dataUrl)).blob()
-                blob = await compressImageBlobForLegacyUploadLimit(blob, editorPublishFileByteBudget())
-                const name = opts.title.trim() || buildPromotionAssetName(documentRef.current)
-                await promoteCompositionToAsset(blob, name, documentRef.current, {
-                    categoryId: opts.categoryId,
-                    description: opts.description.trim() || undefined,
-                    fieldMetadata: opts.fieldMetadata,
-                    collectionIds: opts.collectionIds,
-                })
-                void snapshotCheckpoint('Published to library', documentRef.current)
-                setPromoteOk(true)
-                setPublishModalOpen(false)
-                window.setTimeout(() => setPromoteOk(false), 5000)
             } catch (e) {
                 setPromoteError(handleAIError(e))
             } finally {
                 setPromoteSaving(false)
             }
         },
-        [snapshotCheckpoint]
+        [
+            snapshotCheckpoint,
+            compositionId,
+            hasVisibleVideoLayerInDoc,
+            publishIncludeAudio,
+            waitForImagesToLoad,
+            editorHtmlToImageFetchRequestInit,
+        ]
     )
 
     const submitPublishModal = useCallback(() => {
@@ -5936,6 +6785,46 @@ export default function AssetEditor() {
         })
     }, [selectedLayerId])
 
+    const handleAddLayerMenuChoice = useCallback(
+        (c: AddLayerMenuChoice) => {
+            setAddLayerUI(null)
+            switch (c) {
+                case 'text':
+                    addTextLayer()
+                    break
+                case 'image':
+                    openPickerForAddImage()
+                    break
+                case 'video':
+                    openPickerForAddVideo()
+                    break
+                case 'ai_video':
+                    openStudioAnimateFromAddLayer()
+                    break
+                case 'generative':
+                    addGenerativeImageLayer()
+                    break
+                case 'fill':
+                    addFillLayer()
+                    break
+                case 'mask':
+                    addMaskLayer()
+                    break
+                default:
+                    break
+            }
+        },
+        [
+            addTextLayer,
+            addFillLayer,
+            addGenerativeImageLayer,
+            addMaskLayer,
+            openPickerForAddImage,
+            openPickerForAddVideo,
+            openStudioAnimateFromAddLayer,
+        ],
+    )
+
     /**
      * Resolve a canvas/panel click into the correct selection:
      *
@@ -5967,6 +6856,73 @@ export default function AssetEditor() {
         },
         [setSelectedGroupId]
     )
+
+    /** When an AI image→video job finishes, add the clip as a real video layer so it appears in the design (replace still when possible). */
+    useEffect(() => {
+        if (!compositionId) {
+            return
+        }
+        const prev = studioAnimJobStatusByIdRef.current
+        const next: Record<string, string> = {}
+        const newlyComplete: StudioAnimationJobDto[] = []
+        for (const j of compositionAnimations) {
+            next[j.id] = j.status
+            if (
+                j.status === 'complete' &&
+                j.output?.asset_view_url &&
+                prev[j.id] !== undefined &&
+                prev[j.id] !== 'complete'
+            ) {
+                newlyComplete.push(j)
+            }
+        }
+        studioAnimJobStatusByIdRef.current = next
+        if (newlyComplete.length === 0) {
+            return
+        }
+        newlyComplete.sort((a, b) => {
+            const ta = a.completed_at ?? ''
+            const tb = b.completed_at ?? ''
+            if (ta !== tb) {
+                return tb.localeCompare(ta)
+            }
+            return b.id.localeCompare(a.id)
+        })
+        const job = newlyComplete[0]
+        setStudioAnimationCanvasPreviewJobId(null)
+        setEditingTextLayerId(null)
+        const docSnap = documentRef.current
+        const alreadyOnCanvas = findVideoLayerIdForStudioAnimationJob(docSnap, job.id)
+        if (alreadyOnCanvas) {
+            selectLayerOrGroup(alreadyOnCanvas)
+            return
+        }
+        const args = buildInsertArgsForStudioAnimationJob(job, docSnap)
+        if (!args) {
+            setActivityToast('Animation finished, but the video file is not ready to add yet.')
+            return
+        }
+        if (job.source_layer_id) {
+            selectLayerOrGroup(job.source_layer_id)
+        }
+        void handleInsertStudioAnimationAsVideoLayer(args)
+            .then((docAfter) => {
+                if (!docAfter) {
+                    return
+                }
+                const vid = docAfter.layers.find(
+                    (l) => isVideoLayer(l) && l.studioProvenance?.jobId === job.id,
+                )
+                if (vid) {
+                    selectLayerOrGroup(vid.id)
+                }
+            })
+            .catch((e) => {
+                setActivityToast(
+                    e instanceof Error ? e.message : 'Could not add the AI video to the composition',
+                )
+            })
+    }, [compositionAnimations, compositionId, handleInsertStudioAnimationAsVideoLayer, selectLayerOrGroup])
 
     const beginMove = useCallback(
         (layerId: string, e: React.MouseEvent) => {
@@ -6404,6 +7360,39 @@ export default function AssetEditor() {
         }
     }, [])
 
+    const topBarFolderOptions = useMemo(() => {
+        const s = new Set<string>()
+        for (const f of headerFolderList) {
+            if (f) s.add(f)
+        }
+        const cur = compositionFolder.trim()
+        if (cur) s.add(cur)
+        return Array.from(s).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
+    }, [headerFolderList, compositionFolder])
+
+    const applyNewFolderName = useCallback(() => {
+        const t = folderNewNameDraft.trim().slice(0, 64)
+        if (!t) return
+        setCompositionFolder(t)
+        setHeaderFolderList((prev) => (prev.includes(t) ? prev : [...prev, t].sort((a, b) => a.localeCompare(b))))
+        setFolderNewNameDraft('')
+        setShowFolderCreateRow(false)
+        setFolderMenuOpen(false)
+    }, [folderNewNameDraft])
+
+    useEffect(() => {
+        if (!folderMenuOpen) return
+        const onKey = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') {
+                setFolderMenuOpen(false)
+                setShowFolderCreateRow(false)
+                setFolderNewNameDraft('')
+            }
+        }
+        window.addEventListener('keydown', onKey)
+        return () => window.removeEventListener('keydown', onKey)
+    }, [folderMenuOpen])
+
     return (
         // `dark` is forced so every `dark:*` rule inside the editor fires regardless of
         // the user's OS preference or the top-level html class. On staging the html root
@@ -6467,6 +7456,137 @@ export default function AssetEditor() {
                                 <option value="private">Private (you)</option>
                                 <option value="shared">Shared (brand)</option>
                             </select>
+                            <div className="relative shrink-0">
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setFolderMenuOpen((o) => !o)
+                                        setShowFolderCreateRow(false)
+                                        setFolderNewNameDraft('')
+                                    }}
+                                    title="Group this composition in the Open dialog (campaign, channel, etc.)."
+                                    aria-haspopup="listbox"
+                                    aria-expanded={folderMenuOpen}
+                                    className="flex w-[min(100%,9rem)] min-w-[6.5rem] items-center justify-between gap-0.5 rounded-md border border-gray-700 bg-gray-800/50 px-1.5 py-1 text-left text-[11px] font-medium text-gray-200 hover:border-gray-600 hover:bg-gray-800 focus:border-gray-500 focus:outline-none focus:ring-0"
+                                >
+                                    <span className="min-w-0 flex-1 truncate">
+                                        {compositionFolder.trim() ? compositionFolder.trim() : 'Folder'}
+                                    </span>
+                                    <ChevronDownIcon className="h-3 w-3 shrink-0 text-gray-500" aria-hidden />
+                                </button>
+                                {folderMenuOpen && (
+                                    <>
+                                        <button
+                                            type="button"
+                                            aria-label="Close folder menu"
+                                            className="fixed inset-0 z-[80] cursor-default"
+                                            onClick={() => {
+                                                setFolderMenuOpen(false)
+                                                setShowFolderCreateRow(false)
+                                                setFolderNewNameDraft('')
+                                            }}
+                                        />
+                                        <div
+                                            role="listbox"
+                                            aria-label="Choose composition folder"
+                                            className="absolute left-0 top-full z-[90] mt-1 flex max-h-64 min-w-[12rem] flex-col overflow-hidden rounded-md border border-gray-600 bg-gray-900 py-1 shadow-xl ring-1 ring-black/30"
+                                        >
+                                            <div className="max-h-44 overflow-y-auto px-0.5">
+                                                <button
+                                                    type="button"
+                                                    role="option"
+                                                    onClick={() => {
+                                                        setCompositionFolder('')
+                                                        setFolderMenuOpen(false)
+                                                    }}
+                                                    className="flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-left text-[11px] text-gray-300 hover:bg-gray-700/80"
+                                                >
+                                                    <span className="text-gray-500">—</span>
+                                                    No folder
+                                                </button>
+                                                {topBarFolderOptions.length === 0 ? (
+                                                    <p className="px-2 py-1.5 text-[10px] text-gray-500">
+                                                        No saved folders yet — create one below.
+                                                    </p>
+                                                ) : (
+                                                    topBarFolderOptions.map((f) => (
+                                                        <button
+                                                            key={f}
+                                                            type="button"
+                                                            role="option"
+                                                            title={f}
+                                                            onClick={() => {
+                                                                setCompositionFolder(f)
+                                                                setFolderMenuOpen(false)
+                                                            }}
+                                                            className={`flex w-full truncate rounded px-2 py-1.5 text-left text-[11px] hover:bg-gray-700/80 ${
+                                                                compositionFolder.trim() === f
+                                                                    ? 'bg-indigo-900/50 font-medium text-indigo-200'
+                                                                    : 'text-gray-200'
+                                                            }`}
+                                                        >
+                                                            {f}
+                                                        </button>
+                                                    ))
+                                                )}
+                                            </div>
+                                            <div className="border-t border-gray-700 bg-gray-900/95 p-1.5">
+                                                {!showFolderCreateRow ? (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            setShowFolderCreateRow(true)
+                                                            setFolderNewNameDraft('')
+                                                        }}
+                                                        className="flex w-full items-center justify-center gap-1 rounded border border-dashed border-gray-600 py-1.5 text-[11px] font-medium text-indigo-300 hover:border-indigo-500/50 hover:bg-gray-800/80"
+                                                    >
+                                                        <PlusIcon className="h-3.5 w-3.5" aria-hidden />
+                                                        Create new folder
+                                                    </button>
+                                                ) : (
+                                                    <div className="flex flex-col gap-1.5">
+                                                        <input
+                                                            type="text"
+                                                            value={folderNewNameDraft}
+                                                            onChange={(e) => setFolderNewNameDraft(e.target.value)}
+                                                            onKeyDown={(e) => {
+                                                                if (e.key === 'Enter') {
+                                                                    e.preventDefault()
+                                                                    applyNewFolderName()
+                                                                }
+                                                            }}
+                                                            maxLength={64}
+                                                            placeholder="Folder name"
+                                                            className="w-full rounded border border-gray-600 bg-gray-800 px-2 py-1 text-[11px] text-gray-100 placeholder-gray-500 focus:border-indigo-500 focus:outline-none focus:ring-0"
+                                                            autoFocus
+                                                        />
+                                                        <div className="flex justify-end gap-1">
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    setShowFolderCreateRow(false)
+                                                                    setFolderNewNameDraft('')
+                                                                }}
+                                                                className="rounded px-2 py-0.5 text-[10px] text-gray-400 hover:text-gray-200"
+                                                            >
+                                                                Cancel
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                onClick={applyNewFolderName}
+                                                                disabled={!folderNewNameDraft.trim()}
+                                                                className="rounded bg-indigo-600 px-2 py-0.5 text-[10px] font-semibold text-white hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-40"
+                                                            >
+                                                                Use folder
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+                                    </>
+                                )}
+                            </div>
                             <button
                                 type="button"
                                 onClick={handleSave}
@@ -6481,7 +7601,9 @@ export default function AssetEditor() {
                             <span className="flex items-center gap-1 text-xs">
                                 {(promoteOk || promoteError) && (
                                     <span className={promoteOk ? 'text-emerald-400' : 'text-red-400'} role="status">
-                                        {promoteOk ? 'Published' : promoteError}
+                                        {promoteOk
+                                            ? 'Sent to Jackpot — processing'
+                                            : promoteError}
                                     </span>
                                 )}
                                 {saveError && (
@@ -6870,8 +7992,7 @@ export default function AssetEditor() {
                                                 type="button"
                                                 onClick={() => {
                                                     setLeftPanel(null)
-                                                    setStudioVersionsPanelOpen(true)
-                                                    setStudioAnimateModalOpen(true)
+                                                    openStudioAnimateModal()
                                                 }}
                                                 disabled={!compositionId || !aiEnabled}
                                                 className="flex w-full items-center gap-2.5 rounded-md px-3 py-1.5 text-sm text-gray-200 hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
@@ -6880,7 +8001,7 @@ export default function AssetEditor() {
                                                         ? 'Save the composition first'
                                                         : !aiEnabled
                                                           ? 'AI features are disabled for this workspace'
-                                                          : 'Create a short video from the current canvas (image-to-video)'
+                                                          : 'Create a short AI video from the canvas or a still layer (image-to-video)'
                                                 }
                                             >
                                                 <FilmIcon className="h-4 w-4 shrink-0 text-violet-400" aria-hidden />
@@ -6998,9 +8119,30 @@ export default function AssetEditor() {
                                 )}
                                 {leftPanel === 'layers' && (
                                     <div className="flex flex-1 flex-col">
-                                        <div className="flex items-center justify-between border-b border-gray-700 px-3 py-2">
+                                        <div className="relative z-10 flex items-center justify-between border-b border-gray-700 px-3 py-2">
                                             <h2 className="text-xs font-semibold uppercase tracking-wide text-gray-400">Layer Stack</h2>
-                                            <button type="button" onClick={() => setLeftPanel(null)} className="text-gray-500 hover:text-gray-300"><XMarkIcon className="h-4 w-4" /></button>
+                                            <div className="flex items-center gap-0.5">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setAddLayerUI((u) => (u === 'header' ? null : 'header'))}
+                                                    className={`rounded p-1.5 text-gray-400 hover:bg-gray-800 hover:text-white ${addLayerUI === 'header' ? 'bg-gray-800 text-white' : ''}`}
+                                                    title="Add layer"
+                                                    aria-label="Add layer"
+                                                    aria-expanded={addLayerUI === 'header'}
+                                                >
+                                                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor" aria-hidden>
+                                                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                                                    </svg>
+                                                </button>
+                                                <button type="button" onClick={() => setLeftPanel(null)} className="text-gray-500 hover:text-gray-300" aria-label="Close layer panel">
+                                                    <XMarkIcon className="h-4 w-4" />
+                                                </button>
+                                            </div>
+                                            {addLayerUI === 'header' && (
+                                                <div className="absolute left-0 right-0 top-full flex justify-center px-2 pt-1.5">
+                                                    <AddLayerTypeMenu onPick={handleAddLayerMenuChoice} />
+                                                </div>
+                                            )}
                                         </div>
                                         {/* Grouping toolbar — visible whenever the user has shift-clicked 2+ rows.
                                             Intentionally unobtrusive so the normal flow stays clean. */}
@@ -7077,10 +8219,23 @@ export default function AssetEditor() {
                                                                                 }
                                                                             }}
                                                                             onDoubleClick={() => {
-                                                                                const next = window.prompt('Group name', g.name)
-                                                                                if (next && next.trim() !== g.name) {
-                                                                                    setDocument((d) => updateGroupInDoc(d, g.id, { name: next.trim() }))
-                                                                                }
+                                                                                void (async () => {
+                                                                                    const next = await promptForText({
+                                                                                        title: 'Rename group',
+                                                                                        message: 'Enter a name for this layer group.',
+                                                                                        label: 'Group name',
+                                                                                        initialValue: g.name,
+                                                                                        confirmText: 'Rename',
+                                                                                    })
+                                                                                    if (next === null) {
+                                                                                        return
+                                                                                    }
+                                                                                    const trimmed = next.trim()
+                                                                                    if (!trimmed || trimmed === g.name) {
+                                                                                        return
+                                                                                    }
+                                                                                    setDocument((d) => updateGroupInDoc(d, g.id, { name: trimmed }))
+                                                                                })()
                                                                             }}
                                                                             title="Click to select group. Double-click to rename."
                                                                         >
@@ -7145,46 +8300,237 @@ export default function AssetEditor() {
                                             )}
                                         </div>
                                         <div className="relative flex items-center justify-between border-t border-gray-700 px-2 py-2">
-                                            <button type="button" onClick={() => setAddLayerOpen((v) => !v)} className="rounded p-1.5 text-gray-400 hover:bg-gray-800 hover:text-white" title="Add layer"><svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg></button>
+                                            <button
+                                                type="button"
+                                                onClick={() => setAddLayerUI((u) => (u === 'footer' ? null : 'footer'))}
+                                                className={`rounded p-1.5 text-gray-400 hover:bg-gray-800 hover:text-white ${addLayerUI === 'footer' ? 'bg-gray-800 text-white' : ''}`}
+                                                title="Add layer"
+                                                aria-label="Add layer"
+                                                aria-expanded={addLayerUI === 'footer'}
+                                            >
+                                                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor" aria-hidden>
+                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                                                </svg>
+                                            </button>
                                             <button type="button" onClick={() => selectedLayerId && selectedLayer && setDocument((d) => ({ ...d, layers: [...d.layers, cloneLayer(selectedLayer)] }))} className="rounded p-1.5 text-gray-400 hover:bg-gray-800 hover:text-white" title="Duplicate layer"><DocumentDuplicateIcon className="h-4 w-4" /></button>
                                             <button type="button" onClick={() => selectedLayer && updateLayer(selectedLayer.id, (l) => ({ ...l, visible: !l.visible }))} className="rounded p-1.5 text-gray-400 hover:bg-gray-800 hover:text-white" title="Toggle visibility"><EyeIcon className="h-4 w-4" /></button>
                                             <button type="button" onClick={() => selectedLayerId && setDocument((d) => deleteLayerFromDoc(d, selectedLayerId))} className="rounded p-1.5 text-gray-400 hover:bg-gray-800 hover:text-red-400" title="Delete layer"><TrashIcon className="h-4 w-4" /></button>
 
-                                            {/* Add Layer popover */}
-                                            {addLayerOpen && (
-                                                <div className="absolute bottom-full left-0 mb-2 w-64 rounded-lg bg-gray-900 p-4 shadow-xl ring-1 ring-gray-700">
-                                                    <p className="mb-3 text-[10px] font-semibold uppercase tracking-wider text-gray-400">Add layer</p>
-                                                    <div className="grid grid-cols-2 gap-3">
-                                                        <button type="button" onClick={() => { setAddLayerOpen(false); addTextLayer() }} className="flex flex-col items-center gap-1.5 rounded-md border border-gray-700 bg-gray-800 px-2 py-2.5 text-gray-300 hover:border-gray-500 hover:bg-gray-700 hover:text-white transition-colors">
-                                                            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6 1.123 2.994 2.707 3.227 1.087.16 2.185.283 3.293.369V21l4.076-4.076a1.526 1.526 0 011.037-.443 48.282 48.282 0 005.68-.494c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z" /></svg>
-                                                            <span className="text-[11px] font-medium">Text</span>
-                                                        </button>
-                                                        <button type="button" onClick={() => { setAddLayerOpen(false); openPickerForAddImage() }} className="flex flex-col items-center gap-1.5 rounded-md border border-gray-700 bg-gray-800 px-2 py-2.5 text-gray-300 hover:border-gray-500 hover:bg-gray-700 hover:text-white transition-colors">
-                                                            <PhotoIcon className="h-5 w-5" />
-                                                            <span className="text-[11px] font-medium">Image</span>
-                                                        </button>
-                                                        <button type="button" onClick={() => { setAddLayerOpen(false); addGenerativeImageLayer() }} className="flex flex-col items-center gap-1.5 rounded-md border border-gray-700 bg-gray-800 px-2 py-2.5 text-gray-300 hover:border-gray-500 hover:bg-gray-700 hover:text-white transition-colors">
-                                                            <SparklesIcon className="h-5 w-5" />
-                                                            <span className="text-[11px] font-medium">AI Image</span>
-                                                        </button>
-                                                        <button type="button" onClick={() => { setAddLayerOpen(false); addFillLayer() }} className="flex flex-col items-center gap-1.5 rounded-md border border-gray-700 bg-gray-800 px-2 py-2.5 text-gray-300 hover:border-gray-500 hover:bg-gray-700 hover:text-white transition-colors">
-                                                            <SwatchIcon className="h-5 w-5" />
-                                                            <span className="text-[11px] font-medium">Fill</span>
-                                                        </button>
-                                                        <button type="button" onClick={() => { setAddLayerOpen(false); addMaskLayer() }} className="flex flex-col items-center gap-1.5 rounded-md border border-gray-700 bg-gray-800 px-2 py-2.5 text-gray-300 hover:border-gray-500 hover:bg-gray-700 hover:text-white transition-colors" title="Clip the layer directly beneath with a shape or gradient">
-                                                            <span className="flex h-5 w-5 items-center justify-center text-lg leading-none">◑</span>
-                                                            <span className="text-[11px] font-medium">Mask</span>
-                                                        </button>
-                                                    </div>
+                                            {addLayerUI === 'footer' && (
+                                                <div className="absolute bottom-full left-0 z-20 mb-2">
+                                                    <AddLayerTypeMenu onPick={handleAddLayerMenuChoice} />
                                                 </div>
                                             )}
                                         </div>
                                     </div>
                                 )}
                                 {leftPanel === 'assets' && (
-                                    <div className="flex flex-1 flex-col">
-                                        <div className="flex items-center justify-between border-b border-gray-700 px-3 py-2"><h2 className="text-xs font-semibold uppercase tracking-wide text-gray-400">Assets</h2><button type="button" onClick={() => setLeftPanel(null)} className="text-gray-500 hover:text-gray-300"><XMarkIcon className="h-4 w-4" /></button></div>
-                                        <div className="flex flex-1 items-center justify-center p-6 text-center"><div><PhotoIcon className="mx-auto h-10 w-10 text-gray-600" /><p className="mt-2 text-sm text-gray-400">Asset browser</p><p className="mt-1 text-xs text-gray-500">Coming soon — browse and drag assets from your DAM library.</p><button type="button" onClick={() => { setLeftPanel(null); openPickerForAddImage() }} className="mt-4 rounded-md bg-gray-700 px-3 py-1.5 text-xs font-medium text-gray-200 hover:bg-gray-600">Add image from library</button></div></div>
+                                    <div className="flex min-h-0 flex-1 flex-col">
+                                        <div className="flex shrink-0 items-center justify-between border-b border-gray-700 px-3 py-2">
+                                            <h2 className="text-xs font-semibold uppercase tracking-wide text-gray-400">Assets</h2>
+                                            <button
+                                                type="button"
+                                                onClick={() => setLeftPanel(null)}
+                                                className="text-gray-500 hover:text-gray-300"
+                                                aria-label="Close assets panel"
+                                            >
+                                                <XMarkIcon className="h-4 w-4" />
+                                            </button>
+                                        </div>
+                                        <div className="shrink-0 space-y-2 border-b border-gray-700 px-2 py-2">
+                                            <div className="flex flex-wrap items-center gap-1.5">
+                                                <span className="text-[9px] font-bold uppercase tracking-wide text-gray-500">Source</span>
+                                                <div className="inline-flex rounded-md border border-gray-700 p-0.5">
+                                                    <button
+                                                        type="button"
+                                                        className={`rounded px-2 py-0.5 text-[10px] font-medium ${
+                                                            pickerScope === 'library'
+                                                                ? 'bg-indigo-600 text-white'
+                                                                : 'text-gray-300 hover:bg-gray-800'
+                                                        }`}
+                                                        onClick={() => {
+                                                            setPickerScope('library')
+                                                            setPickerCategoryFilterId('')
+                                                        }}
+                                                    >
+                                                        Library
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        className={`rounded px-2 py-0.5 text-[10px] font-medium ${
+                                                            pickerScope === 'executions'
+                                                                ? 'bg-indigo-600 text-white'
+                                                                : 'text-gray-300 hover:bg-gray-800'
+                                                        }`}
+                                                        onClick={() => {
+                                                            setPickerScope('executions')
+                                                            setPickerCategoryFilterId('')
+                                                        }}
+                                                    >
+                                                        Executions
+                                                    </button>
+                                                </div>
+                                            </div>
+                                            <div className="flex items-center gap-1">
+                                                <div className="relative min-w-0 flex-1">
+                                                    <MagnifyingGlassIcon
+                                                        className="pointer-events-none absolute left-1.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-500"
+                                                        aria-hidden
+                                                    />
+                                                    <input
+                                                        type="search"
+                                                        value={pickerSearchInput}
+                                                        onChange={(e) => setPickerSearchInput(e.target.value)}
+                                                        placeholder="Search…"
+                                                        className="w-full rounded border border-gray-700 bg-gray-800/80 py-1 pl-6 pr-1.5 text-[10px] text-gray-100 placeholder:text-gray-500"
+                                                        autoComplete="off"
+                                                        aria-label="Search assets in panel"
+                                                    />
+                                                </div>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setPickerListRefreshKey((k) => k + 1)}
+                                                    disabled={damLoading}
+                                                    title="Refresh"
+                                                    className="shrink-0 rounded border border-gray-700 bg-gray-800 p-1 text-gray-300 hover:bg-gray-700 disabled:cursor-not-allowed"
+                                                    aria-label="Refresh asset list"
+                                                >
+                                                    <ArrowPathIcon className={`h-3.5 w-3.5 ${damLoading ? 'animate-spin' : ''}`} />
+                                                </button>
+                                            </div>
+                                            <div className="flex flex-col gap-1">
+                                                <label className="text-[9px] font-bold uppercase tracking-wide text-gray-500" htmlFor="assets-panel-category">
+                                                    Category
+                                                </label>
+                                                <select
+                                                    id="assets-panel-category"
+                                                    className="w-full rounded border border-gray-700 bg-gray-800 py-1 pl-1.5 pr-6 text-[10px] text-gray-100"
+                                                    value={pickerCategoryFilterId === '' ? '' : String(pickerCategoryFilterId)}
+                                                    onChange={(e) => {
+                                                        const v = e.target.value
+                                                        setPickerCategoryFilterId(v === '' ? '' : Number(v))
+                                                    }}
+                                                    disabled={pickerCategoriesLoading || pickerCategoriesForScope.length === 0}
+                                                >
+                                                    <option value="">All categories</option>
+                                                    {pickerCategoriesForScope.map((c) => (
+                                                        <option key={c.id} value={c.id}>
+                                                            {c.name}
+                                                        </option>
+                                                    ))}
+                                                </select>
+                                            </div>
+                                            {pickerQuickCategoryChips.length > 0 && (
+                                                <div className="flex max-h-16 flex-wrap gap-0.5 overflow-y-auto">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setPickerCategoryFilterId('')}
+                                                        className={`shrink-0 rounded px-1.5 py-0.5 text-[9px] font-medium ${
+                                                            pickerCategoryFilterId === ''
+                                                                ? 'bg-indigo-600 text-white'
+                                                                : 'border border-gray-600 bg-gray-800/80 text-gray-300'
+                                                        }`}
+                                                    >
+                                                        All
+                                                    </button>
+                                                    {pickerQuickCategoryChips.map((c) => (
+                                                        <button
+                                                            key={c.id}
+                                                            type="button"
+                                                            onClick={() => setPickerCategoryFilterId(c.id)}
+                                                            className={`max-w-[100px] shrink-0 truncate rounded px-1.5 py-0.5 text-[9px] font-medium ${
+                                                                pickerCategoryFilterId === c.id
+                                                                    ? 'bg-indigo-600 text-white'
+                                                                    : 'border border-gray-600 bg-gray-800/80 text-gray-300'
+                                                            }`}
+                                                            title={c.name}
+                                                        >
+                                                            {c.name}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+                                        <div className="min-h-0 flex-1 overflow-y-auto px-2 py-2" style={{ scrollbarWidth: 'thin' }}>
+                                            {damLoading && (
+                                                <div className="flex flex-col items-center gap-2 py-6 text-gray-500">
+                                                    <ArrowPathIcon className="h-6 w-6 animate-spin text-indigo-400" />
+                                                    <span className="text-[10px]">Loading…</span>
+                                                </div>
+                                            )}
+                                            {!damLoading && damError && (
+                                                <p className="text-center text-[11px] text-red-400">{damError}</p>
+                                            )}
+                                            {!damLoading && !damError && damAssets.length === 0 && (
+                                                <p className="px-1 text-center text-[11px] text-gray-500">
+                                                    {pickerSearchDebounced ? 'No matches.' : 'No assets yet.'}
+                                                </p>
+                                            )}
+                                            {!damLoading && !damError && damAssets.length > 0 && (
+                                                <div className="grid grid-cols-2 gap-1.5">
+                                                    {damAssets.map((a) => {
+                                                        const isPicking = pickerPickingAssetId === a.id
+                                                        const blockClicks = pickerPickingAssetId !== null && pickerMode !== 'references'
+                                                        return (
+                                                            <button
+                                                                key={a.id}
+                                                                type="button"
+                                                                disabled={blockClicks}
+                                                                onClick={() => void handlePickDamAsset(a)}
+                                                                className={`group relative flex flex-col overflow-hidden rounded border bg-gray-800/90 text-left transition hover:border-indigo-400 ${
+                                                                    isPicking
+                                                                        ? 'border-indigo-400 ring-1 ring-indigo-400'
+                                                                        : 'border-gray-700'
+                                                                } ${blockClicks && !isPicking ? 'pointer-events-none cursor-not-allowed opacity-40' : ''} ${isPicking ? 'cursor-wait' : ''}`}
+                                                            >
+                                                                <div className="aspect-square w-full overflow-hidden bg-gray-700">
+                                                                    <img
+                                                                        src={a.thumbnail_url || a.file_url}
+                                                                        alt=""
+                                                                        className="h-full w-full object-cover"
+                                                                        loading="lazy"
+                                                                        onError={(e) => {
+                                                                            const img = e.currentTarget
+                                                                            if (a.file_url && img.src !== a.file_url) {
+                                                                                img.src = a.file_url
+                                                                            }
+                                                                        }}
+                                                                    />
+                                                                </div>
+                                                                <span className="truncate px-0.5 py-0.5 text-[9px] text-gray-300" title={a.name || 'Untitled'}>
+                                                                    {a.name || 'Untitled'}
+                                                                </span>
+                                                                {isPicking && (
+                                                                    <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-gray-900/70">
+                                                                        <ArrowPathIcon className="h-5 w-5 animate-spin text-indigo-300" />
+                                                                    </div>
+                                                                )}
+                                                            </button>
+                                                        )
+                                                    })}
+                                                </div>
+                                            )}
+                                        </div>
+                                        <div className="shrink-0 space-y-1.5 border-t border-gray-700 px-2 py-2">
+                                            <a
+                                                href={pickerScope === 'executions' ? '/app/executions' : '/app/assets'}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="block text-center text-[10px] font-medium text-indigo-300/90 underline decoration-indigo-500/50 underline-offset-2 hover:text-indigo-200"
+                                            >
+                                                Open full {pickerScope === 'executions' ? 'Executions' : 'Asset Library'}
+                                            </a>
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    setLeftPanel(null)
+                                                    openPickerForAddImage()
+                                                }}
+                                                className="w-full rounded-md border border-gray-600 bg-gray-800 py-1.5 text-[10px] font-medium text-gray-200 hover:border-gray-500 hover:bg-gray-700"
+                                            >
+                                                Add image (full picker)
+                                            </button>
+                                        </div>
                                     </div>
                                 )}
                                 {leftPanel === 'templates' && (
@@ -7536,6 +8882,7 @@ export default function AssetEditor() {
                                                                     className="mt-2 w-full rounded border border-gray-700"
                                                                     controls
                                                                     playsInline
+                                                                    preload="metadata"
                                                                 />
                                                             )}
                                                             {a.status === 'failed' && a.user_facing_error && (
@@ -7659,7 +9006,13 @@ export default function AssetEditor() {
                             // lifts the canvas off the page and gives the dot grid
                             // enough contrast to read. No `dark:` variant here so
                             // the shell's `dark` class can't flip it to black.
-                            : 'bg-neutral-200'
+                            : `bg-neutral-200${
+                                  uiMode === 'edit'
+                                      ? hasVisibleVideoLayerInDoc || showStudioAnimCanvasPreview
+                                          ? ' pb-20'
+                                          : ' pb-10'
+                                      : ''
+                              }`
                     }`}
                     style={uiMode === 'edit' ? {
                         backgroundImage: 'radial-gradient(circle, rgba(0,0,0,0.10) 1px, transparent 1px)',
@@ -7671,41 +9024,63 @@ export default function AssetEditor() {
 
                     {document.layers.length === 0 && !welcomeDismissed && (
                         <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center p-6">
-                            <style>{`
-                                @keyframes jp-slot-spin { 0% { transform: translateY(0); } 25% { transform: translateY(-6px); } 50% { transform: translateY(0); } 75% { transform: translateY(4px); } 100% { transform: translateY(0); } }
-                                @keyframes jp-slot-spin-delay { 0% { transform: translateY(0); } 30% { transform: translateY(5px); } 55% { transform: translateY(-4px); } 80% { transform: translateY(2px); } 100% { transform: translateY(0); } }
-                                .jp-slot-reel { transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1); }
-                                .group:hover .jp-slot-reel-1 { animation: jp-slot-spin 0.5s ease-in-out; }
-                                .group:hover .jp-slot-reel-2 { animation: jp-slot-spin-delay 0.6s ease-in-out 0.08s; }
-                                .group:hover .jp-slot-reel-3 { animation: jp-slot-spin 0.55s ease-in-out 0.15s; }
-                            `}</style>
                             {/*
                               * White card behind the welcome copy — lifts it off the
                               * canvas dot-grid and keeps the action buttons legible
                               * against busy brand backgrounds without having to fight
                               * every individual text color.
                               */}
-                            <div className="pointer-events-auto w-full max-w-lg rounded-2xl bg-white p-8 shadow-2xl ring-1 ring-black/5 sm:p-10">
-                                {/* Hero with slot icon trio */}
-                                <div className="mb-9 text-center">
-                                    <div className="mb-4 flex items-center justify-center gap-3">
-                                        <img src="/jp-parts/cherry-slot.svg" alt="" className="jp-slot-reel jp-slot-reel-1 h-8 w-8 opacity-60" />
-                                        <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-600 shadow-lg shadow-indigo-500/25">
-                                            <img src="/jp-parts/cherry-slot.svg" alt="" className="h-8 w-8 brightness-0 invert" />
-                                        </div>
-                                        <img src="/jp-parts/diamond-slot.svg" alt="" className="jp-slot-reel jp-slot-reel-2 h-8 w-8 opacity-60" />
+                            <div className="pointer-events-auto w-full max-w-2xl rounded-2xl bg-white p-6 shadow-2xl ring-1 ring-black/5 sm:p-8">
+                                <>
+                                {/* Same visual language as marketing SlotMachineLogo / HeroSection: three reels, cherries lined up */}
+                                <div className="mb-6 text-center">
+                                    <div
+                                        className="mb-3 flex justify-center gap-1.5 sm:gap-2"
+                                        role="img"
+                                        aria-label="Three slot reels, all cherries"
+                                    >
+                                        {([0, 1, 2] as const).map((i) => {
+                                            const cellH = 44
+                                            const cellW = Math.round(cellH * (95 / 108.25))
+                                            return (
+                                                <div
+                                                    key={i}
+                                                    className="flex shrink-0 overflow-hidden rounded-lg bg-white shadow-inner ring-1 ring-gray-200/90"
+                                                    style={{ width: cellW, height: cellH }}
+                                                >
+                                                    <div className="flex h-full w-full items-center justify-center p-[10%]">
+                                                        <img
+                                                            src="/jp-parts/cherry-slot.svg"
+                                                            alt=""
+                                                            className="h-full w-full object-contain invert select-none"
+                                                            draggable={false}
+                                                        />
+                                                    </div>
+                                                </div>
+                                            )
+                                        })}
                                     </div>
-                                    <h2 className="text-xl font-bold text-gray-900 dark:text-white" style={{ color: '#1f2937' }}>
+                                    <h2 className="text-lg font-bold tracking-tight text-gray-900 sm:text-xl" style={{ color: '#111827' }}>
                                         What would you like to create?
                                     </h2>
                                     <p className="mt-1.5 text-sm text-gray-500">
-                                        Pick a starting point — you can always change direction later.
+                                        Choose a path — you can always change course later.
                                     </p>
                                 </div>
 
-                                {/* Action cards */}
-                                <div className="grid gap-4" style={{ marginTop: '8px' }}>
-                                    {/* Start from Template */}
+                                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 sm:gap-3">
+                                    <button
+                                        type="button"
+                                        onClick={openCompositionPickerAndLoad}
+                                        className="group flex min-h-[132px] flex-col items-start gap-2 rounded-xl border border-gray-200 bg-white p-4 text-left shadow-sm transition-all duration-150 hover:-translate-y-0.5 hover:border-gray-300 hover:shadow-md active:scale-[0.99] sm:min-h-[156px]"
+                                    >
+                                        <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-gray-100 text-gray-700 transition-colors group-hover:bg-gray-200">
+                                            <FolderOpenIcon className="h-5 w-5" />
+                                        </span>
+                                        <span className="text-[15px] font-semibold text-gray-900">Open</span>
+                                        <span className="text-[12px] leading-snug text-gray-500">Load a saved composition for this brand and keep editing.</span>
+                                    </button>
+
                                     <button
                                         type="button"
                                         onClick={() => {
@@ -7717,161 +9092,127 @@ export default function AssetEditor() {
                                             setWizardName('')
                                             setTemplateWizardOpen(true)
                                         }}
-                                        className="group relative flex w-full items-start gap-5 rounded-xl border border-indigo-200 bg-gradient-to-r from-indigo-50 to-white px-5 py-5 text-left shadow-sm ring-1 ring-indigo-100 transition-all duration-150 hover:-translate-y-px hover:border-indigo-300 hover:shadow-lg hover:shadow-indigo-100/40 active:scale-[0.99]"
+                                        className="group relative flex min-h-[132px] flex-col items-start gap-2 overflow-hidden rounded-xl border border-indigo-200 bg-gradient-to-b from-indigo-50/90 to-white p-4 text-left shadow-sm ring-1 ring-indigo-100/80 transition-all duration-150 hover:-translate-y-0.5 hover:border-indigo-300 hover:shadow-md active:scale-[0.99] sm:min-h-[156px]"
                                     >
-                                        <span className="mt-0.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-indigo-100 transition-colors group-hover:bg-indigo-200">
-                                            <Squares2X2Icon className="h-5 w-5 text-indigo-600" />
+                                        <div className="absolute right-2 top-2 rounded-full bg-indigo-600 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-white">Template</div>
+                                        <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-indigo-100 text-indigo-700 transition-colors group-hover:bg-indigo-200">
+                                            <Squares2X2Icon className="h-5 w-5" />
                                         </span>
-                                        <div className="min-w-0 flex-1">
-                                            <span className="block text-[15px] font-semibold text-gray-900">Start from a template</span>
-                                            <span className="mt-1.5 block text-[13px] leading-relaxed text-gray-500">
-                                                Choose a platform, pick an ad type, and get a ready-made layer stack — social posts, banners, presentations and more.
-                                            </span>
-                                        </div>
-                                        <span className="ml-auto mt-1 shrink-0 rounded-full bg-indigo-100 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-indigo-600 transition-colors group-hover:bg-indigo-600 group-hover:text-white">Recommended</span>
-                                        <img src="/jp-parts/seven-slot.svg" alt="" className="jp-slot-reel jp-slot-reel-3 absolute -right-2 -top-2 h-6 w-6 opacity-0 transition-opacity duration-200 group-hover:opacity-40" />
+                                        <span className="text-[15px] font-semibold text-gray-900">Start with template</span>
+                                        <span className="text-[12px] leading-snug text-gray-500">Pick a platform and ad type — get a ready-made layer stack you can edit.</span>
                                     </button>
 
-                                    {/* Open existing composition */}
-                                    <button
-                                        type="button"
-                                        onClick={openCompositionPickerAndLoad}
-                                        className="group flex w-full items-start gap-5 rounded-xl border border-gray-200 bg-white px-5 py-5 text-left shadow-sm transition-all duration-150 hover:-translate-y-px hover:border-gray-300 hover:bg-gray-50/80 hover:shadow-md active:scale-[0.99]"
-                                    >
-                                        <span className="mt-0.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-gray-100 text-gray-500 transition-colors group-hover:bg-gray-200 group-hover:text-gray-700">
-                                            <FolderOpenIcon className="h-5 w-5" />
-                                        </span>
-                                        <div className="min-w-0">
-                                            <span className="block text-[15px] font-semibold text-gray-900">Open an existing composition</span>
-                                            <span className="mt-1.5 block text-[13px] leading-relaxed text-gray-500">
-                                                Continue where you left off — load a saved composition for this brand.
-                                            </span>
-                                        </div>
-                                    </button>
-
-                                    {/* Generate with AI — Jackpot Spin Card (hidden when AI disabled) */}
-                                    {!aiEnabled && (
-                                        <div className="w-full rounded-xl border border-gray-300 bg-gray-100 px-5 py-5 text-center opacity-50">
-                                            <p className="text-sm font-medium text-gray-400">AI features are disabled</p>
-                                            <p className="mt-1 text-xs text-gray-400">Contact your workspace admin to enable AI-powered layout generation.</p>
-                                        </div>
-                                    )}
-                                    {aiEnabled && (() => {
-                                        const JP_SPIN_PHRASES = [
-                                            'Take a lucky spin',
-                                            'Feeling lucky?',
-                                            'Give the reels a pull',
-                                            'Spin up something new',
-                                            'Try your luck',
-                                        ]
-                                        const JP_SPIN_SUBS = [
-                                            'Let Jackpot AI build a layout tailored to your brand.',
-                                            'Describe what you need and we\'ll roll out the layers.',
-                                            'One spin and your composition is ready to go.',
-                                        ]
-                                        const REEL_SYMS = [
-                                            '/jp-parts/cherry-slot.svg',
-                                            '/jp-parts/seven-slot.svg',
-                                            '/jp-parts/diamond-slot.svg',
-                                        ]
-                                        return (
-                                        <div
-                                            className="group/spin relative w-full cursor-pointer select-none overflow-hidden rounded-xl shadow-lg transition-all duration-200 hover:-translate-y-px hover:shadow-xl active:scale-[0.99]"
-                                            style={{ background: 'linear-gradient(135deg, #6d28d9 0%, #4338ca 50%, #581c87 100%)', border: '1px solid rgba(139,92,246,0.35)', boxShadow: '0 4px 14px rgba(124,58,237,0.25)' }}
-                                            onClick={() => void generateGuidedLayout()}
-                                            role="button"
-                                            tabIndex={0}
-                                            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); void generateGuidedLayout() } }}
-                                        >
-                                            <style>{`
-                                                @keyframes jp-reel-float-1 { 0%,100% { transform: translateY(0) rotate(0deg); } 50% { transform: translateY(-6px) rotate(4deg); } }
-                                                @keyframes jp-reel-float-2 { 0%,100% { transform: translateY(0) rotate(0deg); } 50% { transform: translateY(-8px) rotate(-5deg); } }
-                                                @keyframes jp-reel-float-3 { 0%,100% { transform: translateY(0) rotate(0deg); } 50% { transform: translateY(-5px) rotate(3deg); } }
-                                                @keyframes jp-spin-pull { 0% { transform: translateY(0); } 30% { transform: translateY(8px) scale(0.97); } 60% { transform: translateY(-60px); } 100% { transform: translateY(0); } }
-                                                @keyframes jp-phrase-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
-                                                .jp-mini-reel-1 { animation: jp-reel-float-1 2.4s ease-in-out infinite; }
-                                                .jp-mini-reel-2 { animation: jp-reel-float-2 2.8s ease-in-out 0.3s infinite; }
-                                                .jp-mini-reel-3 { animation: jp-reel-float-3 2.2s ease-in-out 0.6s infinite; }
-                                                .group\\/spin:hover .jp-mini-reel-1 { animation: jp-spin-pull 0.5s cubic-bezier(0.34, 1.56, 0.64, 1); }
-                                                .group\\/spin:hover .jp-mini-reel-2 { animation: jp-spin-pull 0.55s cubic-bezier(0.34, 1.56, 0.64, 1) 0.07s; }
-                                                .group\\/spin:hover .jp-mini-reel-3 { animation: jp-spin-pull 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) 0.14s; }
-                                                .group\\/spin:active .jp-mini-reel-1,
-                                                .group\\/spin:active .jp-mini-reel-2,
-                                                .group\\/spin:active .jp-mini-reel-3 { transform: translateY(4px) scale(0.95); transition: transform 80ms ease-out; }
-                                            `}</style>
-
-                                            {/* Ambient glow */}
-                                            <div className="pointer-events-none absolute -right-10 -top-10 h-40 w-40 rounded-full blur-3xl" style={{ background: 'rgba(255,255,255,0.1)' }} />
-                                            <div className="pointer-events-none absolute -bottom-8 -left-8 h-32 w-32 rounded-full blur-2xl" style={{ background: 'rgba(167,139,250,0.2)' }} />
-
-                                            <div className="relative flex items-center gap-5 px-5 py-5">
-                                                {/* Mini slot reels */}
-                                                <div className="flex shrink-0 items-end gap-1.5">
-                                                    {REEL_SYMS.map((sym, i) => (
-                                                        <div key={i} className="flex h-12 w-10 items-center justify-center rounded-lg shadow-inner backdrop-blur-sm" style={{ background: 'rgba(255,255,255,0.15)' }}>
-                                                            <img
-                                                                src={sym}
-                                                                alt=""
-                                                                className={`jp-mini-reel-${i + 1} h-6 w-6 brightness-0 invert drop-shadow-sm`}
-                                                                draggable={false}
-                                                            />
-                                                        </div>
-                                                    ))}
-                                                </div>
-
-                                                {/* Copy */}
-                                                <div className="min-w-0 flex-1">
-                                                    <span key={spinPhraseIdx} className="block text-[15px] font-bold" style={{ animation: 'jp-phrase-in 0.35s ease-out', color: '#ffffff', textShadow: '0 1px 2px rgba(0,0,0,0.3)' }}>
-                                                        {JP_SPIN_PHRASES[spinPhraseIdx % JP_SPIN_PHRASES.length]}
-                                                    </span>
-                                                    <span className="mt-1 block text-[12px] leading-relaxed" style={{ color: 'rgba(237,233,254,0.9)' }}>
-                                                        {JP_SPIN_SUBS[spinPhraseIdx % JP_SPIN_SUBS.length]}
-                                                    </span>
-                                                </div>
-
-                                                {/* CTA arrow */}
-                                                <div className="flex shrink-0 items-center">
-                                                    <span className="flex h-9 w-9 items-center justify-center rounded-full shadow-sm backdrop-blur-sm transition-all duration-150 group-hover/spin:scale-110" style={{ background: 'rgba(255,255,255,0.2)', color: '#ffffff' }}>
-                                                        <SparklesIcon className="h-4 w-4" />
-                                                    </span>
-                                                </div>
-                                            </div>
-
-                                            {/* Bottom accent line */}
-                                            <div className="h-[2px] w-full" style={{ background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.25), transparent)' }} />
-                                        </div>
-                                        )
-                                    })()}
-
-                                    {/* Blank canvas */}
                                     <button
                                         type="button"
                                         onClick={async () => {
-                                            // If there's an existing composition loaded, wipe it back
-                                            // to a fresh draft first so "blank canvas" really means
-                                            // blank. startNewComposition resets welcomeDismissed to
-                                            // false, so we set it *after* awaiting. Otherwise just
-                                            // hide the welcome overlay so the user can start adding
-                                            // layers on the current empty doc.
                                             if (compositionId || document.layers.length > 0) {
                                                 await startNewComposition()
                                             }
                                             setWelcomeDismissed(true)
                                             setActivityToast('Blank canvas ready — add a layer to get started')
                                         }}
-                                        className="group flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-gray-300 py-3 text-xs font-medium text-gray-400 transition-all hover:border-gray-400 hover:text-gray-600"
+                                        className="group flex min-h-[132px] flex-col items-start gap-2 rounded-xl border border-dashed border-gray-300 bg-gray-50/50 p-4 text-left transition-all duration-150 hover:-translate-y-0.5 hover:border-gray-400 hover:bg-gray-50 active:scale-[0.99] sm:min-h-[156px]"
                                     >
-                                        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
-                                        Blank canvas — I'll build it myself
+                                        <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-white text-gray-600 ring-1 ring-gray-200 transition-colors group-hover:ring-gray-300">
+                                            <PlusIcon className="h-5 w-5" />
+                                        </span>
+                                        <span className="text-[15px] font-semibold text-gray-900">Quick start</span>
+                                        <span className="text-[12px] leading-snug text-gray-500">Empty canvas — add layers and build it yourself from scratch.</span>
                                     </button>
                                 </div>
 
-                                {/* Slot machine motif footer */}
-                                <div className="group mt-5 flex items-center justify-center gap-2 opacity-30 transition-opacity hover:opacity-60">
-                                    <img src="/jp-parts/cherry-slot.svg" alt="" className="jp-slot-reel jp-slot-reel-1 h-4 w-4" />
-                                    <img src="/jp-parts/seven-slot.svg" alt="" className="jp-slot-reel jp-slot-reel-2 h-4 w-4" />
-                                    <img src="/jp-parts/diamond-slot.svg" alt="" className="jp-slot-reel jp-slot-reel-3 h-4 w-4" />
+                                <p className="mb-1.5 mt-5 text-center text-[10px] font-bold uppercase tracking-wider text-gray-400">Quick spin</p>
+                                {!aiEnabled && (
+                                    <div className="w-full rounded-xl border border-gray-200 bg-gray-100 px-4 py-3 text-center">
+                                        <p className="text-xs font-medium text-gray-500">AI layout spin is off for this workspace.</p>
+                                        <p className="mt-0.5 text-[11px] text-gray-400">Ask an admin to enable AI in Studio, or use a template or blank canvas above.</p>
+                                    </div>
+                                )}
+                                {aiEnabled && (() => {
+                                    const hubSpinPhrases = [
+                                        'Take a lucky spin',
+                                        'Feeling lucky?',
+                                        'Give the reels a pull',
+                                        'Spin up something new',
+                                        'Try your luck',
+                                    ]
+                                    const hubSpinSubs = [
+                                        'Let Jackpot AI build a layout tailored to your brand.',
+                                        'Describe what you need and we\'ll roll out the layers.',
+                                        'One spin and your composition is ready to go.',
+                                    ]
+                                    const hubReelSyms = [
+                                        '/jp-parts/cherry-slot.svg',
+                                        '/jp-parts/seven-slot.svg',
+                                        '/jp-parts/diamond-slot.svg',
+                                    ]
+                                    return (
+                                    <div
+                                        className="group/hubspin relative w-full cursor-pointer select-none overflow-hidden rounded-xl border border-violet-200/80 bg-gradient-to-r from-violet-50/90 via-white to-indigo-50/80 text-gray-900 shadow-md transition-all duration-200 hover:-translate-y-px hover:border-violet-300/90 hover:shadow-lg active:scale-[0.99]"
+                                        style={{ boxShadow: '0 4px 20px rgba(0,0,0,0.08)' }}
+                                        onClick={() => void generateGuidedLayout()}
+                                        role="button"
+                                        tabIndex={0}
+                                        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); void generateGuidedLayout() } }}
+                                    >
+                                        <style>{`
+                                            @keyframes jp-hub-reel-1 { 0%,100% { transform: translateY(0) rotate(0deg); } 50% { transform: translateY(-6px) rotate(4deg); } }
+                                            @keyframes jp-hub-reel-2 { 0%,100% { transform: translateY(0) rotate(0deg); } 50% { transform: translateY(-8px) rotate(-5deg); } }
+                                            @keyframes jp-hub-reel-3 { 0%,100% { transform: translateY(0) rotate(0deg); } 50% { transform: translateY(-5px) rotate(3deg); } }
+                                            @keyframes jp-hub-pull { 0% { transform: translateY(0); } 30% { transform: translateY(8px) scale(0.97); } 60% { transform: translateY(-60px); } 100% { transform: translateY(0); } }
+                                            @keyframes jp-hub-phrase { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+                                            .jp-hub-mini-1 { animation: jp-hub-reel-1 2.4s ease-in-out infinite; }
+                                            .jp-hub-mini-2 { animation: jp-hub-reel-2 2.8s ease-in-out 0.3s infinite; }
+                                            .jp-hub-mini-3 { animation: jp-hub-reel-3 2.2s ease-in-out 0.6s infinite; }
+                                            .group\\/hubspin:hover .jp-hub-mini-1 { animation: jp-hub-pull 0.5s cubic-bezier(0.34, 1.56, 0.64, 1); }
+                                            .group\\/hubspin:hover .jp-hub-mini-2 { animation: jp-hub-pull 0.55s cubic-bezier(0.34, 1.56, 0.64, 1) 0.07s; }
+                                            .group\\/hubspin:hover .jp-hub-mini-3 { animation: jp-hub-pull 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) 0.14s; }
+                                        `}</style>
+                                        <div className="pointer-events-none absolute -right-8 -top-8 h-32 w-32 rounded-full bg-indigo-100/40 blur-2xl" />
+                                        <div className="relative flex items-center gap-3 px-3 py-3 sm:gap-4 sm:px-4 sm:py-4">
+                                            <div className="flex shrink-0 items-end gap-1.5">
+                                                {hubReelSyms.map((sym, i) => (
+                                                    <div
+                                                        key={i}
+                                                        className="flex h-11 w-9 items-center justify-center rounded-lg border border-violet-200/90 bg-white shadow-sm ring-1 ring-inset ring-violet-100/80 sm:h-12 sm:w-10"
+                                                    >
+                                                        {/*
+                                                          jp-parts/*-slot.svg use white (#fff) fills — they were designed for
+                                                          dark reels. On a light card, flatten to a dark glyph via
+                                                          brightness-0 (same trick as the header cherries with invert on white).
+                                                        */}
+                                                        <img
+                                                            src={sym}
+                                                            alt=""
+                                                            className={`jp-hub-mini-${i + 1} h-5 w-5 sm:h-6 sm:w-6 object-contain brightness-0 contrast-100`}
+                                                            draggable={false}
+                                                        />
+                                                    </div>
+                                                ))}
+                                            </div>
+                                            <div className="min-w-0 flex-1 text-left">
+                                                <span className="block text-[14px] font-bold text-gray-900 sm:text-[15px]" style={{ animation: 'jp-hub-phrase 0.35s ease-out' }} key={spinPhraseIdx}>
+                                                    {hubSpinPhrases[spinPhraseIdx % hubSpinPhrases.length]}
+                                                </span>
+                                                <span className="mt-0.5 block text-[11px] leading-relaxed text-gray-600 sm:text-xs">
+                                                    {hubSpinSubs[spinPhraseIdx % hubSpinSubs.length]}
+                                                </span>
+                                            </div>
+                                            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-indigo-300 bg-indigo-100 text-indigo-700 shadow-sm sm:h-9 sm:w-9">
+                                                <SparklesIcon className="h-3.5 w-3.5" />
+                                            </span>
+                                        </div>
+                                        <div className="h-px w-full bg-gradient-to-r from-transparent via-gray-200 to-transparent" />
+                                    </div>
+                                    )
+                                })()}
+
+                                <div className="mt-4 flex items-center justify-center gap-1.5 text-[11px] text-gray-400">
+                                    <img src="/jp-parts/cherry-slot.svg" alt="" className="h-3.5 w-3.5 brightness-0 opacity-25" />
+                                    <img src="/jp-parts/seven-slot.svg" alt="" className="h-3.5 w-3.5 brightness-0 opacity-25" />
+                                    <img src="/jp-parts/diamond-slot.svg" alt="" className="h-3.5 w-3.5 brightness-0 opacity-25" />
                                 </div>
+                                </>
                             </div>
                         </div>
                     )}
@@ -7881,6 +9222,17 @@ export default function AssetEditor() {
                             <span className="inline-block h-2.5 w-2.5 rounded-full bg-amber-400 shadow-sm" />
                             <span className="inline-block h-2.5 w-2.5 rounded-full bg-emerald-500 shadow-sm" />
                             <span className="ml-1 text-[11px] font-medium text-neutral-700">Web banner preview</span>
+                        </div>
+                    )}
+                    {uiMode === 'edit' && showStudioAnimCanvasPreview && (
+                        <div className="pointer-events-auto absolute left-1/2 top-3 z-50 -translate-x-1/2">
+                            <button
+                                type="button"
+                                onClick={() => setStudioAnimationCanvasPreviewJobId(null)}
+                                className="rounded-full border border-gray-600/90 bg-gray-900/95 px-3.5 py-1.5 text-[11px] font-medium text-gray-100 shadow-lg ring-1 ring-white/5 hover:bg-gray-800"
+                            >
+                                Close fullscreen preview
+                            </button>
                         </div>
                     )}
                     {/* Artboard positioning wrapper */}
@@ -7912,6 +9264,16 @@ export default function AssetEditor() {
                                 className="absolute inset-0 shadow-2xl ring-1 ring-black/10 bg-white"
                             />
                         )}
+                        {uiMode === 'edit' && hasFullFrameActiveAnimation && (
+                            <div
+                                className="absolute inset-0 z-[100] flex flex-col items-center justify-center gap-2 bg-white/88 dark:bg-gray-950/88"
+                                role="status"
+                                aria-busy="true"
+                                aria-label="Animating composition"
+                            >
+                                <EditorSlotReelLoader label="Animating…" />
+                            </div>
+                        )}
                         <div
                             ref={stageRef}
                             role="presentation"
@@ -7928,7 +9290,7 @@ export default function AssetEditor() {
                                 ...(uiMode === 'edit' ? { overflow: 'visible' } : {}),
                             }}
                         >
-                            {uiMode === 'edit' && gridEnabled && (
+                            {uiMode === 'edit' && !showStudioAnimCanvasPreview && gridEnabled && (
                                 <GridOverlay
                                     docW={document.width}
                                     docH={document.height}
@@ -7936,7 +9298,20 @@ export default function AssetEditor() {
                                     hits={snapHits}
                                 />
                             )}
-                            {layersForCanvas.map((layer) => {
+                            {uiMode === 'edit' && showStudioAnimCanvasPreview && studioAnimCanvasPreviewInfo ? (
+                                <video
+                                    key={studioAnimCanvasPreviewInfo.jobId}
+                                    ref={studioAnimationCanvasPreviewVideoRef}
+                                    data-jp-editor-studio-anim-canvas-preview
+                                    src={studioAnimCanvasPreviewInfo.url}
+                                    className="absolute left-0 top-0 z-[5] h-full w-full bg-black object-contain"
+                                    muted
+                                    playsInline
+                                    preload="auto"
+                                />
+                            ) : null}
+                            {!(uiMode === 'edit' && showStudioAnimCanvasPreview)
+                                ? layersForCanvas.map((layer) => {
                                 if (!layer.visible) {
                                     return null
                                 }
@@ -7970,6 +9345,7 @@ export default function AssetEditor() {
                                 return (
                                     <div
                                         key={layer.id}
+                                        data-studio-layer-id={layer.id}
                                         role="presentation"
                                         className={`group relative box-border ${
                                             showMemberRing
@@ -8168,18 +9544,19 @@ export default function AssetEditor() {
                                             </div>
                                         )}
                                         {isGenerativeImageLayer(layer) && (
-                                            <div className="relative h-full min-h-0 w-full min-w-0">
+                                            <div className="relative h-full min-h-0 w-full min-w-0 overflow-hidden">
                                                 {layer.resultSrc ? (
+                                                    (() => {
+                                                        const o = canvasImageObjectFit(layer.fit)
+                                                        return (
                                                     <img
-                                                        key={layer.resultSrc}
+                                                        key={`${layer.resultSrc}-${o.value}`}
                                                         src={layer.resultSrc}
                                                         alt=""
                                                         draggable={false}
-                                                        className="editor-gen-fade-in block h-full w-full max-h-full max-w-none select-none"
+                                                        className={`editor-gen-fade-in pointer-events-none absolute inset-0 !h-full !w-full min-h-0 min-w-0 max-w-none max-h-full select-none ${o.className}`}
                                                         style={{
-                                                            width: '100%',
-                                                            height: '100%',
-                                                            objectFit: layer.fit ?? 'cover',
+                                                            objectPosition: 'center',
                                                         }}
                                                         onError={() =>
                                                             updateLayer(layer.id, (l) =>
@@ -8194,6 +9571,8 @@ export default function AssetEditor() {
                                                             )
                                                         }
                                                     />
+                                                        )
+                                                    })()
                                                 ) : (
                                                     <div className="flex h-full w-full flex-col items-center justify-center gap-1 border-2 border-dashed border-violet-300 bg-violet-50/80 px-2 text-center text-[10px] text-violet-800 dark:border-violet-600 dark:bg-violet-950/40 dark:text-violet-200">
                                                         <SparklesIcon className="h-5 w-5 opacity-70" aria-hidden />
@@ -8252,33 +9631,47 @@ export default function AssetEditor() {
                                                         </button>
                                                     </div>
                                                 )}
+                                                {activeLayerAnimationBySourceLayerId.has(layer.id) && (
+                                                    <div
+                                                        className="absolute inset-0 z-[22] flex flex-col items-center justify-center gap-2 bg-white/88 dark:bg-gray-950/88"
+                                                        role="status"
+                                                        aria-busy="true"
+                                                        aria-label="Animating image"
+                                                    >
+                                                        <EditorSlotReelLoader label="Animating…" />
+                                                    </div>
+                                                )}
                                             </div>
                                         )}
                                         {layer.type === 'image' && (
-                                            <div className="relative h-full min-h-0 w-full min-w-0">
+                                            <div className="relative h-full min-h-0 w-full min-w-0 overflow-hidden">
                                                 {layer.src ? (
-                                                <img
-                                                    src={layer.src}
-                                                    alt=""
-                                                    draggable={false}
-                                                    className="block h-full w-full max-h-full max-w-none select-none"
-                                                    style={{
-                                                        width: '100%',
-                                                        height: '100%',
-                                                        objectFit: layer.fit ?? 'cover',
-                                                    }}
-                                                    onError={() => {
-                                                        setImageLoadFailedByLayerId((p) => ({
-                                                            ...p,
-                                                            [layer.id]: true,
-                                                        }))
-                                                        updateLayer(layer.id, (l) =>
-                                                            l.type === 'image' && l.src !== PLACEHOLDER_IMAGE_SRC
-                                                                ? { ...l, src: PLACEHOLDER_IMAGE_SRC }
-                                                                : l
+                                                    (() => {
+                                                        const o = canvasImageObjectFit(layer.fit)
+                                                        return (
+                                                            <img
+                                                                key={`${layer.id}-${o.value}`}
+                                                                src={layer.src}
+                                                                alt=""
+                                                                draggable={false}
+                                                                className={`pointer-events-none absolute inset-0 !h-full !w-full min-h-0 min-w-0 max-w-none max-h-full select-none ${o.className}`}
+                                                                style={{
+                                                                    objectPosition: 'center',
+                                                                }}
+                                                                onError={() => {
+                                                                    setImageLoadFailedByLayerId((p) => ({
+                                                                        ...p,
+                                                                        [layer.id]: true,
+                                                                    }))
+                                                                    updateLayer(layer.id, (l) =>
+                                                                        l.type === 'image' && l.src !== PLACEHOLDER_IMAGE_SRC
+                                                                            ? { ...l, src: PLACEHOLDER_IMAGE_SRC }
+                                                                            : l
+                                                                    )
+                                                                }}
+                                                            />
                                                         )
-                                                    }}
-                                                />
+                                                    })()
                                                 ) : (
                                                 /*
                                                  * Empty image slot — now that templates default to real-photo
@@ -8349,6 +9742,45 @@ export default function AssetEditor() {
                                                         >
                                                             Retry
                                                         </button>
+                                                    </div>
+                                                )}
+                                                {activeLayerAnimationBySourceLayerId.has(layer.id) && (
+                                                    <div
+                                                        className="absolute inset-0 z-[22] flex flex-col items-center justify-center gap-2 bg-white/88 dark:bg-gray-950/88"
+                                                        role="status"
+                                                        aria-busy="true"
+                                                        aria-label="Animating image"
+                                                    >
+                                                        <EditorSlotReelLoader label="Animating…" />
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )}
+                                        {layer.type === 'video' && (
+                                            <div className="relative h-full min-h-0 w-full min-w-0 overflow-hidden">
+                                                {layer.src ? (
+                                                    (() => {
+                                                        const o = canvasImageObjectFit(layer.fit)
+                                                        const showCanvasVideoControls = isSelected && uiMode === 'edit'
+                                                        return (
+                                                            <video
+                                                                key={`${layer.id}-${o.value}`}
+                                                                data-jp-editor-layer={layer.id}
+                                                                src={layer.src}
+                                                                className={`absolute inset-0 !h-full !w-full min-h-0 min-w-0 max-w-none max-h-full select-none ${showCanvasVideoControls ? 'pointer-events-auto' : 'pointer-events-none'} ${o.className}`}
+                                                                style={{ objectPosition: 'center' }}
+                                                                controls={showCanvasVideoControls}
+                                                                muted
+                                                                loop
+                                                                playsInline
+                                                                preload="metadata"
+                                                                draggable={false}
+                                                            />
+                                                        )
+                                                    })()
+                                                ) : (
+                                                    <div className="flex h-full w-full items-center justify-center border-2 border-dashed border-gray-600 bg-gray-900/30 px-2 text-center text-[10px] text-gray-500">
+                                                        Missing video source
                                                     </div>
                                                 )}
                                             </div>
@@ -8438,8 +9870,9 @@ export default function AssetEditor() {
                                         )}
                                     </div>
                                 )
-                            })}
-                            {uiMode === 'edit' && selectedGroupRect && (
+                            })
+                            : null}
+                            {uiMode === 'edit' && !showStudioAnimCanvasPreview && selectedGroupRect && (
                                 // Single dashed outline enclosing every group
                                 // member. Sits above the per-layer rings (which
                                 // are suppressed when a group is active) so
@@ -8462,15 +9895,37 @@ export default function AssetEditor() {
                             </div>
                     </div>
 
-                    {/* Bottom status bar */}
+                    {/* Bottom: canvas size + fit (closer to artboard), then AI clip or composition video — stacks flush above Versions. */}
                     {uiMode === 'edit' && (
-                        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex items-center justify-between px-4 py-2 text-[11px] text-gray-500">
-                            <span className="pointer-events-auto tabular-nums">{document.width} &times; {document.height}</span>
-                            <div className="pointer-events-auto flex items-center gap-3">
-                                <button type="button" onClick={fitToView} className="hover:text-gray-300" title="Reset zoom & pan">
-                                    <ViewfinderCircleIcon className="h-4 w-4" />
-                                </button>
+                        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-40 flex w-full max-w-full flex-col">
+                            <div className="flex items-center justify-between border-t border-gray-300/50 bg-neutral-200/95 px-4 py-2 text-[11px] text-gray-500 shadow-[0_-1px_0_rgba(0,0,0,0.06)]">
+                                <span className="pointer-events-auto tabular-nums">
+                                    {document.width} &times; {document.height}
+                                </span>
+                                <div className="pointer-events-auto flex items-center gap-3">
+                                    <button
+                                        type="button"
+                                        onClick={fitToView}
+                                        className="hover:text-gray-300"
+                                        title="Reset zoom & pan"
+                                    >
+                                        <ViewfinderCircleIcon className="h-4 w-4" />
+                                    </button>
+                                </div>
                             </div>
+                            {showStudioAnimCanvasPreview && studioAnimCanvasPreviewInfo ? (
+                                <EditorStudioAnimationCanvasPreviewBar
+                                    videoRef={studioAnimationCanvasPreviewVideoRef}
+                                    fallbackDurationMs={studioAnimCanvasPreviewInfo.durationMs}
+                                    previewKey={studioAnimCanvasPreviewInfo.jobId}
+                                />
+                            ) : (
+                                <EditorCompositionVideoPlaybackBar
+                                    document={document}
+                                    getStageEl={() => stageRef.current}
+                                    autoplayNonce={compositionPlaybackAutoplayNonce}
+                                />
+                            )}
                         </div>
                     )}
 
@@ -8507,13 +9962,34 @@ export default function AssetEditor() {
                         </div>
                     )}
                 </main>
-                {uiMode === 'edit' && studioCreativeSet && compositionId && (
+                {uiMode === 'edit' && compositionId && (
                     <>
+                        {studioCreativeSet ? (
+                        <>
                         {studioVersionsPanelOpen ? (
-                            <>
+                            <div
+                                className="shrink-0 border-t border-gray-800 bg-gray-950"
+                                data-testid="studio-versions-dock"
+                            >
+                                <ApplyScopeBar
+                                    creativeSetId={studioCreativeSet.id}
+                                    sourceCompositionId={compositionId}
+                                    applyScope={studioApplyScope}
+                                    onApplyScopeChange={handleStudioApplyScopeChange}
+                                    selectedTargetCompositionIds={studioApplySelectedCompositionIds}
+                                    selectedLayer={selectedLayer}
+                                    siblingCompositionCount={Math.max(
+                                        0,
+                                        studioCreativeSet.variants.filter((v) => v.composition_id !== compositionId)
+                                            .length
+                                    )}
+                                    onNotice={(msg) => setActivityToast(msg)}
+                                    onCreativeSetUpdated={(cs) => setStudioCreativeSet(cs)}
+                                />
                                 <VersionsRail
                                     creativeSet={studioCreativeSet}
                                     activeCompositionId={compositionId}
+                                    showCompositionAnimationChips={false}
                                     onSelectComposition={(id) => {
                                         void switchToSiblingComposition(id)
                                     }}
@@ -8551,23 +10027,10 @@ export default function AssetEditor() {
                                     onSelectStudioAnimationJob={(jobId) => setStudioAnimationDetailJobId(jobId)}
                                     onRequestDiscardStudioAnimationJob={requestDiscardStudioAnimationJob}
                                     onRequestRemoveVariant={removeStudioVariantFromSet}
+                                    onDissolveSet={dissolveStudioVersionsSet}
+                                    dissolveSetBusy={studioDissolveSetBusy}
                                 />
-                                <ApplyScopeBar
-                                    creativeSetId={studioCreativeSet.id}
-                                    sourceCompositionId={compositionId}
-                                    applyScope={studioApplyScope}
-                                    onApplyScopeChange={handleStudioApplyScopeChange}
-                                    selectedTargetCompositionIds={studioApplySelectedCompositionIds}
-                                    selectedLayer={selectedLayer}
-                                    siblingCompositionCount={Math.max(
-                                        0,
-                                        studioCreativeSet.variants.filter((v) => v.composition_id !== compositionId)
-                                            .length
-                                    )}
-                                    onNotice={(msg) => setActivityToast(msg)}
-                                    onCreativeSetUpdated={(cs) => setStudioCreativeSet(cs)}
-                                />
-                            </>
+                            </div>
                         ) : (
                             <button
                                 type="button"
@@ -8585,6 +10048,28 @@ export default function AssetEditor() {
                                 </span>
                             </button>
                         )}
+                        </>
+                        ) : studioVersionsEntryFetchDone ? (
+                            <div
+                                className="flex shrink-0 flex-col gap-1.5 border-t border-gray-800 bg-gray-950 px-3 py-2 sm:flex-row sm:items-center sm:justify-between"
+                                data-testid="studio-versions-no-set-hint"
+                            >
+                                <p className="text-[10px] leading-snug text-gray-500">
+                                    <span className="font-semibold uppercase tracking-wider text-gray-400">Versions</span>{' '}
+                                    — this composition is not in a set yet. Create one to manage siblings, or keep editing
+                                    a single design.
+                                </p>
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        void createStudioVersionsSet()
+                                    }}
+                                    className="shrink-0 self-start rounded-md border border-indigo-600/50 bg-indigo-950/40 px-2.5 py-1 text-[10px] font-semibold text-indigo-100 hover:bg-indigo-900/50 sm:self-auto"
+                                >
+                                    Create Versions set
+                                </button>
+                            </div>
+                        ) : null}
                     </>
                 )}
                 {versionBuilderOpen && studioCreativeSet && compositionId && (
@@ -8620,18 +10105,20 @@ export default function AssetEditor() {
                 )}
                 {studioAnimateModalOpen && compositionId && (
                     <StudioAnimateCompositionModal
+                        key={studioAnimateModalMountKey}
                         open
                         compositionId={compositionId}
                         document={document}
                         textLayerCount={document.layers.filter((l) => l.type === 'text').length}
                         getStageEl={() => stageRef.current}
-                        onClose={() => setStudioAnimateModalOpen(false)}
-                        onAnimateSubmitStart={() => {
-                            setStudioVersionsPanelOpen(true)
+                        initialSourceKind={studioAnimateOpenContext?.sourceKind ?? 'full_composition'}
+                        initialLayerId={studioAnimateOpenContext?.layerId ?? null}
+                        onClose={() => {
+                            setStudioAnimateModalOpen(false)
+                            setStudioAnimateOpenContext(null)
                         }}
                         onQueued={(_jobId) => {
                             setActivityToast('Animation started…')
-                            setStudioVersionsPanelOpen(true)
                             void refreshCompositionAnimations()
                         }}
                     />
@@ -8646,6 +10133,18 @@ export default function AssetEditor() {
                         }}
                         onRequestDiscardJob={requestDiscardStudioAnimationJob}
                         compositionTitleForLabel={compositionName.trim() || defaultCompositionName(document)}
+                        compositionId={compositionId}
+                        sourceLayerReplaceable={(() => {
+                            const j = compositionAnimations.find((x) => x.id === studioAnimationDetailJobId)
+                            return Boolean(
+                                j?.source_layer_id &&
+                                document.layers.some((l) => l.id === j.source_layer_id)
+                            )
+                        })()}
+                        onInsertOutputAsVideoLayer={
+                            compositionId ? handleInsertStudioAnimationAsVideoLayer : undefined
+                        }
+                        onExportBakedVideo={compositionId ? handleRequestBakedCompositionVideoExport : undefined}
                     />
                 )}
                 </div>
@@ -8834,109 +10333,594 @@ export default function AssetEditor() {
                                   * icon + uppercase label) so the two sections read
                                   * as peers.
                                   */}
-                                <div className="flex items-center justify-between gap-2 rounded-md bg-indigo-950/40 px-2.5 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-indigo-200 ring-1 ring-inset ring-indigo-900/50">
-                                    <span className="flex min-w-0 items-center gap-1.5">
-                                        <RectangleGroupIcon className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                                        Layer
-                                        <span className="ml-1 min-w-0 truncate rounded bg-gray-900/70 px-1.5 py-px text-[9px] font-normal normal-case tracking-normal text-gray-400">
-                                            {selectedLayer.name ?? selectedLayer.type}
+                                <div className="rounded-lg border border-gray-800/80 bg-gray-950/40 p-2.5 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.04)] ring-1 ring-inset ring-gray-800/50">
+                                    <div className="mb-2.5 flex items-center justify-between gap-2 rounded-md bg-indigo-950/35 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-indigo-200/95 ring-1 ring-inset ring-indigo-900/40">
+                                        <span className="flex min-w-0 items-center gap-1.5">
+                                            <RectangleGroupIcon className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                                            Layer
+                                            <span className="ml-1 min-w-0 truncate rounded bg-gray-900/60 px-1.5 py-px text-[9px] font-normal normal-case tracking-normal text-gray-400">
+                                                {selectedLayer.name ?? selectedLayer.type}
+                                            </span>
                                         </span>
-                                    </span>
-                                </div>
-                                <div className="flex flex-wrap gap-2">
-                                    <button
-                                        type="button"
-                                        onClick={duplicateSelectedLayer}
-                                        className="inline-flex items-center gap-1 rounded border border-gray-700 bg-gray-800 px-2 py-1 text-gray-200 hover:bg-gray-700"
-                                        title="Duplicate layer"
+                                    </div>
+                                    <p className="mb-1.5 text-[9px] font-semibold uppercase tracking-wider text-gray-500">Actions</p>
+                                    <div
+                                        className="mb-3 grid grid-cols-4 gap-px overflow-hidden rounded-lg bg-gray-800/40 p-px ring-1 ring-inset ring-gray-700/40"
+                                        role="toolbar"
+                                        aria-label="Layer actions"
                                     >
-                                        <Square2StackIcon className="h-3.5 w-3.5" aria-hidden />
-                                        Duplicate
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={deleteSelectedLayer}
-                                        className="inline-flex items-center gap-1 rounded border border-red-900 bg-gray-800 px-2 py-1 text-red-400 hover:bg-red-950/40"
-                                        title="Delete layer"
-                                    >
-                                        <TrashIcon className="h-3.5 w-3.5" aria-hidden />
-                                        Delete
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={bringSelectedToFront}
-                                        className="inline-flex items-center gap-1 rounded border border-gray-700 bg-gray-800 px-2 py-1 text-gray-200 hover:bg-gray-700"
-                                        title="Bring to front"
-                                    >
-                                        <ChevronDoubleUpIcon className="h-3.5 w-3.5" aria-hidden />
-                                        Front
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={sendSelectedToBack}
-                                        className="inline-flex items-center gap-1 rounded border border-gray-700 bg-gray-800 px-2 py-1 text-gray-200 hover:bg-gray-700"
-                                        title="Send to back"
-                                    >
-                                        <ChevronDoubleDownIcon className="h-3.5 w-3.5" aria-hidden />
-                                        Back
-                                    </button>
-                                </div>
-                                <div>
-                                    <label className="mb-1 block font-medium text-gray-300">Name</label>
-                                    <input
-                                        type="text"
-                                        value={selectedLayer.name ?? ''}
-                                        onChange={(e) =>
-                                            updateLayer(selectedLayer.id, (l) => ({
-                                                ...l,
-                                                name: e.target.value || undefined,
-                                            }))
-                                        }
-                                        className="w-full rounded border border-gray-700 bg-gray-800 px-2 py-1 text-gray-200"
-                                        placeholder={
-                                            selectedLayer.type === 'text'
-                                                ? 'Text'
-                                                : selectedLayer.type === 'generative_image'
-                                                  ? 'AI image'
-                                                  : selectedLayer.type === 'fill'
-                                                    ? 'Fill'
-                                                    : 'Image'
-                                        }
-                                    />
+                                        <button
+                                            type="button"
+                                            onClick={duplicateSelectedLayer}
+                                            className="flex flex-col items-center justify-center gap-0.5 bg-gray-900/90 py-2 text-[9px] font-medium text-gray-200 transition-colors hover:bg-gray-800 sm:text-[10px]"
+                                            title="Duplicate layer"
+                                        >
+                                            <Square2StackIcon className="h-4 w-4 text-indigo-300/90" aria-hidden />
+                                            <span>Duplicate</span>
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={deleteSelectedLayer}
+                                            className="flex flex-col items-center justify-center gap-0.5 bg-red-950/20 py-2 text-[9px] font-medium text-red-300 transition-colors hover:bg-red-950/50 sm:text-[10px]"
+                                            title="Delete layer"
+                                        >
+                                            <TrashIcon className="h-4 w-4" aria-hidden />
+                                            <span>Delete</span>
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={bringSelectedToFront}
+                                            className="flex flex-col items-center justify-center gap-0.5 bg-gray-900/90 py-2 text-[9px] font-medium text-gray-200 transition-colors hover:bg-gray-800 sm:text-[10px]"
+                                            title="Bring to front"
+                                        >
+                                            <ChevronDoubleUpIcon className="h-4 w-4 text-gray-400" aria-hidden />
+                                            <span>Front</span>
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={sendSelectedToBack}
+                                            className="flex flex-col items-center justify-center gap-0.5 bg-gray-900/90 py-2 text-[9px] font-medium text-gray-200 transition-colors hover:bg-gray-800 sm:text-[10px]"
+                                            title="Send to back"
+                                        >
+                                            <ChevronDoubleDownIcon className="h-4 w-4 text-gray-400" aria-hidden />
+                                            <span>Back</span>
+                                        </button>
+                                    </div>
+                                    <div className="mb-0.5">
+                                        <button
+                                            type="button"
+                                            onClick={() => setLayerDetailsSectionOpen((o) => !o)}
+                                            className="flex w-full items-center justify-between gap-2 rounded-md bg-gray-800/50 px-2 py-1.5 text-left text-[10px] font-semibold uppercase tracking-wide text-gray-300 ring-1 ring-inset ring-gray-700/50 hover:bg-gray-800"
+                                            aria-expanded={layerDetailsSectionOpen}
+                                            aria-controls="jp-layer-details-section"
+                                        >
+                                            <span className="flex items-center gap-1.5">
+                                                <AdjustmentsHorizontalIcon className="h-3.5 w-3.5 text-gray-400" aria-hidden />
+                                                Layer details
+                                                <span className="ml-0.5 rounded bg-gray-900/50 px-1.5 py-px text-[8px] font-normal normal-case tracking-normal text-gray-500">
+                                                    name · {isImageLayer(selectedLayer) ? 'source · ' : ''}state
+                                                </span>
+                                            </span>
+                                            {layerDetailsSectionOpen
+                                                ? <ChevronDownIcon className="h-3.5 w-3.5 shrink-0 text-gray-500" aria-hidden />
+                                                : <ChevronRightIcon className="h-3.5 w-3.5 shrink-0 text-gray-500" aria-hidden />}
+                                        </button>
+                                    </div>
+                                    {layerDetailsSectionOpen && (
+                                        <div id="jp-layer-details-section" className="mt-2 space-y-3 border-t border-gray-800/80 pt-2.5">
+                                            <div>
+                                                <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-gray-500">
+                                                    Layer name
+                                                </label>
+                                                <input
+                                                    type="text"
+                                                    value={selectedLayer.name ?? ''}
+                                                    onChange={(e) =>
+                                                        updateLayer(selectedLayer.id, (l) => ({
+                                                            ...l,
+                                                            name: e.target.value || undefined,
+                                                        }))
+                                                    }
+                                                    className="w-full rounded-md border-0 bg-gray-900/60 px-2.5 py-1.5 text-sm text-gray-100 ring-1 ring-inset ring-gray-700/60 transition-shadow placeholder:text-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/45"
+                                                    placeholder={
+                                                        selectedLayer.type === 'text'
+                                                            ? 'Text'
+                                                            : selectedLayer.type === 'generative_image'
+                                                              ? 'AI image'
+                                                              : selectedLayer.type === 'fill'
+                                                                ? 'Fill'
+                                                                : 'Image'
+                                                    }
+                                                />
+                                            </div>
+                                            {isImageLayer(selectedLayer) && (
+                                                <div>
+                                                    <p className="mb-1.5 text-[9px] font-semibold uppercase tracking-wider text-gray-500">
+                                                        Image source
+                                                    </p>
+                                                    <button
+                                                        type="button"
+                                                        disabled={selectedLayer.locked}
+                                                        onClick={() => openPickerForReplaceImage(selectedLayer.id)}
+                                                        className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-indigo-500/45 bg-indigo-950/25 px-3 py-2.5 text-xs font-semibold text-indigo-100 shadow-sm transition-colors hover:border-indigo-400/60 hover:bg-indigo-900/30 disabled:cursor-not-allowed disabled:opacity-45"
+                                                    >
+                                                        <PhotoIcon className="h-4 w-4 shrink-0 text-indigo-300" aria-hidden />
+                                                        Replace image
+                                                    </button>
+                                                </div>
+                                            )}
+                                            {(isImageLayer(selectedLayer) || isGenerativeImageLayer(selectedLayer)) && (
+                                                <div className="mt-2">
+                                                    <p className="mb-1.5 text-[9px] font-semibold uppercase tracking-wider text-gray-500">
+                                                        Motion
+                                                    </p>
+                                                    <button
+                                                        type="button"
+                                                        disabled={selectedLayer.locked || !aiEnabled}
+                                                        onClick={() =>
+                                                            openStudioAnimateModal({
+                                                                sourceKind: 'layer_isolated',
+                                                                layerId: selectedLayer.id,
+                                                            })
+                                                        }
+                                                        className="flex w-full items-center justify-center gap-2 rounded-lg border border-violet-700/50 bg-violet-950/30 px-3 py-2.5 text-xs font-semibold text-violet-100 shadow-sm transition-colors hover:border-violet-500/70 hover:bg-violet-900/40 disabled:cursor-not-allowed disabled:opacity-45"
+                                                        title={
+                                                            !aiEnabled
+                                                                ? 'AI is disabled for this workspace'
+                                                                : 'Queue image-to-video; other layers stay on top for playback and export'
+                                                        }
+                                                    >
+                                                        <span className="flex items-center gap-0.5" aria-hidden>
+                                                            <FilmIcon className="h-4 w-4" />
+                                                            <SparklesIcon className="h-3.5 w-3.5" />
+                                                        </span>
+                                                        Image → video (AI)
+                                                    </button>
+                                                    <p className="mt-1.5 text-[9px] leading-snug text-gray-500">
+                                                        Not a library MP4 — when a render finishes, the clip is added as a
+                                                        video layer in your stack (the still is swapped in place when
+                                                        possible) so logos and type stay on top.
+                                                    </p>
+                                                    {(() => {
+                                                        const jobs = compositionAnimations.filter(
+                                                            (j) => j.source_layer_id === selectedLayer.id,
+                                                        )
+                                                        if (jobs.length === 0) {
+                                                            return null
+                                                        }
+                                                        return (
+                                                            <div className="mt-2 space-y-1.5 rounded-md border border-violet-900/30 bg-violet-950/20 px-2 py-2">
+                                                                <p className="text-[9px] font-semibold uppercase tracking-wider text-violet-200/80">
+                                                                    AI video for this still
+                                                                </p>
+                                                                <p className="text-[9px] leading-snug text-gray-500">
+                                                                    Finished clips appear in the layer stack automatically.
+                                                                    Click a run to select its video layer, or add it if the
+                                                                    file is ready but not on the canvas yet.
+                                                                </p>
+                                                                <ul className="mt-1.5 space-y-1.5">
+                                                                    {jobs.map((j) => {
+                                                                        const active = isStudioAnimationStatusActive(j.status)
+                                                                        const out = j.output
+                                                                        const canUseOutput =
+                                                                            j.status === 'complete' &&
+                                                                            Boolean(out?.asset_view_url) &&
+                                                                            Boolean(
+                                                                                out?.asset_id &&
+                                                                                    String(out.asset_id) !== '',
+                                                                            )
+                                                                        const videoLayerIdInDesign =
+                                                                            findVideoLayerIdForStudioAnimationJob(
+                                                                                document,
+                                                                                j.id,
+                                                                            )
+                                                                        const isVideoLayerSelected =
+                                                                            Boolean(
+                                                                                videoLayerIdInDesign &&
+                                                                                    selectedLayerId === videoLayerIdInDesign,
+                                                                            )
+                                                                        const isFullscreenPreview =
+                                                                            studioAnimationCanvasPreviewJobId === j.id
+                                                                        const rowHighlighted =
+                                                                            isVideoLayerSelected || isFullscreenPreview
+                                                                        return (
+                                                                            <li
+                                                                                key={j.id}
+                                                                                className={`rounded border bg-gray-900/50 p-1.5 ${
+                                                                                    rowHighlighted
+                                                                                        ? 'border-violet-500/80 ring-1 ring-violet-500/40'
+                                                                                        : 'border-gray-800/80'
+                                                                                }`}
+                                                                            >
+                                                                                {canUseOutput ? (
+                                                                                    <button
+                                                                                        type="button"
+                                                                                        onClick={() => {
+                                                                                            const existing =
+                                                                                                findVideoLayerIdForStudioAnimationJob(
+                                                                                                    document,
+                                                                                                    j.id,
+                                                                                                )
+                                                                                            if (existing) {
+                                                                                                setStudioAnimationCanvasPreviewJobId(
+                                                                                                    null,
+                                                                                                )
+                                                                                                selectLayerOrGroup(existing)
+                                                                                                return
+                                                                                            }
+                                                                                            const ins =
+                                                                                                buildInsertArgsForStudioAnimationJob(
+                                                                                                    j,
+                                                                                                    document,
+                                                                                                )
+                                                                                            if (!ins) {
+                                                                                                setActivityToast(
+                                                                                                    'Video file is not ready to add yet.',
+                                                                                                )
+                                                                                                return
+                                                                                            }
+                                                                                            setStudioAnimationCanvasPreviewJobId(
+                                                                                                null,
+                                                                                            )
+                                                                                            void handleInsertStudioAnimationAsVideoLayer(
+                                                                                                ins,
+                                                                                            )
+                                                                                                .then((docAfter) => {
+                                                                                                    if (!docAfter) {
+                                                                                                        return
+                                                                                                    }
+                                                                                                    const vid =
+                                                                                                        docAfter.layers.find(
+                                                                                                            (l) =>
+                                                                                                                isVideoLayer(
+                                                                                                                    l,
+                                                                                                                ) &&
+                                                                                                                l.studioProvenance
+                                                                                                                    ?.jobId ===
+                                                                                                                    j.id,
+                                                                                                        )
+                                                                                                    if (vid) {
+                                                                                                        selectLayerOrGroup(
+                                                                                                            vid.id,
+                                                                                                        )
+                                                                                                    }
+                                                                                                })
+                                                                                                .catch((e) => {
+                                                                                                    setActivityToast(
+                                                                                                        e instanceof Error
+                                                                                                            ? e.message
+                                                                                                            : 'Could not add the video',
+                                                                                                    )
+                                                                                                })
+                                                                                        }}
+                                                                                        className="w-full text-left"
+                                                                                    >
+                                                                                        <div className="flex items-start gap-2">
+                                                                                            <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded border border-gray-700/80 bg-black">
+                                                                                                <video
+                                                                                                    src={out?.asset_view_url ?? undefined}
+                                                                                                    className="pointer-events-none h-full w-full object-cover"
+                                                                                                    muted
+                                                                                                    playsInline
+                                                                                                    preload="metadata"
+                                                                                                    aria-hidden
+                                                                                                />
+                                                                                            </div>
+                                                                                            <div className="min-w-0 flex-1">
+                                                                                                <p
+                                                                                                    className={`text-[10px] font-medium ${active ? 'text-amber-200' : 'text-gray-200'}`}
+                                                                                                >
+                                                                                                    {j.motion_preset?.replace(
+                                                                                                        /_/g,
+                                                                                                        ' '
+                                                                                                    ) ?? 'AI clip'}{' '}
+                                                                                                    <span className="text-gray-500">
+                                                                                                        · {j.duration_seconds}s
+                                                                                                    </span>
+                                                                                                </p>
+                                                                                                <p className="mt-0.5 text-[9px] text-violet-300/90">
+                                                                                                    {videoLayerIdInDesign
+                                                                                                        ? isVideoLayerSelected
+                                                                                                            ? 'Selected on canvas'
+                                                                                                            : 'In design — click to select layer'
+                                                                                                        : 'Click to add to design'}
+                                                                                                </p>
+                                                                                            </div>
+                                                                                        </div>
+                                                                                    </button>
+                                                                                ) : (
+                                                                                    <div className="flex items-start justify-between gap-1">
+                                                                                        <span
+                                                                                            className={`text-[10px] font-medium ${active ? 'text-amber-200' : 'text-gray-300'}`}
+                                                                                        >
+                                                                                            {active
+                                                                                                ? 'Rendering…'
+                                                                                                : j.status === 'complete'
+                                                                                                  ? 'Ready'
+                                                                                                  : j.status === 'failed'
+                                                                                                    ? 'Failed'
+                                                                                                    : j.status}
+                                                                                        </span>
+                                                                                    </div>
+                                                                                )}
+                                                                                <div className="mt-1.5 flex flex-wrap items-center justify-end gap-2">
+                                                                                    {out?.asset_view_url ? (
+                                                                                        <a
+                                                                                            href={out.asset_view_url}
+                                                                                            target="_blank"
+                                                                                            rel="noreferrer"
+                                                                                            className="text-[9px] font-medium text-violet-300/90 hover:text-violet-200"
+                                                                                        >
+                                                                                            Open in new tab
+                                                                                        </a>
+                                                                                    ) : null}
+                                                                                    {out?.asset_view_url &&
+                                                                                    j.status === 'complete' ? (
+                                                                                        <button
+                                                                                            type="button"
+                                                                                            onClick={() =>
+                                                                                                setStudioAnimationCanvasPreviewJobId(
+                                                                                                    studioAnimationCanvasPreviewJobId ===
+                                                                                                        j.id
+                                                                                                        ? null
+                                                                                                        : j.id,
+                                                                                                )
+                                                                                            }
+                                                                                            className="text-[9px] font-medium text-violet-300/90 hover:text-violet-200"
+                                                                                        >
+                                                                                            {studioAnimationCanvasPreviewJobId === j.id
+                                                                                                ? 'Close fullscreen'
+                                                                                                : 'Fullscreen preview'}
+                                                                                        </button>
+                                                                                    ) : null}
+                                                                                    <button
+                                                                                        type="button"
+                                                                                        onClick={() => setStudioAnimationDetailJobId(j.id)}
+                                                                                        className="text-[9px] font-semibold text-violet-300 hover:text-violet-200"
+                                                                                    >
+                                                                                        Details
+                                                                                    </button>
+                                                                                </div>
+                                                                                {j.status === 'failed' && j.user_facing_error ? (
+                                                                                    <p className="mt-1 text-[9px] leading-snug text-red-300/90">
+                                                                                        {j.user_facing_error}
+                                                                                    </p>
+                                                                                ) : null}
+                                                                            </li>
+                                                                        )
+                                                                    })}
+                                                                </ul>
+                                                            </div>
+                                                        )
+                                                    })()}
+                                                </div>
+                                            )}
+                                            {isVideoLayer(selectedLayer) ? (
+                                                <div className="space-y-2 border-t border-gray-800/80 pt-2.5">
+                                                    <p className="text-[9px] font-semibold uppercase tracking-wider text-gray-500">
+                                                        Video &amp; export
+                                                    </p>
+                                                    {(() => {
+                                                        const fromJobId = selectedLayer.studioProvenance?.jobId
+                                                        const linked =
+                                                            (fromJobId &&
+                                                                compositionAnimations.find((x) => x.id === fromJobId)) ||
+                                                            (selectedLayer.assetId
+                                                                ? compositionAnimations.find(
+                                                                      (x) => x.output?.asset_id === selectedLayer.assetId,
+                                                                  )
+                                                                : null)
+                                                        if (!linked) {
+                                                            return null
+                                                        }
+                                                        return (
+                                                            <div className="rounded-md border border-gray-800/80 bg-gray-900/50 px-2 py-1.5">
+                                                                <p className="text-[9px] font-semibold uppercase tracking-wider text-gray-500">
+                                                                    AI image → video
+                                                                </p>
+                                                                <p className="mt-0.5 text-[10px] text-gray-400">
+                                                                    This layer is the generated clip. The start frame was your
+                                                                    still; playback uses the timeline under the canvas.
+                                                                </p>
+                                                                <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                                                                    {selectedLayer.src ? (
+                                                                        <div className="shrink-0 max-w-full overflow-hidden rounded border border-gray-700">
+                                                                            <video
+                                                                                src={selectedLayer.src}
+                                                                                className="h-20 max-w-full object-cover"
+                                                                                controls
+                                                                                playsInline
+                                                                                preload="metadata"
+                                                                                title="Generated video"
+                                                                            />
+                                                                        </div>
+                                                                    ) : null}
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() =>
+                                                                            setStudioAnimationDetailJobId(linked.id)
+                                                                        }
+                                                                        className="text-[10px] font-semibold text-violet-300 hover:text-violet-200"
+                                                                    >
+                                                                        Job details
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+                                                        )
+                                                    })()}
+                                                    <label className="flex cursor-pointer items-center gap-2 text-[11px] text-gray-300">
+                                                        <input
+                                                            type="checkbox"
+                                                            className="rounded border-gray-600 bg-gray-900 text-indigo-500 focus:ring-indigo-500"
+                                                            checked={Boolean(selectedLayer.primaryForExport)}
+                                                            onChange={(e) => {
+                                                                const on = e.target.checked
+                                                                setDocument((d) => ({
+                                                                    ...d,
+                                                                    layers: d.layers.map((l) =>
+                                                                        isVideoLayer(l)
+                                                                            ? {
+                                                                                  ...l,
+                                                                                  primaryForExport: on && l.id === selectedLayer.id,
+                                                                              }
+                                                                            : l
+                                                                    ),
+                                                                }))
+                                                            }}
+                                                        />
+                                                        Primary video for baked export
+                                                    </label>
+                                                    <p className="text-[10px] leading-snug text-gray-500">
+                                                        If you have several video layers, check this on the one that should
+                                                        fill the frame for export. Otherwise the back-most visible video is
+                                                        used.
+                                                    </p>
+                                                    {selectedLayer.studioProvenance ? (
+                                                        <div className="rounded-md bg-gray-900/50 px-2 py-1.5 text-[10px] leading-snug text-gray-400">
+                                                            <p>
+                                                                <span className="text-gray-500">Source:</span>{' '}
+                                                                {selectedLayer.studioProvenance.sourceMode ?? '—'}
+                                                            </p>
+                                                            <p>
+                                                                <span className="text-gray-500">Model:</span>{' '}
+                                                                {selectedLayer.studioProvenance.provider ?? '—'}
+                                                                {selectedLayer.studioProvenance.model
+                                                                    ? ` / ${selectedLayer.studioProvenance.model}`
+                                                                    : ''}
+                                                            </p>
+                                                            {typeof selectedLayer.studioProvenance.durationMs === 'number' ? (
+                                                                <p>
+                                                                    <span className="text-gray-500">Duration:</span>{' '}
+                                                                    {Math.round(selectedLayer.studioProvenance.durationMs / 100) / 10}s
+                                                                </p>
+                                                            ) : null}
+                                                            {selectedLayer.studioProvenance.outputAssetId ? (
+                                                                <Link
+                                                                    href={`/app/assets/${encodeURIComponent(selectedLayer.studioProvenance.outputAssetId)}/view`}
+                                                                    className="mt-1 inline-block font-medium text-violet-300 hover:text-violet-200"
+                                                                >
+                                                                    Open clip in library →
+                                                                </Link>
+                                                            ) : null}
+                                                        </div>
+                                                    ) : null}
+                                                    <div className="grid grid-cols-2 gap-2">
+                                                        <div>
+                                                            <label className="mb-0.5 block text-[10px] text-gray-500">Trim in (ms)</label>
+                                                            <input
+                                                                type="number"
+                                                                min={0}
+                                                                className="w-full rounded border border-gray-700 bg-gray-800 px-1.5 py-1 text-[11px] text-gray-200"
+                                                                value={selectedLayer.timeline?.trim_in_ms ?? 0}
+                                                                onChange={(e) => {
+                                                                    const v = Math.max(0, Math.floor(Number(e.target.value) || 0))
+                                                                    updateLayer(selectedLayer.id, (l) => {
+                                                                        if (!isVideoLayer(l)) return l
+                                                                        const t = l.timeline ?? {
+                                                                            start_ms: 0,
+                                                                            end_ms: 30_000,
+                                                                        }
+                                                                        return {
+                                                                            ...l,
+                                                                            timeline: { ...t, trim_in_ms: v },
+                                                                        }
+                                                                    })
+                                                                }}
+                                                            />
+                                                        </div>
+                                                        <div>
+                                                            <label className="mb-0.5 block text-[10px] text-gray-500">Trim out (ms)</label>
+                                                            <input
+                                                                type="number"
+                                                                min={0}
+                                                                className="w-full rounded border border-gray-700 bg-gray-800 px-1.5 py-1 text-[11px] text-gray-200"
+                                                                value={selectedLayer.timeline?.trim_out_ms ?? 0}
+                                                                onChange={(e) => {
+                                                                    const v = Math.max(0, Math.floor(Number(e.target.value) || 0))
+                                                                    updateLayer(selectedLayer.id, (l) => {
+                                                                        if (!isVideoLayer(l)) return l
+                                                                        const t = l.timeline ?? {
+                                                                            start_ms: 0,
+                                                                            end_ms: 30_000,
+                                                                        }
+                                                                        return {
+                                                                            ...l,
+                                                                            timeline: { ...t, trim_out_ms: v },
+                                                                        }
+                                                                    })
+                                                                }}
+                                                            />
+                                                        </div>
+                                                    </div>
+                                                    <div>
+                                                        <label className="mb-0.5 block text-[10px] text-gray-500">Composition length (ms)</label>
+                                                        <input
+                                                            type="number"
+                                                            min={100}
+                                                            className="w-full rounded border border-gray-700 bg-gray-800 px-1.5 py-1 text-[11px] text-gray-200"
+                                                            value={document.studio_timeline?.duration_ms ?? selectedLayer.timeline?.end_ms ?? 30_000}
+                                                            onChange={(e) => {
+                                                                const v = Math.max(100, Math.floor(Number(e.target.value) || 0))
+                                                                setDocument((d) => ({
+                                                                    ...d,
+                                                                    studio_timeline: { ...d.studio_timeline, duration_ms: v },
+                                                                }))
+                                                            }}
+                                                        />
+                                                        <p className="mt-0.5 text-[9px] text-gray-600">Caps baked export length with trim.</p>
+                                                    </div>
+                                                </div>
+                                            ) : null}
+                                            <div>
+                                                <p className="mb-1.5 text-[9px] font-semibold uppercase tracking-wider text-gray-500">State</p>
+                                                <div className="grid grid-cols-2 gap-2">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() =>
+                                                            updateLayer(selectedLayer.id, (l) => ({ ...l, visible: !l.visible }))
+                                                        }
+                                                        className={`inline-flex items-center justify-center gap-1.5 rounded-lg px-2 py-2 text-[11px] font-medium transition-colors ${
+                                                            selectedLayer.visible
+                                                                ? 'bg-gray-800 text-white ring-1 ring-gray-600'
+                                                                : 'bg-gray-900/30 text-gray-500 hover:bg-gray-800/60 hover:text-gray-300'
+                                                        }`}
+                                                    >
+                                                        {selectedLayer.visible ? (
+                                                            <EyeIcon className="h-4 w-4 shrink-0" />
+                                                        ) : (
+                                                            <EyeSlashIcon className="h-4 w-4 shrink-0" />
+                                                        )}
+                                                        Visible
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        title="Prevent this layer from changing when regenerating or editing"
+                                                        onClick={() =>
+                                                            updateLayer(selectedLayer.id, (l) => ({ ...l, locked: !l.locked }))
+                                                        }
+                                                        className={`inline-flex items-center justify-center gap-1.5 rounded-lg px-2 py-2 text-[11px] font-medium transition-colors ${
+                                                            selectedLayer.locked
+                                                                ? 'bg-amber-950/50 text-amber-100 ring-1 ring-amber-800/60'
+                                                                : 'bg-gray-900/30 text-gray-500 hover:bg-gray-800/60 hover:text-gray-300'
+                                                        }`}
+                                                    >
+                                                        {selectedLayer.locked ? (
+                                                            <LockClosedIcon className="h-4 w-4 shrink-0" />
+                                                        ) : (
+                                                            <LockOpenIcon className="h-4 w-4 shrink-0" />
+                                                        )}
+                                                        Lock
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
 
-                                {/* Visibility / Lock — always visible */}
-                                <div className="flex gap-3">
-                                    <button
-                                        type="button"
-                                        className="inline-flex items-center gap-1 text-gray-300"
-                                        onClick={() =>
-                                            updateLayer(selectedLayer.id, (l) => ({ ...l, visible: !l.visible }))
-                                        }
-                                    >
-                                        {selectedLayer.visible ? (
-                                            <EyeIcon className="h-4 w-4" />
-                                        ) : (
-                                            <EyeSlashIcon className="h-4 w-4" />
-                                        )}
-                                        Visible
-                                    </button>
-                                    <button
-                                        type="button"
-                                        title="Prevent this layer from changing when regenerating or editing"
-                                        className="inline-flex items-center gap-1 text-gray-300"
-                                        onClick={() =>
-                                            updateLayer(selectedLayer.id, (l) => ({ ...l, locked: !l.locked }))
-                                        }
-                                    >
-                                        {selectedLayer.locked ? (
-                                            <LockClosedIcon className="h-4 w-4" />
-                                        ) : (
-                                            <LockOpenIcon className="h-4 w-4" />
-                                        )}
-                                        Lock
-                                    </button>
-                                </div>
+                                <div
+                                    className="pointer-events-none h-px w-full bg-gradient-to-r from-transparent via-gray-700/50 to-transparent"
+                                    aria-hidden
+                                />
 
                                 {/*
                                   * Placement (layer-specific). Snap on/off + grid
@@ -9696,6 +11680,83 @@ export default function AssetEditor() {
 
                                 {isGenerativeImageLayer(selectedLayer) && (
                                     <div className="space-y-3 border-t border-gray-700 pt-3">
+                                        {studioAiVideoForSelectedStill ? (
+                                            <div className="mb-1 rounded-lg border border-violet-600/50 bg-violet-950/35 p-2.5">
+                                                <p className="text-[10px] font-semibold text-violet-100">
+                                                    AI video is active for this still
+                                                </p>
+                                                <p className="mt-1 text-[9px] leading-snug text-gray-400">
+                                                    The clip plays in the layer stack under logos and type. Use video mode
+                                                    to preview it, or image mode to return to generative controls.
+                                                </p>
+                                                <button
+                                                    type="button"
+                                                    className="mt-2 w-full rounded-md bg-violet-700 px-2 py-1.5 text-[10px] font-semibold text-white hover:bg-violet-600"
+                                                    onClick={() => {
+                                                        setStudioAnimationCanvasPreviewJobId(null)
+                                                        if (!studioAiVideoForSelectedStill || !selectedLayer) {
+                                                            return
+                                                        }
+                                                        setDocument((prev) => ({
+                                                            ...prev,
+                                                            layers: prev.layers.map((l) => {
+                                                                if (
+                                                                    l.id === selectedLayer.id &&
+                                                                    (isImageLayer(l) || isGenerativeImageLayer(l))
+                                                                ) {
+                                                                    return { ...l, visible: false }
+                                                                }
+                                                                if (
+                                                                    l.id === studioAiVideoForSelectedStill.videoLayerId &&
+                                                                    isVideoLayer(l)
+                                                                ) {
+                                                                    return { ...l, visible: true }
+                                                                }
+                                                                return l
+                                                            }),
+                                                            updated_at: new Date().toISOString(),
+                                                        }))
+                                                        selectLayerOrGroup(studioAiVideoForSelectedStill.videoLayerId)
+                                                        setCompositionPlaybackAutoplayNonce((n) => n + 1)
+                                                    }}
+                                                >
+                                                    Video mode — show clip on canvas
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    className="mt-1.5 w-full rounded-md border border-gray-600 bg-gray-900/80 px-2 py-1.5 text-[10px] font-semibold text-gray-200 hover:bg-gray-800"
+                                                    onClick={() => {
+                                                        if (!studioAiVideoForSelectedStill || !selectedLayer) {
+                                                            return
+                                                        }
+                                                        setStudioAnimationCanvasPreviewJobId(null)
+                                                        setDocument((prev) => ({
+                                                            ...prev,
+                                                            layers: prev.layers.map((l) => {
+                                                                if (
+                                                                    l.id === selectedLayer.id &&
+                                                                    (isImageLayer(l) || isGenerativeImageLayer(l))
+                                                                ) {
+                                                                    return { ...l, visible: true }
+                                                                }
+                                                                if (
+                                                                    l.id === studioAiVideoForSelectedStill.videoLayerId &&
+                                                                    isVideoLayer(l)
+                                                                ) {
+                                                                    return { ...l, visible: false }
+                                                                }
+                                                                return l
+                                                            }),
+                                                            updated_at: new Date().toISOString(),
+                                                        }))
+                                                        selectLayerOrGroup(selectedLayer.id)
+                                                    }}
+                                                >
+                                                    Image mode — generative &amp; still tools
+                                                </button>
+                                            </div>
+                                        ) : (
+                                        <>
                                         {!aiEnabled && (
                                             <div className="rounded-md border border-amber-800/50 bg-amber-950/30 px-2.5 py-2">
                                                 <p className="text-[10px] font-medium text-amber-200">AI features are disabled for this workspace.</p>
@@ -10211,70 +12272,96 @@ export default function AssetEditor() {
                                         </div>
                                         {selectedLayer.resultSrc && (
                                             <div>
-                                                <label className="mb-1 block font-medium text-gray-300">
-                                                    Object fit
-                                                </label>
-                                                <select
-                                                    value={selectedLayer.fit ?? 'cover'}
-                                                    onChange={(e) =>
-                                                        updateLayer(selectedLayer.id, (l) => {
-                                                            if (!isGenerativeImageLayer(l)) {
-                                                                return l
-                                                            }
-                                                            return {
-                                                                ...l,
-                                                                fit: e.target.value as GenerativeImageLayer['fit'],
-                                                            }
-                                                        })
-                                                    }
-                                                    className="w-full rounded border border-gray-700 bg-gray-800 px-2 py-1 text-gray-200"
+                                                <p className="mb-1.5 text-[9px] font-semibold uppercase tracking-wider text-gray-500">
+                                                    How it fits the layer box
+                                                </p>
+                                                <div
+                                                    className="grid grid-cols-3 gap-px overflow-hidden rounded-lg bg-gray-800/50 p-px ring-1 ring-inset ring-gray-700/40"
+                                                    role="group"
+                                                    aria-label="Object fit within layer bounds"
                                                 >
-                                                    <option value="cover">cover</option>
-                                                    <option value="contain">contain</option>
-                                                    <option value="fill">fill</option>
-                                                </select>
+                                                    {OBJECT_FIT_CHOICES.map((opt) => {
+                                                        const Ic = opt.Icon
+                                                        const active = (selectedLayer.fit ?? 'cover') === opt.value
+                                                        const dis =
+                                                            selectedLayer.status === 'generating' ||
+                                                            selectedLayer.variationPending
+                                                        return (
+                                                            <button
+                                                                key={opt.value}
+                                                                type="button"
+                                                                title={opt.title}
+                                                                disabled={dis}
+                                                                onClick={() =>
+                                                                    updateLayer(selectedLayer.id, (l) => {
+                                                                        if (!isGenerativeImageLayer(l)) return l
+                                                                        return { ...l, fit: opt.value }
+                                                                    })
+                                                                }
+                                                                className={`flex flex-col items-center justify-center gap-0.5 bg-gray-900/90 py-2 text-[9px] font-medium transition-colors sm:text-[10px] ${
+                                                                    active
+                                                                        ? 'text-indigo-100 ring-1 ring-inset ring-indigo-500/60'
+                                                                        : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200'
+                                                                } disabled:cursor-not-allowed disabled:opacity-40`}
+                                                            >
+                                                                <Ic className="h-4 w-4" aria-hidden />
+                                                                <span>{opt.short}</span>
+                                                            </button>
+                                                        )
+                                                    })}
+                                                </div>
                                             </div>
+                                        )}
+                                        </>
                                         )}
                                     </div>
                                 )}
 
                                 {isImageLayer(selectedLayer) && (
                                     <div className="space-y-3">
-                                        <button
-                                            type="button"
-                                            disabled={selectedLayer.locked}
-                                            onClick={() => openPickerForReplaceImage(selectedLayer.id)}
-                                            className="w-full rounded-md border border-gray-700 bg-gray-800 px-3 py-2 text-left text-xs font-medium text-gray-100 shadow-sm hover:bg-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
-                                        >
-                                            Replace image
-                                        </button>
-                                        <div>
-                                        <label className="mb-1 block font-medium text-gray-300">
-                                            Object fit
-                                        </label>
-                                        <select
-                                            value={selectedLayer.fit ?? 'cover'}
-                                            onChange={(e) =>
-                                                updateLayer(selectedLayer.id, (l) => {
-                                                    if (!isImageLayer(l)) {
-                                                        return l
-                                                    }
-                                                    return {
-                                                        ...l,
-                                                        fit: e.target.value as ImageLayer['fit'],
-                                                    }
-                                                })
-                                            }
-                                            className="w-full rounded border border-gray-700 bg-gray-800 px-2 py-1 text-gray-200"
-                                        >
-                                            <option value="cover">cover</option>
-                                            <option value="contain">contain</option>
-                                            <option value="fill">fill</option>
-                                        </select>
-                                        <p className="mt-1 text-[10px] leading-snug text-gray-500">
-                                            <span className="font-semibold text-gray-400">contain</span>: reveals the full image when the layer is scaled (best for logos).{' '}
-                                            <span className="font-semibold text-gray-400">cover</span>: fills the layer, crops overflow (best for hero photos).
+                                        <p className="text-[9px] font-semibold uppercase tracking-wider text-gray-500">
+                                            On canvas
                                         </p>
+                                        <p className="text-[10px] leading-snug text-gray-500">
+                                            Image is drawn inside the layer&apos;s box (resize the layer to change the
+                                            frame). Choose how the file maps into that box — tooltips explain each
+                                            mode.
+                                        </p>
+                                        <div
+                                            className="grid grid-cols-3 gap-px overflow-hidden rounded-lg bg-gray-800/50 p-px ring-1 ring-inset ring-gray-700/40"
+                                            role="group"
+                                            aria-label="Object fit within layer bounds"
+                                        >
+                                            {OBJECT_FIT_CHOICES.map((opt) => {
+                                                const Ic = opt.Icon
+                                                const active = (selectedLayer.fit ?? 'cover') === opt.value
+                                                return (
+                                                    <button
+                                                        key={opt.value}
+                                                        type="button"
+                                                        title={opt.title}
+                                                        onClick={() =>
+                                                            updateLayer(selectedLayer.id, (l) => {
+                                                                if (!isImageLayer(l)) {
+                                                                    return l
+                                                                }
+                                                                return {
+                                                                    ...l,
+                                                                    fit: opt.value,
+                                                                }
+                                                            })
+                                                        }
+                                                        className={`flex flex-col items-center justify-center gap-0.5 bg-gray-900/90 py-2 text-[9px] font-medium transition-colors sm:text-[10px] ${
+                                                            active
+                                                                ? 'text-indigo-100 ring-1 ring-inset ring-indigo-500/60'
+                                                                : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200'
+                                                        }`}
+                                                    >
+                                                        <Ic className="h-4 w-4" aria-hidden />
+                                                        <span>{opt.short}</span>
+                                                    </button>
+                                                )
+                                            })}
                                         </div>
                                         {/*
                                           * Snap the layer shape back to the asset's aspect ratio.
@@ -10350,9 +12437,8 @@ export default function AssetEditor() {
                                                         </span>
                                                     )}
                                                 </div>
-                                                <p className="mb-2 text-[10px] leading-snug text-gray-400">
-                                                    Oldest on the left (Original), each AI save to the right. Click a
-                                                    thumbnail to load it on the canvas.
+                                                <p className="mb-2 text-[10px] leading-snug text-gray-500">
+                                                    Original left → newest right · click to load
                                                 </p>
                                                 <div
                                                     className="flex max-w-full items-stretch gap-0 overflow-x-auto overflow-y-visible rounded-lg border border-gray-700/80 bg-gray-950/40 px-2 py-2 scroll-smooth"
@@ -10413,94 +12499,196 @@ export default function AssetEditor() {
                                             </div>
                                         )}
 
-                                        <div className="rounded-lg border border-violet-800 bg-violet-950/30 p-2 text-gray-100">
-                                            <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-violet-200">
-                                                Modify image (AI)
-                                            </p>
-                                            <p className="mb-2 text-[10px] leading-snug text-gray-400">
-                                                Uses the same monthly AI image budget as Generate. Apply runs on the
-                                                current layer. After a successful edit,{' '}
-                                                <span className="font-medium text-gray-300">
-                                                    Regenerate
-                                                </span>{' '}
-                                                re-runs your prompt on the latest result. Choose{' '}
-                                                <span className="font-medium text-gray-300">
-                                                    Nano Banana (2.5)
-                                                </span>{' '}
-                                                or{' '}
-                                                <span className="font-medium text-gray-300">
-                                                    Nano Banana Pro (3)
-                                                </span>{' '}
-                                                if OpenAI cannot decode your file (e.g. AVIF/HEIC); Gemini models
-                                                require{' '}
-                                                <span className="font-mono text-[10px]">GEMINI_API_KEY</span>.
-                                            </p>
-                                            <div className="mb-2 flex flex-wrap items-center gap-1.5">
-                                                <span className="w-full text-[10px] font-medium uppercase tracking-wide text-violet-300/90">
-                                                    Quick actions
-                                                </span>
-                                                {IMAGE_LAYER_QUICK_ACTIONS.map((qa) => (
-                                                    <button
-                                                        key={qa.id}
-                                                        type="button"
-                                                        disabled={
-                                                            selectedLayer.locked ||
-                                                            selectedLayer.aiEdit?.status === 'editing' ||
-                                                            imageEditUsageBlocked
-                                                        }
-                                                        title={qa.instruction}
-                                                        onClick={() =>
-                                                            void runImageLayerEdit(selectedLayer.id, {
-                                                                instructionOverride: qa.instruction,
-                                                            })
-                                                        }
-                                                        className="rounded border border-violet-600/80 bg-violet-950/50 px-2 py-1 text-[10px] font-medium text-violet-100 hover:bg-violet-900/60 disabled:cursor-not-allowed disabled:opacity-50"
-                                                    >
-                                                        {qa.label}
-                                                    </button>
-                                                ))}
-                                            </div>
-                                            <div className="mb-2">
-                                                <label className="mb-0.5 block text-[10px] font-medium text-gray-300">
-                                                    Edit model
-                                                </label>
-                                                <select
-                                                    value={normalizeEditModelKey(
-                                                        selectedLayer.aiEdit?.editModelKey
-                                                    )}
-                                                    disabled={
-                                                        selectedLayer.locked ||
-                                                        selectedLayer.aiEdit?.status === 'editing'
-                                                    }
-                                                    onChange={(e) => {
-                                                        const v = e.target.value
-                                                        updateLayer(selectedLayer.id, (l) => {
-                                                            if (!isImageLayer(l)) {
-                                                                return l
-                                                            }
-                                                            return {
-                                                                ...l,
-                                                                aiEdit: {
-                                                                    ...l.aiEdit,
-                                                                    editModelKey: v,
-                                                                },
-                                                            }
-                                                        })
-                                                    }}
-                                                    className="w-full rounded border border-violet-700 bg-gray-900 px-2 py-1.5 text-[11px] text-gray-100"
-                                                >
-                                                    {GENERATIVE_EDIT_MODEL_OPTIONS.map((opt) => (
-                                                        <option key={opt.value} value={opt.value}>
-                                                            {opt.label}
-                                                        </option>
-                                                    ))}
-                                                </select>
-                                            </div>
-                                            {genUsageError && (
-                                                <p className="mb-2 text-[10px] text-amber-200">
-                                                    {genUsageError} — AI actions stay off until usage loads.
+                                        {studioAiVideoForSelectedStill ? (
+                                            <div className="mb-1 rounded-lg border border-violet-600/50 bg-violet-950/35 p-2.5">
+                                                <p className="text-[10px] font-semibold text-violet-100">
+                                                    AI video is active for this still
                                                 </p>
+                                                <p className="mt-1 text-[9px] leading-snug text-gray-400">
+                                                    The clip plays in the layer stack under logos and type. Use video mode
+                                                    to preview it, or image mode to run Modify image and other still tools
+                                                    again.
+                                                </p>
+                                                <button
+                                                    type="button"
+                                                    className="mt-2 w-full rounded-md bg-violet-700 px-2 py-1.5 text-[10px] font-semibold text-white hover:bg-violet-600"
+                                                    onClick={() => {
+                                                        setStudioAnimationCanvasPreviewJobId(null)
+                                                        if (!studioAiVideoForSelectedStill || !selectedLayer) {
+                                                            return
+                                                        }
+                                                        setDocument((prev) => ({
+                                                            ...prev,
+                                                            layers: prev.layers.map((l) => {
+                                                                if (
+                                                                    l.id === selectedLayer.id &&
+                                                                    (isImageLayer(l) || isGenerativeImageLayer(l))
+                                                                ) {
+                                                                    return { ...l, visible: false }
+                                                                }
+                                                                if (
+                                                                    l.id === studioAiVideoForSelectedStill.videoLayerId &&
+                                                                    isVideoLayer(l)
+                                                                ) {
+                                                                    return { ...l, visible: true }
+                                                                }
+                                                                return l
+                                                            }),
+                                                            updated_at: new Date().toISOString(),
+                                                        }))
+                                                        selectLayerOrGroup(studioAiVideoForSelectedStill.videoLayerId)
+                                                        setCompositionPlaybackAutoplayNonce((n) => n + 1)
+                                                    }}
+                                                >
+                                                    Video mode — show clip on canvas
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    className="mt-1.5 w-full rounded-md border border-gray-600 bg-gray-900/80 px-2 py-1.5 text-[10px] font-semibold text-gray-200 hover:bg-gray-800"
+                                                    onClick={() => {
+                                                        if (!studioAiVideoForSelectedStill || !selectedLayer) {
+                                                            return
+                                                        }
+                                                        setStudioAnimationCanvasPreviewJobId(null)
+                                                        setDocument((prev) => ({
+                                                            ...prev,
+                                                            layers: prev.layers.map((l) => {
+                                                                if (
+                                                                    l.id === selectedLayer.id &&
+                                                                    (isImageLayer(l) || isGenerativeImageLayer(l))
+                                                                ) {
+                                                                    return { ...l, visible: true }
+                                                                }
+                                                                if (
+                                                                    l.id === studioAiVideoForSelectedStill.videoLayerId &&
+                                                                    isVideoLayer(l)
+                                                                ) {
+                                                                    return { ...l, visible: false }
+                                                                }
+                                                                return l
+                                                            }),
+                                                            updated_at: new Date().toISOString(),
+                                                        }))
+                                                        selectLayerOrGroup(selectedLayer.id)
+                                                    }}
+                                                >
+                                                    Image mode — edit still with AI
+                                                </button>
+                                            </div>
+                                        ) : null}
+                                        {!studioAiVideoForSelectedStill ? (
+                                        <div className="rounded-lg border border-violet-500/30 bg-gradient-to-b from-violet-950/25 to-indigo-950/20 p-2.5 text-gray-100 ring-1 ring-inset ring-violet-500/20">
+                                            <div className="mb-2.5 flex items-center gap-2.5">
+                                                <div
+                                                    className="relative flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-gradient-to-br from-violet-500 via-fuchsia-500 to-indigo-600 shadow-md shadow-violet-900/20 ring-2 ring-white/10"
+                                                    aria-hidden
+                                                >
+                                                    <SparklesIcon className="relative h-[18px] w-[18px] text-white drop-shadow" />
+                                                </div>
+                                                <div className="min-w-0 flex-1">
+                                                    <p className="text-[9px] font-bold uppercase tracking-[0.12em] text-fuchsia-300/95">
+                                                        AI
+                                                    </p>
+                                                    <p className="text-[11px] font-semibold uppercase tracking-wide text-indigo-100">
+                                                        Modify image
+                                                    </p>
+                                                </div>
+                                            </div>
+
+                                            <div className="mb-3 space-y-1.5">
+                                                <p className="text-[9px] font-bold uppercase tracking-wider text-indigo-300/80">
+                                                    Quick
+                                                </p>
+                                                <div className="grid grid-cols-1 gap-1.5">
+                                                    {IMAGE_LAYER_QUICK_ACTIONS.map((qa) => {
+                                                        const Ic = qa.Icon
+                                                        return (
+                                                            <button
+                                                                key={qa.id}
+                                                                type="button"
+                                                                disabled={
+                                                                    selectedLayer.locked ||
+                                                                    selectedLayer.aiEdit?.status === 'editing' ||
+                                                                    imageEditUsageBlocked
+                                                                }
+                                                                title={qa.instruction}
+                                                                onClick={() =>
+                                                                    void runImageLayerEdit(selectedLayer.id, {
+                                                                        instructionOverride: qa.instruction,
+                                                                    })
+                                                                }
+                                                                className="flex w-full items-center gap-2.5 rounded-lg border border-indigo-500/40 bg-indigo-950/35 px-2.5 py-2.5 text-left text-[11px] font-medium text-indigo-50 shadow-sm transition-colors hover:border-indigo-400/70 hover:bg-indigo-900/40 disabled:cursor-not-allowed disabled:opacity-45"
+                                                            >
+                                                                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-indigo-500/30 bg-indigo-600/25 text-indigo-200">
+                                                                    <Ic className="h-4 w-4" aria-hidden />
+                                                                </span>
+                                                                <span className="min-w-0 flex-1 leading-tight">
+                                                                    {qa.label}
+                                                                </span>
+                                                            </button>
+                                                        )
+                                                    })}
+                                                </div>
+                                            </div>
+
+                                            <div className="mb-2.5">
+                                                <p className="mb-1.5 text-[9px] font-bold uppercase tracking-wider text-indigo-300/80">
+                                                    Model
+                                                </p>
+                                                <div className="grid grid-cols-1 gap-1.5 min-[420px]:grid-cols-3 min-[420px]:gap-1">
+                                                    {IMAGE_EDIT_MODEL_PRESETS.map((preset) => {
+                                                        const Ic = preset.Icon
+                                                        const current = normalizeEditModelKey(
+                                                            selectedLayer.aiEdit?.editModelKey
+                                                        )
+                                                        const active = current === preset.value
+                                                        return (
+                                                            <button
+                                                                key={preset.value}
+                                                                type="button"
+                                                                disabled={
+                                                                    selectedLayer.locked ||
+                                                                    selectedLayer.aiEdit?.status === 'editing'
+                                                                }
+                                                                onClick={() => {
+                                                                    updateLayer(selectedLayer.id, (l) => {
+                                                                        if (!isImageLayer(l)) {
+                                                                            return l
+                                                                        }
+                                                                        return {
+                                                                            ...l,
+                                                                            aiEdit: {
+                                                                                ...l.aiEdit,
+                                                                                editModelKey: preset.value,
+                                                                            },
+                                                                        }
+                                                                    })
+                                                                }}
+                                                                className={`flex flex-col items-stretch gap-0.5 rounded-lg border px-2 py-2 text-left transition-colors ${
+                                                                    active
+                                                                        ? 'border-indigo-500 bg-indigo-600/30 ring-2 ring-indigo-500/50 ring-offset-1 ring-offset-gray-950'
+                                                                        : 'border-indigo-500/25 bg-gray-900/50 hover:border-indigo-500/50 hover:bg-indigo-950/30'
+                                                                } disabled:cursor-not-allowed disabled:opacity-50`}
+                                                            >
+                                                                <span className="flex items-center gap-1.5 text-[10px] font-semibold text-indigo-100">
+                                                                    <Ic className="h-3.5 w-3.5 shrink-0 text-indigo-300" />
+                                                                    {preset.title}
+                                                                </span>
+                                                                <span className="text-[8px] leading-tight text-gray-500">
+                                                                    {preset.subtitle}
+                                                                </span>
+                                                            </button>
+                                                        )
+                                                    })}
+                                                </div>
+                                            </div>
+
+                                            {genUsageError && (
+                                                <p className="mb-2 text-[9px] text-amber-300/90">{genUsageError}</p>
                                             )}
+                                            <label className="mb-0.5 block text-[9px] font-bold uppercase tracking-wider text-indigo-300/80">
+                                                Prompt
+                                            </label>
                                             <textarea
                                                 value={selectedLayer.aiEdit?.prompt ?? ''}
                                                 onChange={(e) => {
@@ -10516,20 +12704,18 @@ export default function AssetEditor() {
                                                     })
                                                 }}
                                                 rows={3}
-                                                placeholder="Describe what to change (e.g. change background to desert, make pants blue)"
+                                                placeholder="What should change on this image?"
                                                 disabled={selectedLayer.locked || selectedLayer.aiEdit?.status === 'editing'}
-                                                className="w-full rounded border border-violet-700 bg-gray-900 px-2 py-1.5 text-xs text-gray-100 placeholder:text-gray-400"
+                                                className="w-full rounded-lg border border-indigo-500/40 bg-gray-900/80 px-2.5 py-1.5 text-xs text-gray-100 placeholder:text-gray-500 focus:border-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-500/40"
                                             />
                                             {imageEditActionError && (
                                                 <p className="mt-1 text-[10px] text-red-400">{imageEditActionError}</p>
                                             )}
                                             {selectedLayer.aiEdit?.status === 'error' && !imageEditActionError && (
-                                                <p className="mt-1 text-[10px] text-red-400">
-                                                    Edit failed. Try again or adjust the instruction.
-                                                </p>
+                                                <p className="mt-1 text-[10px] text-red-400">Couldn’t apply — try again.</p>
                                             )}
-                                            <div className="mt-2 flex flex-col gap-2">
-                                                <div className="flex flex-wrap gap-2">
+                                            <div className="mt-2.5 flex flex-col gap-1.5">
+                                                <div className="flex flex-wrap gap-1.5">
                                                     <button
                                                         type="button"
                                                         disabled={
@@ -10542,14 +12728,13 @@ export default function AssetEditor() {
                                                                 ? genUsageError
                                                                 : imageEditUsageBlocked
                                                                   ? "You've used all AI image generations for this month"
-                                                                  : 'Send this layer and prompt to the AI editor'
+                                                                  : 'Apply your prompt to this layer'
                                                         }
                                                         onClick={() => void runImageLayerEdit(selectedLayer.id)}
-                                                        className="group inline-flex min-h-[2.25rem] min-w-[8.5rem] flex-1 items-center justify-center rounded-md border-2 border-violet-400 bg-violet-700 px-3 py-1.5 text-xs font-semibold shadow-sm hover:bg-violet-600 disabled:cursor-not-allowed disabled:border-violet-800 disabled:bg-violet-900"
+                                                        className="group inline-flex min-h-[2.25rem] min-w-0 flex-1 items-center justify-center gap-1.5 rounded-lg border-2 border-indigo-500/60 bg-indigo-600 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:bg-indigo-500 disabled:cursor-not-allowed disabled:border-indigo-800/80 disabled:bg-indigo-950/80"
                                                     >
-                                                        <span className="text-white group-disabled:text-violet-100">
-                                                            Apply changes
-                                                        </span>
+                                                        <ArrowPathIcon className="h-3.5 w-3.5 group-disabled:opacity-60" />
+                                                        Apply
                                                     </button>
                                                     {selectedLayer.aiEdit?.resultSrc ? (
                                                         <button
@@ -10560,11 +12745,11 @@ export default function AssetEditor() {
                                                                 imageEditUsageBlocked ||
                                                                 !(selectedLayer.aiEdit?.prompt ?? '').trim()
                                                             }
-                                                            title="Run the same prompt again on the last AI result"
+                                                            title="Same prompt on the latest AI result"
                                                             onClick={() => void runImageLayerEdit(selectedLayer.id)}
-                                                            className="inline-flex min-h-[2.25rem] min-w-[8rem] flex-1 items-center justify-center rounded-md border-2 border-gray-400 bg-neutral-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-neutral-500 disabled:cursor-not-allowed disabled:border-neutral-700 disabled:bg-neutral-800 disabled:text-neutral-300"
+                                                            className="inline-flex min-h-[2.25rem] min-w-0 flex-1 items-center justify-center rounded-lg border-2 border-indigo-500/30 bg-indigo-950/40 px-3 py-2 text-xs font-semibold text-indigo-100 hover:border-indigo-400/50 hover:bg-indigo-900/30 disabled:cursor-not-allowed disabled:opacity-40"
                                                         >
-                                                            Regenerate
+                                                            Again
                                                         </button>
                                                     ) : null}
                                                 </div>
@@ -10572,8 +12757,7 @@ export default function AssetEditor() {
                                                     <button
                                                         type="button"
                                                         disabled={
-                                                            selectedLayer.locked ||
-                                                            selectedLayer.aiEdit?.status === 'editing'
+                                                            selectedLayer.locked || selectedLayer.aiEdit?.status === 'editing'
                                                         }
                                                         onClick={() =>
                                                             updateLayer(selectedLayer.id, (l) => {
@@ -10597,13 +12781,14 @@ export default function AssetEditor() {
                                                                 }
                                                             })
                                                         }
-                                                        className="inline-flex w-full min-h-[2.25rem] items-center justify-center rounded-md border-2 border-gray-400 bg-neutral-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-neutral-500 disabled:cursor-not-allowed disabled:border-neutral-700 disabled:bg-neutral-800 disabled:text-neutral-300 sm:w-auto"
+                                                        className="w-full rounded-md border border-gray-600/80 bg-gray-800/50 py-1.5 text-[10px] font-medium text-gray-300 hover:border-gray-500 hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
                                                     >
-                                                        Revert to previous image
+                                                        Step back one edit
                                                     </button>
                                                 )}
                                             </div>
                                         </div>
+                                        ) : null}
                                     </div>
                                 )}
 
@@ -11402,10 +13587,12 @@ export default function AssetEditor() {
                 if (thisMonth.length) groups.push({ label: 'This month', items: thisMonth })
                 if (older.length) groups.push({ label: 'Older', items: older })
 
+                const myUserId = String(auth?.user?.id ?? '')
+
                 const renderCard = (c: (typeof compositionSummaries)[0]) => (
                     <div
                         key={c.id}
-                        className="group/card flex flex-col overflow-hidden rounded-xl border border-gray-700 bg-gray-800/60 transition-all hover:border-gray-600 hover:bg-gray-800 hover:shadow-lg"
+                        className="group/card flex flex-col overflow-hidden rounded-xl border border-gray-200 bg-white transition-all hover:border-gray-300 hover:shadow-md"
                     >
                         {/* Thumbnail */}
                         <button type="button" onClick={() => navigateToComposition(c.id)} className="relative block w-full">
@@ -11417,18 +13604,31 @@ export default function AssetEditor() {
                                     className="aspect-[4/3] w-full object-cover"
                                 />
                             ) : (
-                                <div className="flex aspect-[4/3] w-full items-center justify-center bg-gray-800">
-                                    <svg className="h-10 w-10 text-gray-600" fill="none" viewBox="0 0 24 24" strokeWidth="1" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909M3.75 21h16.5A2.25 2.25 0 0 0 22.5 18.75V5.25A2.25 2.25 0 0 0 20.25 3H3.75A2.25 2.25 0 0 0 1.5 5.25v13.5A2.25 2.25 0 0 0 3.75 21Z" /></svg>
+                                <div className="flex aspect-[4/3] w-full items-center justify-center bg-gray-100">
+                                    <svg className="h-10 w-10 text-gray-400" fill="none" viewBox="0 0 24 24" strokeWidth="1" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909M3.75 21h16.5A2.25 2.25 0 0 0 22.5 18.75V5.25A2.25 2.25 0 0 0 20.25 3H3.75A2.25 2.25 0 0 0 1.5 5.25v13.5A2.25 2.25 0 0 0 3.75 21Z" /></svg>
                                 </div>
                             )}
-                            <div className="absolute inset-0 flex items-center justify-center bg-black/0 opacity-0 transition-all group-hover/card:bg-black/30 group-hover/card:opacity-100">
+                            <div className="absolute inset-0 flex items-center justify-center bg-black/0 opacity-0 transition-all group-hover/card:bg-black/25 group-hover/card:opacity-100">
                                 <span className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white shadow-lg">Open</span>
                             </div>
                         </button>
                         {/* Info */}
-                        <div className="flex min-w-0 flex-1 items-center gap-2 px-3 py-2.5">
+                        <div className="flex min-w-0 flex-1 items-center gap-2 border-t border-gray-100 px-3 py-2.5">
                             <div className="min-w-0 flex-1">
-                                <p className="truncate text-xs font-semibold text-gray-100">{c.name || 'Untitled'}</p>
+                                <p className="truncate text-xs font-semibold text-gray-900">{c.name || 'Untitled'}</p>
+                                <div className="mt-1 flex flex-wrap items-center gap-1">
+                                    {c.folder ? (
+                                        <span className="max-w-full truncate rounded bg-gray-100 px-1.5 py-0.5 text-[9px] font-medium text-gray-600" title={c.folder}>
+                                            {c.folder}
+                                        </span>
+                                    ) : null}
+                                    {myUserId && c.owner_user_id === myUserId ? (
+                                        <span className="rounded bg-indigo-50 px-1.5 py-0.5 text-[9px] font-medium text-indigo-700">Yours</span>
+                                    ) : null}
+                                    {pickerListFilter === 'all' && c.visibility === 'private' && c.owner_user_id && c.owner_user_id !== myUserId ? (
+                                        <span className="rounded bg-amber-50 px-1.5 py-0.5 text-[9px] font-medium text-amber-800">Private</span>
+                                    ) : null}
+                                </div>
                                 <p className="mt-0.5 text-[10px] text-gray-500">
                                     {c.updated_at ? new Date(c.updated_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : ''}
                                 </p>
@@ -11436,7 +13636,7 @@ export default function AssetEditor() {
                             <button
                                 type="button"
                                 disabled={compositionDeleteBusy}
-                                className="shrink-0 rounded-md p-1 text-gray-600 opacity-0 transition-all hover:bg-red-950/40 hover:text-red-400 group-hover/card:opacity-100 disabled:cursor-not-allowed disabled:opacity-30"
+                                className="shrink-0 rounded-md p-1 text-gray-400 opacity-0 transition-all hover:bg-red-50 hover:text-red-600 group-hover/card:opacity-100 disabled:cursor-not-allowed disabled:opacity-30"
                                 title="Delete"
                                 aria-label={`Delete ${c.name || 'composition'}`}
                                 onClick={(e) => { e.stopPropagation(); void deleteCompositionById(c.id) }}
@@ -11452,28 +13652,36 @@ export default function AssetEditor() {
                         key={c.id}
                         type="button"
                         onClick={() => navigateToComposition(c.id)}
-                        className="group/row flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors hover:bg-gray-800"
+                        className="group/row flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors hover:bg-gray-50"
                     >
                         {c.thumbnail_url ? (
                             <img
                                 src={`${c.thumbnail_url}${c.thumbnail_url.includes('?') ? '&' : '?'}rid=${encodeURIComponent(c.id)}`}
                                 alt=""
-                                className="h-10 w-10 shrink-0 rounded-lg object-cover ring-1 ring-gray-700"
+                                className="h-10 w-10 shrink-0 rounded-lg object-cover ring-1 ring-gray-200"
                             />
                         ) : (
-                            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-gray-800 ring-1 ring-gray-700">
-                                <svg className="h-4 w-4 text-gray-600" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909M3.75 21h16.5A2.25 2.25 0 0 0 22.5 18.75V5.25A2.25 2.25 0 0 0 20.25 3H3.75A2.25 2.25 0 0 0 1.5 5.25v13.5A2.25 2.25 0 0 0 3.75 21Z" /></svg>
+                            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-gray-100 ring-1 ring-gray-200">
+                                <svg className="h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909M3.75 21h16.5A2.25 2.25 0 0 0 22.5 18.75V5.25A2.25 2.25 0 0 0 20.25 3H3.75A2.25 2.25 0 0 0 1.5 5.25v13.5A2.25 2.25 0 0 0 3.75 21Z" /></svg>
                             </div>
                         )}
                         <div className="min-w-0 flex-1">
-                            <p className="truncate text-xs font-semibold text-gray-100">{c.name || 'Untitled'}</p>
+                            <p className="truncate text-xs font-semibold text-gray-900">{c.name || 'Untitled'}</p>
+                            <div className="mt-0.5 flex flex-wrap items-center gap-1">
+                                {c.folder ? (
+                                    <span className="max-w-[7rem] truncate rounded bg-gray-100 px-1 py-0.5 text-[9px] font-medium text-gray-600">{c.folder}</span>
+                                ) : null}
+                                {myUserId && c.owner_user_id === myUserId ? (
+                                    <span className="rounded bg-indigo-50 px-1 py-0.5 text-[9px] text-indigo-700">Yours</span>
+                                ) : null}
+                            </div>
                             <p className="mt-0.5 text-[10px] text-gray-500">{c.updated_at ? new Date(c.updated_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : ''}</p>
                         </div>
-                        <span className="shrink-0 rounded-md bg-gray-800 px-2 py-1 text-[10px] font-medium text-gray-400 opacity-0 transition-opacity group-hover/row:opacity-100">Open</span>
+                        <span className="shrink-0 rounded-md bg-gray-100 px-2 py-1 text-[10px] font-medium text-gray-600 opacity-0 transition-opacity group-hover/row:opacity-100">Open</span>
                         <button
                             type="button"
                             disabled={compositionDeleteBusy}
-                            className="shrink-0 rounded-md p-1 text-gray-600 opacity-0 transition-all hover:bg-red-950/40 hover:text-red-400 group-hover/row:opacity-100 disabled:opacity-30"
+                            className="shrink-0 rounded-md p-1 text-gray-400 opacity-0 transition-all hover:bg-red-50 hover:text-red-600 group-hover/row:opacity-100 disabled:opacity-30"
                             title="Delete"
                             onClick={(e) => { e.stopPropagation(); e.preventDefault(); void deleteCompositionById(c.id) }}
                         >
@@ -11489,62 +13697,122 @@ export default function AssetEditor() {
                     aria-modal="true"
                     aria-labelledby="open-composition-dialog-title"
                 >
-                    <div className="flex w-full flex-col overflow-hidden rounded-xl border border-gray-700 bg-gray-900 shadow-2xl ring-1 ring-white/5" style={{ maxWidth: 820, maxHeight: 'min(88vh, 720px)' }}>
+                    <div className="flex w-full flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white p-0 shadow-2xl ring-1 ring-black/5" style={{ maxWidth: 820, maxHeight: 'min(88vh, 720px)' }}>
                         {/* Header */}
-                        <div className="flex shrink-0 items-center justify-between border-b border-gray-700 px-5 py-4">
+                        <div className="flex shrink-0 items-center justify-between border-b border-gray-100 px-5 py-4 sm:px-6 sm:py-5">
                             <div className="flex items-center gap-3">
-                                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-gray-800">
-                                    <FolderOpenIcon className="h-4.5 w-4.5 text-indigo-400" />
+                                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-indigo-50 ring-1 ring-indigo-100/80">
+                                    <FolderOpenIcon className="h-5 w-5 text-indigo-600" />
                                 </div>
                                 <div>
-                                    <h3 id="open-composition-dialog-title" className="text-sm font-semibold text-white">Your Compositions</h3>
-                                    <p className="text-[11px] text-gray-500">{compositionSummaries.length} saved for this brand</p>
+                                    <h3 id="open-composition-dialog-title" className="text-base font-bold tracking-tight text-gray-900">Your Compositions</h3>
+                                    <p className="text-xs text-gray-500">{compositionSummaries.length} saved for this brand</p>
                                 </div>
                             </div>
-                            <button type="button" className="rounded-md p-1.5 text-gray-400 hover:bg-gray-800 hover:text-white transition-colors" onClick={() => setOpenCompositionPicker(false)} aria-label="Close">
+                            <button type="button" className="rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700" onClick={() => setOpenCompositionPicker(false)} aria-label="Close">
                                 <XMarkIcon className="h-5 w-5" />
                             </button>
                         </div>
 
-                        {/* Toolbar: search + view toggle */}
-                        {compositionSummaries.length > 0 && (
-                            <div className="flex shrink-0 items-center gap-3 border-b border-gray-800 px-5 py-3">
-                                <div className="relative flex-1">
-                                    <svg className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" /></svg>
+                        {/* Who + folder filter + search */}
+                        <div className="shrink-0 space-y-2 border-b border-gray-100 px-5 py-2.5 sm:px-6">
+                            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+                                <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Composition list scope">
+                                    <span className="text-[10px] font-bold uppercase tracking-wide text-gray-400">Show</span>
+                                    {(
+                                        [
+                                            { id: 'team' as const, label: 'Team' },
+                                            { id: 'mine' as const, label: 'Mine' },
+                                            ...(pickerListMeta.can_list_all ? [{ id: 'all' as const, label: 'Entire brand' }] : []),
+                                        ]
+                                    ).map((opt) => (
+                                        <button
+                                            key={opt.id}
+                                            type="button"
+                                            onClick={() => {
+                                                if (opt.id === 'all' && !pickerListMeta.can_list_all) {
+                                                    return
+                                                }
+                                                setPickerListFilter(opt.id)
+                                            }}
+                                            className={`rounded-md px-2.5 py-1 text-[11px] font-semibold transition-colors ${
+                                                pickerListFilter === opt.id
+                                                    ? 'bg-indigo-600 text-white'
+                                                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                                            } ${opt.id === 'all' && !pickerListMeta.can_list_all ? 'hidden' : ''}`}
+                                            title={
+                                                opt.id === 'team'
+                                                    ? 'Shared with the brand and your private drafts (default)'
+                                                    : opt.id === 'mine'
+                                                        ? 'Only compositions you created'
+                                                        : 'All compositions in this brand, including other people’s private (brand admin only)'
+                                            }
+                                        >
+                                            {opt.label}
+                                        </button>
+                                    ))}
+                                </div>
+                                <div className="flex min-w-0 max-w-md flex-1 items-center gap-2 sm:max-w-xs">
+                                    <label className="shrink-0 text-[10px] font-bold uppercase tracking-wide text-gray-400" htmlFor="open-comp-folder-filter">
+                                        Folder
+                                    </label>
+                                    <select
+                                        id="open-comp-folder-filter"
+                                        value={pickerFolderFilter}
+                                        onChange={(e) => setPickerFolderFilter(e.target.value)}
+                                        className="min-w-0 flex-1 rounded-lg border border-gray-200 bg-white py-1.5 pl-2 pr-7 text-xs text-gray-800 shadow-sm focus:border-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                                    >
+                                        <option value="">All folders</option>
+                                        <option value="__unfiled__">Unfiled</option>
+                                        {pickerListMeta.folders.map((f) => (
+                                            <option key={f} value={f}>
+                                                {f}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+                            </div>
+                            <div className="flex items-center gap-3">
+                                <div className="flex min-w-0 flex-1 items-center gap-0 rounded-lg border border-gray-200 bg-white py-0.5 pl-2.5 pr-2 shadow-sm focus-within:border-indigo-400 focus-within:ring-1 focus-within:ring-indigo-500">
+                                    <span className="shrink-0 text-gray-400" aria-hidden>
+                                        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
+                                            <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
+                                        </svg>
+                                    </span>
                                     <input
                                         type="text"
                                         value={pickerSearch}
                                         onChange={(e) => setPickerSearch(e.target.value)}
-                                        placeholder="Search compositions…"
-                                        className="w-full rounded-lg border border-gray-700 bg-gray-800 py-1.5 pl-9 pr-3 text-xs text-gray-100 placeholder-gray-500 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                                        placeholder="Search by name…"
+                                        className="min-w-0 flex-1 border-0 bg-transparent py-1.5 pl-2 text-xs text-gray-900 shadow-none placeholder:text-gray-400 focus:outline-none focus:ring-0"
                                     />
                                 </div>
-                                <div className="flex shrink-0 items-center rounded-lg border border-gray-700 bg-gray-800 p-0.5">
-                                    <button type="button" onClick={() => setPickerView('grid')} className={`rounded-md p-1.5 transition-colors ${pickerView === 'grid' ? 'bg-gray-700 text-white' : 'text-gray-500 hover:text-gray-300'}`} title="Grid view">
+                                <div className="flex shrink-0 items-center rounded-lg border border-gray-200 bg-gray-50 p-0.5">
+                                    <button type="button" onClick={() => setPickerView('grid')} className={`rounded-md p-1.5 transition-colors ${pickerView === 'grid' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`} title="Grid view">
                                         <Squares2X2Icon className="h-3.5 w-3.5" />
                                     </button>
-                                    <button type="button" onClick={() => setPickerView('list')} className={`rounded-md p-1.5 transition-colors ${pickerView === 'list' ? 'bg-gray-700 text-white' : 'text-gray-500 hover:text-gray-300'}`} title="List view">
+                                    <button type="button" onClick={() => setPickerView('list')} className={`rounded-md p-1.5 transition-colors ${pickerView === 'list' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`} title="List view">
                                         <Bars3Icon className="h-3.5 w-3.5" />
                                     </button>
                                 </div>
                             </div>
-                        )}
+                        </div>
 
                         {/* Body */}
-                        <div className="min-h-0 flex-1 overflow-y-auto" style={{ scrollbarWidth: 'thin', scrollbarColor: '#374151 transparent' }}>
+                        <div className="min-h-0 flex-1 overflow-y-auto bg-white" style={{ scrollbarWidth: 'thin', scrollbarColor: '#d1d5db transparent' }}>
                             {/* Loading */}
                             {compositionListLoading && (
                                 <div className="flex flex-col items-center justify-center py-16 text-center">
                                     <ArrowPathIcon className="h-8 w-8 animate-spin text-indigo-500" />
-                                    <p className="mt-3 text-sm text-gray-400">Loading your compositions…</p>
+                                    <p className="mt-3 text-sm text-gray-500">Loading your compositions…</p>
                                 </div>
                             )}
 
                             {/* Error */}
                             {compositionListError && (
                                 <div className="flex flex-col items-center justify-center py-16 text-center px-6">
-                                    <ExclamationTriangleIcon className="h-8 w-8 text-red-400" />
-                                    <p className="mt-3 text-sm text-red-400">{compositionListError}</p>
+                                    <ExclamationTriangleIcon className="h-8 w-8 text-red-500" />
+                                    <p className="mt-3 text-sm text-red-600">{compositionListError}</p>
                                 </div>
                             )}
 
@@ -11552,17 +13820,17 @@ export default function AssetEditor() {
                             {!compositionListLoading && !compositionListError && compositionSummaries.length === 0 && (
                                 <div className="flex flex-col items-center justify-center px-6 py-20 text-center">
                                     <div className="mb-5 flex items-center gap-3">
-                                        <img src="/jp-parts/cherry-slot.svg" alt="" className="h-7 w-7 opacity-40" />
-                                        <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-gray-800 ring-1 ring-gray-700">
-                                            <FolderOpenIcon className="h-8 w-8 text-gray-600" />
+                                        <img src="/jp-parts/cherry-slot.svg" alt="" className="h-7 w-7 opacity-30 brightness-0" />
+                                        <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-gray-100 ring-1 ring-gray-200">
+                                            <FolderOpenIcon className="h-8 w-8 text-gray-400" />
                                         </div>
-                                        <img src="/jp-parts/diamond-slot.svg" alt="" className="h-7 w-7 opacity-40" />
+                                        <img src="/jp-parts/diamond-slot.svg" alt="" className="h-7 w-7 opacity-30 brightness-0" />
                                     </div>
-                                    <h4 className="text-base font-semibold text-white">No compositions yet</h4>
+                                    <h4 className="text-base font-semibold text-gray-900">No compositions yet</h4>
                                     <p className="mt-2 max-w-xs text-sm leading-relaxed text-gray-500">
                                         Start from a template or build one from scratch. Once you save a composition it'll appear here — ready to pick up right where you left off.
                                     </p>
-                                    <div className="mt-6 flex items-center gap-3">
+                                    <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
                                         <button
                                             type="button"
                                             onClick={() => {
@@ -11582,7 +13850,7 @@ export default function AssetEditor() {
                                         <button
                                             type="button"
                                             onClick={() => { setOpenCompositionPicker(false); startNewComposition() }}
-                                            className="rounded-lg border border-gray-700 bg-gray-800 px-4 py-2 text-xs font-semibold text-gray-300 transition-colors hover:bg-gray-700 hover:text-white"
+                                            className="rounded-lg border border-dashed border-gray-300 bg-white px-4 py-2 text-xs font-semibold text-gray-600 transition-colors hover:border-gray-400 hover:bg-gray-50"
                                         >
                                             Blank Canvas
                                         </button>
@@ -11593,15 +13861,15 @@ export default function AssetEditor() {
                             {/* No search results */}
                             {!compositionListLoading && !compositionListError && compositionSummaries.length > 0 && filtered.length === 0 && (
                                 <div className="flex flex-col items-center justify-center py-16 text-center">
-                                    <svg className="h-8 w-8 text-gray-600" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" /></svg>
-                                    <p className="mt-3 text-sm text-gray-400">No compositions match "<span className="text-gray-300">{pickerSearch}</span>"</p>
+                                    <svg className="h-8 w-8 text-gray-400" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" /></svg>
+                                    <p className="mt-3 text-sm text-gray-500">No compositions match &quot;<span className="font-medium text-gray-800">{pickerSearch}</span>&quot;</p>
                                 </div>
                             )}
 
                             {/* Composition grid/list grouped by time */}
                             {!compositionListLoading && !compositionListError && groups.map((group) => (
-                                <div key={group.label} className="px-5 pb-4 pt-3 first:pt-4">
-                                    <h4 className="mb-3 text-[10px] font-bold uppercase tracking-wider text-gray-500">{group.label}</h4>
+                                <div key={group.label} className="px-5 pb-4 pt-3 first:pt-4 sm:px-6">
+                                    <h4 className="mb-3 text-[10px] font-bold uppercase tracking-wider text-gray-400">{group.label}</h4>
                                     {pickerView === 'grid' ? (
                                         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                                             {group.items.map(renderCard)}
@@ -11880,12 +14148,15 @@ export default function AssetEditor() {
                     aria-modal="true"
                     aria-label="Publish to library"
                 >
-                    <div className="flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-lg border border-gray-200 bg-white shadow-xl dark:border-gray-700 dark:bg-gray-900">
-                        <div className="flex shrink-0 items-center justify-between border-b border-gray-200 px-4 py-3 dark:border-gray-700">
-                            <h3 className="text-sm font-semibold text-gray-100">Publish</h3>
+                    <div className="flex max-h-[92vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl ring-1 ring-black/5">
+                        <div className="flex shrink-0 items-center justify-between border-b border-gray-200 bg-white px-5 py-3.5">
+                            <div className="flex items-center gap-2.5">
+                                <img src="/jp-parts/diamond-slot.svg" alt="" className="h-5 w-5 opacity-80" />
+                                <h3 className="text-base font-semibold text-gray-900">Publish to Jackpot</h3>
+                            </div>
                             <button
                                 type="button"
-                                className="rounded p-1 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800"
+                                className="rounded p-1 text-gray-500 hover:bg-gray-100"
                                 onClick={() => !promoteSaving && setPublishModalOpen(false)}
                                 disabled={promoteSaving}
                                 aria-label="Close"
@@ -11893,146 +14164,221 @@ export default function AssetEditor() {
                                 <XMarkIcon className="h-5 w-5" />
                             </button>
                         </div>
-                        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4 text-sm">
-                            <p className="text-xs text-gray-400">
-                                Publishes a JPEG export of the canvas. The file is compressed so publish works on servers
-                                with a strict upload size cap (about 1MB for the whole request). Choose a library or
-                                deliverable category; category-specific metadata uses the same schema as uploads.
-                            </p>
-                            {publishCategoriesLoading && (
-                                <p
-                                    className="flex items-center gap-2 text-xs text-gray-300"
-                                    role="status"
-                                    aria-busy="true"
-                                >
-                                    <ArrowPathIcon className="h-4 w-4 shrink-0 animate-spin text-indigo-400" />
-                                    Loading categories…
-                                </p>
-                            )}
-                            {publishCategoriesError && (
-                                <p className="text-xs text-red-400">{publishCategoriesError}</p>
-                            )}
-                            <label className="block">
-                                <span className="mb-1 block text-xs font-medium text-gray-300">
-                                    Title
-                                </span>
-                                <input
-                                    type="text"
-                                    value={publishTitle}
-                                    onChange={(e) => setPublishTitle(e.target.value)}
-                                    className="w-full rounded border border-gray-300 bg-white px-2 py-1.5 text-sm text-gray-900 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
-                                    disabled={promoteSaving}
-                                />
-                            </label>
-                            <label className="block">
-                                <span className="mb-1 block text-xs font-medium text-gray-300">
-                                    Category
-                                </span>
-                                <select
-                                    value={publishCategoryId === '' ? '' : String(publishCategoryId)}
-                                    onChange={(e) => {
-                                        setPublishCategoryId(e.target.value === '' ? '' : Number(e.target.value))
-                                        setPublishMetadataValues({})
-                                        setPublishCollectionIds([])
-                                        setPublishMetadataShowErrors(false)
-                                    }}
-                                    className="w-full rounded border border-gray-300 bg-white px-2 py-1.5 text-sm text-gray-900 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
-                                    disabled={promoteSaving || publishCategories.length === 0}
-                                >
-                                    {publishCategories.length === 0 ? (
-                                        <option value="">No categories</option>
-                                    ) : (
-                                        <>
-                                            {publishCategories.some((c) => c.asset_type === 'asset') && (
-                                                <optgroup label="Asset">
-                                                    {publishCategories
-                                                        .filter((c) => c.asset_type === 'asset')
-                                                        .map((c) => (
-                                                            <option key={c.id} value={c.id}>
-                                                                {c.name}
-                                                            </option>
-                                                        ))}
-                                                </optgroup>
-                                            )}
-                                            {publishCategories.some((c) => c.asset_type === 'deliverable') && (
-                                                <optgroup label="Executions">
-                                                    {publishCategories
-                                                        .filter((c) => c.asset_type === 'deliverable')
-                                                        .map((c) => (
-                                                            <option key={c.id} value={c.id}>
-                                                                {c.name}
-                                                            </option>
-                                                        ))}
-                                                </optgroup>
-                                            )}
-                                        </>
-                                    )}
-                                </select>
-                            </label>
-                            <label className="block">
-                                <span className="mb-1 block text-xs font-medium text-gray-300">
-                                    Description <span className="font-normal text-gray-500">(optional)</span>
-                                </span>
-                                <textarea
-                                    value={publishDescription}
-                                    onChange={(e) => setPublishDescription(e.target.value)}
-                                    rows={3}
-                                    className="w-full resize-y rounded border border-gray-300 bg-white px-2 py-1.5 text-sm text-gray-900 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
-                                    disabled={promoteSaving}
-                                    placeholder="Shown in asset metadata as editor publish notes."
-                                />
-                            </label>
-                            <div className="border-t border-gray-700 pt-3">
-                                <p className="mb-2 text-xs font-medium text-gray-300">
-                                    Metadata <span className="font-normal text-gray-500">(from category)</span>
-                                </p>
-                                {publishMetadataLoading && (
-                                    <p
-                                        className="flex items-center gap-2 text-xs text-gray-300"
-                                        role="status"
-                                        aria-busy="true"
-                                    >
-                                        <ArrowPathIcon className="h-4 w-4 shrink-0 animate-spin text-indigo-400" />
-                                        Loading metadata fields…
+                        <div className="min-h-0 flex-1 overflow-y-auto">
+                            <div className="space-y-0">
+                                <div className="space-y-3 px-4 pb-3 pt-4 text-sm text-gray-900">
+                                    <p className="text-xs leading-relaxed text-gray-600">
+                                        {hasVisibleVideoLayerInDoc && compositionId
+                                            ? 'Renders a baked MP4 and creates a new library asset. Pick a library or deliverable category — metadata uses the same schema as file uploads. Export runs in a background queue; the dialog stays open until baking finishes (thumbnails may update shortly after).'
+                                            : 'Publishes a JPEG export of the canvas. The file is compressed so publish works on servers with a strict upload size cap (about 1MB for the whole request).'}
                                     </p>
-                                )}
-                                {publishMetadataError && (
-                                    <p className="text-xs text-red-400">{publishMetadataError}</p>
-                                )}
-                                {!publishMetadataLoading &&
-                                    publishMetadataSchema?.groups &&
-                                    publishMetadataSchema.groups.length > 0 && (
-                                        <div className="max-h-[min(40vh,320px)] overflow-y-auto rounded border border-gray-100 bg-gray-50/80 p-2 dark:border-gray-700 dark:bg-gray-800/50">
-                                            <MetadataGroups
-                                                groups={publishMetadataSchema.groups}
-                                                values={publishMetadataValues}
-                                                onChange={(key: string, value: unknown) => {
-                                                    setPublishMetadataValues((prev) => ({ ...prev, [key]: value }))
-                                                }}
-                                                disabled={promoteSaving}
-                                                showErrors={publishMetadataShowErrors}
-                                                collectionProps={{
-                                                    collections: publishCollectionsList,
-                                                    collectionsLoading: publishCollectionsLoading,
-                                                    selectedIds: publishCollectionIds,
-                                                    onChange: setPublishCollectionIds,
-                                                    showCreateButton: false,
-                                                }}
-                                            />
+                                    {publishCategoriesLoading && (
+                                        <p
+                                            className="flex items-center gap-2 text-xs text-gray-500"
+                                            role="status"
+                                            aria-busy="true"
+                                        >
+                                            <ArrowPathIcon className="h-4 w-4 shrink-0 animate-spin text-indigo-500" />
+                                            Loading categories…
+                                        </p>
+                                    )}
+                                    {publishCategoriesError && (
+                                        <p className="text-xs text-red-600">{publishCategoriesError}</p>
+                                    )}
+                                    {promoteError && (
+                                        <p
+                                            className="rounded-md border border-red-200 bg-red-50 px-2.5 py-2 text-xs text-red-800"
+                                            role="alert"
+                                        >
+                                            {promoteError}
+                                        </p>
+                                    )}
+                                </div>
+
+                                {/* Preview + title / category / description (one row from md upward) */}
+                                <div className="grid grid-cols-1 gap-4 border-t border-gray-200 bg-gradient-to-b from-indigo-50/30 to-white px-4 py-4 md:grid-cols-[minmax(200px,280px)_1fr] md:items-start md:gap-6">
+                                    <div className="min-w-0">
+                                        <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+                                            Preview
+                                        </p>
+                                        <div
+                                            className="relative flex aspect-square max-h-[min(36vh,300px)] w-full items-center justify-center overflow-hidden rounded-xl border border-gray-200/90 bg-white shadow-inner ring-1 ring-black/5 pointer-events-auto"
+                                            style={{ minHeight: 160 }}
+                                        >
+                                            {hasVisibleVideoLayerInDoc && publishModalPrimaryVideo?.src ? (
+                                                <video
+                                                    className="h-full w-full object-contain"
+                                                    src={publishModalPrimaryVideo.src}
+                                                    muted
+                                                    playsInline
+                                                    controls
+                                                    loop
+                                                    preload="metadata"
+                                                />
+                                            ) : publishModalStillPreviewUrl ? (
+                                                <img
+                                                    src={publishModalStillPreviewUrl}
+                                                    alt="Canvas preview"
+                                                    className="h-full w-full object-contain"
+                                                />
+                                            ) : (
+                                                <div className="flex flex-col items-center justify-center gap-2 p-4 text-center text-xs text-gray-500">
+                                                    <PhotoIcon className="h-8 w-8 text-gray-300" />
+                                                    {promoteSaving ? 'Preparing…' : 'Preview will appear here.'}
+                                                </div>
+                                            )}
                                         </div>
+                                        {hasVisibleVideoLayerInDoc && Boolean(compositionId) && (
+                                            <p className="mt-2 text-xs leading-snug text-gray-500">
+                                                Video publish bakes a full MP4 (clip + image overlays), then sends it to
+                                                the library with the details beside this preview.
+                                            </p>
+                                        )}
+                                    </div>
+                                    <div className="min-h-0 min-w-0 space-y-3">
+                                        {hasVisibleVideoLayerInDoc && Boolean(compositionId) && (
+                                            <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-gray-200 bg-white/80 px-3 py-2.5 shadow-sm">
+                                                <input
+                                                    type="checkbox"
+                                                    className="mt-0.5 h-4 w-4 rounded border-gray-300 text-indigo-600"
+                                                    checked={publishIncludeAudio}
+                                                    onChange={(e) => setPublishIncludeAudio(e.target.checked)}
+                                                    disabled={promoteSaving}
+                                                />
+                                                <span>
+                                                    <span className="block text-xs font-medium text-gray-900">
+                                                        Include audio
+                                                    </span>
+                                                    <span className="text-[11px] text-gray-500">
+                                                        Mux audio from the source clip when a soundtrack is present. Turn
+                                                        off to force a silent file. A video layer with Timeline → Muted is
+                                                        always exported without audio.
+                                                    </span>
+                                                </span>
+                                            </label>
+                                        )}
+                                        <label className="block">
+                                            <span className="mb-1 block text-xs font-medium text-gray-700">Title</span>
+                                            <input
+                                                type="text"
+                                                value={publishTitle}
+                                                onChange={(e) => setPublishTitle(e.target.value)}
+                                                className="w-full rounded-md border border-gray-300 bg-white px-2.5 py-2 text-sm text-gray-900"
+                                                disabled={promoteSaving}
+                                            />
+                                        </label>
+                                        <label className="block">
+                                            <span className="mb-1 block text-xs font-medium text-gray-700">Category</span>
+                                            <select
+                                                value={publishCategoryId === '' ? '' : String(publishCategoryId)}
+                                                onChange={(e) => {
+                                                    setPublishCategoryId(e.target.value === '' ? '' : Number(e.target.value))
+                                                    setPublishMetadataValues({})
+                                                    setPublishCollectionIds([])
+                                                    setPublishMetadataShowErrors(false)
+                                                }}
+                                                className="w-full rounded-md border border-gray-300 bg-white px-2.5 py-2 text-sm text-gray-900"
+                                                disabled={promoteSaving || publishCategories.length === 0}
+                                            >
+                                                {publishCategories.length === 0 ? (
+                                                    <option value="">No categories</option>
+                                                ) : (
+                                                    <>
+                                                        {publishCategories.some((c) => c.asset_type === 'asset') && (
+                                                            <optgroup label="Asset">
+                                                                {publishCategories
+                                                                    .filter((c) => c.asset_type === 'asset')
+                                                                    .map((c) => (
+                                                                        <option key={c.id} value={c.id}>
+                                                                            {c.name}
+                                                                        </option>
+                                                                    ))}
+                                                            </optgroup>
+                                                        )}
+                                                        {publishCategories.some((c) => c.asset_type === 'deliverable') && (
+                                                            <optgroup label="Executions">
+                                                                {publishCategories
+                                                                    .filter((c) => c.asset_type === 'deliverable')
+                                                                    .map((c) => (
+                                                                        <option key={c.id} value={c.id}>
+                                                                            {c.name}
+                                                                        </option>
+                                                                    ))}
+                                                            </optgroup>
+                                                        )}
+                                                    </>
+                                                )}
+                                            </select>
+                                        </label>
+                                        <label className="block">
+                                            <span className="mb-1 block text-xs font-medium text-gray-700">
+                                                Description <span className="font-normal text-gray-500">(optional)</span>
+                                            </span>
+                                            <textarea
+                                                value={publishDescription}
+                                                onChange={(e) => setPublishDescription(e.target.value)}
+                                                rows={3}
+                                                className="w-full resize-y rounded-md border border-gray-300 bg-white px-2.5 py-2 text-sm text-gray-900"
+                                                disabled={promoteSaving}
+                                                placeholder="Shown in asset metadata as editor publish notes."
+                                            />
+                                        </label>
+                                    </div>
+                                </div>
+
+                                {/* Category metadata — full width */}
+                                <div className="border-t border-gray-200 bg-white px-4 py-4">
+                                    <p className="mb-2 text-xs font-medium text-gray-800">
+                                        Metadata <span className="font-normal text-gray-500">(from category)</span>
+                                    </p>
+                                    {publishMetadataLoading && (
+                                        <p
+                                            className="flex items-center gap-2 text-xs text-gray-500"
+                                            role="status"
+                                            aria-busy="true"
+                                        >
+                                            <ArrowPathIcon className="h-4 w-4 shrink-0 animate-spin text-indigo-500" />
+                                            Loading metadata fields…
+                                        </p>
                                     )}
-                                {!publishMetadataLoading &&
-                                    !publishMetadataError &&
-                                    publishMetadataSchema?.groups &&
-                                    publishMetadataSchema.groups.length === 0 && (
-                                        <p className="text-xs text-gray-500">No extra metadata fields for this category.</p>
+                                    {publishMetadataError && (
+                                        <p className="text-xs text-red-600">{publishMetadataError}</p>
                                     )}
+                                    {!publishMetadataLoading &&
+                                        publishMetadataSchema?.groups &&
+                                        publishMetadataSchema.groups.length > 0 && (
+                                            <div className="max-h-[min(44vh,380px)] overflow-y-auto rounded-lg border border-gray-200 bg-gray-50/90 p-2.5">
+                                                <MetadataGroups
+                                                    groups={publishMetadataSchema.groups}
+                                                    values={publishMetadataValues}
+                                                    onChange={(key: string, value: unknown) => {
+                                                        setPublishMetadataValues((prev) => ({ ...prev, [key]: value }))
+                                                    }}
+                                                    disabled={promoteSaving}
+                                                    showErrors={publishMetadataShowErrors}
+                                                    collectionProps={{
+                                                        collections: publishCollectionsList,
+                                                        collectionsLoading: publishCollectionsLoading,
+                                                        selectedIds: publishCollectionIds,
+                                                        onChange: setPublishCollectionIds,
+                                                        showCreateButton: false,
+                                                    }}
+                                                />
+                                            </div>
+                                        )}
+                                    {!publishMetadataLoading &&
+                                        !publishMetadataError &&
+                                        publishMetadataSchema?.groups &&
+                                        publishMetadataSchema.groups.length === 0 && (
+                                            <p className="text-xs text-gray-500">No extra metadata fields for this category.</p>
+                                        )}
+                                </div>
                             </div>
                         </div>
-                        <div className="flex shrink-0 justify-end gap-2 border-t border-gray-200 px-4 py-3 dark:border-gray-700">
+                        <div className="flex shrink-0 justify-end gap-2 border-t border-gray-200 bg-white px-5 py-3.5">
                             <button
                                 type="button"
-                                className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200"
+                                className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-800 hover:bg-gray-50"
                                 onClick={() => !promoteSaving && setPublishModalOpen(false)}
                                 disabled={promoteSaving}
                             >
@@ -12040,7 +14386,7 @@ export default function AssetEditor() {
                             </button>
                             <button
                                 type="button"
-                                className="rounded-md border border-emerald-600 bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
+                                className="rounded-md border border-indigo-600 bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
                                 onClick={() => void submitPublishModal()}
                                 disabled={
                                     promoteSaving ||
@@ -12056,6 +14402,46 @@ export default function AssetEditor() {
                     </div>
                 </div>
             )}
+
+            <AnimatePresence>
+                {publishSuccessCelebration && (
+                    <motion.div
+                        className="pointer-events-none fixed inset-0 z-[70] flex items-center justify-center bg-black/30"
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                    >
+                        <motion.div
+                            className="pointer-events-auto rounded-2xl border border-indigo-100 bg-white px-8 py-6 shadow-2xl ring-1 ring-black/5"
+                            initial={{ scale: 0.9, y: 12, opacity: 0 }}
+                            animate={{ scale: 1, y: 0, opacity: 1 }}
+                            transition={{ type: 'spring', stiffness: 420, damping: 28 }}
+                        >
+                            <div className="mb-3 flex justify-center gap-1.5 sm:gap-2" aria-hidden>
+                                {([0, 1, 2] as const).map((i) => (
+                                    <motion.div
+                                        key={i}
+                                        className="flex h-12 w-11 items-center justify-center overflow-hidden rounded-lg bg-indigo-50 ring-1 ring-indigo-200/60"
+                                        animate={{ y: [0, -6, 0, -3, 0] }}
+                                        transition={{ duration: 0.6, delay: i * 0.12, ease: 'easeInOut' }}
+                                    >
+                                        <img
+                                            src="/jp-parts/diamond-slot.svg"
+                                            alt=""
+                                            className="h-8 w-8 object-contain"
+                                            draggable={false}
+                                        />
+                                    </motion.div>
+                                ))}
+                            </div>
+                            <p className="text-center text-sm font-bold tracking-tight text-gray-900">Sent to Jackpot</p>
+                            <p className="mt-1 text-center text-xs text-gray-500">
+                                Your asset has been sent to Jackpot and will be processed.
+                            </p>
+                        </motion.div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
 
             {pickerOpen && (
                 <div
@@ -12079,7 +14465,9 @@ export default function AssetEditor() {
                                     ? `Reference images (max ${MAX_REFERENCE_ASSETS})`
                                     : pickerMode === 'replace'
                                       ? 'Replace image'
-                                      : 'Add image from library'}
+                                      : pickerMode === 'add_video'
+                                        ? 'Add video from library'
+                                        : 'Add image from library'}
                             </h3>
                             <button
                                 type="button"
@@ -12225,81 +14613,100 @@ export default function AssetEditor() {
                                 </a>{' '}
                                 in a new tab to upload or manage files, then return here and refresh the list.
                             </p>
-                            <input
-                                ref={pickerUploadInputRef}
-                                type="file"
-                                accept="image/png,image/jpeg,image/jpg,image/webp,.png,.jpg,.jpeg,.webp"
-                                className="hidden"
-                                onChange={(e) => {
-                                    const f = e.target.files?.[0]
-                                    e.target.value = ''
-                                    if (f) {
-                                        void runPickerLibraryUpload(f)
-                                    }
-                                }}
-                            />
-                            <div
-                                className={`mt-3 rounded-md border border-dashed px-3 py-3 transition-colors ${
-                                    pickerDropActive
-                                        ? 'border-indigo-400 bg-indigo-950/30'
-                                        : 'border-gray-600 bg-gray-800/40'
-                                } ${
-                                    pickerPickingAssetId !== null || pickerLibraryUploading
-                                        ? 'pointer-events-none opacity-50'
-                                        : ''
-                                }`}
-                                onDragEnter={(e) => {
-                                    e.preventDefault()
-                                    if (!pickerLibraryUploading && !damLoading && pickerPickingAssetId === null) {
-                                        setPickerDropActive(true)
-                                    }
-                                }}
-                                onDragLeave={() => setPickerDropActive(false)}
-                                onDragOver={(e) => {
-                                    e.preventDefault()
-                                    if (!pickerLibraryUploading && !damLoading && pickerPickingAssetId === null) {
-                                        setPickerDropActive(true)
-                                    }
-                                }}
-                                onDrop={(e) => {
-                                    e.preventDefault()
-                                    setPickerDropActive(false)
-                                    if (pickerLibraryUploading || damLoading || pickerPickingAssetId !== null) {
-                                        return
-                                    }
-                                    const f = e.dataTransfer.files?.[0]
-                                    if (f && (f.type.startsWith('image/') || /\.(png|jpe?g|webp)$/i.test(f.name))) {
-                                        void runPickerLibraryUpload(f)
-                                    }
-                                }}
-                            >
-                                <div className="flex flex-wrap items-center gap-2">
-                                    <CloudArrowUpIcon className="h-5 w-5 shrink-0 text-gray-500" aria-hidden />
-                                    <div className="min-w-0 flex-1">
-                                        <p className="text-[11px] font-medium text-gray-200">
-                                            Upload or drop an image
-                                        </p>
-                                        <p className="mt-0.5 text-[10px] leading-snug text-gray-500">
-                                            Files are finalized into the library (not staged). The{' '}
-                                            <span className="font-medium text-gray-400">Category</span> filter above sets
-                                            the upload category when chosen; otherwise the brand default category applies.
-                                        </p>
-                                    </div>
-                                    <button
-                                        type="button"
-                                        disabled={
-                                            pickerPickingAssetId !== null || pickerLibraryUploading || damLoading
-                                        }
-                                        onClick={() => pickerUploadInputRef.current?.click()}
-                                        className="shrink-0 rounded border border-indigo-600 bg-indigo-700 px-2.5 py-1.5 text-[11px] font-semibold text-white hover:bg-indigo-600 disabled:cursor-not-allowed disabled:opacity-50"
+                            {pickerMode === 'add_video' ? (
+                                <p className="mt-3 rounded-md border border-gray-600 bg-gray-800/50 px-3 py-2.5 text-[10px] leading-snug text-gray-400">
+                                    Upload new videos from the{' '}
+                                    <a
+                                        href="/app/assets"
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="font-medium text-indigo-300 underline hover:text-indigo-200"
                                     >
-                                        {pickerLibraryUploading ? 'Uploading…' : 'Choose file'}
-                                    </button>
-                                </div>
-                                {pickerLibraryUploadError && (
-                                    <p className="mt-2 text-[10px] text-red-400">{pickerLibraryUploadError}</p>
-                                )}
-                            </div>
+                                        Assets
+                                    </a>{' '}
+                                    page (this picker lists existing library files only). Clips from Studio animation also
+                                    insert from the job detail panel.
+                                </p>
+                            ) : (
+                                <>
+                                    <input
+                                        ref={pickerUploadInputRef}
+                                        type="file"
+                                        accept="image/png,image/jpeg,image/jpg,image/webp,.png,.jpg,.jpeg,.webp"
+                                        className="hidden"
+                                        onChange={(e) => {
+                                            const f = e.target.files?.[0]
+                                            e.target.value = ''
+                                            if (f) {
+                                                void runPickerLibraryUpload(f)
+                                            }
+                                        }}
+                                    />
+                                    <div
+                                        className={`mt-3 rounded-md border border-dashed px-3 py-3 transition-colors ${
+                                            pickerDropActive
+                                                ? 'border-indigo-400 bg-indigo-950/30'
+                                                : 'border-gray-600 bg-gray-800/40'
+                                        } ${
+                                            pickerPickingAssetId !== null || pickerLibraryUploading
+                                                ? 'pointer-events-none opacity-50'
+                                                : ''
+                                        }`}
+                                        onDragEnter={(e) => {
+                                            e.preventDefault()
+                                            if (!pickerLibraryUploading && !damLoading && pickerPickingAssetId === null) {
+                                                setPickerDropActive(true)
+                                            }
+                                        }}
+                                        onDragLeave={() => setPickerDropActive(false)}
+                                        onDragOver={(e) => {
+                                            e.preventDefault()
+                                            if (!pickerLibraryUploading && !damLoading && pickerPickingAssetId === null) {
+                                                setPickerDropActive(true)
+                                            }
+                                        }}
+                                        onDrop={(e) => {
+                                            e.preventDefault()
+                                            setPickerDropActive(false)
+                                            if (pickerLibraryUploading || damLoading || pickerPickingAssetId !== null) {
+                                                return
+                                            }
+                                            const f = e.dataTransfer.files?.[0]
+                                            if (f && (f.type.startsWith('image/') || /\.(png|jpe?g|webp)$/i.test(f.name))) {
+                                                void runPickerLibraryUpload(f)
+                                            }
+                                        }}
+                                    >
+                                        <div className="flex flex-wrap items-center gap-2">
+                                            <CloudArrowUpIcon className="h-5 w-5 shrink-0 text-gray-500" aria-hidden />
+                                            <div className="min-w-0 flex-1">
+                                                <p className="text-[11px] font-medium text-gray-200">
+                                                    Upload or drop an image
+                                                </p>
+                                                <p className="mt-0.5 text-[10px] leading-snug text-gray-500">
+                                                    Files are finalized into the library (not staged). The{' '}
+                                                    <span className="font-medium text-gray-400">Category</span> filter above
+                                                    sets the upload category when chosen; otherwise the brand default
+                                                    category applies.
+                                                </p>
+                                            </div>
+                                            <button
+                                                type="button"
+                                                disabled={
+                                                    pickerPickingAssetId !== null || pickerLibraryUploading || damLoading
+                                                }
+                                                onClick={() => pickerUploadInputRef.current?.click()}
+                                                className="shrink-0 rounded border border-indigo-600 bg-indigo-700 px-2.5 py-1.5 text-[11px] font-semibold text-white hover:bg-indigo-600 disabled:cursor-not-allowed disabled:opacity-50"
+                                            >
+                                                {pickerLibraryUploading ? 'Uploading…' : 'Choose file'}
+                                            </button>
+                                        </div>
+                                        {pickerLibraryUploadError && (
+                                            <p className="mt-2 text-[10px] text-red-400">{pickerLibraryUploadError}</p>
+                                        )}
+                                    </div>
+                                </>
+                            )}
                         </div>
                         {pickerMode === 'references' && referenceSelectionIds.length > 0 && (
                             <div className="shrink-0 border-b border-violet-800 bg-violet-950/25 px-4 py-2.5">
@@ -13393,6 +15800,7 @@ export default function AssetEditor() {
 
             {/* Styled confirm dialog (replaces window.confirm) */}
             <EditorConfirmDialog state={confirmState} onClose={handleConfirmClose} />
+            <EditorTextInputDialog state={textInputState} onClose={handleTextInputClose} />
         </div>
     )
 }
