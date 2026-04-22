@@ -58,6 +58,7 @@ import type {
     ImageLayer,
     Layer,
     LayerBlendMode,
+    MaskLayer,
     TextLayer,
 } from './documentModel'
 import {
@@ -1406,6 +1407,8 @@ export default function AssetEditor() {
     const [previewFrame, setPreviewFrame] = useState<'social' | 'banner'>('social')
     const compositionIdRef = useRef<string | null>(null)
     compositionIdRef.current = compositionId
+    /** Lets {@link refreshVersions} ignore stale completions when multiple fetches overlap. */
+    const compositionVersionsFetchSeqRef = useRef(0)
     const compositionNameRef = useRef(compositionName)
     compositionNameRef.current = compositionName
     const studioCreativeSetRef = useRef<StudioCreativeSetDto | null>(null)
@@ -1505,6 +1508,8 @@ export default function AssetEditor() {
     }, [])
 
     const [leftPanel, setLeftPanel] = useState<'layers' | 'assets' | 'templates' | 'menu' | 'history' | null>('layers')
+    const leftPanelRef = useRef(leftPanel)
+    leftPanelRef.current = leftPanel
     const [addLayerOpen, setAddLayerOpen] = useState(false)
     const [shortcutsOpen, setShortcutsOpen] = useState(false)
     const [templateCategory, setTemplateCategory] = useState<TemplateCategory | 'all'>('all')
@@ -2087,16 +2092,24 @@ export default function AssetEditor() {
         const id = compositionIdRef.current
         if (!id) {
             setVersions([])
+            setVersionsLoading(false)
             return
         }
+        const seq = ++compositionVersionsFetchSeqRef.current
         setVersionsLoading(true)
         try {
             const v = await fetchCompositionVersions(id)
-            setVersions(v)
+            if (seq === compositionVersionsFetchSeqRef.current) {
+                setVersions(v)
+            }
         } catch {
-            setVersions([])
+            if (seq === compositionVersionsFetchSeqRef.current) {
+                setVersions([])
+            }
         } finally {
-            setVersionsLoading(false)
+            if (seq === compositionVersionsFetchSeqRef.current) {
+                setVersionsLoading(false)
+            }
         }
     }, [])
 
@@ -4092,6 +4105,13 @@ export default function AssetEditor() {
         }
     }, [historyOpen, compositionId, refreshVersions])
 
+    /** History rail: load versions when the user opens it (not on every animation poll tick). */
+    useEffect(() => {
+        if (leftPanel === 'history' && compositionId) {
+            void refreshVersions()
+        }
+    }, [leftPanel, compositionId, refreshVersions])
+
     useEffect(() => {
         if (!compositionId) {
             return undefined
@@ -4106,13 +4126,10 @@ export default function AssetEditor() {
         if (!pollAnimations) {
             return undefined
         }
-        if (leftPanel === 'history') {
-            void refreshVersions()
-        }
         void refreshCompositionAnimations()
         const id = window.setInterval(() => {
             void refreshCompositionAnimations()
-            if (leftPanel === 'history') {
+            if (leftPanelRef.current === 'history') {
                 void refreshVersions()
             }
         }, 5000)
@@ -5895,7 +5912,12 @@ export default function AssetEditor() {
                         ? { ...l, z: (Number(l.z) || 0) + 1 }
                         : l
                 )
-                layers = normalizeZ([...bumped, { ...mask, z: selectedZ + 1 }])
+                const maskWithZ: MaskLayer = { ...mask, z: selectedZ + 1 }
+                const maskInGroup: MaskLayer =
+                    selected.groupId != null && selected.groupId !== ''
+                        ? { ...maskWithZ, groupId: selected.groupId }
+                        : maskWithZ
+                layers = normalizeZ([...bumped, maskInGroup])
             } else {
                 layers = normalizeZ([...prev.layers, mask])
             }

@@ -103,7 +103,7 @@ export function VersionsRail(props: {
     selectedStudioAnimationJobId?: string | null
     onSelectStudioAnimationJob?: (jobId: string) => void
     /** Remove a failed/canceled animation job from the rail (parent runs confirm + API). */
-    onRequestDiscardStudioAnimationJob?: (jobId: string) => void
+    onRequestDiscardStudioAnimationJob?: (jobId: string) => void | Promise<unknown>
     /** Remove a non-base variant from the set (parent runs confirm + API). */
     onRequestRemoveVariant?: (variant: StudioCreativeSetVariantDto) => void
 }) {

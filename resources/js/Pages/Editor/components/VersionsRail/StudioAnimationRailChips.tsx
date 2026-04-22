@@ -1,4 +1,5 @@
-import { ArrowPathIcon, FilmIcon, TrashIcon } from '@heroicons/react/24/outline'
+import { ArrowPathIcon, FilmIcon } from '@heroicons/react/24/outline'
+import { XMarkIcon } from '@heroicons/react/20/solid'
 import { getStudioAnimationStallHints, studioAnimationRailJobLabel, type StudioAnimationJobDto } from '../../editorStudioAnimationBridge'
 
 function animStatusLabel(status: string): string {
@@ -31,7 +32,7 @@ type Props = {
     onSelectJob: (jobId: string) => void
     /** Current composition display name (editor title) for tile labels. */
     compositionTitle?: string
-    onRequestDiscardJob?: (jobId: string) => void
+    onRequestDiscardJob?: (jobId: string) => void | Promise<unknown>
 }
 
 /**
@@ -69,10 +70,25 @@ export function StudioAnimationRailChips(props: Props) {
                 return (
                     <div
                         key={a.id}
-                        className={`flex w-[76px] shrink-0 flex-col items-center gap-0.5 rounded-lg p-1 ${
+                        className={`relative flex w-[76px] shrink-0 flex-col items-center gap-0.5 rounded-lg p-1 ${
                             active ? 'bg-violet-950/35 ring-1 ring-violet-600/50' : `bg-gray-900/80 ${stallRing}`
                         }`}
                     >
+                        {canDiscard ? (
+                            <button
+                                type="button"
+                                data-testid={`studio-discard-animation-${a.id}`}
+                                title="Remove this run from the rail"
+                                aria-label="Remove failed video from rail"
+                                onClick={(e) => {
+                                    e.stopPropagation()
+                                    void onRequestDiscardJob?.(a.id)
+                                }}
+                                className="absolute -right-0.5 -top-0.5 z-[3] flex h-6 w-6 items-center justify-center rounded-full bg-gray-950/95 text-red-300 shadow-md ring-1 ring-red-800/70 hover:bg-red-950/90 hover:text-red-100"
+                            >
+                                <XMarkIcon className="h-3.5 w-3.5" aria-hidden />
+                            </button>
+                        ) : null}
                         <button
                             type="button"
                             onClick={(e) => {
@@ -101,21 +117,6 @@ export function StudioAnimationRailChips(props: Props) {
                                 {tileLabel}
                             </span>
                         </button>
-                        {canDiscard ? (
-                            <button
-                                type="button"
-                                data-testid={`studio-discard-animation-${a.id}`}
-                                title="Remove this failed run from the rail"
-                                onClick={(e) => {
-                                    e.stopPropagation()
-                                    onRequestDiscardJob?.(a.id)
-                                }}
-                                className="flex w-full items-center justify-center gap-0.5 rounded border border-gray-700/80 bg-gray-900/90 py-0.5 text-[8px] font-semibold text-gray-500 hover:border-red-900/50 hover:bg-red-950/30 hover:text-red-200"
-                            >
-                                <TrashIcon className="h-3 w-3 shrink-0" aria-hidden />
-                                Remove
-                            </button>
-                        ) : null}
                     </div>
                 )
             })}

@@ -452,9 +452,12 @@ export type GenerativeImageLayer = BaseLayer & {
  * manipulate the mask's extent.
  *
  * Target semantics:
- *   - 'below_one'  → clips only the single layer immediately beneath this mask
- *                    in the z-stack (most common — e.g. a soft vignette on the
- *                    hero photo).
+ *   - 'below_one'  → clips only one layer beneath this mask: when the mask
+ *                    shares a {@link BaseLayer.groupId} with other layers, the
+ *                    target is the group member with the greatest z that is
+ *                    still strictly below the mask (the compositing "layer
+ *                    directly under" the mask). Otherwise the target is the
+ *                    first non-mask layer below the mask in global z-order.
  *   - 'below_all'  → clips every layer beneath this mask.
  *   - 'group'      → clips all members of {@link groupId}.
  */
@@ -502,9 +505,12 @@ export function isMaskLayer(l: Layer): l is MaskLayer {
  * Compute the concrete set of mask layers that apply to a given target layer.
  *
  * Rules:
- *   - 'below_one' masks apply to the non-mask layer directly under them in
- *     the z-stack (the first non-mask layer scanning downward from the
- *     mask's z value).
+ *   - 'below_one' masks apply to one layer beneath the mask: if the mask has
+ *     a `groupId`, the target is the in-group non-mask with the highest z
+ *     that is still `< mask.z` (avoids mis-targeting when other document layers
+ *     sit between group members in global z). If the mask has no `groupId`,
+ *     the target is the first non-mask layer immediately below the mask in
+ *     global z-order.
  *   - 'below_all' masks apply to every non-mask layer with z < mask.z.
  *   - 'group' masks apply to every layer whose `groupId` matches the mask's
  *     `groupId`.
@@ -522,17 +528,43 @@ export function masksAffectingLayer(layer: Layer, allLayers: Layer[]): MaskLayer
     const result: MaskLayer[] = []
     for (const m of masks) {
         if (m.target === 'below_one') {
-            // Find the non-mask layer directly beneath this mask in z.
-            // `byZ` is ascending, so look at the entry immediately before the
-            // mask and walk down to the first non-mask.
-            const idx = byZ.findIndex((l) => l.id === m.id)
-            for (let i = idx - 1; i >= 0; i--) {
-                const candidate = byZ[i]
-                if (candidate.type === 'mask') continue
-                if (candidate.id === layer.id) {
+            const gid = m.groupId
+            if (gid) {
+                const mZ = Number(m.z) || 0
+                let best: Layer | null = null
+                let bestZ = -Infinity
+                for (const cand of allLayers) {
+                    if (cand.type === 'mask') {
+                        continue
+                    }
+                    if (cand.groupId !== gid) {
+                        continue
+                    }
+                    const cz = Number(cand.z) || 0
+                    if (cz >= mZ) {
+                        continue
+                    }
+                    if (cz > bestZ) {
+                        bestZ = cz
+                        best = cand
+                    }
+                }
+                if (best !== null && best.id === layer.id) {
                     result.push(m)
                 }
-                break
+            } else {
+                // Global z: first non-mask immediately below this mask.
+                const idx = byZ.findIndex((l) => l.id === m.id)
+                for (let i = idx - 1; i >= 0; i--) {
+                    const candidate = byZ[i]
+                    if (candidate.type === 'mask') {
+                        continue
+                    }
+                    if (candidate.id === layer.id) {
+                        result.push(m)
+                    }
+                    break
+                }
             }
         } else if (m.target === 'below_all') {
             const mZ = Number(m.z) || 0
