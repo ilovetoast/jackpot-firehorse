@@ -13,7 +13,9 @@ use App\Studio\Animation\Enums\StudioAnimationSourceStrategy;
 use App\Studio\Animation\Services\StudioAnimationService;
 use App\Studio\Animation\Support\AnimationCapabilityRegistry;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\Rule;
@@ -176,19 +178,39 @@ class StudioAnimationController extends Controller
         return response()->json($this->studioAnimationService->toApiPayload($job), 201);
     }
 
-    public function show(Request $request, StudioAnimationJob $animationJob): JsonResponse
+    public function show(Request $request, int $animationJob): JsonResponse|RedirectResponse
     {
         $user = $request->user();
         if (! $user instanceof User) {
             return response()->json(['message' => 'Unauthorized'], 401);
         }
 
-        Gate::authorize('view', $animationJob);
+        $tenant = app('tenant');
+        if (! $tenant instanceof Tenant) {
+            if ($request->expectsJson()) {
+                return response()->json(['message' => 'Tenant context required.'], 422);
+            }
 
-        return response()->json($this->studioAnimationService->toApiPayload($animationJob));
+            return redirect()->route('companies.index');
+        }
+
+        $job = $this->firstTenantStudioAnimationJob($animationJob, $tenant);
+        if ($job === null) {
+            if ($request->expectsJson()) {
+                return response()->json(['message' => 'Animation job not found.'], 404);
+            }
+
+            return redirect()
+                ->route('generative.index')
+                ->with('warning', 'That animation is no longer available. Open a composition in Studio to run a new one.');
+        }
+
+        Gate::authorize('view', $job);
+
+        return response()->json($this->studioAnimationService->toApiPayload($job));
     }
 
-    public function retry(Request $request, StudioAnimationJob $animationJob): JsonResponse
+    public function retry(Request $request, int $animationJob): JsonResponse
     {
         $user = $request->user();
         if (! $user instanceof User) {
@@ -200,35 +222,25 @@ class StudioAnimationController extends Controller
             return response()->json(['message' => 'Tenant context required.'], 422);
         }
 
-        Gate::authorize('retry', $animationJob);
+        $job = $this->firstTenantStudioAnimationJob($animationJob, $tenant);
+        if ($job === null) {
+            return response()->json(['message' => 'Animation job not found.'], 404);
+        }
+
+        Gate::authorize('retry', $job);
 
         try {
-            $this->studioAnimationService->retry($animationJob, $tenant, $user);
+            $this->studioAnimationService->retry($job, $tenant, $user);
         } catch (\Illuminate\Validation\ValidationException $e) {
             return response()->json(['message' => 'Validation failed', 'errors' => $e->errors()], 422);
         }
 
-        $animationJob->refresh();
+        $job->refresh();
 
-        return response()->json($this->studioAnimationService->toApiPayload($animationJob));
+        return response()->json($this->studioAnimationService->toApiPayload($job));
     }
 
-    public function cancel(Request $request, StudioAnimationJob $animationJob): JsonResponse
-    {
-        $user = $request->user();
-        if (! $user instanceof User) {
-            return response()->json(['message' => 'Unauthorized'], 401);
-        }
-
-        Gate::authorize('cancel', $animationJob);
-
-        $this->studioAnimationService->cancel($animationJob);
-        $animationJob->refresh();
-
-        return response()->json($this->studioAnimationService->toApiPayload($animationJob));
-    }
-
-    public function destroy(Request $request, int $animationJob): \Illuminate\Http\Response|JsonResponse
+    public function cancel(Request $request, int $animationJob): JsonResponse
     {
         $user = $request->user();
         if (! $user instanceof User) {
@@ -240,10 +252,32 @@ class StudioAnimationController extends Controller
             return response()->json(['message' => 'Tenant context required.'], 422);
         }
 
-        $job = StudioAnimationJob::query()
-            ->whereKey($animationJob)
-            ->where('tenant_id', $tenant->id)
-            ->first();
+        $job = $this->firstTenantStudioAnimationJob($animationJob, $tenant);
+        if ($job === null) {
+            return response()->json(['message' => 'Animation job not found.'], 404);
+        }
+
+        Gate::authorize('cancel', $job);
+
+        $this->studioAnimationService->cancel($job);
+        $job->refresh();
+
+        return response()->json($this->studioAnimationService->toApiPayload($job));
+    }
+
+    public function destroy(Request $request, int $animationJob): Response|JsonResponse
+    {
+        $user = $request->user();
+        if (! $user instanceof User) {
+            return response()->json(['message' => 'Unauthorized'], 401);
+        }
+
+        $tenant = app('tenant');
+        if (! $tenant instanceof Tenant) {
+            return response()->json(['message' => 'Tenant context required.'], 422);
+        }
+
+        $job = $this->firstTenantStudioAnimationJob($animationJob, $tenant);
         if ($job === null) {
             Log::info('StudioAnimationController.destroy not_found (treated as idempotent)', [
                 'requested_studio_animation_job_id' => $animationJob,
@@ -263,5 +297,13 @@ class StudioAnimationController extends Controller
         }
 
         return response()->noContent();
+    }
+
+    private function firstTenantStudioAnimationJob(int $animationJobId, Tenant $tenant): ?StudioAnimationJob
+    {
+        return StudioAnimationJob::query()
+            ->whereKey($animationJobId)
+            ->where('tenant_id', $tenant->id)
+            ->first();
     }
 }

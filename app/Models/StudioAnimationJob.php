@@ -114,23 +114,4 @@ class StudioAnimationJob extends Model
     {
         $this->update(['status' => $status->value]);
     }
-
-    /**
-     * @param  mixed  $value
-     * @param  string|null  $field
-     */
-    public function resolveRouteBinding($value, $field = null): ?StudioAnimationJob
-    {
-        $tenant = app()->bound('tenant') ? app('tenant') : null;
-        if (! $tenant) {
-            return null;
-        }
-
-        // Scope by tenant only here; session brand is enforced in {@see \App\Policies\StudioAnimationJobPolicy}
-        // so a valid id in another brand yields 403 (forbidden) instead of 404 (not found).
-        return self::query()
-            ->whereKey($value)
-            ->where('tenant_id', $tenant->id)
-            ->first();
-    }
 }

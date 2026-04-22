@@ -618,6 +618,23 @@ class StudioAnimationTest extends TestCase
             ->assertJsonPath('provider_submission_used_frame', 'server_locked_state');
     }
 
+    public function test_show_missing_job_as_json_returns_404_with_message(): void
+    {
+        $this->actingAs($this->user)
+            ->withSession(['tenant_id' => $this->tenant->id, 'brand_id' => $this->brand->id])
+            ->getJson('/app/studio/animations/9999991')
+            ->assertNotFound()
+            ->assertJsonPath('message', 'Animation job not found.');
+    }
+
+    public function test_show_missing_job_as_browser_request_redirects_to_generative(): void
+    {
+        $this->actingAs($this->user)
+            ->withSession(['tenant_id' => $this->tenant->id, 'brand_id' => $this->brand->id])
+            ->get('/app/studio/animations/9999991')
+            ->assertRedirect(route('generative.index'));
+    }
+
     public function test_to_api_payload_includes_drift_level_and_conditional_rollout_diagnostics(): void
     {
         $job = StudioAnimationJob::query()->create([

@@ -165,10 +165,19 @@ export default function AssetProcessingTray() {
     const getAssetStatus = (asset) => {
         const thumbnailStatus = asset.thumbnail_status || 'pending'
         const assetStatus = asset.status || 'pending'
+        const mime = typeof asset.mime_type === 'string' ? asset.mime_type.toLowerCase() : ''
+        const isVideo =
+            mime.startsWith('video/') ||
+            asset.source === 'studio_animation' ||
+            (typeof asset.title === 'string' && asset.title.trim().toLowerCase() === 'studio animation')
+
+        const waitLabel = isVideo ? 'Preparing video preview…' : 'Processing thumbnails...'
+        const busyLabel = isVideo ? 'Generating video preview…' : 'Processing thumbnails...'
+        const failLabel = isVideo ? 'Video preview failed' : 'Thumbnail failed'
 
         if (thumbnailStatus === 'failed') {
             return {
-                label: 'Thumbnail failed',
+                label: failLabel,
                 icon: XCircleIcon,
                 iconColor: 'text-red-500',
                 bgColor: 'bg-red-50',
@@ -178,7 +187,7 @@ export default function AssetProcessingTray() {
 
         if (thumbnailStatus === 'processing') {
             return {
-                label: 'Processing thumbnails...',
+                label: busyLabel,
                 icon: ArrowPathIcon,
                 iconColor: 'text-blue-500',
                 bgColor: 'bg-blue-50',
@@ -198,9 +207,9 @@ export default function AssetProcessingTray() {
             }
         }
 
-        // Default: pending
+        // Default: pending (or legacy null)
         return {
-            label: 'Processing thumbnails...',
+            label: waitLabel,
             icon: ArrowPathIcon,
             iconColor: 'text-gray-500',
             bgColor: 'bg-gray-50',

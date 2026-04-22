@@ -773,10 +773,13 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
                     ->whereNumber('document')
                     ->name('app.studio.documents.animations.preflight');
                 Route::get('/studio/animations/{animationJob}', [\App\Http\Controllers\Studio\StudioAnimationController::class, 'show'])
+                    ->whereNumber('animationJob')
                     ->name('app.studio.animations.show');
                 Route::post('/studio/animations/{animationJob}/retry', [\App\Http\Controllers\Studio\StudioAnimationController::class, 'retry'])
+                    ->whereNumber('animationJob')
                     ->name('app.studio.animations.retry');
                 Route::post('/studio/animations/{animationJob}/cancel', [\App\Http\Controllers\Studio\StudioAnimationController::class, 'cancel'])
+                    ->whereNumber('animationJob')
                     ->name('app.studio.animations.cancel');
                 Route::delete('/studio/animations/{animationJob}', [\App\Http\Controllers\Studio\StudioAnimationController::class, 'destroy'])
                     ->whereNumber('animationJob')
