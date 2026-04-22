@@ -2610,10 +2610,7 @@ export default function AssetEditor() {
 
     /** Used by the poll effect: boolean dep avoids re-subscribing the interval on every list refresh. */
     const hasActiveNonTerminalAnimation = useMemo(
-        () =>
-            compositionAnimations.some(
-                (j) => j.status !== 'complete' && j.status !== 'failed' && j.status !== 'canceled',
-            ),
+        () => compositionAnimations.some((j) => isStudioAnimationStatusActive(j.status)),
         [compositionAnimations],
     )
 
@@ -4814,7 +4811,10 @@ export default function AssetEditor() {
         const pollAnimations =
             leftPanel === 'history' ||
             (studioVersionsPanelOpen && studioCreativeSet !== null) ||
-            hasActiveNonTerminalAnimation
+            hasActiveNonTerminalAnimation ||
+            studioAnimateModalOpen ||
+            studioAnimationDetailJobId !== null ||
+            studioAnimationCanvasPreviewJobId !== null
         if (!pollAnimations) {
             return undefined
         }
@@ -4832,6 +4832,9 @@ export default function AssetEditor() {
         studioVersionsPanelOpen,
         studioCreativeSet,
         hasActiveNonTerminalAnimation,
+        studioAnimateModalOpen,
+        studioAnimationDetailJobId,
+        studioAnimationCanvasPreviewJobId,
         refreshVersions,
         refreshCompositionAnimations,
     ])
