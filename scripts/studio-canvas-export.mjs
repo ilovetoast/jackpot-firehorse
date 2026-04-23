@@ -49,6 +49,15 @@ export function parseStudioCanvasExportArgs(argv) {
     if (!Number.isFinite(width) || width < 1 || !Number.isFinite(height) || height < 1) {
         return { ok: false, error: '--width and --height must be positive numbers', raw }
     }
+    const readinessRaw = Number(raw['readiness-timeout-ms'] ?? 120_000)
+    const navigationRaw = Number(raw['navigation-timeout-ms'] ?? 120_000)
+    const frameSettleRaw = Number(raw['frame-settle-ms'] ?? 50)
+    const deviceScaleRaw = Number(raw['device-scale-factor'] ?? 1)
+    const totalRaw = Number(raw['total-timeout-ms'] ?? 3_600_000)
+    /** Playwright defaults to ~30s when timeout is 0/NaN — clamp so PHP `0` cast does not silently shorten waits. */
+    const clampMs = (n, fallback, min) =>
+        Number.isFinite(n) && n >= min ? Math.floor(n) : fallback
+
     return {
         ok: true,
         config: {
@@ -59,11 +68,11 @@ export function parseStudioCanvasExportArgs(argv) {
             width,
             height,
             exportJobId: String(raw['export-job-id']),
-            readinessTimeoutMs: Number(raw['readiness-timeout-ms'] ?? 120_000),
-            navigationTimeoutMs: Number(raw['navigation-timeout-ms'] ?? 120_000),
-            frameSettleMs: Number(raw['frame-settle-ms'] ?? 50),
-            deviceScaleFactor: Number(raw['device-scale-factor'] ?? 1),
-            totalTimeoutMs: Number(raw['total-timeout-ms'] ?? 3_600_000),
+            readinessTimeoutMs: clampMs(readinessRaw, 120_000, 5000),
+            navigationTimeoutMs: clampMs(navigationRaw, 120_000, 5000),
+            frameSettleMs: clampMs(frameSettleRaw, 50, 0),
+            deviceScaleFactor: Number.isFinite(deviceScaleRaw) && deviceScaleRaw > 0 ? deviceScaleRaw : 1,
+            totalTimeoutMs: clampMs(totalRaw, 3_600_000, 60_000),
         },
     }
 }

@@ -37,6 +37,8 @@ return [
      * When queue workers run in Docker but {@code APP_URL} is a browser-only hostname (e.g. {@code http://jackpot.local}),
      * headless Chromium gets {@code net::ERR_CONNECTION_REFUSED}. Set this to an origin workers can reach
      * (Laravel Sail: {@code http://laravel.test}). Leave empty to use {@code APP_URL} like other signed routes.
+     * When set, {@see \App\Services\Studio\CompositionRenderPayloadFactory} also rewrites {@code APP_URL} prefixes in
+     * the render payload (layer {@code src}, brand font URLs) so assets load from the same worker-reachable origin.
      */
     'canvas_export_signed_url_root' => env('STUDIO_VIDEO_CANVAS_EXPORT_SIGNED_URL_ROOT', ''),
 

@@ -5641,7 +5641,8 @@ export default function AssetEditor() {
             if (!stageRef.current) {
                 return
             }
-            const isVideoPublish = Boolean(compositionId) && hasVisibleVideoLayerInDoc
+            const compositionIdForPublish = compositionId ?? compositionIdFromUrl
+            const isVideoPublish = Boolean(compositionIdForPublish) && hasVisibleVideoLayerInDoc
             setPromoteSaving(true)
             setPromoteError(null)
             setPromoteOk(false)
@@ -5687,7 +5688,7 @@ export default function AssetEditor() {
 
             try {
                 if (isVideoPublish) {
-                    const compId = compositionId as string
+                    const compId = compositionIdForPublish as string
                     const name = opts.title.trim() || buildPromotionAssetName(documentRef.current)
                     const created = await postRequestVideoExport(compId, {
                         include_audio: publishIncludeAudio,
@@ -5750,6 +5751,11 @@ export default function AssetEditor() {
                                 return
                             }
                             setLibraryVideoExportNotice({ kind: 'fail', message: handleAIError(e) })
+                        } finally {
+                            if (editorShellMountedRef.current) {
+                                setPromoteSaving(false)
+                                setPublishProgressMessage(null)
+                            }
                         }
                     })()
                 } else {
@@ -5790,6 +5796,7 @@ export default function AssetEditor() {
         [
             snapshotCheckpoint,
             compositionId,
+            compositionIdFromUrl,
             hasVisibleVideoLayerInDoc,
             publishIncludeAudio,
             waitForImagesToLoad,

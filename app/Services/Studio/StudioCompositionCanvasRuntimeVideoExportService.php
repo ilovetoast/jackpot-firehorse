@@ -98,6 +98,24 @@ final class StudioCompositionCanvasRuntimeVideoExportService
             'node_binary' => $nodeBinary,
         ];
 
+        $playwrightPackageJson = base_path('node_modules/playwright/package.json');
+        if (! is_file($playwrightPackageJson) && ! app()->environment('testing')) {
+            $this->fail(
+                $row,
+                'canvas_runtime_playwright_module_missing',
+                self::missingPlaywrightNpmPackageMessage($playwrightPackageJson),
+                array_merge($preRunDiagnostics, [
+                    'preflight' => true,
+                    'expected_package_json' => $playwrightPackageJson,
+                    'application_root' => base_path(),
+                ]),
+                $preserved,
+                $workDir,
+            );
+
+            return;
+        }
+
         try {
             $result = $this->playwrightInvoker->run($command, $cwd, $timeoutSeconds);
         } catch (Throwable $e) {
@@ -705,8 +723,39 @@ final class StudioCompositionCanvasRuntimeVideoExportService
         if ($exitCode === 3 && str_contains($detail, 'ERR_CONNECTION_REFUSED')) {
             $msg .= ' Connection refused usually means the URL host is not listening inside the worker network (browser-only DNS like jackpot.local). Set STUDIO_VIDEO_CANVAS_EXPORT_SIGNED_URL_ROOT to a worker-reachable origin (Sail: http://laravel.test).';
         }
+        if ($exitCode === 5 && self::exportDiagnosticsMentionConnectionRefused($captureDiagnosticsFile)) {
+            $msg .= ' Browser console shows ERR_CONNECTION_REFUSED for sub-resources (fonts, images, or media). With STUDIO_VIDEO_CANVAS_EXPORT_SIGNED_URL_ROOT set, the server rewrites APP_URL-prefixed URLs in the export payload; ensure that env is deployed and config cached, or fix any absolute URLs that do not start with APP_URL.';
+        }
 
         return $msg;
+    }
+
+    /**
+     * @param  array<string, mixed>|null  $captureDiagnosticsFile
+     */
+    private static function exportDiagnosticsMentionConnectionRefused(?array $captureDiagnosticsFile): bool
+    {
+        if (! is_array($captureDiagnosticsFile)) {
+            return false;
+        }
+        $blob = json_encode($captureDiagnosticsFile, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?: '';
+
+        return str_contains(strtolower($blob), 'err_connection_refused');
+    }
+
+    /**
+     * Human message when {@code node_modules/playwright} is absent (Forge / zero-downtime releases often skip `npm ci`).
+     */
+    private static function missingPlaywrightNpmPackageMessage(string $expectedPackageJsonPath): string
+    {
+        $root = base_path();
+
+        return 'Canvas runtime export needs the npm package `playwright` installed at `'.$expectedPackageJsonPath.'`, '
+            .'but that file is missing. Horizon runs `node` with cwd `'.$root.'`; without `npm ci` on this release, Node throws ERR_MODULE_NOT_FOUND (exit code 1).'
+            ."\n\n"
+            .'**What to do:** SSH to the worker, `cd '.$root.'`, run `npm ci --no-audit --no-fund`, then install browsers (see docs). '
+            .'Add the same commands to your **deploy script** after each code sync (e.g. Laravel Forge “Deploy” hook, or your CI release step). '
+            .'`playwright` is in **`package.json` → `dependencies`** so production `npm ci` includes it.';
     }
 
     /**

@@ -66,7 +66,7 @@ final class CompositionRenderPayloadFactory
                 ->serializeBrandContextForBrand($composition->brand);
         }
 
-        return [
+        $payload = [
             'version' => self::VERSION,
             'width' => $w,
             'height' => $h,
@@ -86,6 +86,65 @@ final class CompositionRenderPayloadFactory
             'user_id' => $user?->id ?? $job->user_id,
             'brand_context' => $brandContext,
         ];
+
+        return self::rewriteWorkerReachableOriginsInPayload($payload);
+    }
+
+    /**
+     * When {@see config('studio_video.canvas_export_signed_url_root')} is set, Playwright loads the Inertia export page
+     * from that origin while {@see config('app.url')} may still point at a browser-only host. Layer `src` values and
+     * brand typography URLs often embed {@code APP_URL}; without rewriting, Chromium logs ERR_CONNECTION_REFUSED and
+     * the export bridge never becomes ready (waitForFunction timeout).
+     *
+     * @param  array<string, mixed>  $payload
+     * @return array<string, mixed>
+     */
+    private static function rewriteWorkerReachableOriginsInPayload(array $payload): array
+    {
+        $target = trim((string) config('studio_video.canvas_export_signed_url_root', ''));
+        if ($target === '') {
+            return $payload;
+        }
+        $from = rtrim((string) config('app.url'), '/');
+        $to = rtrim($target, '/');
+        if ($from === '' || $from === $to) {
+            return $payload;
+        }
+
+        return self::rewriteOriginPrefixDeep($payload, $from, $to);
+    }
+
+    /**
+     * @param  array<string, mixed>|list<mixed>  $data
+     * @return array<string, mixed>|list<mixed>
+     */
+    private static function rewriteOriginPrefixDeep(array $data, string $fromOrigin, string $toOrigin): array
+    {
+        $out = [];
+        foreach ($data as $key => $value) {
+            $out[$key] = self::rewriteOriginPrefixValue($value, $fromOrigin, $toOrigin);
+        }
+
+        return $out;
+    }
+
+    private static function rewriteOriginPrefixValue(mixed $value, string $fromOrigin, string $toOrigin): mixed
+    {
+        if (is_string($value)) {
+            if (str_starts_with($value, $fromOrigin.'/')) {
+                return $toOrigin.substr($value, strlen($fromOrigin));
+            }
+            if ($value === $fromOrigin) {
+                return $toOrigin;
+            }
+
+            return $value;
+        }
+        if (is_array($value)) {
+            return self::rewriteOriginPrefixDeep($value, $fromOrigin, $toOrigin);
+        }
+
+        return $value;
     }
 
     /**

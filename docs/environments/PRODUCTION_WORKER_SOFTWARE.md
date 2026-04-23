@@ -123,6 +123,17 @@ npx playwright install --with-deps chromium
 
 **Exit code 1 vs 3 (canvas capture):** **3** = Chromium could not open the signed URL (network / DNS / wrong host). **1** = the Node process died **before** the script’s structured exits—usually **no `playwright` in `node_modules`** for that release, wrong Node binary, or an import-time crash; check `error_json.debug.stderr_tail` on the failed job row.
 
+### Zero-downtime / Forge releases (why `ERR_MODULE_NOT_FOUND` persists)
+
+If deploy only runs **`composer install`** and **never `npm ci`**, each new release directory (e.g. `/var/www/jackpot/releases/…`) has **no `node_modules`**, so Node cannot resolve `playwright` — **no amount of PHP config fixes that**.
+
+1. On the server, **`cd` to the active release** (same path as `php artisan` / `base_path()`).
+2. Run **`npm ci --no-audit --no-fund`** (after `composer install` / symlink step).
+3. Install browsers: **`PLAYWRIGHT_BROWSERS_PATH=0 npx playwright install chromium`** when your image sets that env, else **`npx playwright install --with-deps chromium`**.
+4. Add those lines to your **Forge deploy script** (or CI) every release. Repo helper: **`bash scripts/forge-studio-npm-ci.sh`** from the app root.
+
+The app also **preflight-checks** for `node_modules/playwright/package.json` before spawning capture; if it is missing you get failure code **`canvas_runtime_playwright_module_missing`** with this explanation instead of a raw Node stack trace.
+
 Further rollout detail: [CANVAS_RUNTIME_EXPORT.md](../studio/CANVAS_RUNTIME_EXPORT.md), [studio-animation-rollout.md](../internal/studio-animation-rollout.md).
 
 ---
