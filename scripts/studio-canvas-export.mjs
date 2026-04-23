@@ -3,7 +3,7 @@
  * Playwright driver: open signed Studio composition export render URL, wait for bridge readiness,
  * step time deterministically, capture PNG frames from [data-jp-composition-scene-root].
  *
- * Exit codes: 0 success | 2 bad args | 3 navigation | 4 readiness | 5 capture | 6 manifest I/O
+ * Exit codes: 0 success | 1 Node/bootstrap (uncaught before script exits 2–6; often missing `playwright` import) | 2 bad args | 3 navigation | 4 readiness | 5 capture | 6 manifest I/O
  */
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'

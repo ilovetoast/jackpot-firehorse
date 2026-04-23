@@ -119,7 +119,9 @@ npm ci
 npx playwright install --with-deps chromium
 ```
 
-**Docker / split DNS:** if **`APP_URL`** is only resolvable outside worker containers, set **`STUDIO_VIDEO_CANVAS_EXPORT_SIGNED_URL_ROOT`** (see `.env.example` and [CANVAS_RUNTIME_EXPORT.md](../studio/CANVAS_RUNTIME_EXPORT.md)) so the signed render URL host matches what Playwright can open (`net::ERR_CONNECTION_REFUSED` on exit code 3 otherwise).
+**Docker / split DNS:** if **`APP_URL`** is only resolvable outside worker containers, set **`STUDIO_VIDEO_CANVAS_EXPORT_SIGNED_URL_ROOT`** (see `.env.example` and [CANVAS_RUNTIME_EXPORT.md](../studio/CANVAS_RUNTIME_EXPORT.md)) so the signed render URL host matches what Playwright can open (`net::ERR_CONNECTION_REFUSED` on **process exit code 3**).
+
+**Exit code 1 vs 3 (canvas capture):** **3** = Chromium could not open the signed URL (network / DNS / wrong host). **1** = the Node process died **before** the script’s structured exits—usually **no `playwright` in `node_modules`** for that release, wrong Node binary, or an import-time crash; check `error_json.debug.stderr_tail` on the failed job row.
 
 Further rollout detail: [CANVAS_RUNTIME_EXPORT.md](../studio/CANVAS_RUNTIME_EXPORT.md), [studio-animation-rollout.md](../internal/studio-animation-rollout.md).
 

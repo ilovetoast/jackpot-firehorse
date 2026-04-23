@@ -662,7 +662,7 @@ final class StudioCompositionCanvasRuntimeVideoExportService
     private static function playwrightExitCodeHintLine(int $exitCode): string
     {
         return match ($exitCode) {
-            1 => 'exit_1_unhandled: Node/Playwright failed before controlled exits (missing module, bad node path, or crash).',
+            1 => 'exit_1_bootstrap: Node process died before the script used exit codes 2–6 (import failure, wrong cwd, or crash before try/catch).',
             2 => 'exit_2_bad_args: invalid CLI flags, paths, or numeric parameters.',
             3 => 'exit_3_navigation: Chromium could not load the signed render URL (timeouts, DNS/TLS, or worker cannot reach APP_URL).',
             4 => 'exit_4_readiness: page loaded but export bridge never became ready=true (fonts, assets, raster preload, or readiness timeout).',
@@ -683,7 +683,7 @@ final class StudioCompositionCanvasRuntimeVideoExportService
             $detail = is_string($e) ? $e : '';
         }
         $hint = match ($exitCode) {
-            1 => 'The capture process exited before the script\'s normal error codes (often missing Playwright/Chromium, wrong Node path, or an uncaught exception in the driver).',
+            1 => 'Node exited with code 1 before the capture script could return its normal exit codes 2–6 (this is usually not Chromium navigation—that is exit 3). Typical causes: missing `playwright` under `node_modules` for this release, `STUDIO_VIDEO_CANVAS_EXPORT_NODE_BINARY` pointing at a Node without that tree, or an ESM import-time crash.',
             2 => 'The Node driver rejected its arguments.',
             3 => 'The headless browser could not open the signed export URL before navigation-timeout-ms.',
             4 => 'The export page did not become ready before readiness-timeout-ms (fonts, images, or bridge checks).',
@@ -694,8 +694,14 @@ final class StudioCompositionCanvasRuntimeVideoExportService
         $msg = "Studio video export: {$hint} (process exit code {$exitCode}).";
         if ($detail !== '') {
             $msg .= ' '.$detail;
+        } elseif ($exitCode === 1 && trim($stderr) !== '') {
+            $msg .= ' Raw stderr (first 1500 chars): '.mb_substr(trim($stderr), 0, 1500);
         }
-        $msg .= ' On the Horizon host: ensure `npm ci` and `npx playwright install --with-deps chromium` from the app root, and that workers can HTTP(S) reach the same host the signed URL uses. Inspect `error_json.debug` for stderr_tail.';
+        if ($exitCode === 1) {
+            $msg .= ' Staging/production: on the Horizon host `cd` to the app root that runs `artisan` (same as `base_path()`), run `npm ci` so `node_modules/playwright` exists (`playwright` must be a **dependency**, not dev-only). Then install browsers (e.g. `PLAYWRIGHT_BROWSERS_PATH=0 npx playwright install chromium` when your image sets that env). Align `STUDIO_VIDEO_CANVAS_EXPORT_NODE_BINARY` with the Node that uses that `node_modules`.';
+        } else {
+            $msg .= ' On the Horizon host: ensure `npm ci` and `npx playwright install --with-deps chromium` from the app root, and that workers can HTTP(S) reach the same host the signed URL uses. Inspect `error_json.debug` for stderr_tail.';
+        }
         if ($exitCode === 3 && str_contains($detail, 'ERR_CONNECTION_REFUSED')) {
             $msg .= ' Connection refused usually means the URL host is not listening inside the worker network (browser-only DNS like jackpot.local). Set STUDIO_VIDEO_CANVAS_EXPORT_SIGNED_URL_ROOT to a worker-reachable origin (Sail: http://laravel.test).';
         }
