@@ -200,7 +200,8 @@ export const CompositionScene = forwardRef<HTMLDivElement, CompositionSceneProps
                                 setImageLoadFailedByLayerId={setImageLoadFailedByLayerId}
                                 editorHandlers={editorHandlers}
                                 renderTextLayer={renderTextLayer}
-                                showVideoControls={mode === 'editor' && isSelected}
+                                /* Native controls stay off — use {@link EditorCompositionVideoPlaybackBar} only. */
+                                showVideoControls={false}
                             />
                             {mode === 'editor' &&
                                 editorHandlers &&

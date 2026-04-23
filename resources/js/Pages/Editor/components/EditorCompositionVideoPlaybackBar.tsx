@@ -28,6 +28,14 @@ export function EditorCompositionVideoPlaybackBar(props: {
     const anyVideo = useMemo(() => hasVisibleVideoLayer(doc.layers), [doc.layers])
 
     const [playing, setPlaying] = useState(false)
+    /** Local playhead while playing so we do not `setState` on the parent every RAF (that re-ran scene sync and thrashed video). */
+    const [livePlayheadMs, setLivePlayheadMs] = useState(playheadMs)
+
+    useEffect(() => {
+        if (!playing) {
+            setLivePlayheadMs(playheadMs)
+        }
+    }, [playheadMs, playing])
 
     const queryVideos = useCallback(() => {
         const stage = getStageEl()
@@ -66,13 +74,13 @@ export function EditorCompositionVideoPlaybackBar(props: {
             const vids = queryVideos()
             const v0 = vids[0]
             if (v0) {
-                onPlayheadMsChange(Math.min(Math.round(v0.currentTime * 1000), durationMs))
+                setLivePlayheadMs(Math.min(Math.round(v0.currentTime * 1000), durationMs))
             }
             raf = requestAnimationFrame(tick)
         }
         raf = requestAnimationFrame(tick)
         return () => cancelAnimationFrame(raf)
-    }, [playing, durationMs, queryVideos, onPlayheadMsChange])
+    }, [playing, durationMs, queryVideos])
 
     useEffect(() => {
         if (!autoplayNonce) {
@@ -96,10 +104,14 @@ export function EditorCompositionVideoPlaybackBar(props: {
                     /* autoplay / decode */
                 }
             }
+            const v0 = queryVideosRef.current()[0]
+            if (v0) {
+                setLivePlayheadMs(Math.min(Math.round(v0.currentTime * 1000), durationMs))
+            }
             setPlaying(true)
         })()
         return undefined
-    }, [autoplayNonce])
+    }, [autoplayNonce, durationMs])
 
     const togglePlay = useCallback(() => {
         const vids = queryVideos()
@@ -110,6 +122,10 @@ export function EditorCompositionVideoPlaybackBar(props: {
             for (const v of vids) {
                 void v.pause()
             }
+            const v0 = vids[0]
+            const endMs = v0 ? Math.min(Math.round(v0.currentTime * 1000), durationMs) : playheadMs
+            onPlayheadMsChange(endMs)
+            setLivePlayheadMs(endMs)
             setPlaying(false)
             return
         }
@@ -122,9 +138,13 @@ export function EditorCompositionVideoPlaybackBar(props: {
                     /* autoplay / decode */
                 }
             }
+            const v0 = vids[0]
+            if (v0) {
+                setLivePlayheadMs(Math.min(Math.round(v0.currentTime * 1000), durationMs))
+            }
             setPlaying(true)
         })()
-    }, [queryVideos, playing, playheadMs])
+    }, [queryVideos, playing, playheadMs, durationMs, onPlayheadMsChange])
 
     if (videoLayerCount === 0 || !anyVideo) {
         return null
@@ -144,7 +164,7 @@ export function EditorCompositionVideoPlaybackBar(props: {
         >
             <span
                 className="max-w-[10rem] text-[9px] font-semibold uppercase tracking-wider text-indigo-300/90"
-                title="Scrub the clip, or use the on-canvas player when a video layer is selected."
+                title="Scrub and play/pause here — canvas video has no native controls."
             >
                 Video playback
             </span>
@@ -158,17 +178,18 @@ export function EditorCompositionVideoPlaybackBar(props: {
                 {playing ? <PauseIcon className="h-4 w-4" /> : <PlayIcon className="h-4 w-4" />}
             </button>
             <span className="tabular-nums text-[10px] text-gray-400">
-                {fmt(playheadMs)} / {fmt(durationMs)}
+                {fmt(playing ? livePlayheadMs : playheadMs)} / {fmt(durationMs)}
             </span>
             <input
                 type="range"
                 min={0}
                 max={durationMs}
                 step={50}
-                value={playheadMs}
+                value={playing ? livePlayheadMs : playheadMs}
                 onChange={(e) => {
                     const v = Number(e.target.value)
                     syncVideosToMs(v)
+                    setLivePlayheadMs(v)
                     if (playing) {
                         for (const vid of queryVideos()) {
                             void vid.play().catch(() => {})

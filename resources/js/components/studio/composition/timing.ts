@@ -14,6 +14,10 @@ export function applyVideosCurrentTimeInContainer(
     const t = Math.max(0, Math.min(timeMs / 1000, Math.max(0.001, durationMs) / 1000))
     for (const v of container.querySelectorAll<HTMLVideoElement>('[data-jp-composition-scene-video]')) {
         try {
+            // Avoid re-seeking every frame while playing — that fights decode/playback and causes pause/play thrash.
+            if (!v.paused && Math.abs(v.currentTime - t) < 0.12) {
+                continue
+            }
             v.currentTime = t
         } catch {
             /* decode / range */
