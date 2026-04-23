@@ -32,6 +32,14 @@ return [
     /** TTL (minutes) for signed URLs to the internal export render page (Playwright opens this URL). */
     'canvas_export_render_url_ttl_minutes' => (int) env('STUDIO_VIDEO_CANVAS_EXPORT_RENDER_URL_TTL', 120),
 
+    /**
+     * Optional scheme + host (no path) used only when signing the internal Playwright render URL.
+     * When queue workers run in Docker but {@code APP_URL} is a browser-only hostname (e.g. {@code http://jackpot.local}),
+     * headless Chromium gets {@code net::ERR_CONNECTION_REFUSED}. Set this to an origin workers can reach
+     * (Laravel Sail: {@code http://laravel.test}). Leave empty to use {@code APP_URL} like other signed routes.
+     */
+    'canvas_export_signed_url_root' => env('STUDIO_VIDEO_CANVAS_EXPORT_SIGNED_URL_ROOT', ''),
+
     /** Target FPS for canvas frame capture (must match {@see CompositionRenderPayloadV1} contract). */
     'canvas_export_default_fps' => (int) env('STUDIO_VIDEO_CANVAS_EXPORT_DEFAULT_FPS', 30),
 

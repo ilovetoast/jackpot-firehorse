@@ -32,6 +32,7 @@ So: FFmpeg remains essential for **H.264/AAC**, timeline cuts, and **merging** b
 ### Phase 1: headless frame capture + FFmpeg merge (implemented)
 
 1. **Worker image / dependencies**: Node LTS + **`playwright`** on the **video-heavy** (or dedicated canvas) worker; `npm ci` in `jackpot/`; run **`npx playwright install --with-deps chromium`** in CI/AMI bake (or `PLAYWRIGHT_BROWSERS_PATH` cache). In build/CI, **`npx playwright install --with-deps --dry-run chromium`** validates the CLI and planned browser + OS deps **without installing** (see [Production worker software — Node.js / Playwright](../environments/PRODUCTION_WORKER_SOFTWARE.md#nodejs--playwright-video-heavy--studio)).
+   - **Signed URL host vs workers**: Playwright runs **inside the worker** and calls `page.goto` on the signed internal render URL. That URL is normally rooted at **`APP_URL`**. If `APP_URL` uses a hostname only your **browser** can reach (e.g. `jackpot.local` → host loopback) but **not** the worker container, Chromium reports `net::ERR_CONNECTION_REFUSED` (export exit code **3**). Set **`STUDIO_VIDEO_CANVAS_EXPORT_SIGNED_URL_ROOT`** to an origin workers can reach (Laravel Sail: **`http://laravel.test`**) while leaving **`APP_URL`** unchanged for Inertia/Vite in the browser.
 2. **Node driver**: `jackpot/scripts/studio-canvas-export.mjs`
 
    - CLI: `--url`, `--output-dir`, `--fps`, `--duration-ms`, `--width`, `--height`, `--export-job-id`, plus optional timeouts / `--frame-settle-ms` / `--device-scale-factor` (see service + script header).
@@ -41,7 +42,7 @@ So: FFmpeg remains essential for **H.264/AAC**, timeline cuts, and **merging** b
 
 3. **PHP service** (`StudioCompositionCanvasRuntimeVideoExportService`):
 
-   - Assert feature flag; resolve signed URL via `URL::temporarySignedRoute`; create `storage/app/studio-canvas-runtime/{jobId}/run-*`.
+   - Assert feature flag; resolve signed URL via `URL::temporarySignedRoute` (optional root override `studio_video.canvas_export_signed_url_root`); create `storage/app/studio-canvas-runtime/{jobId}/run-*`.
    - **`DefaultStudioCanvasRuntimePlaywrightInvoker`** runs `Symfony\Component\Process` (`config/studio_video.php` timeouts + node binary path).
    - **FFmpeg merge**: **`StudioCompositionCanvasRuntimeFfmpegMerger`** reads **`meta_json.canvas_runtime_capture.working_directory`** + manifest (`fps`, `duration_ms`, `frame_filename_pattern`, frame counts, dimensions). Base video selection, trim, duration cap, pad color, and audio gating match **`StudioCompositionVideoExportMediaHelper`** + legacy rules (`include_audio` + layer `timeline.muted` + `ffprobe` audio presence). **`DefaultStudioCanvasRuntimeFfmpegProcessInvoker`** runs FFmpeg (configurable timeout, x264 preset/CRF, pixel format). **`StudioCompositionVideoExportMp4Publisher`** writes the MP4 and dispatches **`ProcessAssetJob`** (same as legacy export).
 

@@ -58,11 +58,7 @@ final class StudioCompositionCanvasRuntimeVideoExportService
 
         $payload = CompositionRenderPayloadFactory::fromComposition($composition, $tenant, $user, $row);
         $ttl = max(5, (int) config('studio_video.canvas_export_render_url_ttl_minutes', 120));
-        $renderUrl = URL::temporarySignedRoute(
-            'internal.studio.composition-export-render',
-            now()->addMinutes($ttl),
-            ['exportJob' => $row->id],
-        );
+        $renderUrl = $this->temporarySignedCompositionExportRenderUrl($row->id, $ttl);
 
         $workDir = storage_path('app/studio-canvas-runtime/'.$row->id.'/run-'.Str::lower(Str::random(12)));
         File::ensureDirectoryExists($workDir);
@@ -700,8 +696,35 @@ final class StudioCompositionCanvasRuntimeVideoExportService
             $msg .= ' '.$detail;
         }
         $msg .= ' On the Horizon host: ensure `npm ci` and `npx playwright install --with-deps chromium` from the app root, and that workers can HTTP(S) reach the same host the signed URL uses. Inspect `error_json.debug` for stderr_tail.';
+        if ($exitCode === 3 && str_contains($detail, 'ERR_CONNECTION_REFUSED')) {
+            $msg .= ' Connection refused usually means the URL host is not listening inside the worker network (browser-only DNS like jackpot.local). Set STUDIO_VIDEO_CANVAS_EXPORT_SIGNED_URL_ROOT to a worker-reachable origin (Sail: http://laravel.test).';
+        }
 
         return $msg;
+    }
+
+    /**
+     * Signed route uses the app URL root; workers may need a different origin than {@see config('app.url')}.
+     */
+    private function temporarySignedCompositionExportRenderUrl(int $exportJobId, int $ttlMinutes): string
+    {
+        $raw = (string) config('studio_video.canvas_export_signed_url_root', '');
+        $forcedRoot = trim($raw);
+        $didForce = $forcedRoot !== '';
+        if ($didForce) {
+            URL::forceRootUrl(rtrim($forcedRoot, '/'));
+        }
+        try {
+            return URL::temporarySignedRoute(
+                'internal.studio.composition-export-render',
+                now()->addMinutes($ttlMinutes),
+                ['exportJob' => $exportJobId],
+            );
+        } finally {
+            if ($didForce) {
+                URL::forceRootUrl(rtrim((string) config('app.url'), '/'));
+            }
+        }
     }
 
     private static function parseLastJsonErrorFromStderr(string $stderr): string
