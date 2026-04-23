@@ -573,7 +573,7 @@ class EditorCompositionStudioVideoController extends Controller
         if (! $needsDefaultFallback) {
             return null;
         }
-        $path = trim((string) config('studio_rendering.default_font_path', ''));
+        $path = trim((string) (config('studio_rendering.default_font_path') ?? ''));
         if ($path === '' || ! is_file($path)) {
             return 'At least one text layer has no tenant font (font_asset_id) or explicit local font path; set STUDIO_RENDERING_DEFAULT_FONT_PATH to a readable TTF/OTF on workers for CSS font-family fallback.';
         }

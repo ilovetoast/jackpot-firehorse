@@ -34,6 +34,24 @@ class StudioRenderingFontResolverTest extends TestCase
         @unlink($tmp);
     }
 
+    public function test_default_font_path_used_when_no_tenant_font_no_explicit_font_and_no_family_map(): void
+    {
+        $tmp = sys_get_temp_dir().'/jp_font_minimal_'.uniqid('', true).'.ttf';
+        file_put_contents($tmp, 'dummy');
+        Config::set('studio_rendering.default_font_path', $tmp);
+        Config::set('studio_rendering.font_family_map', []);
+
+        $r = $this->resolver()->resolveForTextLayer(
+            new Tenant(['id' => 1]),
+            null,
+            [],
+            'Some Web Font, sans-serif',
+        );
+        $this->assertSame('default', $r->source);
+        $this->assertSame($tmp, $r->absolutePath);
+        @unlink($tmp);
+    }
+
     public function test_font_family_map_local_path(): void
     {
         $tmp = sys_get_temp_dir().'/jp_map_font_'.uniqid('', true).'.ttf';

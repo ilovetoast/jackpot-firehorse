@@ -48,10 +48,14 @@ return [
 
     /**
      * Absolute path to a TTF/OTF when no tenant/font_family_map match (see StudioRenderingFontResolver).
-     * Uses STUDIO_RENDERING_DEFAULT_FONT_PATH; when empty, falls back to Debian/Ubuntu DejaVu.
-     * With config:cache, set the variable in the process environment as well so workers see it.
+     * Populated from STUDIO_RENDERING_DEFAULT_FONT_PATH; when empty, falls back to Debian/Ubuntu DejaVu.
+     * If {@see config('studio_rendering.default_font_path')} is null after `config:cache` from an older build,
+     * {@see \App\Providers\AppServiceProvider} re-hydrates this key from the environment at boot.
      */
-    'default_font_path' => trim((string) (env('STUDIO_RENDERING_DEFAULT_FONT_PATH') ?: '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf')),
+    'default_font_path' => trim((string) (
+        env('STUDIO_RENDERING_DEFAULT_FONT_PATH')
+        ?: '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'
+    )),
 
     /**
      * When true, visible layers FFmpeg-native cannot render (unknown type, under-primary-video, etc.)

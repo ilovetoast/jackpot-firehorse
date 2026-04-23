@@ -87,24 +87,15 @@ final class StudioRenderingFontResolver
             }
 
             $path = $this->tryDefaultFontPath();
-            if ($path !== null) {
-                $this->assertLocalFontFile($path, 'default');
-                $this->logFontResolved($layerId, $path, 'default');
+            $this->assertLocalFontFile($path, 'default');
+            $this->logFontResolved($layerId, $path, 'default');
 
-                return new ResolvedStudioFont($path, 'default', false, array_merge($debug, [
-                    'resolved_path' => $path,
-                ]));
-            }
+            return new ResolvedStudioFont($path, 'default', false, array_merge($debug, [
+                'resolved_path' => $path,
+            ]));
         } catch (StudioFontResolutionException $e) {
             throw $e;
         }
-
-        throw new StudioFontResolutionException(
-            'missing_default_font_path',
-            'No font file resolved. Set STUDIO_RENDERING_DEFAULT_FONT_PATH to a readable TTF/OTF on workers, '
-            .'configure studio_rendering.font_family_map, or attach a tenant font asset (font_asset_id) on the text layer.',
-            $debug,
-        );
     }
 
     private function logFontResolved(?string $layerId, string $fontPath, string $source): void
@@ -372,19 +363,31 @@ final class StudioRenderingFontResolver
         return null;
     }
 
-    private function tryDefaultFontPath(): ?string
+    /**
+     * @throws StudioFontResolutionException
+     */
+    private function tryDefaultFontPath(): string
     {
-        $default = trim((string) (config('studio_rendering.default_font_path') ?? ''));
-        if ($default === '') {
-            $default = $this->readDefaultFontPathFromProcessEnv();
+        $raw = config('studio_rendering.default_font_path');
+        if ($raw === null) {
+            throw new StudioFontResolutionException(
+                'missing_default_font_path',
+                'config("studio_rendering.default_font_path") is null. Run `php artisan config:clear` and `php artisan config:cache` after upgrading, or set default_font_path in config/studio_rendering.php.',
+                [],
+            );
         }
+        $default = trim((string) $raw);
         if ($default === '') {
-            return null;
+            throw new StudioFontResolutionException(
+                'missing_default_font_path',
+                'config("studio_rendering.default_font_path") is empty. Set STUDIO_RENDERING_DEFAULT_FONT_PATH in the environment or default_font_path in config/studio_rendering.php.',
+                [],
+            );
         }
         if (! is_file($default)) {
             throw new StudioFontResolutionException(
                 'default_font_path_not_found',
-                'Default font path is not a file: '.$default.'. Set STUDIO_RENDERING_DEFAULT_FONT_PATH (or config studio_rendering.default_font_path) to a valid TTF/OTF on workers.',
+                'Default font path is not a file: '.$default.'. Fix config("studio_rendering.default_font_path") or install the font on workers.',
                 ['path' => $default],
             );
         }
@@ -397,17 +400,6 @@ final class StudioRenderingFontResolver
         }
 
         return $default;
-    }
-
-    private function readDefaultFontPathFromProcessEnv(): string
-    {
-        $v = getenv('STUDIO_RENDERING_DEFAULT_FONT_PATH');
-        if (is_string($v) && trim($v) !== '') {
-            return trim($v);
-        }
-        $v = $_SERVER['STUDIO_RENDERING_DEFAULT_FONT_PATH'] ?? null;
-
-        return is_string($v) && trim($v) !== '' ? trim($v) : '';
     }
 
     /**

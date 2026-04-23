@@ -25,6 +25,7 @@ Install the **same PHP version and extensions** the application expects in produ
 |-------------|---------|
 | **PHP CLI / FPM** | Runs Laravel and Horizon |
 | **imagick** extension | Image and PDF rasterization via Imagick; requires **system ImageMagick** (see [Packages](#packages)) |
+| **php{x}-xml** | **DOM**, **SimpleXML**, and other XML APIs Laravel and dependencies use on workers — install the package that matches your PHP major (e.g. **`php8.5-xml`** on Ubuntu when PHP 8.5 runs Horizon) |
 
 If **imagick** is missing or system ImageMagick/Ghostscript is absent, raster and PDF thumbnails fail at runtime.
 
@@ -89,7 +90,17 @@ sudo apt install -y \
 command -v ffprobe && ffprobe -version
 ```
 
-**PHP raster backend (pick one; match your PHP major, e.g. `php8.3-*`)**
+**PHP extensions (match your PHP major, e.g. `php8.5-*` on Ubuntu)**
+
+XML (required for typical Laravel / dependency XML usage on workers):
+
+```bash
+sudo apt install -y php8.5-xml
+```
+
+Use **`php{version}-xml`** for whatever version runs **`php artisan queue:work`** / Horizon (e.g. **`php8.3-xml`**, **`php8.4-xml`**).
+
+**PHP raster backend (pick one; same version suffix as above)**
 
 Preferred when the app uses Imagick for text overlays:
 

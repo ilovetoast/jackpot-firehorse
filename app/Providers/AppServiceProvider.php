@@ -168,6 +168,8 @@ class AppServiceProvider extends ServiceProvider
         $router->aliasMiddleware('incubation.not_locked', EnsureIncubationWorkspaceNotLocked::class);
         $router->aliasMiddleware('ensure.onboarding', EnsureOnboardingComplete::class);
 
+        $this->hydrateStudioRenderingDefaultFontPath();
+
         // Sentry: prevent huge transaction span explosions from inflating quota (drops the transaction only, not errors).
         if ($this->app->bound(HubInterface::class)) {
             \Sentry\configureScope(static function (Scope $scope): void {
@@ -290,6 +292,22 @@ class AppServiceProvider extends ServiceProvider
         );
 
         Config::set('mail.default', 'log');
+    }
+
+    /**
+     * Stale `php artisan config:cache` artifacts may omit `default_font_path` under `studio_rendering`
+     * while STUDIO_RENDERING_DEFAULT_FONT_PATH is present in the process environment. Ensure
+     * {@see config('studio_rendering.default_font_path')} is always a non-empty string at runtime.
+     */
+    private function hydrateStudioRenderingDefaultFontPath(): void
+    {
+        $current = config('studio_rendering.default_font_path');
+        if ($current !== null && trim((string) $current) !== '') {
+            return;
+        }
+        $fromEnv = env('STUDIO_RENDERING_DEFAULT_FONT_PATH');
+        $resolved = trim((string) (is_string($fromEnv) && $fromEnv !== '' ? $fromEnv : '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'));
+        Config::set('studio_rendering.default_font_path', $resolved);
     }
 
     /**
