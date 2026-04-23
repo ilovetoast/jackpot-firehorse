@@ -42,21 +42,41 @@ export async function withAIConcurrency<T>(fn: () => Promise<T>): Promise<T> {
     }
 }
 
+function shouldPreserveTimeoutLikeMessage(message: string): boolean {
+    const m = message.trim()
+    // Typical client/axios timeout strings are ~30–80 chars; keep them visible.
+    if (m.length >= 32) {
+        return true
+    }
+    // Studio / publish / media paths: never replace with the generic one-liner.
+    if (
+        /video|export|studio|composition|playwright|ffmpeg|horizon|queued|worker|fetch|network|gateway|504|503|502|csrf|csrf-token/i.test(
+            m,
+        )
+    ) {
+        return true
+    }
+    return false
+}
+
 /** Normalize any thrown value into a user-safe string for inline UI. */
 export function handleAIError(error: unknown): string {
     if (error instanceof DOMException && error.name === 'AbortError') {
         return 'Request cancelled.'
     }
     if (error instanceof Error && error.message) {
-        const m = error.message
-        // Keep specific copy for long-running studio video export polling / queue issues.
-        if (/video export timed out|video export is still queued|timed out while reading video export status/i.test(m)) {
-            return m
+        const m = error.message.trim()
+        if (m === '') {
+            return 'Something went wrong. Please try again.'
         }
-        if (/abort|timed?\s*out|timeout/i.test(m)) {
+        // Only collapse *short* generic transport failures; keep anything diagnostic.
+        if (/abort|timed?\s*out|timeout/i.test(m) && !shouldPreserveTimeoutLikeMessage(m)) {
             return 'Request timed out or was cancelled. Please try again.'
         }
-        return m
+        return error.message
+    }
+    if (typeof error === 'string' && error.trim() !== '') {
+        return handleAIError(new Error(error))
     }
     return 'Something went wrong. Please try again.'
 }

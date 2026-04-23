@@ -96,7 +96,7 @@ Required only on **queue workers** (or dedicated services) that run **Studio** w
 **Checklist**
 
 1. **Node.js** — Version pinned to what `jackpot/package.json` and CI use; `node` and `npm` on `PATH` for the user that runs Horizon / `queue:work`.
-2. **Application JS** — From the **`jackpot/`** directory (same as `artisan`), run **`npm ci`** during image bake or deploy so `node_modules/playwright` matches the lockfile.
+2. **Application JS** — From the **`jackpot/`** directory (same as `artisan`), run **`npm ci`** during image bake or deploy so `node_modules/playwright` matches the lockfile. The **`playwright`** package lives in **`dependencies`** (not `devDependencies`) so staging/production installs that use **`npm ci --omit=dev`** or **`NODE_ENV=production`** still ship the driver Horizon invokes.
 3. **Chromium + OS libraries** — After `npm ci`, from **`jackpot/`**:
 
    **`npx playwright install --with-deps chromium`**
