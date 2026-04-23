@@ -38,6 +38,7 @@ class ProcessStudioCompositionVideoExportJob implements ShouldQueue
         if ($row && $row->render_mode === StudioCompositionVideoExportRenderMode::CANVAS_RUNTIME->value) {
             $queue = StudioCanvasExportQueue::heavy();
         }
+        // ffmpeg_native uses the default heavy video queue (no Playwright).
         $this->onQueue($queue);
     }
 

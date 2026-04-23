@@ -6,6 +6,7 @@ use App\Models\StudioCompositionVideoExportJob;
 use App\Models\Tenant;
 use App\Models\User;
 use App\Services\Studio\StudioCompositionCanvasRuntimeVideoExportService;
+use App\Services\Studio\StudioCompositionFfmpegNativeVideoExportService;
 use App\Services\Studio\StudioCompositionVideoExportOrchestrator;
 use App\Services\Studio\StudioCompositionVideoExportRenderMode;
 use App\Services\Studio\StudioCompositionVideoExportService;
@@ -27,7 +28,10 @@ class StudioCompositionVideoExportOrchestratorTest extends TestCase
         $canvas = Mockery::mock(StudioCompositionCanvasRuntimeVideoExportService::class);
         $canvas->shouldReceive('run')->never();
 
-        $orchestrator = new StudioCompositionVideoExportOrchestrator($legacy, $canvas);
+        $ffmpeg = Mockery::mock(StudioCompositionFfmpegNativeVideoExportService::class);
+        $ffmpeg->shouldReceive('run')->never();
+
+        $orchestrator = new StudioCompositionVideoExportOrchestrator($legacy, $canvas, $ffmpeg);
 
         $row = new StudioCompositionVideoExportJob([
             'render_mode' => StudioCompositionVideoExportRenderMode::LEGACY_BITMAP->value,
@@ -45,10 +49,33 @@ class StudioCompositionVideoExportOrchestratorTest extends TestCase
         $canvas = Mockery::mock(StudioCompositionCanvasRuntimeVideoExportService::class);
         $canvas->shouldReceive('run')->once();
 
-        $orchestrator = new StudioCompositionVideoExportOrchestrator($legacy, $canvas);
+        $ffmpeg = Mockery::mock(StudioCompositionFfmpegNativeVideoExportService::class);
+        $ffmpeg->shouldReceive('run')->never();
+
+        $orchestrator = new StudioCompositionVideoExportOrchestrator($legacy, $canvas, $ffmpeg);
 
         $row = new StudioCompositionVideoExportJob([
             'render_mode' => StudioCompositionVideoExportRenderMode::CANVAS_RUNTIME->value,
+        ]);
+        $tenant = new Tenant(['id' => 1]);
+        $user = new User(['id' => 1]);
+
+        $orchestrator->run($row, $tenant, $user);
+    }
+
+    public function test_ffmpeg_native_routes_to_ffmpeg_service_only(): void
+    {
+        $legacy = Mockery::mock(StudioCompositionVideoExportService::class);
+        $legacy->shouldReceive('run')->never();
+        $canvas = Mockery::mock(StudioCompositionCanvasRuntimeVideoExportService::class);
+        $canvas->shouldReceive('run')->never();
+        $ffmpeg = Mockery::mock(StudioCompositionFfmpegNativeVideoExportService::class);
+        $ffmpeg->shouldReceive('run')->once();
+
+        $orchestrator = new StudioCompositionVideoExportOrchestrator($legacy, $canvas, $ffmpeg);
+
+        $row = new StudioCompositionVideoExportJob([
+            'render_mode' => StudioCompositionVideoExportRenderMode::FFMPEG_NATIVE->value,
         ]);
         $tenant = new Tenant(['id' => 1]);
         $user = new User(['id' => 1]);

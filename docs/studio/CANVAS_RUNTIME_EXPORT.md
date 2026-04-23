@@ -23,7 +23,7 @@ So: FFmpeg remains essential for **H.264/AAC**, timeline cuts, and **merging** b
 
 1. **`render_mode`** column on `studio_composition_video_export_jobs`: `legacy_bitmap` (default) | `canvas_runtime`.
 2. **API**: `POST .../studio/video-export` accepts optional `render_mode`; status payload includes `render_mode`.
-3. **`StudioCompositionVideoExportOrchestrator`**: dispatches to legacy service vs canvas-runtime service.
+3. **`StudioCompositionVideoExportOrchestrator`**: dispatches to legacy bitmap, **`ffmpeg_native`** (FFmpeg filter graph, no browser), or canvas-runtime (Playwright) services.
 4. **Queues**: `ProcessStudioCompositionVideoExportJob` uses `StudioVideoQueue::heavy()` for legacy; `StudioCanvasExportQueue::heavy()` for canvas-runtime (defaults to the same Redis queue until `QUEUE_VIDEO_HEAVY_STUDIO_CANVAS_QUEUE` is set).
 5. **Signed internal render URL**: `GET /internal/studio/composition-export-render/{exportJob}` (middleware `web`, `signed`) serves Inertia page `StudioExport/CompositionExportRender` with **no editor chrome** (`app.jsx` treats `StudioExport/*` like experience pages).
 6. **`CompositionRenderPayloadFactory`**: versioned JSON (`version: 1`, dimensions, fps, duration, sorted layers, background hint, ids) plus **`brand_context`** and derived **`fonts`** metadata for the export surface.

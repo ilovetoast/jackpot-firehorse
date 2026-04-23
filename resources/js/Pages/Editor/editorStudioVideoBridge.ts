@@ -96,8 +96,8 @@ export async function postStoreVideoLayer(
 export type PostVideoExportResponse = { id: string; status: string; render_mode?: string }
 
 export type PostRequestVideoExportBody = {
-    /** `legacy_bitmap` = current FFmpeg-only overlays. `canvas_runtime` = headless browser scene (feature-flagged). */
-    render_mode?: 'legacy_bitmap' | 'canvas_runtime'
+    /** `legacy_bitmap` = FFmpeg overlays only. `ffmpeg_native` = full-scene FFmpeg (default server path). `canvas_runtime` = Playwright capture (optional). */
+    render_mode?: 'legacy_bitmap' | 'canvas_runtime' | 'ffmpeg_native'
     include_audio?: boolean
     editor_publish?: {
         name?: string
@@ -156,6 +156,8 @@ export type VideoExportStatusResponse = {
     output_asset_id: string | null
     error: unknown
     meta: unknown
+    canvas_runtime_debug?: unknown
+    ffmpeg_native_debug?: unknown
 }
 
 export type VideoExportJobListItem = {

@@ -118,6 +118,11 @@ class AppServiceProvider extends ServiceProvider
             \App\Services\Studio\DefaultStudioCanvasRuntimeFfmpegProcessInvoker::class,
         );
 
+        $this->app->bind(
+            \App\Studio\Rendering\Contracts\CompositionRenderer::class,
+            \App\Studio\Rendering\FfmpegNativeCompositionRenderer::class,
+        );
+
         $this->app->singleton(\App\Services\SpatieRoleLookup::class);
 
         $this->app->singleton(\App\Services\NotificationOrchestrator::class, function ($app) {

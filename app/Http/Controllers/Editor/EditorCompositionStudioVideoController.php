@@ -7,7 +7,11 @@ use App\Jobs\ProcessStudioCompositionVideoExportJob;
 use App\Models\Composition;
 use App\Models\StudioCompositionVideoExportJob;
 use App\Support\StudioCanvasRuntimeExportJobDiagnostics;
+use App\Services\Studio\StudioCompositionFfmpegNativeFeaturePolicy;
 use App\Services\Studio\StudioCompositionVideoExportRenderMode;
+use App\Services\Studio\StudioRenderingDriverResolver;
+use App\Studio\Rendering\StudioRenderingFontResolver;
+use App\Studio\Rendering\StudioTextLayerFontExtras;
 use App\Models\Tenant;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
@@ -250,6 +254,7 @@ class EditorCompositionStudioVideoController extends Controller
             'render_mode' => ['nullable', 'string', Rule::in([
                 StudioCompositionVideoExportRenderMode::LEGACY_BITMAP->value,
                 StudioCompositionVideoExportRenderMode::CANVAS_RUNTIME->value,
+                StudioCompositionVideoExportRenderMode::FFMPEG_NATIVE->value,
             ])],
             'include_audio' => 'nullable|boolean',
             'editor_publish' => 'nullable|array',
@@ -272,36 +277,33 @@ class EditorCompositionStudioVideoController extends Controller
         $editorPublish = $request->input('editor_publish');
 
         $canvasRuntimeEnabled = (bool) config('studio_video.canvas_runtime_export_enabled', false);
-        $needsCanvasRuntime = $this->compositionNeedsCanvasRuntimeExport($composition);
+        $needsFullSceneExport = $this->compositionNeedsCanvasRuntimeExport($composition);
+        $ffmpegUnsupported = StudioCompositionFfmpegNativeFeaturePolicy::unsupportedCodes($composition);
+        $driver = StudioRenderingDriverResolver::effectiveDriver();
+        $browserFallback = (bool) config('studio_rendering.browser_fallback_when_unsupported', false);
+
         $requestedRaw = $request->input('render_mode');
         $requestedMode = is_string($requestedRaw) && $requestedRaw !== ''
             ? (StudioCompositionVideoExportRenderMode::tryFrom($requestedRaw) ?? null)
             : null;
 
-        if ($needsCanvasRuntime && ! $canvasRuntimeEnabled) {
-            return response()->json([
-                'message' => 'This composition includes text (or other layers) that are not supported by the legacy FFmpeg export. Enable STUDIO_VIDEO_CANVAS_RUNTIME_EXPORT_ENABLED and run the canvas export workers (Playwright), then try again.',
-            ], 422);
-        }
         if ($requestedMode === StudioCompositionVideoExportRenderMode::CANVAS_RUNTIME && ! $canvasRuntimeEnabled) {
             return response()->json([
                 'message' => 'Canvas runtime export is disabled on this server.',
             ], 422);
         }
 
-        if (! $canvasRuntimeEnabled) {
-            $renderMode = StudioCompositionVideoExportRenderMode::LEGACY_BITMAP;
-        } elseif ($requestedMode === StudioCompositionVideoExportRenderMode::CANVAS_RUNTIME) {
-            $renderMode = StudioCompositionVideoExportRenderMode::CANVAS_RUNTIME;
-        } elseif ($needsCanvasRuntime) {
-            $renderMode = StudioCompositionVideoExportRenderMode::CANVAS_RUNTIME;
-            if ($requestedMode === StudioCompositionVideoExportRenderMode::LEGACY_BITMAP) {
-                Log::info('[EditorCompositionStudioVideoController] Upgrading video export to canvas_runtime (composition requires it)', [
-                    'composition_id' => $composition->id,
-                ]);
-            }
-        } else {
-            $renderMode = StudioCompositionVideoExportRenderMode::LEGACY_BITMAP;
+        $renderMode = $this->resolveStudioVideoExportRenderMode(
+            $composition,
+            $requestedMode,
+            $needsFullSceneExport,
+            $ffmpegUnsupported,
+            $driver,
+            $canvasRuntimeEnabled,
+            $browserFallback,
+        );
+        if ($renderMode instanceof JsonResponse) {
+            return $renderMode;
         }
 
         $metaJson = [
@@ -381,6 +383,14 @@ class EditorCompositionStudioVideoController extends Controller
         if ($row->render_mode === StudioCompositionVideoExportRenderMode::CANVAS_RUNTIME->value) {
             $payload['canvas_runtime_debug'] = StudioCanvasRuntimeExportJobDiagnostics::canvasRuntimeDebugBlock($row);
         }
+        if ($row->render_mode === StudioCompositionVideoExportRenderMode::FFMPEG_NATIVE->value) {
+            $meta = is_array($row->meta_json) ? $row->meta_json : [];
+            $payload['ffmpeg_native_debug'] = [
+                'export_phase' => $row->status,
+                'has_ffmpeg_diagnostics' => isset($meta['ffmpeg_diagnostics']),
+                'has_ffmpeg_native_export_meta' => isset($meta['ffmpeg_native_export']),
+            ];
+        }
 
         return response()->json($payload);
     }
@@ -440,6 +450,154 @@ class EditorCompositionStudioVideoController extends Controller
         })->values()->all();
 
         return response()->json(['jobs' => $jobs]);
+    }
+
+    /**
+     * @param  list<string>  $ffmpegUnsupported
+     * @return StudioCompositionVideoExportRenderMode|JsonResponse
+     */
+    private function resolveStudioVideoExportRenderMode(
+        Composition $composition,
+        ?StudioCompositionVideoExportRenderMode $requestedMode,
+        bool $needsFullSceneExport,
+        array $ffmpegUnsupported,
+        string $driver,
+        bool $canvasRuntimeEnabled,
+        bool $browserFallback,
+    ): StudioCompositionVideoExportRenderMode|JsonResponse {
+        if ($requestedMode === StudioCompositionVideoExportRenderMode::CANVAS_RUNTIME) {
+            return StudioCompositionVideoExportRenderMode::CANVAS_RUNTIME;
+        }
+        if ($requestedMode === StudioCompositionVideoExportRenderMode::FFMPEG_NATIVE) {
+            if ($ffmpegUnsupported !== []) {
+                return response()->json([
+                    'message' => StudioCompositionFfmpegNativeFeaturePolicy::humanSummary($ffmpegUnsupported),
+                    'unsupported_codes' => $ffmpegUnsupported,
+                ], 422);
+            }
+            $fontErr = $this->fontConfigErrorForTextExport($composition);
+            if ($fontErr !== null) {
+                return response()->json(['message' => $fontErr], 422);
+            }
+
+            return StudioCompositionVideoExportRenderMode::FFMPEG_NATIVE;
+        }
+        if ($requestedMode === StudioCompositionVideoExportRenderMode::LEGACY_BITMAP) {
+            if (! $needsFullSceneExport) {
+                return StudioCompositionVideoExportRenderMode::LEGACY_BITMAP;
+            }
+            if ($ffmpegUnsupported === []) {
+                $fontErr = $this->fontConfigErrorForTextExport($composition);
+                if ($fontErr !== null) {
+                    return response()->json(['message' => $fontErr], 422);
+                }
+                Log::info('[EditorCompositionStudioVideoController] Upgrading video export to ffmpeg_native (legacy requested but composition needs full scene)', [
+                    'composition_id' => $composition->id,
+                ]);
+
+                return StudioCompositionVideoExportRenderMode::FFMPEG_NATIVE;
+            }
+            if ($browserFallback && $canvasRuntimeEnabled) {
+                Log::warning('[EditorCompositionStudioVideoController] Falling back to canvas_runtime (legacy requested, ffmpeg unsupported features)', [
+                    'composition_id' => $composition->id,
+                    'unsupported_codes' => $ffmpegUnsupported,
+                ]);
+
+                return StudioCompositionVideoExportRenderMode::CANVAS_RUNTIME;
+            }
+
+            return response()->json([
+                'message' => StudioCompositionFfmpegNativeFeaturePolicy::humanSummary($ffmpegUnsupported).' Use render_mode=canvas_runtime if Playwright export is enabled, or remove unsupported layers.',
+                'unsupported_codes' => $ffmpegUnsupported,
+            ], 422);
+        }
+
+        if (! $needsFullSceneExport) {
+            return StudioCompositionVideoExportRenderMode::LEGACY_BITMAP;
+        }
+
+        if ($driver === StudioRenderingDriverResolver::BROWSER_CANVAS) {
+            if (! $canvasRuntimeEnabled) {
+                return response()->json([
+                    'message' => 'Studio rendering driver is browser_canvas but STUDIO_VIDEO_CANVAS_RUNTIME_EXPORT_ENABLED is false. Enable canvas runtime workers or set STUDIO_RENDERING_DRIVER=ffmpeg_native.',
+                ], 422);
+            }
+
+            return StudioCompositionVideoExportRenderMode::CANVAS_RUNTIME;
+        }
+
+        if ($ffmpegUnsupported === []) {
+            $fontErr = $this->fontConfigErrorForTextExport($composition);
+            if ($fontErr !== null) {
+                return response()->json(['message' => $fontErr], 422);
+            }
+
+            return StudioCompositionVideoExportRenderMode::FFMPEG_NATIVE;
+        }
+        if ($browserFallback && $canvasRuntimeEnabled) {
+            Log::warning('[EditorCompositionStudioVideoController] Falling back to canvas_runtime (ffmpeg driver but unsupported native features)', [
+                'composition_id' => $composition->id,
+                'unsupported_codes' => $ffmpegUnsupported,
+            ]);
+
+            return StudioCompositionVideoExportRenderMode::CANVAS_RUNTIME;
+        }
+
+        return response()->json([
+            'message' => StudioCompositionFfmpegNativeFeaturePolicy::humanSummary($ffmpegUnsupported),
+            'unsupported_codes' => $ffmpegUnsupported,
+        ], 422);
+    }
+
+    private function fontConfigErrorForTextExport(Composition $composition): ?string
+    {
+        if (! $this->compositionHasVisibleTextLayer($composition)) {
+            return null;
+        }
+        $resolver = app(StudioRenderingFontResolver::class);
+        $doc = is_array($composition->document_json) ? $composition->document_json : [];
+        $layers = isset($doc['layers']) && is_array($doc['layers']) ? $doc['layers'] : [];
+        $needsDefaultFallback = false;
+        foreach ($layers as $ly) {
+            if (! is_array($ly) || ($ly['visible'] ?? true) === false || ($ly['type'] ?? '') !== 'text') {
+                continue;
+            }
+            $style = is_array($ly['style'] ?? null) ? $ly['style'] : [];
+            $base = ['font_family' => (string) ($style['fontFamily'] ?? 'sans-serif')];
+            $extra = StudioTextLayerFontExtras::mergeFromDocumentLayer($ly, $base);
+            if (! $resolver->layerHasExplicitCustomFontSelection($extra)) {
+                $needsDefaultFallback = true;
+                break;
+            }
+        }
+        if (! $needsDefaultFallback) {
+            return null;
+        }
+        $path = trim((string) config('studio_rendering.default_font_path', ''));
+        if ($path === '' || ! is_file($path)) {
+            return 'At least one text layer has no tenant font (font_asset_id) or explicit local font path; set STUDIO_RENDERING_DEFAULT_FONT_PATH to a readable TTF/OTF on workers for CSS font-family fallback.';
+        }
+
+        return null;
+    }
+
+    private function compositionHasVisibleTextLayer(Composition $composition): bool
+    {
+        $doc = is_array($composition->document_json) ? $composition->document_json : [];
+        $layers = isset($doc['layers']) && is_array($doc['layers']) ? $doc['layers'] : [];
+        foreach ($layers as $ly) {
+            if (! is_array($ly)) {
+                continue;
+            }
+            if (($ly['visible'] ?? true) === false) {
+                continue;
+            }
+            if (($ly['type'] ?? '') === 'text') {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
