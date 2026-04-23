@@ -271,9 +271,33 @@ export default function OperationsCenterIndex({
     const formatDate = (d) => {
         if (!d) return '—'
         try {
-            return new Date(d).toLocaleString()
+            const dt = new Date(d)
+            if (Number.isNaN(dt.getTime())) {
+                return String(d)
+            }
+            return dt.toLocaleString(undefined, {
+                dateStyle: 'medium',
+                timeStyle: 'medium',
+                timeZoneName: 'short',
+            })
         } catch (e) {
-            return d
+            return String(d)
+        }
+    }
+
+    /** Hover text: same instant in UTC + which zone the table uses (browser). */
+    const formatDateHoverUtc = (d) => {
+        if (!d) return ''
+        try {
+            const dt = new Date(d)
+            if (Number.isNaN(dt.getTime())) {
+                return ''
+            }
+            const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'browser default'
+            const utc = `${dt.toISOString().replace('T', ' ').slice(0, 19)} UTC`
+            return `Displayed in your browser timezone (${tz}). Same instant: ${utc}`
+        } catch {
+            return ''
         }
     }
 
@@ -707,7 +731,11 @@ export default function OperationsCenterIndex({
                                         <h2 className="text-lg font-semibold text-gray-900">Failed Jobs (Horizon / DB)</h2>
                                         <p className="mt-1 text-sm text-gray-500">
                                             Recent failed jobs from failed_jobs table. Clearing removes stored failure records only;
-                                            use Horizon to retry work if needed.
+                                            use Horizon to retry work if needed.{' '}
+                                            <span className="text-gray-600">
+                                                Failed at uses your browser’s timezone (abbreviation in the cell); hover for the
+                                                same instant in UTC.
+                                            </span>
                                         </p>
                                     </div>
                                     <button
@@ -734,7 +762,12 @@ export default function OperationsCenterIndex({
                                                 <tr key={j.id}>
                                                     <td className="py-3 pl-4 pr-3 text-sm font-mono">{j.job_name}</td>
                                                     <td className="py-3 px-3 text-sm text-gray-500">{j.queue}</td>
-                                                    <td className="py-3 px-3 text-sm text-gray-500">{formatDate(j.failed_at)}</td>
+                                                    <td
+                                                        className="py-3 px-3 text-sm text-gray-500"
+                                                        title={formatDateHoverUtc(j.failed_at) || undefined}
+                                                    >
+                                                        {formatDate(j.failed_at)}
+                                                    </td>
                                                     <td className="py-3 px-3 text-sm text-gray-600 max-w-xs truncate" title={j.exception}>{j.exception}</td>
                                                 </tr>
                                             ))}

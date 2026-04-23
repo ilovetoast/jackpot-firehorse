@@ -15,6 +15,7 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Carbon;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -78,7 +79,10 @@ class OperationsCenterController extends Controller
                     'uuid' => $job->uuid,
                     'job_name' => $payload['displayName'] ?? class_basename($payload['job'] ?? 'Unknown'),
                     'queue' => $job->queue,
-                    'failed_at' => $job->failed_at,
+                    // UTC ISO8601 so the browser parses one unambiguous instant (then toLocaleString = viewer local).
+                    'failed_at' => $job->failed_at !== null && $job->failed_at !== ''
+                        ? Carbon::parse($job->failed_at)->utc()->toIso8601String()
+                        : null,
                     'exception' => \Illuminate\Support\Str::limit($job->exception ?? '', 200),
                 ];
             });

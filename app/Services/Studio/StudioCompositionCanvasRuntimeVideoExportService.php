@@ -117,8 +117,10 @@ final class StudioCompositionCanvasRuntimeVideoExportService
 
         if ($exitCode !== 0) {
             $fromDisk = $this->readOptionalJsonFile($workDir.'/capture-diagnostics.json');
-            $this->fail($row, 'canvas_runtime_playwright_failed', 'Playwright capture script exited with a non-zero status.', array_merge($preRunDiagnostics, [
+            $humanMessage = $this->buildPlaywrightCaptureFailureMessage((int) $exitCode, $stderr, $fromDisk);
+            $this->fail($row, 'canvas_runtime_playwright_failed', $humanMessage, array_merge($preRunDiagnostics, [
                 'exit_code' => $exitCode,
+                'exit_code_hint' => self::playwrightExitCodeHintLine((int) $exitCode),
                 'stderr_tail' => mb_substr($stderr, -8000),
                 'stdout_tail' => mb_substr($stdout, -2000),
                 'capture_diagnostics_file' => $fromDisk,
@@ -617,6 +619,70 @@ final class StudioCompositionCanvasRuntimeVideoExportService
         } catch (Throwable) {
             return null;
         }
+    }
+
+    /**
+     * Maps {@see scripts/studio-canvas-export.mjs} exit codes (header comment) to a short support hint.
+     */
+    private static function playwrightExitCodeHintLine(int $exitCode): string
+    {
+        return match ($exitCode) {
+            2 => 'exit_2_bad_args: invalid CLI flags, paths, or numeric parameters.',
+            3 => 'exit_3_navigation: Chromium could not load the signed render URL (timeouts, DNS/TLS, or worker cannot reach APP_URL).',
+            4 => 'exit_4_readiness: page loaded but export bridge never became ready=true (fonts, assets, raster preload, or readiness timeout).',
+            5 => 'exit_5_capture: screenshot loop failed (missing [data-jp-composition-scene-root], Playwright error, or total-timeout-ms).',
+            6 => 'exit_6_manifest_io: manifest write failed (disk permissions or path).',
+            default => 'nonzero_exit: see stderr_tail and capture-diagnostics.json on the worker.',
+        };
+    }
+
+    /**
+     * @param  array<string, mixed>|null  $captureDiagnosticsFile
+     */
+    private function buildPlaywrightCaptureFailureMessage(int $exitCode, string $stderr, ?array $captureDiagnosticsFile): string
+    {
+        $detail = self::parseLastJsonErrorFromStderr($stderr);
+        if ($detail === '' && is_array($captureDiagnosticsFile)) {
+            $e = $captureDiagnosticsFile['error'] ?? null;
+            $detail = is_string($e) ? $e : '';
+        }
+        $hint = match ($exitCode) {
+            2 => 'The Node driver rejected its arguments.',
+            3 => 'The headless browser could not open the signed export URL before navigation-timeout-ms.',
+            4 => 'The export page did not become ready before readiness-timeout-ms (fonts, images, or bridge checks).',
+            5 => 'Frame capture failed after the page was ready.',
+            6 => 'Writing capture-manifest.json or diagnostics failed.',
+            default => 'The Playwright capture process ended unsuccessfully.',
+        };
+        $msg = "Studio video export: {$hint} (process exit code {$exitCode}).";
+        if ($detail !== '') {
+            $msg .= ' '.$detail;
+        }
+        $msg .= ' On the Horizon host: ensure `npm ci` and `npx playwright install --with-deps chromium` from the app root, and that workers can HTTP(S) reach the same host the signed URL uses. Inspect `error_json.debug` for stderr_tail.';
+
+        return $msg;
+    }
+
+    private static function parseLastJsonErrorFromStderr(string $stderr): string
+    {
+        $lines = preg_split("/\r\n|\n|\r/", $stderr) ?: [];
+        for ($i = count($lines) - 1; $i >= 0; $i--) {
+            $line = trim($lines[$i]);
+            if ($line === '' || ! str_starts_with($line, '{')) {
+                continue;
+            }
+            try {
+                /** @var array<string, mixed> $j */
+                $j = json_decode($line, true, 512, JSON_THROW_ON_ERROR);
+                if (isset($j['error']) && is_string($j['error']) && $j['error'] !== '') {
+                    return $j['error'];
+                }
+            } catch (JsonException) {
+                continue;
+            }
+        }
+
+        return '';
     }
 
     /**
