@@ -3,7 +3,7 @@
 namespace App\Assets\Metadata;
 
 /**
- * Single governance entry point for embedded metadata allowlists.
+ * Single governance entry point for embedded metadata allowlists. 
  * Unknown file keys are never indexed; only config('asset_embedded_metadata.keys') drives Layer C.
  */
 class EmbeddedMetadataRegistry
