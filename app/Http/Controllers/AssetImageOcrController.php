@@ -14,7 +14,7 @@ use Illuminate\Support\Facades\Gate;
  *
  * Note: we do NOT probe tesseract availability here. OCR runs on the queue
  * worker tier, which may be a separate machine/container from the web tier
- * that handles this request (see docs/environments/SERVER_REQUIREMENTS.md).
+ * that handles this request (see docs/environments/PRODUCTION_WORKER_SOFTWARE.md).
  * {@see \App\Jobs\ExtractImageOcrJob} checks availability on the worker and
  * records `tesseract_unavailable` in asset.metadata.ocr if the binary is
  * missing, which the drawer surfaces to the operator.

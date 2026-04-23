@@ -17,7 +17,7 @@ npx playwright install --with-deps --dry-run chromium
 npx playwright install --with-deps chromium
 ```
 
-Canonical production worker checklist (Node, `npm ci`, full vs dry install): [Server requirements — Node.js / Playwright](../environments/SERVER_REQUIREMENTS.md#nodejs--playwright-video-heavy--studio).
+Canonical production worker checklist (Node, `npm ci`, full vs dry install): [Production worker software — Node.js / Playwright](../environments/PRODUCTION_WORKER_SOFTWARE.md#nodejs--playwright-video-heavy--studio).
 
 Enable:
 

@@ -165,7 +165,8 @@ services:
             - mysql
             - redis
         restart: unless-stopped
-        command: php artisan queue:work database --queue=video-heavy --tries=1 --timeout=3600 --sleep=3 --max-jobs=50 --max-time=7200
+        # --timeout must be >= studio_video.export_job_timeout_seconds (default 12600) for canvas-runtime MP4 bakes.
+        command: php artisan queue:work database --queue=video-heavy --tries=1 --timeout=14400 --sleep=3 --max-jobs=50 --max-time=18000
 networks:
     sail:
         driver: bridge

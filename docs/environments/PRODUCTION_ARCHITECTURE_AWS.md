@@ -29,7 +29,7 @@ This page is the **environment and operations** story. It does not replace:
 
 | Document | Contents |
 |----------|----------|
-| [SERVER_REQUIREMENTS.md](SERVER_REQUIREMENTS.md) | OS binaries on workers (ImageMagick, FFmpeg, Poppler, etc.); **Node + Playwright** (`npx playwright install --with-deps chromium`; `--with-deps --dry-run` preflight) on **video-heavy** when Studio canvas-runtime or official animation renderer is enabled |
+| [PRODUCTION_WORKER_SOFTWARE.md](PRODUCTION_WORKER_SOFTWARE.md) | Single checklist: OS binaries on workers (ImageMagick, FFmpeg, Poppler, etc.); **Node + Playwright** (`npx playwright install --with-deps chromium`; `--with-deps --dry-run` preflight) on **video-heavy** when Studio canvas-runtime or official animation renderer is enabled. |
 | [../STORAGE.md](../STORAGE.md) | Tenant buckets, upload behaviour |
 | [../UPLOAD_AND_QUEUE.md](../UPLOAD_AND_QUEUE.md) | Queue dispatch, pipeline |
 | [../compliance/PATH_TO_GDPR.md](../compliance/PATH_TO_GDPR.md) | Privacy; AWS as processor |
@@ -44,7 +44,7 @@ Use **one ECS cluster** and **separate capacity providers / Auto Scaling Groups*
 **Why ECS on EC2 (vs Elastic Beanstalk or raw EC2 ASG only)**
 
 - Keeps the **server-template / pool** model while avoiding Beanstalk lock-in.  
-- Fits **Docker-based** development (see repo `Dockerfile` / Sail).  
+- Fits **Docker-based** development and ECS task images aligned with [PRODUCTION_WORKER_SOFTWARE.md](PRODUCTION_WORKER_SOFTWARE.md).  
 - **Web and worker services scale independently** at the task level; EC2 fleets scale underneath.  
 - Rolling deployments, health checks, capacity providers, and future blue/green or canary patterns.  
 - **Always-on workloads** tend to cost less than running the same patterns entirely on Fargate.

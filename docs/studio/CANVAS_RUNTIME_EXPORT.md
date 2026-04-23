@@ -31,7 +31,7 @@ So: FFmpeg remains essential for **H.264/AAC**, timeline cuts, and **merging** b
 
 ### Phase 1: headless frame capture + FFmpeg merge (implemented)
 
-1. **Worker image / dependencies**: Node LTS + **`playwright`** on the **video-heavy** (or dedicated canvas) worker; `npm ci` in `jackpot/`; run **`npx playwright install --with-deps chromium`** in CI/AMI bake (or `PLAYWRIGHT_BROWSERS_PATH` cache). In build/CI, **`npx playwright install --with-deps --dry-run chromium`** validates the CLI and planned browser + OS deps **without installing** (see [Server requirements — Node.js / Playwright](../environments/SERVER_REQUIREMENTS.md#nodejs--playwright-video-heavy--studio)).
+1. **Worker image / dependencies**: Node LTS + **`playwright`** on the **video-heavy** (or dedicated canvas) worker; `npm ci` in `jackpot/`; run **`npx playwright install --with-deps chromium`** in CI/AMI bake (or `PLAYWRIGHT_BROWSERS_PATH` cache). In build/CI, **`npx playwright install --with-deps --dry-run chromium`** validates the CLI and planned browser + OS deps **without installing** (see [Production worker software — Node.js / Playwright](../environments/PRODUCTION_WORKER_SOFTWARE.md#nodejs--playwright-video-heavy--studio)).
 2. **Node driver**: `jackpot/scripts/studio-canvas-export.mjs`
 
    - CLI: `--url`, `--output-dir`, `--fps`, `--duration-ms`, `--width`, `--height`, `--export-job-id`, plus optional timeouts / `--frame-settle-ms` / `--device-scale-factor` (see service + script header).
@@ -197,7 +197,7 @@ No secrets or signed URLs are added here.
 ## Staging / production rollout checklist
 
 1. **Feature flag**: keep **`STUDIO_VIDEO_CANVAS_RUNTIME_EXPORT_ENABLED=false`** until workers are ready; enable deliberately per environment.
-2. **Binaries on workers**: `ffmpeg`, `ffprobe`, `node`, Playwright Chromium (**`npx playwright install --with-deps chromium`** from `jackpot/` after `npm ci` in image bake). Preflight with **`npx playwright install --with-deps --dry-run chromium`**; full checklist: [SERVER_REQUIREMENTS.md](../environments/SERVER_REQUIREMENTS.md#nodejs--playwright-video-heavy--studio).
+2. **Binaries on workers**: `ffmpeg`, `ffprobe`, `node`, Playwright Chromium (**`npx playwright install --with-deps chromium`** from `jackpot/` after `npm ci` in image bake). Preflight with **`npx playwright install --with-deps --dry-run chromium`**; full checklist: [PRODUCTION_WORKER_SOFTWARE.md](../environments/PRODUCTION_WORKER_SOFTWARE.md#nodejs--playwright-video-heavy--studio).
 3. **Env**: set `STUDIO_VIDEO_FFMPEG_BINARY`, `STUDIO_VIDEO_FFPROBE_BINARY`, canvas timeouts, optional `QUEUE_VIDEO_HEAVY_STUDIO_CANVAS_QUEUE`, merge timeout / x264 / optional PNG delete envs (see `config/studio_video.php` and `.env.example`).
 4. **Queues**: run **video-heavy** (or dedicated canvas) Horizon workers with RAM headroom; Playwright is memory-hungry.
 5. **Disk**: PNG sequences are one file per frame; long 1080p exports need **large ephemeral disk** on workers.

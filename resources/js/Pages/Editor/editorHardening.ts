@@ -49,6 +49,10 @@ export function handleAIError(error: unknown): string {
     }
     if (error instanceof Error && error.message) {
         const m = error.message
+        // Keep specific copy for long-running studio video export polling / queue issues.
+        if (/video export timed out|video export is still queued|timed out while reading video export status/i.test(m)) {
+            return m
+        }
         if (/abort|timed?\s*out|timeout/i.test(m)) {
             return 'Request timed out or was cancelled. Please try again.'
         }

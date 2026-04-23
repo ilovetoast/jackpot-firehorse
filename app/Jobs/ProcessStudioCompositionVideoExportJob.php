@@ -26,11 +26,13 @@ class ProcessStudioCompositionVideoExportJob implements ShouldQueue
      */
     public int $tries = 3;
 
-    public int $timeout = 3600;
+    /** Overridden in constructor from {@see config('studio_video.export_job_timeout_seconds')}. */
+    public int $timeout = 12_600;
 
     public function __construct(
         public readonly int $exportJobRowId,
     ) {
+        $this->timeout = max(600, (int) config('studio_video.export_job_timeout_seconds', 12_600));
         $row = StudioCompositionVideoExportJob::query()->find($exportJobRowId);
         $queue = StudioVideoQueue::heavy();
         if ($row && $row->render_mode === StudioCompositionVideoExportRenderMode::CANVAS_RUNTIME->value) {

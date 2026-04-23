@@ -1,6 +1,6 @@
 # Features
 
-This document combines **value positioning**, **feature-area overview**, and **product-level behavior** (URLs, gates, production caveats) so humans and tools have one place to start. Deeper architecture lives in [TECHNICAL_OVERVIEW.md](TECHNICAL_OVERVIEW.md); host packages and environments are in [environments/SERVER_REQUIREMENTS.md](environments/SERVER_REQUIREMENTS.md).
+This document combines **value positioning**, **feature-area overview**, and **product-level behavior** (URLs, gates, production caveats) so humans and tools have one place to start. Deeper architecture lives in [TECHNICAL_OVERVIEW.md](TECHNICAL_OVERVIEW.md); production worker install checklist is [environments/PRODUCTION_WORKER_SOFTWARE.md](environments/PRODUCTION_WORKER_SOFTWARE.md).
 
 ---
 
@@ -286,6 +286,6 @@ It helps teams move faster **without losing control**.
 | [PHASE_INDEX.md](PHASE_INDEX.md) | Map of legacy “Phase X” docs → merged locations |
 | [TECHNICAL_OVERVIEW.md](TECHNICAL_OVERVIEW.md) | Architecture, stack, principles |
 | [BRAND_INTELLIGENCE.md](BRAND_INTELLIGENCE.md) | Execution-based brand intelligence (EBI) |
-| [environments/SERVER_REQUIREMENTS.md](environments/SERVER_REQUIREMENTS.md) | OS packages by role (web, worker) |
+| [environments/PRODUCTION_WORKER_SOFTWARE.md](environments/PRODUCTION_WORKER_SOFTWARE.md) | OS packages and runtimes for production workers |
 | [DEV_TOOLING.md](DEV_TOOLING.md) | Local-only dev commands and utilities |
 | [AGENCY_INCUBATION_ROADMAP.md](AGENCY_INCUBATION_ROADMAP.md) | Agency partner incubation: storage, windows, hard lock, support extensions |

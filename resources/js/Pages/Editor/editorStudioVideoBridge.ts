@@ -3,6 +3,12 @@
  * Legacy FFmpeg export composites image / generative_image overlays only; text and related effects use canvas runtime when enabled.
  */
 
+/** Single status GET can block behind PHP-FPM / DB load; keep well above client poll interval. */
+const VIDEO_EXPORT_STATUS_FETCH_TIMEOUT_MS = 300_000
+
+/** Max wall time for publish UI to poll (align with `STUDIO_VIDEO_EXPORT_JOB_TIMEOUT_SECONDS` + buffer). */
+const VIDEO_EXPORT_POLL_WALL_CLOCK_MS = 14_400_000
+
 function csrf(): string {
     return document.querySelector('meta[name="csrf-token"]')?.content ?? ''
 }
@@ -119,7 +125,7 @@ export async function postRequestVideoExport(
             credentials: 'same-origin',
             body: JSON.stringify(body ?? {}),
         },
-        180_000,
+        300_000,
     )
     const text = await res.text()
     let data: unknown
@@ -198,7 +204,7 @@ export async function getVideoExportStatus(
             headers: { Accept: 'application/json', 'X-CSRF-TOKEN': csrf() },
             credentials: 'same-origin',
         },
-        90_000,
+        VIDEO_EXPORT_STATUS_FETCH_TIMEOUT_MS,
     )
     const text = await res.text()
     let data: unknown
@@ -228,7 +234,7 @@ export async function pollVideoExportUntilTerminal(
     }
 ): Promise<VideoExportStatusResponse> {
     const intervalMs = opts?.intervalMs ?? 2000
-    const timeoutMs = opts?.timeoutMs ?? 3_600_000
+    const timeoutMs = opts?.timeoutMs ?? VIDEO_EXPORT_POLL_WALL_CLOCK_MS
     const queuedStallMs = opts?.queuedStallMs ?? 120_000
     const start = Date.now()
     let queuedSince: number | null = null

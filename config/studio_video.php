@@ -46,6 +46,13 @@ return [
     'canvas_export_playwright_script' => env('STUDIO_VIDEO_CANVAS_EXPORT_PLAYWRIGHT_SCRIPT', 'scripts/studio-canvas-export.mjs'),
 
     /**
+     * Laravel {@see \App\Jobs\ProcessStudioCompositionVideoExportJob} $timeout and UI poll ceiling should
+     * stay above: capture + merge (+ publish buffer). Horizon {@code HORIZON_VIDEO_HEAVY_WORKER_TIMEOUT}
+     * must be >= this value.
+     */
+    'export_job_timeout_seconds' => (int) env('STUDIO_VIDEO_EXPORT_JOB_TIMEOUT_SECONDS', 12_600),
+
+    /**
      * Max wall time for the entire Playwright process (navigation + readiness + all frames).
      */
     'canvas_export_capture_timeout_seconds' => (int) env('STUDIO_VIDEO_CANVAS_EXPORT_CAPTURE_TIMEOUT_SECONDS', 7200),

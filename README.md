@@ -23,7 +23,7 @@
 - [Testing](docs/testing.md) — PHPUnit layout, Sail commands, fast runs, Xdebug, groups (`ffmpeg`, etc.)
 - [Features](docs/FEATURES.md) — value proposition and product-level behavior
 - [Technical overview](docs/TECHNICAL_OVERVIEW.md) — architecture and stack
-- [Server requirements](docs/environments/SERVER_REQUIREMENTS.md) — third-party binaries for web/worker hosts
+- [Production worker software](docs/environments/PRODUCTION_WORKER_SOFTWARE.md) — single checklist for staging/production worker hosts (thumbnails, PDF, video, OCR, Studio)
 - [Phase index](docs/PHASE_INDEX.md) — where former phase docs were merged (canonical guide map)
 
 ---

@@ -324,7 +324,8 @@ return [
             // tries=1 caused MaxAttemptsExceeded on the *next* reservation (timeout/OOM/redeploy) before handle()
             // ran again — noisy Sentry + stuck studio export rows. Allow a small retry budget like images-heavy.
             'tries' => (int) env('HORIZON_VIDEO_HEAVY_SUPERVISOR_TRIES', 3),
-            'timeout' => (int) env('HORIZON_VIDEO_HEAVY_WORKER_TIMEOUT', 3600),
+            // Must be >= studio_video.export_job_timeout_seconds (canvas capture + FFmpeg merge can exceed 1h).
+            'timeout' => (int) env('HORIZON_VIDEO_HEAVY_WORKER_TIMEOUT', 12_600),
             'nice' => 0,
         ],
     ],

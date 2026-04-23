@@ -26,7 +26,7 @@ Use this page as the **table of contents** for engineering docs (e.g. admin “D
 | Document | Contents |
 |----------|----------|
 | [environments/PRODUCTION_ARCHITECTURE_AWS.md](environments/PRODUCTION_ARCHITECTURE_AWS.md) | **Production AWS** — ECS on EC2, 2×AZ, RDS Multi-AZ, ElastiCache, CloudFront+S3, worker lanes, scaling, cost, CI/CD, phases |
-| [environments/SERVER_REQUIREMENTS.md](environments/SERVER_REQUIREMENTS.md) | OS packages (ImageMagick, FFmpeg, Poppler, etc.) |
+| [environments/PRODUCTION_WORKER_SOFTWARE.md](environments/PRODUCTION_WORKER_SOFTWARE.md) | **Single checklist** — OS packages for production workers (thumbnails, PDF, SVG, video, OCR, Studio Playwright) |
 | [environments/README.md](environments/README.md) | Environment doc index |
 | [DEV_TOOLING.md](DEV_TOOLING.md) | Local-only dev commands |
 
