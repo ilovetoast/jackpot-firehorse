@@ -1,6 +1,6 @@
 # Production worker software (single checklist)
 
-Use this document when **provisioning or auditing staging/production machines** (or container images) that run **queue workers** for Jackpot: **raster thumbnails**, **PDF** thumbnails and text, **SVG** rasterization, **video** previews and processing, **image OCR**, optional **Python/OpenCV** jobs, and **Studio** headless Chromium workloads on dedicated lanes.
+Use this document when **provisioning or auditing staging/production machines** (or container images) that run **queue workers** for Jackpot: **raster thumbnails**, **PDF** thumbnails and text, **SVG** rasterization, **video** previews and processing, **image OCR**, optional **Python/OpenCV** jobs, and **Studio** workloads: **FFmpeg-native composition export** (video + text rasterization) and/or **headless Chromium** on dedicated lanes where enabled.
 
 **Web tier:** Often shares the same image as workers. If web does not run workers, it still needs any CLI tool invoked on the request path; matching the worker image avoids drift.
 
@@ -12,7 +12,7 @@ Use this document when **provisioning or auditing staging/production machines** 
 
 | Role | Typical processes | What this checklist covers |
 |------|-------------------|----------------------------|
-| **Worker** | `queue:work`, Horizon, `ProcessAssetJob`, thumbnails, transcoding | All **OS packages**, **PHP/ImageMagick policy**, **Node + Playwright** (when Studio video-heavy features are on) below |
+| **Worker** | `queue:work`, Horizon, `ProcessAssetJob`, thumbnails, transcoding, Studio export | All **OS packages**, **PHP/ImageMagick policy**, **FFmpeg + font/image libs** for native Studio export, **Node + Playwright** (when Studio canvas/browser capture is on) below |
 | **Web** | PHP-FPM, HTTP | Same stack if workers are colocated; otherwise match versions where shared code paths shell out to CLIs |
 
 ---
@@ -43,7 +43,10 @@ Ubuntu/Debian-style names; adjust for RHEL, Alpine, or AMI equivalents.
 | **poppler-utils** | PDF: `pdftotext`, `pdftoppm`, `pdfinfo` (text extraction and fallbacks) |
 | **librsvg2-bin** | **SVG → raster** (`rsvg-convert`). Without it, SVG thumbnails do not generate |
 | **librsvg2-dev** | Only if you compile extensions against librsvg on the host |
-| **ffmpeg** | Video thumbnails, previews, and FFmpeg-driven processing (`ffprobe` typically ships with the same package) |
+| **ffmpeg** | Video thumbnails, previews, FFmpeg-driven processing, and **Studio `ffmpeg_native` composition export**; **`ffprobe`** is included with **`ffmpeg`** on Ubuntu/Debian (verify with `command -v ffprobe`) |
+| **fontconfig** | Font configuration for stacks that resolve fonts via fontconfig (useful alongside Imagick/GD text) |
+| **libfreetype6** | **FreeType** — required for text rendering in **GD** (and common Imagick text paths) |
+| **libjpeg-turbo8** / **libpng16-16** | JPEG/PNG codecs used by **Imagick** / **GD** when rasterizing Studio text overlays to PNG (exact package names can differ by Ubuntu LTS; install equivalents on Debian/RHEL) |
 | **python3-opencv** | Only if workers run Python code using `import cv2` |
 | **tesseract-ocr** | `ImageOcrService` / `ExtractImageOcrJob` — install on workers that run OCR |
 
@@ -55,11 +58,52 @@ sudo apt-get install -y \
   imagemagick ghostscript poppler-utils \
   librsvg2-bin librsvg2-dev \
   ffmpeg \
+  fontconfig libfreetype6 libjpeg-turbo8 libpng16-16 \
   python3-opencv \
   tesseract-ocr
 ```
 
 Omit **python3-opencv** if no OpenCV-backed jobs run on that host.
+
+<a id="studio-ffmpeg-native-export-workers"></a>
+
+### Studio FFmpeg-native export (staging + production workers)
+
+Workers that run **`STUDIO_RENDERING_DRIVER=ffmpeg_native`** (or otherwise execute `FfmpegNativeCompositionRenderer` / `TextOverlayRasterizer`) need **FFmpeg**, libraries for **PNG/JPEG text overlays**, and **either Imagick or GD with FreeType** for PHP-side text rasterization. Tenant fonts are staged as local **TTF/OTF** files; see [FFMPEG_NATIVE_EXPORT.md](../studio/FFMPEG_NATIVE_EXPORT.md).
+
+**Typical Ubuntu (staging and production worker hosts)**
+
+```bash
+sudo apt update
+sudo apt install -y \
+  ffmpeg \
+  fontconfig \
+  libfreetype6 \
+  libjpeg-turbo8 \
+  libpng16-16
+```
+
+**`ffprobe`:** On Ubuntu and Debian it is installed **with** the **`ffmpeg`** package. A separate `ffprobe` apt package is often **not** available — after installing `ffmpeg`, confirm:
+
+```bash
+command -v ffprobe && ffprobe -version
+```
+
+**PHP raster backend (pick one; match your PHP major, e.g. `php8.3-*`)**
+
+Preferred when the app uses Imagick for text overlays:
+
+```bash
+sudo apt install -y imagemagick php-imagick
+```
+
+Or GD + FreeType (ensure your `php-gd` build links FreeType — the `libfreetype6` package above covers the system library):
+
+```bash
+sudo apt install -y php-gd
+```
+
+Use **`php8.x-imagick`** / **`php8.x-gd`** if multiple PHP versions are installed so the extension loads for the CLI/FPM version that runs Horizon.
 
 ### ImageMagick PDF policy (required for PDF thumbnails)
 

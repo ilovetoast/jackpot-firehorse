@@ -48,9 +48,12 @@ return [
 
     /**
      * Absolute path to a TTF/OTF used when no font mapping matches (required for text export).
-     * Debian/Ubuntu example: /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf
+     * Defaults to the standard Debian/Ubuntu DejaVu path when env is unset or empty; override with
+     * STUDIO_RENDERING_DEFAULT_FONT_PATH (e.g. on macOS or minimal images). After changing .env,
+     * run `php artisan config:clear` or rebuild `config:cache` so workers pick up the value.
      */
-    'default_font_path' => env('STUDIO_RENDERING_DEFAULT_FONT_PATH', ''),
+    'default_font_path' => trim((string) env('STUDIO_RENDERING_DEFAULT_FONT_PATH', ''))
+        ?: '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
 
     /**
      * Directory under storage_path('app') for staged tenant font binaries (TTF/OTF only).

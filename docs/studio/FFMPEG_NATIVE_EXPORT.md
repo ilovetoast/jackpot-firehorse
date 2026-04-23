@@ -48,7 +48,7 @@ The queued job still resolves the tenant/user and calls `StudioCompositionVideoE
 | `rasterizer_missing_imagick_and_gd` | Install **Imagick** or **PHP GD** with FreeType on workers. |
 | `font_remote_disk_requires_asset_id` | Do not point `font.disk` at `s3` without an asset id — use DAM font assets. |
 
-Server packages: **PHP Imagick** (recommended) or **GD + freetype**; **ffmpeg/ffprobe** unchanged.
+Server packages: **PHP Imagick** (recommended) or **GD + FreeType**, plus **ffmpeg** (includes **ffprobe** on Ubuntu/Debian), **fontconfig**, and common image libs — see the install snippets in [PRODUCTION_WORKER_SOFTWARE.md](../environments/PRODUCTION_WORKER_SOFTWARE.md#studio-ffmpeg-native-export-workers).
 
 ## Unsupported in FFmpeg native V1
 
