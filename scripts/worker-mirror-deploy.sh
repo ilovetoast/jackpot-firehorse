@@ -119,6 +119,21 @@ sudo -u "$APP_USER" "$COMPOSER" install \
   --optimize-autoloader
 
 ############################################
+# NODE / PLAYWRIGHT
+############################################
+
+echo "📦 Installing Node dependencies"
+if ! command -v npm >/dev/null; then
+  echo "❌ npm missing"
+  exit 1
+fi
+
+sudo -u "$APP_USER" npm ci --no-audit --no-fund
+
+echo "🎭 Installing Playwright Chromium"
+sudo -u "$APP_USER" npx playwright install chromium
+
+############################################
 # LARAVEL
 ############################################
 
