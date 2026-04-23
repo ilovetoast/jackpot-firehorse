@@ -704,7 +704,7 @@ final class StudioCompositionCanvasRuntimeVideoExportService
             1 => 'Node exited with code 1 before the capture script could return its normal exit codes 2–6 (this is usually not Chromium navigation—that is exit 3). Typical causes: missing `playwright` under `node_modules` for this release, `STUDIO_VIDEO_CANVAS_EXPORT_NODE_BINARY` pointing at a Node without that tree, or an ESM import-time crash.',
             2 => 'The Node driver rejected its arguments.',
             3 => 'The headless browser could not open the signed export URL before navigation-timeout-ms.',
-            4 => 'The export page did not become ready before readiness-timeout-ms (fonts, images, or bridge checks).',
+            4 => 'The export page did not become ready before readiness-timeout-ms (fonts, images, or bridge checks). If the browser console shows ERR_CONNECTION_REFUSED for asset URLs, add STUDIO_VIDEO_CANVAS_EXPORT_PAYLOAD_EXTRA_ORIGINS for hosts not covered by APP_URL, or align APP_URL / ASSET_URL with persisted layer URLs.',
             5 => 'Frame capture failed after the page was ready.',
             6 => 'Writing capture-manifest.json or diagnostics failed.',
             default => 'The Playwright capture process ended unsuccessfully.',

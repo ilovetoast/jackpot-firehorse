@@ -42,6 +42,13 @@ return [
      */
     'canvas_export_signed_url_root' => env('STUDIO_VIDEO_CANVAS_EXPORT_SIGNED_URL_ROOT', ''),
 
+    /**
+     * Comma-separated extra origins (scheme + host, optional port, no path) to rewrite into {@code canvas_export_signed_url_root}
+     * inside the export payload when that root is set. Use when persisted layer URLs or typography links use a host that
+     * differs from {@code APP_URL} (e.g. legacy {@code https://} while {@code APP_URL} is {@code http://}, or {@code VITE_DEV_SERVER_URL}).
+     */
+    'canvas_export_payload_extra_origins' => env('STUDIO_VIDEO_CANVAS_EXPORT_PAYLOAD_EXTRA_ORIGINS', ''),
+
     /** Target FPS for canvas frame capture (must match {@see CompositionRenderPayloadV1} contract). */
     'canvas_export_default_fps' => (int) env('STUDIO_VIDEO_CANVAS_EXPORT_DEFAULT_FPS', 30),
 

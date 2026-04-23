@@ -93,7 +93,8 @@ final class CompositionRenderPayloadFactory
     /**
      * When {@see config('studio_video.canvas_export_signed_url_root')} is set, Playwright loads the Inertia export page
      * from that origin while {@see config('app.url')} may still point at a browser-only host. Layer `src` values and
-     * brand typography URLs often embed {@code APP_URL}; without rewriting, Chromium logs ERR_CONNECTION_REFUSED and
+     * brand typography URLs often embed {@code APP_URL} (or the alternate scheme, {@code ASSET_URL}, or
+     * {@code STUDIO_VIDEO_CANVAS_EXPORT_PAYLOAD_EXTRA_ORIGINS}); without rewriting, Chromium logs ERR_CONNECTION_REFUSED and
      * the export bridge never becomes ready (waitForFunction timeout).
      *
      * @param  array<string, mixed>  $payload
@@ -105,43 +106,169 @@ final class CompositionRenderPayloadFactory
         if ($target === '') {
             return $payload;
         }
-        $from = rtrim((string) config('app.url'), '/');
         $to = rtrim($target, '/');
-        if ($from === '' || $from === $to) {
+        if ($to === '') {
             return $payload;
         }
+        $sourceOrigins = self::collectPayloadRewriteSourceOrigins();
+        $sourceOrigins = array_values(array_filter(
+            $sourceOrigins,
+            static fn (string $o): bool => rtrim($o, '/') !== $to,
+        ));
+        if ($sourceOrigins === []) {
+            return $payload;
+        }
+        $prefixes = self::buildRewritePrefixesLongestFirst($sourceOrigins);
 
-        return self::rewriteOriginPrefixDeep($payload, $from, $to);
+        return self::rewriteOriginPrefixDeep($payload, $to, $prefixes);
+    }
+
+    /**
+     * Origins that should be rewritten to {@see config('studio_video.canvas_export_signed_url_root')} when set.
+     *
+     * @return list<string>
+     */
+    private static function collectPayloadRewriteSourceOrigins(): array
+    {
+        $out = [];
+        $add = static function (string $s) use (&$out): void {
+            $s = rtrim(trim($s), '/');
+            if ($s === '') {
+                return;
+            }
+            $out[] = $s;
+        };
+        $add((string) config('app.url'));
+        $app = rtrim(trim((string) config('app.url')), '/');
+        if ($app !== '' && preg_match('#^https://#i', $app) === 1) {
+            $add('http://'.substr($app, 8));
+        } elseif ($app !== '' && preg_match('#^http://#i', $app) === 1) {
+            $add('https://'.substr($app, 7));
+        }
+        $asset = trim((string) config('app.asset_url'));
+        if ($asset !== '') {
+            $add($asset);
+            $ar = rtrim($asset, '/');
+            if (preg_match('#^https://#i', $ar) === 1) {
+                $add('http://'.substr($ar, 8));
+            } elseif (preg_match('#^http://#i', $ar) === 1) {
+                $add('https://'.substr($ar, 7));
+            }
+        }
+        $raw = trim((string) config('studio_video.canvas_export_payload_extra_origins', ''));
+        foreach (preg_split('/\s*,\s*/', $raw, -1, PREG_SPLIT_NO_EMPTY) ?: [] as $piece) {
+            $p = rtrim(trim((string) $piece), '/');
+            if ($p === '') {
+                continue;
+            }
+            $add($p);
+            if (preg_match('#^https://#i', $p) === 1) {
+                $add('http://'.substr($p, 8));
+            } elseif (preg_match('#^http://#i', $p) === 1) {
+                $add('https://'.substr($p, 7));
+            }
+        }
+
+        $uniq = [];
+        $deduped = [];
+        foreach ($out as $o) {
+            $k = strtolower($o);
+            if (isset($uniq[$k])) {
+                continue;
+            }
+            $uniq[$k] = true;
+            $deduped[] = $o;
+        }
+
+        return $deduped;
+    }
+
+    /**
+     * @param  list<string>  $origins
+     * @return list<string>
+     */
+    private static function buildRewritePrefixesLongestFirst(array $origins): array
+    {
+        $seen = [];
+        $prefixes = [];
+        foreach ($origins as $origin) {
+            $o = rtrim(trim($origin), '/');
+            if ($o === '') {
+                continue;
+            }
+            if (! isset($seen[strtolower($o)])) {
+                $seen[strtolower($o)] = true;
+                $prefixes[] = $o;
+            }
+            $rel = self::httpOriginToProtocolRelativeAuthority($o);
+            if ($rel !== null && ! isset($seen[strtolower($rel)])) {
+                $seen[strtolower($rel)] = true;
+                $prefixes[] = $rel;
+            }
+        }
+        usort($prefixes, static fn (string $a, string $b): int => strlen($b) <=> strlen($a));
+
+        return $prefixes;
+    }
+
+    private static function httpOriginToProtocolRelativeAuthority(string $origin): ?string
+    {
+        if (preg_match('#^https?://#i', $origin) !== 1) {
+            return null;
+        }
+        /** @var array{host?: string, port?: int} $parts */
+        $parts = parse_url($origin);
+        if (! is_array($parts) || empty($parts['host'])) {
+            return null;
+        }
+        $auth = $parts['host'].(isset($parts['port']) ? ':'.$parts['port'] : '');
+
+        return '//'.$auth;
+    }
+
+    private static function rewriteUrlString(string $value, string $toOrigin, array $prefixesLongestFirst): string
+    {
+        $to = rtrim($toOrigin, '/');
+        foreach ($prefixesLongestFirst as $prefix) {
+            if ($prefix === '' || $prefix === $to) {
+                continue;
+            }
+            if (str_starts_with($value, $prefix.'/')) {
+                return $to.substr($value, strlen($prefix));
+            }
+            if ($value === $prefix) {
+                return $to;
+            }
+        }
+
+        return $value;
     }
 
     /**
      * @param  array<string, mixed>|list<mixed>  $data
+     * @param  list<string>  $prefixesLongestFirst
      * @return array<string, mixed>|list<mixed>
      */
-    private static function rewriteOriginPrefixDeep(array $data, string $fromOrigin, string $toOrigin): array
+    private static function rewriteOriginPrefixDeep(array $data, string $toOrigin, array $prefixesLongestFirst): array
     {
         $out = [];
         foreach ($data as $key => $value) {
-            $out[$key] = self::rewriteOriginPrefixValue($value, $fromOrigin, $toOrigin);
+            $out[$key] = self::rewriteOriginPrefixValue($value, $toOrigin, $prefixesLongestFirst);
         }
 
         return $out;
     }
 
-    private static function rewriteOriginPrefixValue(mixed $value, string $fromOrigin, string $toOrigin): mixed
+    /**
+     * @param  list<string>  $prefixesLongestFirst
+     */
+    private static function rewriteOriginPrefixValue(mixed $value, string $toOrigin, array $prefixesLongestFirst): mixed
     {
         if (is_string($value)) {
-            if (str_starts_with($value, $fromOrigin.'/')) {
-                return $toOrigin.substr($value, strlen($fromOrigin));
-            }
-            if ($value === $fromOrigin) {
-                return $toOrigin;
-            }
-
-            return $value;
+            return self::rewriteUrlString($value, $toOrigin, $prefixesLongestFirst);
         }
         if (is_array($value)) {
-            return self::rewriteOriginPrefixDeep($value, $fromOrigin, $toOrigin);
+            return self::rewriteOriginPrefixDeep($value, $toOrigin, $prefixesLongestFirst);
         }
 
         return $value;

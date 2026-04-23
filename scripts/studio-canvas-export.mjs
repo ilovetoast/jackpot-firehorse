@@ -269,7 +269,13 @@ async function main() {
         })
         // eslint-disable-next-line no-console
         console.error(JSON.stringify({ ok: false, error: message }))
-        const code = /goto|navigation|timeout.*goto/i.test(message) ? 3 : /ready|bridge|getState/i.test(message) ? 4 : 5
+        // Playwright readiness timeouts look like "page.waitForFunction: Timeout 30000ms exceeded" — classify as exit 4, not 5.
+        const code = /goto|navigation|timeout.*goto/i.test(message)
+            ? 3
+            : /waitForFunction|wait for function|Page\.waitForFunction/i.test(message) ||
+                  /ready|bridge|getState/i.test(message)
+              ? 4
+              : 5
         process.exit(code)
     } finally {
         if (browser) {

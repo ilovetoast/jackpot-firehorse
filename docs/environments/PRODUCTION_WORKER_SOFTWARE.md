@@ -121,7 +121,11 @@ npx playwright install --with-deps chromium
 
 **Docker / split DNS:** if **`APP_URL`** is only resolvable outside worker containers, set **`STUDIO_VIDEO_CANVAS_EXPORT_SIGNED_URL_ROOT`** (see `.env.example` and [CANVAS_RUNTIME_EXPORT.md](../studio/CANVAS_RUNTIME_EXPORT.md)) so the signed render URL host matches what Playwright can open (`net::ERR_CONNECTION_REFUSED` on **process exit code 3**).
 
+When that root is set, the server rewrites **`APP_URL`** (and the opposite **http/https** variant, **`ASSET_URL`**, and **`STUDIO_VIDEO_CANVAS_EXPORT_PAYLOAD_EXTRA_ORIGINS`**) inside the export JSON so fonts and media do not still point at a browser-only host. If the console shows **`ERR_CONNECTION_REFUSED`** for assets while the main page loaded, add **`STUDIO_VIDEO_CANVAS_EXPORT_PAYLOAD_EXTRA_ORIGINS`** for any other absolute origins in persisted compositions (e.g. a dev Vite host), redeploy config, and restart Horizon.
+
 **Exit code 1 vs 3 (canvas capture):** **3** = Chromium could not open the signed URL (network / DNS / wrong host). **1** = the Node process died **before** the script’s structured exits—usually **no `playwright` in `node_modules`** for that release, wrong Node binary, or an import-time crash; check `error_json.debug.stderr_tail` on the failed job row.
+
+**Exit code 4 vs 5:** **4** = page loaded but the export bridge never reached **ready** (often asset or font load failures). **5** = the screenshot loop failed after readiness (missing scene root, disk, or total capture timeout).
 
 ### Zero-downtime / Forge releases (why `ERR_MODULE_NOT_FOUND` persists)
 
