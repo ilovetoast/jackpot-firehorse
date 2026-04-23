@@ -1,4 +1,5 @@
 import {
+    startTransition,
     useCallback,
     useEffect,
     useLayoutEffect,
@@ -1509,6 +1510,10 @@ export default function AssetEditor() {
     const pickerDropDepthRef = useRef(0)
     const pickerUploadInputRef = useRef<HTMLInputElement>(null)
     const [promoteSaving, setPromoteSaving] = useState(false)
+    /** Short status line while publish / export is in flight (image rasterization or video server job). */
+    const [publishProgressMessage, setPublishProgressMessage] = useState<string | null>(null)
+    /** Wall-clock seconds while `promoteSaving` — proves the tab is still scheduling JS (not hard-frozen). */
+    const [publishWaitSec, setPublishWaitSec] = useState(0)
     const [promoteError, setPromoteError] = useState<string | null>(null)
     const [promoteOk, setPromoteOk] = useState(false)
     const [publishModalOpen, setPublishModalOpen] = useState(false)
@@ -5437,6 +5442,7 @@ export default function AssetEditor() {
         setPublishCollectionIds([])
         setPublishIncludeAudio(true)
         setPublishModalStillPreviewUrl(null)
+        setPublishProgressMessage(null)
         setPublishMetadataShowErrors(false)
         setPublishMetadataSchema(null)
         setPublishMetadataError(null)
@@ -5494,6 +5500,15 @@ export default function AssetEditor() {
             })
         return () => ac.abort()
     }, [publishModalOpen, publishCategoryId])
+
+    useEffect(() => {
+        if (!promoteSaving) {
+            setPublishWaitSec(0)
+            return
+        }
+        const t = window.setInterval(() => setPublishWaitSec((n) => n + 1), 1000)
+        return () => window.clearInterval(t)
+    }, [promoteSaving])
 
     useEffect(() => {
         if (!publishModalOpen || hasVisibleVideoLayerInDoc) {
@@ -5554,10 +5569,19 @@ export default function AssetEditor() {
             if (!stageRef.current) {
                 return
             }
+            const isVideoPublish = Boolean(compositionId) && hasVisibleVideoLayerInDoc
             setPromoteSaving(true)
             setPromoteError(null)
             setPromoteOk(false)
             setPublishSuccessCelebration(false)
+            setPublishProgressMessage(
+                isVideoPublish ? 'Submitting export to the server…' : 'Preparing image export…',
+            )
+            await new Promise<void>((resolve) => {
+                requestAnimationFrame(() => {
+                    requestAnimationFrame(() => resolve())
+                })
+            })
 
             const exportStageForPublish = async () => {
                 const node = stageRef.current
@@ -5589,8 +5613,6 @@ export default function AssetEditor() {
                 return toJpeg(node, { ...cap, quality: 0.88 })
             }
 
-            const isVideoPublish = Boolean(compositionId) && hasVisibleVideoLayerInDoc
-
             try {
                 if (isVideoPublish) {
                     const compId = compositionId as string
@@ -5606,9 +5628,26 @@ export default function AssetEditor() {
                             editor_provenance: buildEditorProvenanceHints(documentRef.current),
                         },
                     })
+                    setPublishProgressMessage('Queued — polling export status…')
+                    await new Promise<void>((r) => setTimeout(r, 0))
                     const final = await pollVideoExportUntilTerminal(compId, created.id, {
                         intervalMs: 2000,
                         queuedStallMs: 120_000,
+                        onStatus: (s) => {
+                            startTransition(() => {
+                                if (s.status === 'queued') {
+                                    setPublishProgressMessage(
+                                        'In queue — waiting for a worker (run `video-heavy` / studio export queue if this lasts more than a minute)…',
+                                    )
+                                } else if (s.status === 'processing') {
+                                    setPublishProgressMessage(
+                                        'Baking MP4 on the server (this can take a while for long clips)…',
+                                    )
+                                } else {
+                                    setPublishProgressMessage('Finishing up…')
+                                }
+                            })
+                        },
                     })
                     if (final.status === 'failed') {
                         const err = final.error
@@ -5635,11 +5674,14 @@ export default function AssetEditor() {
                 } else {
                     let dataUrl: string
                     try {
+                        setPublishProgressMessage('Rasterizing the canvas in your browser…')
                         dataUrl = await exportStageForPublish()
                     } catch (e) {
                         console.warn('Retry export...', e)
+                        setPublishProgressMessage('Retrying canvas export…')
                         dataUrl = await exportStageForPublish()
                     }
+                    setPublishProgressMessage('Compressing and uploading to Jackpot…')
                     let blob = await (await fetch(dataUrl)).blob()
                     blob = await compressImageBlobForLegacyUploadLimit(blob, editorPublishFileByteBudget())
                     const name = opts.title.trim() || buildPromotionAssetName(documentRef.current)
@@ -5661,6 +5703,7 @@ export default function AssetEditor() {
                 setPromoteError(handleAIError(e))
             } finally {
                 setPromoteSaving(false)
+                setPublishProgressMessage(null)
             }
         },
         [
@@ -13839,6 +13882,7 @@ export default function AssetEditor() {
                     className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4"
                     role="dialog"
                     aria-modal="true"
+                    aria-busy={promoteSaving}
                     aria-label="Publish to library"
                 >
                     <div className="flex max-h-[92vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl ring-1 ring-black/5">
@@ -13857,6 +13901,24 @@ export default function AssetEditor() {
                                 <XMarkIcon className="h-5 w-5" />
                             </button>
                         </div>
+                        {promoteSaving && publishProgressMessage && (
+                            <div
+                                className="flex shrink-0 items-center gap-2.5 border-b border-indigo-100 bg-indigo-50 px-5 py-2.5 text-xs font-medium text-indigo-950"
+                                role="status"
+                                aria-live="polite"
+                            >
+                                <ArrowPathIcon className="h-4 w-4 shrink-0 animate-spin text-indigo-600" aria-hidden />
+                                <span className="min-w-0 flex-1 leading-snug">{publishProgressMessage}</span>
+                                {publishWaitSec > 0 && (
+                                    <span
+                                        className="shrink-0 tabular-nums text-[11px] font-semibold text-indigo-800/80"
+                                        title="Time since publish started"
+                                    >
+                                        {publishWaitSec}s
+                                    </span>
+                                )}
+                            </div>
+                        )}
                         <div className="min-h-0 flex-1 overflow-y-auto">
                             <div className="space-y-0">
                                 <div className="space-y-3 px-4 pb-3 pt-4 text-sm text-gray-900">
@@ -14079,7 +14141,7 @@ export default function AssetEditor() {
                             </button>
                             <button
                                 type="button"
-                                className="rounded-md border border-indigo-600 bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
+                                className="inline-flex items-center justify-center gap-2 rounded-md border border-indigo-600 bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
                                 onClick={() => void submitPublishModal()}
                                 disabled={
                                     promoteSaving ||
@@ -14089,7 +14151,14 @@ export default function AssetEditor() {
                                     publishCategoryId === ''
                                 }
                             >
-                                {promoteSaving ? 'Publishing…' : 'Publish'}
+                                {promoteSaving ? (
+                                    <>
+                                        <ArrowPathIcon className="h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden />
+                                        Publishing…
+                                    </>
+                                ) : (
+                                    'Publish'
+                                )}
                             </button>
                         </div>
                     </div>

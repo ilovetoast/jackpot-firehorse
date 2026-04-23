@@ -7,6 +7,17 @@ function csrf(): string {
     return document.querySelector('meta[name="csrf-token"]')?.content ?? ''
 }
 
+/** Avoid hung tabs when a status poll never completes (stalled connection, proxy, or server). */
+async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
+    const controller = new AbortController()
+    const tid = window.setTimeout(() => controller.abort(), timeoutMs)
+    try {
+        return await fetch(url, { ...init, signal: controller.signal })
+    } finally {
+        window.clearTimeout(tid)
+    }
+}
+
 function formatApiError(data: unknown, fallback: string): string {
     if (!data || typeof data !== 'object') {
         return fallback
@@ -96,16 +107,20 @@ export async function postRequestVideoExport(
     compositionId: string,
     body: PostRequestVideoExportBody = {}
 ): Promise<PostVideoExportResponse> {
-    const res = await fetch(`/app/api/compositions/${encodeURIComponent(compositionId)}/studio/video-export`, {
-        method: 'POST',
-        headers: {
-            Accept: 'application/json',
-            'Content-Type': 'application/json',
-            'X-CSRF-TOKEN': csrf(),
+    const res = await fetchWithTimeout(
+        `/app/api/compositions/${encodeURIComponent(compositionId)}/studio/video-export`,
+        {
+            method: 'POST',
+            headers: {
+                Accept: 'application/json',
+                'Content-Type': 'application/json',
+                'X-CSRF-TOKEN': csrf(),
+            },
+            credentials: 'same-origin',
+            body: JSON.stringify(body ?? {}),
         },
-        credentials: 'same-origin',
-        body: JSON.stringify(body ?? {}),
-    })
+        180_000,
+    )
     const text = await res.text()
     let data: unknown
     try {
@@ -116,7 +131,16 @@ export async function postRequestVideoExport(
     if (!res.ok) {
         throw new Error(formatApiError(data, text || `Video export request failed (${res.status})`))
     }
-    return data as PostVideoExportResponse
+    const parsed = data as { id?: unknown; status?: unknown; render_mode?: unknown }
+    const id = parsed.id != null && String(parsed.id).trim() !== '' ? String(parsed.id) : ''
+    if (!id) {
+        throw new Error('Video export response did not include a job id.')
+    }
+    return {
+        id,
+        status: typeof parsed.status === 'string' ? parsed.status : String(parsed.status ?? ''),
+        render_mode: typeof parsed.render_mode === 'string' ? parsed.render_mode : undefined,
+    }
 }
 
 export type VideoExportStatusResponse = {
@@ -132,12 +156,14 @@ export async function getVideoExportStatus(
     compositionId: string,
     exportJobId: string
 ): Promise<VideoExportStatusResponse> {
-    const res = await fetch(
-        `/app/api/compositions/${encodeURIComponent(compositionId)}/studio/video-export/${encodeURIComponent(exportJobId)}`,
+    const jobId = String(exportJobId)
+    const res = await fetchWithTimeout(
+        `/app/api/compositions/${encodeURIComponent(compositionId)}/studio/video-export/${encodeURIComponent(jobId)}`,
         {
             headers: { Accept: 'application/json', 'X-CSRF-TOKEN': csrf() },
             credentials: 'same-origin',
-        }
+        },
+        90_000,
     )
     const text = await res.text()
     let data: unknown
@@ -171,8 +197,23 @@ export async function pollVideoExportUntilTerminal(
     const queuedStallMs = opts?.queuedStallMs ?? 120_000
     const start = Date.now()
     let queuedSince: number | null = null
+    const jobId = String(exportJobId)
     for (;;) {
-        const s = await getVideoExportStatus(compositionId, exportJobId)
+        // Yield so the UI can paint (progress text, timers) before each status read.
+        await new Promise<void>((r) => setTimeout(r, 0))
+        let s: VideoExportStatusResponse
+        try {
+            s = await getVideoExportStatus(compositionId, jobId)
+        } catch (e) {
+            const name = e instanceof DOMException ? e.name : ''
+            const msg = e instanceof Error ? e.message : ''
+            if (name === 'AbortError' || msg.includes('aborted')) {
+                throw new Error(
+                    'Timed out while reading video export status (no response in time). Check the Network tab for GET /studio/video-export/{id}, proxy limits, or run a queue worker if the job stays queued.',
+                )
+            }
+            throw e
+        }
         opts?.onStatus?.(s)
         if (s.status === 'complete' || s.status === 'failed' || s.status === 'canceled' || s.status === 'cancelled') {
             return s
