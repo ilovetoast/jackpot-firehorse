@@ -397,8 +397,10 @@ export function StudioAnimationJobDetailDialog(props: Props) {
                         </button>
                         <p className="text-[10px] leading-snug text-gray-500">
                             Baked export uses the <strong className="text-gray-400">primary video for export</strong> (set in
-                            layer properties if you have more than one). Raster layers above that video in the stack are
-                            composited in.
+                            layer properties if you have more than one). Image and generated-image layers above that video are
+                            composited in. <strong className="text-gray-400">Text layers are not included</strong> in the MP4
+                            yet—flatten copy to an image first if it must appear in export. Masks and blend modes are not
+                            applied server-side.
                         </p>
                     </div>
                 ) : null}

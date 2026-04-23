@@ -1,5 +1,6 @@
 /**
  * Compositions: insert a video layer (DAM asset) and export a baked MP4.
+ * Server export composites image / generative_image layers only (no text, masks, or blend modes).
  */
 
 function csrf(): string {

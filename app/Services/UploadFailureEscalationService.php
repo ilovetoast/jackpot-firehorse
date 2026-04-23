@@ -42,7 +42,7 @@ class UploadFailureEscalationService
         $creator = User::where('email', 'system@internal')->first() ?? User::find(1);
 
         try {
-            $ticket = $this->ticketService->createInternalEngineeringTicket([
+            $payload = [
                 'subject' => $subject,
                 'description' => $description,
                 'tenant_id' => $upload->tenant_id,
@@ -53,7 +53,11 @@ class UploadFailureEscalationService
                     'failure_count' => $upload->failure_count,
                     'agent_summary' => $agentSummary,
                 ],
-            ], $creator);
+            ];
+            if ($upload->asset_id) {
+                $payload['asset_id'] = $upload->asset_id;
+            }
+            $ticket = $this->ticketService->createInternalEngineeringTicket($payload, $creator);
 
             $upload->update(['escalation_ticket_id' => $ticket->id]);
 

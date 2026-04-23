@@ -42,8 +42,10 @@ class DownloadZipFailureEscalationService
 
         $creator = User::where('email', 'system@internal')->first() ?? User::find(1);
 
+        $linkedAssetId = ($download->primaryAsset()->first() ?? $download->assets()->first())?->id;
+
         try {
-            $ticket = $this->ticketService->createInternalEngineeringTicket([
+            $payload = [
                 'subject' => $subject,
                 'description' => $description,
                 'tenant_id' => $download->tenant_id,
@@ -55,7 +57,11 @@ class DownloadZipFailureEscalationService
                     'asset_count' => $download->assets()->count(),
                     'agent_summary' => $agentSummary,
                 ],
-            ], $creator);
+            ];
+            if ($linkedAssetId) {
+                $payload['asset_id'] = $linkedAssetId;
+            }
+            $ticket = $this->ticketService->createInternalEngineeringTicket($payload, $creator);
 
             $download->update(['escalation_ticket_id' => $ticket->id]);
 

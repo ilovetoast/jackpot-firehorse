@@ -452,7 +452,7 @@ export function StudioAnimateCompositionModal(props: Props) {
                             headlines. After the job finishes, <strong className="text-sky-50">Insert as composition
                             video layer</strong> places the file <strong className="text-sky-50">under</strong> your text
                             and other layers, then you can <strong className="text-sky-50">Export final video</strong> to
-                            bake one MP4.
+                            bake one MP4. That export still omits text layers—only raster overlays are composited.
                         </p>
                     </div>
                     {sourceKind !== 'full_composition' && animatableLayers.length > 0 && (

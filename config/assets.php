@@ -438,7 +438,11 @@ return [
         /** Batch dispatcher: jobs per chunk and pause between chunks (seconds). */
         'batch_size' => (int) env('ASSET_VIDEO_AI_BATCH_SIZE', 5),
         'batch_delay_seconds' => (int) env('ASSET_VIDEO_AI_BATCH_DELAY', 2),
-        /** Queue for {@see \App\Jobs\GenerateVideoInsightsJob} (default ai-low for throughput). */
+        /**
+         * Queue for {@see \App\Jobs\GenerateVideoInsightsJob}. When null, uses {@see config('queue.ai_low_queue')}.
+         * The job maps `default` to that AI queue so Horizon workers are not capped at supervisor-default tries
+         * (video insights may release() many times while storage paths appear).
+         */
         'queue' => env('ASSET_VIDEO_AI_QUEUE', null),
         /** Surface cumulative video AI USD in asset drawer (metadata-backed). */
         'show_cost_in_drawer' => (bool) env('ASSET_VIDEO_AI_SHOW_COST_IN_DRAWER', true),

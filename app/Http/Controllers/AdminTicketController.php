@@ -13,6 +13,7 @@ use App\Enums\TicketTeam;
 use App\Enums\TicketType;
 use App\Models\ActivityEvent;
 use App\Models\AITicketSuggestion;
+use App\Models\Asset;
 use App\Models\Brand;
 use App\Models\SupportRoundRobinUser;
 use App\Models\Tenant;
@@ -913,8 +914,8 @@ class AdminTicketController extends Controller
 
         $validated = $request->validate([
             'linkable_type' => 'required|string',
-            'linkable_id' => 'required|integer',
-            'link_type' => 'required|string|in:event,error_log,ticket,frontend_error,job_failure',
+            'linkable_id' => 'required|string|max:64',
+            'link_type' => 'required|string|in:event,error_log,ticket,frontend_error,job_failure,asset',
             'designation' => 'nullable|string|in:' . implode(',', array_column(LinkDesignation::cases(), 'value')),
             'metadata' => 'nullable|array',
         ]);
@@ -931,6 +932,7 @@ class AdminTicketController extends Controller
             'error_log' => \App\Models\ErrorLog::class,
             'frontend_error' => \App\Models\FrontendError::class,
             'job_failure' => \App\Models\JobFailure::class,
+            'asset' => Asset::class,
         ];
         
         // If it's a short name, get the full class name
@@ -1113,14 +1115,21 @@ class AdminTicketController extends Controller
             'description' => $ticket->metadata['description'] ?? null,
             'converted_from' => $convertedFrom,
             'converted_to' => $convertedTo,
-            'links' => $ticket->ticketLinks->map(fn($link) => [
-                'id' => $link->id,
-                'link_type' => $link->link_type,
-                'linkable_type' => $link->linkable_type,
-                'linkable_id' => $link->linkable_id,
-                'designation' => $link->designation?->value,
-                'metadata' => $link->metadata,
-            ]),
+            'links' => $ticket->ticketLinks->map(function ($link) {
+                $row = [
+                    'id' => $link->id,
+                    'link_type' => $link->link_type,
+                    'linkable_type' => $link->linkable_type,
+                    'linkable_id' => $link->linkable_id,
+                    'designation' => $link->designation?->value,
+                    'metadata' => $link->metadata,
+                ];
+                if ($link->linkable_type === Asset::class) {
+                    $row['admin_asset_operations_url'] = url('/app/admin/assets').'?asset_id='.rawurlencode((string) $link->linkable_id);
+                }
+
+                return $row;
+            }),
         ]);
     }
 

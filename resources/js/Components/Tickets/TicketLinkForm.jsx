@@ -62,6 +62,7 @@ export default function TicketLinkForm({ ticketId }) {
                         <option value="ticket">Ticket</option>
                         <option value="frontend_error">Frontend Error</option>
                         <option value="job_failure">Job Failure</option>
+                        <option value="asset">Asset</option>
                     </select>
                 </div>
 
@@ -86,12 +87,12 @@ export default function TicketLinkForm({ ticketId }) {
                         Model ID <span className="text-red-500">*</span>
                     </label>
                     <input
-                        type="number"
+                        type="text"
                         id="linkable_id"
                         value={data.linkable_id}
                         onChange={(e) => setData('linkable_id', e.target.value)}
                         className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
-                        placeholder="123"
+                        placeholder="Numeric ID or asset UUID"
                         required
                     />
                     {errors.linkable_id && <p className="mt-1 text-sm text-red-600">{errors.linkable_id}</p>}

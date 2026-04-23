@@ -49,9 +49,18 @@ class GenerateVideoInsightsJob implements ShouldQueue
     public function __construct(
         public readonly string $assetId
     ) {
-        $q = config('assets.video_ai.queue');
+        $configured = config('assets.video_ai.queue');
+        $fallback = config('queue.ai_low_queue', 'ai-low');
+        $queue = ($configured !== null && $configured !== '')
+            ? trim((string) $configured)
+            : $fallback;
+        // Horizon's `default` supervisor uses low tries (e.g. 3 on staging); this job can release()
+        // many times waiting for storage_root_path. Route to the AI supervisor queues instead.
+        if ($queue === 'default') {
+            $queue = $fallback;
+        }
 
-        $this->onQueue($q ?: config('queue.ai_low_queue', 'ai-low'));
+        $this->onQueue($queue);
     }
 
     /**
@@ -60,6 +69,24 @@ class GenerateVideoInsightsJob implements ShouldQueue
     public function backoff(): array
     {
         return [60, 180];
+    }
+
+    /**
+     * Horizon / debug: make the asset id visible without opening the serialized payload.
+     *
+     * @return list<string>
+     */
+    public function tags(): array
+    {
+        return [
+            'GenerateVideoInsightsJob',
+            'asset:'.(string) $this->assetId,
+        ];
+    }
+
+    public function displayName(): string
+    {
+        return 'GenerateVideoInsightsJob (asset '.(string) $this->assetId.')';
     }
 
     public function shouldRetry(\Throwable $exception): bool
@@ -79,6 +106,8 @@ class GenerateVideoInsightsJob implements ShouldQueue
         VideoAiMinuteEstimator $minuteEstimator,
         VideoInsightsSearchIndexWriter $videoSearchIndex,
     ): void {
+        $this->configureErrorMonitoringContext();
+
         $asset = Asset::find($this->assetId);
         if (! $asset) {
             return;
@@ -310,6 +339,8 @@ class GenerateVideoInsightsJob implements ShouldQueue
      */
     public function failed(?\Throwable $exception): void
     {
+        $this->configureErrorMonitoringContext();
+
         try {
             $asset = Asset::find($this->assetId);
             if (! $asset) {
@@ -331,6 +362,28 @@ class GenerateVideoInsightsJob implements ShouldQueue
     protected function signalDeferredEbiIfVideoInsightsSettled(Asset $asset): void
     {
         app(BrandIntelligenceScheduleService::class)->dispatchAfterVideoInsightsIfDeferred($asset);
+    }
+
+    /**
+     * Enrich Sentry (and similar) with the asset id — MaxAttemptsExceeded is thrown by the worker
+     * wrapper, so payload context is easy to miss in the UI without explicit tags.
+     */
+    protected function configureErrorMonitoringContext(): void
+    {
+        if (! function_exists('Sentry\\configureScope')) {
+            return;
+        }
+
+        \Sentry\configureScope(function (\Sentry\State\Scope $scope): void {
+            $scope->setTag('asset_id', (string) $this->assetId);
+            $scope->setTag('queue_job', 'GenerateVideoInsightsJob');
+            $scope->setContext('generate_video_insights_job', [
+                'asset_id' => $this->assetId,
+                'attempt' => $this->attempts(),
+                'queue' => $this->queue,
+                'admin_asset_operations_url' => url('/app/admin/assets').'?asset_id='.rawurlencode((string) $this->assetId),
+            ]);
+        });
     }
 
     /**

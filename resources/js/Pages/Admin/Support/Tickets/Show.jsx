@@ -453,7 +453,7 @@ export default function AdminTicketsShow({ ticket, publicMessages, internalNotes
                                         ticket.links.map((link) => (
                                             <div key={link.id} className="flex items-center justify-between p-4 border border-gray-200 rounded-lg">
                                                 <div className="flex-1">
-                                                    <div className="flex items-center gap-2 mb-1">
+                                                    <div className="flex items-center gap-2 mb-1 flex-wrap">
                                                         <p className="text-sm font-medium text-gray-900">
                                                             {link.link_type} - {link.linkable_type}
                                                         </p>
@@ -465,6 +465,14 @@ export default function AdminTicketsShow({ ticket, publicMessages, internalNotes
                                                             }`}>
                                                                 {link.designation}
                                                             </span>
+                                                        )}
+                                                        {link.admin_asset_operations_url && (
+                                                            <a
+                                                                href={link.admin_asset_operations_url}
+                                                                className="text-sm font-medium text-indigo-600 hover:text-indigo-900"
+                                                            >
+                                                                View in Asset Operations
+                                                            </a>
                                                         )}
                                                     </div>
                                                     <p className="text-xs text-gray-500">ID: {link.linkable_id}</p>

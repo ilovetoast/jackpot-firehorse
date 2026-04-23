@@ -2,12 +2,14 @@
 
 namespace App\Services;
 
+use App\Enums\LinkDesignation;
 use App\Enums\TicketSeverity;
 use App\Enums\TicketStatus;
 use App\Enums\TicketType;
 use App\Models\Asset;
 use App\Models\SystemIncident;
 use App\Models\Ticket;
+use App\Models\TicketLink;
 use App\Models\TicketMessage;
 use App\Models\User;
 use App\Jobs\PopulateAutomaticMetadataJob;
@@ -149,6 +151,20 @@ class SystemIncidentRecoveryService
 
                 if ($asset?->brand_id) {
                     $ticket->brands()->attach([$asset->brand_id]);
+                }
+
+                if ($incident->source_type === 'asset' && Asset::whereKey($assetId)->exists()) {
+                    TicketLink::create([
+                        'ticket_id' => $ticket->id,
+                        'linkable_type' => Asset::class,
+                        'linkable_id' => $assetId,
+                        'link_type' => 'asset',
+                        'designation' => LinkDesignation::PRIMARY,
+                        'metadata' => [
+                            'source' => 'operations_incident',
+                            'incident_id' => $incident->id,
+                        ],
+                    ]);
                 }
 
                 TicketMessage::create([

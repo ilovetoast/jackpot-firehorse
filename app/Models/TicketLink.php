@@ -97,6 +97,7 @@ class TicketLink extends Model
             'error_log' => \App\Models\ErrorLog::class,
             'frontend_error' => \App\Models\FrontendError::class,
             'job_failure' => \App\Models\JobFailure::class,
+            'asset' => \App\Models\Asset::class,
             'ai_agent_run' => \App\Models\AIAgentRun::class,
             'aiagentrun' => \App\Models\AIAgentRun::class,
         ];

@@ -47,6 +47,7 @@ class AssetDerivativeFailureEscalationService
                 'description' => $description,
                 'tenant_id' => $record->asset?->tenant_id,
                 'severity' => 'high',
+                'asset_id' => $record->asset_id,
                 'metadata' => [
                     'asset_derivative_failure_id' => $record->id,
                     'asset_id' => $record->asset_id,

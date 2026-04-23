@@ -2,13 +2,16 @@
 
 namespace App\Services;
 
+use App\Enums\LinkDesignation;
 use App\Enums\TicketComponent;
 use App\Enums\TicketEnvironment;
 use App\Enums\TicketSeverity;
 use App\Enums\TicketStatus;
 use App\Enums\TicketTeam;
 use App\Enums\TicketType;
+use App\Models\Asset;
 use App\Models\Ticket;
+use App\Models\TicketLink;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
@@ -46,12 +49,17 @@ class TicketCreationService
      *   - error_fingerprint (string, optional)
      *   - tenant_id (int, optional)
      *   - metadata (array, optional)
+     *   - asset_id (string UUID, optional) — creates a ticket_links row to Asset (Asset Operations)
      * @param User|null $creator Optional user creating the ticket (defaults to system user)
      * @return Ticket The created ticket
      * @throws \Illuminate\Validation\ValidationException
      */
     public function createInternalEngineeringTicket(array $data, ?User $creator = null): Ticket
     {
+        if (array_key_exists('asset_id', $data) && ($data['asset_id'] === null || $data['asset_id'] === '')) {
+            unset($data['asset_id']);
+        }
+
         // Validate input
         $validator = Validator::make($data, [
             'subject' => 'required|string|max:255',
@@ -62,6 +70,7 @@ class TicketCreationService
             'error_fingerprint' => 'nullable|string|max:255',
             'tenant_id' => 'nullable|exists:tenants,id',
             'metadata' => 'nullable|array',
+            'asset_id' => 'nullable|string|max:64|exists:assets,id',
         ]);
 
         if ($validator->fails()) {
@@ -102,6 +111,20 @@ class TicketCreationService
 
             // Assign to engineering team/user
             $this->assignmentService->assignTicket($ticket);
+
+            $assetId = $data['asset_id'] ?? null;
+            if ($assetId && Asset::whereKey($assetId)->exists()) {
+                TicketLink::create([
+                    'ticket_id' => $ticket->id,
+                    'linkable_type' => Asset::class,
+                    'linkable_id' => $assetId,
+                    'link_type' => 'asset',
+                    'designation' => LinkDesignation::PRIMARY,
+                    'metadata' => [
+                        'source' => 'ticket_creation_service',
+                    ],
+                ]);
+            }
 
             return $ticket;
         });

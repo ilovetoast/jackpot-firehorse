@@ -25,8 +25,10 @@ use Symfony\Component\Process\Process;
 
 /**
  * Bakes a composition MP4: scale/pad the first video layer to the canvas, then (when present) overlays
- * image / generative_image layers with z-order above the video. Text and mask effects are not rendered here
- * (they remain editor-only in this pipeline).
+ * image / generative_image layers with z-order above the video.
+ *
+ * Not baked in this pipeline (editor-only today): text layers, mask clipping, blend modes, fill borders,
+ * and other non-raster effects. Callers should surface that in UI so “live type” is not expected in the MP4.
  */
 final class StudioCompositionVideoExportService
 {
@@ -178,13 +180,14 @@ final class StudioCompositionVideoExportService
             $hasAudio = $this->ffprobeHasAudio($ffprobe, $tmpIn);
             $tlMuted = (bool) ($tl['muted'] ?? false);
             $wantAudio = $includeAudioPref && ! $tlMuted && $hasAudio;
+            $padColor = $this->resolvePadColorForFfmpeg($layers, $videoZ);
             if ($stacks === []) {
-                $fc = "[0:v]scale={$w}:{$h}:force_original_aspect_ratio=decrease,pad={$w}:{$h}:(ow-iw)/2:(oh-ih)/2,format=yuv420p,setsar=1[vout]";
+                $fc = "[0:v]scale={$w}:{$h}:force_original_aspect_ratio=decrease,pad={$w}:{$h}:(ow-iw)/2:(oh-ih)/2:{$padColor},format=yuv420p,setsar=1[vout]";
                 $mapLabel = 'vout';
             } else {
                 $filterParts = [];
                 $baseLabel = 'bg0';
-                $filterParts[] = "[0:v]scale={$w}:{$h}:force_original_aspect_ratio=decrease,pad={$w}:{$h}:(ow-iw)/2:(oh-ih)/2,format=yuv420p,setsar=1[{$baseLabel}]";
+                $filterParts[] = "[0:v]scale={$w}:{$h}:force_original_aspect_ratio=decrease,pad={$w}:{$h}:(ow-iw)/2:(oh-ih)/2:{$padColor},format=yuv420p,setsar=1[{$baseLabel}]";
                 $graphCurrent = $baseLabel;
                 $inIdx = 1;
                 $oi = 0;
@@ -202,14 +205,15 @@ final class StudioCompositionVideoExportService
                     if ($fit === 'fill') {
                         $fitExpr = "scale={$tw}:{$th},format=rgba";
                     } elseif ($fit === 'contain') {
-                        $fitExpr = "scale={$tw}:{$th}:force_original_aspect_ratio=decrease,pad={$tw}:{$th}:(ow-iw)/2:(oh-ih)/2,format=rgba";
+                        // Transparent letterbox inside the overlay tile so letterboxing is not painted as opaque black.
+                        $fitExpr = "scale={$tw}:{$th}:force_original_aspect_ratio=decrease,pad={$tw}:{$th}:(ow-iw)/2:(oh-ih)/2:color=black@0,format=rgba";
                     } else {
                         $fitExpr = "scale={$tw}:{$th}:force_original_aspect_ratio=increase,crop={$tw}:{$th},format=rgba";
                     }
                     $ovLabel = 'ov'.$oi;
                     $nextLabel = 'st'.$oi;
                     $filterParts[] = "[{$inIdx}:v]{$fitExpr}[{$ovLabel}]";
-                    $filterParts[] = "[{$graphCurrent}][{$ovLabel}]overlay={$x}:{$y}:shortest=1[{$nextLabel}]";
+                    $filterParts[] = "[{$graphCurrent}][{$ovLabel}]overlay={$x}:{$y}:shortest=1:format=auto[{$nextLabel}]";
                     $graphCurrent = $nextLabel;
                     $inIdx++;
                     $oi++;
@@ -357,6 +361,7 @@ final class StudioCompositionVideoExportService
                 'include_audio' => $includeAudioPref,
                 'audio_muxed' => $wantAudio,
                 'layer_timeline_muted' => $tlMuted,
+                'ffmpeg_pad_color' => $padColor,
                 'ffmpeg_command_summary' => $stacks === [] ? 'scale+pad base video to canvas' : 'scale+pad base + image overlays (z above video layer)',
                 'primary_video_layer_id' => (string) ($videoLayer['id'] ?? ''),
                 'probed_source_duration_s' => $probedS,
@@ -367,7 +372,7 @@ final class StudioCompositionVideoExportService
                 'overlays_applied' => $overlaysApplied,
                 'overlays_skipped' => $overlaysSkipped,
                 'overlays_total_candidates' => $overlaysAttempted,
-                'text_layers_note' => 'Text and mask effects are not baked in this service.',
+                'text_layers_note' => 'Text layers, masks, blend modes, and non-raster fills are not baked; only image/generative_image overlays.',
                 'output_asset_id' => $asset->id,
             ];
             $preserved = is_array($row->meta_json) ? $row->meta_json : [];
@@ -513,5 +518,94 @@ final class StudioCompositionVideoExportService
         file_put_contents($path, $raw);
 
         return $path;
+    }
+
+    /**
+     * FFmpeg pad filter color for letterboxing the base video to the canvas.
+     * Defaults to black when no usable fill is found (legacy behavior).
+     *
+     * @param  array<int, mixed>  $layers
+     */
+    private function resolvePadColorForFfmpeg(array $layers, int $videoZ): string
+    {
+        $resolved = $this->resolveBackgroundFillCssColor($layers, $videoZ);
+        if ($resolved === null) {
+            return 'black';
+        }
+        $ffmpeg = $this->cssColorToFfmpegPadColor($resolved);
+
+        return $ffmpeg ?? 'black';
+    }
+
+    /**
+     * Prefer the lowest-z visible fill that sits beneath the export video (typical canvas wash).
+     * Falls back to lowest-z visible fill in the document.
+     *
+     * @param  array<int, mixed>  $layers
+     */
+    private function resolveBackgroundFillCssColor(array $layers, int $videoZ): ?string
+    {
+        $below = [];
+        $any = [];
+        foreach ($layers as $ly) {
+            if (! is_array($ly) || ($ly['type'] ?? '') !== 'fill') {
+                continue;
+            }
+            if (($ly['visible'] ?? true) === false) {
+                continue;
+            }
+            $z = (int) ($ly['z'] ?? 0);
+            $any[] = ['z' => $z, 'layer' => $ly];
+            if ($z < $videoZ) {
+                $below[] = ['z' => $z, 'layer' => $ly];
+            }
+        }
+        $pool = $below !== [] ? $below : $any;
+        if ($pool === []) {
+            return null;
+        }
+        usort($pool, static fn (array $a, array $b): int => $a['z'] <=> $b['z']);
+        $fill = $pool[0]['layer'];
+        $fillKind = (string) ($fill['fillKind'] ?? 'solid');
+        if ($fillKind === 'gradient') {
+            $g = (string) ($fill['gradientEndColor'] ?? $fill['gradientStartColor'] ?? $fill['color'] ?? '');
+
+            return $g !== '' ? $g : null;
+        }
+
+        $c = (string) ($fill['color'] ?? '');
+        if ($c === '') {
+            return null;
+        }
+
+        return $c;
+    }
+
+    /**
+     * @return non-empty-string|null  FFmpeg pad color (named color or {@code 0xRRGGBB})
+     */
+    private function cssColorToFfmpegPadColor(string $css): ?string
+    {
+        $s = trim($css);
+        if ($s === '') {
+            return null;
+        }
+        if (preg_match('/^#([0-9a-f]{3})$/i', $s, $m)) {
+            $x = $m[1];
+
+            return '0x'.strtoupper($x[0].$x[0].$x[1].$x[1].$x[2].$x[2]);
+        }
+        if (preg_match('/^#([0-9a-f]{6})([0-9a-f]{2})?$/i', $s, $m)) {
+            return '0x'.strtoupper($m[1]);
+        }
+        if (preg_match('/^rgba?\(\s*([0-9]+)\s*,\s*([0-9]+)\s*,\s*([0-9]+)/i', $s, $m)) {
+            $r = max(0, min(255, (int) $m[1]));
+            $g = max(0, min(255, (int) $m[2]));
+            $b = max(0, min(255, (int) $m[3]));
+
+            return sprintf('0x%02X%02X%02X', $r, $g, $b);
+        }
+
+        return null;
     }
 }

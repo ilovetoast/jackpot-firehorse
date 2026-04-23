@@ -10800,7 +10800,9 @@ export default function AssetEditor() {
                                                     <p className="text-[10px] leading-snug text-gray-500">
                                                         If you have several video layers, check this on the one that should
                                                         fill the frame for export. Otherwise the back-most visible video is
-                                                        used.
+                                                        used. Baked MP4 adds image / generated-image overlays only; live text,
+                                                        masks, and blend modes are not written into the file—flatten type into
+                                                        a bitmap layer if it must appear in the export.
                                                     </p>
                                                     {selectedLayer.studioProvenance ? (
                                                         <div className="rounded-md bg-gray-900/50 px-2 py-1.5 text-[10px] leading-snug text-gray-400">

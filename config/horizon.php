@@ -289,8 +289,9 @@ return [
             'maxTime' => 3600,
             'maxJobs' => 100,
             'memory' => (int) env('HORIZON_AI_MEMORY', 1024),
-            // One retry covers transient 429/5xx from AI providers; expensive jobs should cap $tries locally.
-            'tries' => 2,
+            // {@see \App\Jobs\GenerateVideoInsightsJob}: may release() many times while storage paths appear;
+            // worker max attempts must stay >= that deferral budget (job $tries is 32). Override via HORIZON_AI_SUPERVISOR_TRIES.
+            'tries' => (int) env('HORIZON_AI_SUPERVISOR_TRIES', 40),
             'timeout' => (int) env('HORIZON_AI_WORKER_TIMEOUT', 960),
             'nice' => 0,
         ],
