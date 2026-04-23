@@ -1,5 +1,4 @@
 import {
-    startTransition,
     useCallback,
     useEffect,
     useLayoutEffect,
@@ -1811,6 +1810,10 @@ export default function AssetEditor() {
     const [suggestionToast, setSuggestionToast] = useState<string | null>(null)
     /** Short-lived confirmations (save, export, generation). */
     const [activityToast, setActivityToast] = useState<string | null>(null)
+    /** After “Publish” for video: job runs on server while editor stays usable; dismiss errors with ×. */
+    const [libraryVideoExportNotice, setLibraryVideoExportNotice] = useState<
+        null | { kind: 'working'; title: string } | { kind: 'ok' } | { kind: 'fail'; message: string }
+    >(null)
     const [variationHoverIdx, setVariationHoverIdx] = useState<number | null>(null)
     const [variationPressedIdx, setVariationPressedIdx] = useState<number | null>(null)
     const [layerDragId, setLayerDragId] = useState<string | null>(null)
@@ -2750,6 +2753,22 @@ export default function AssetEditor() {
         const t = window.setTimeout(() => setActivityToast(null), 3200)
         return () => window.clearTimeout(t)
     }, [activityToast])
+
+    useEffect(() => {
+        if (!libraryVideoExportNotice || libraryVideoExportNotice.kind !== 'ok') {
+            return undefined
+        }
+        const t = window.setTimeout(() => setLibraryVideoExportNotice(null), 5500)
+        return () => window.clearTimeout(t)
+    }, [libraryVideoExportNotice])
+
+    const editorShellMountedRef = useRef(true)
+    useEffect(() => {
+        editorShellMountedRef.current = true
+        return () => {
+            editorShellMountedRef.current = false
+        }
+    }, [])
 
     useEffect(() => {
         const t = window.setInterval(() => setSpinPhraseIdx((i) => i + 1), 4000)
@@ -5628,49 +5647,58 @@ export default function AssetEditor() {
                             editor_provenance: buildEditorProvenanceHints(documentRef.current),
                         },
                     })
-                    setPublishProgressMessage('Queued — polling export status…')
-                    await new Promise<void>((r) => setTimeout(r, 0))
-                    const final = await pollVideoExportUntilTerminal(compId, created.id, {
-                        intervalMs: 2000,
-                        queuedStallMs: 120_000,
-                        onStatus: (s) => {
-                            startTransition(() => {
-                                if (s.status === 'queued') {
-                                    setPublishProgressMessage(
-                                        'In queue — waiting for a worker (run `video-heavy` / studio export queue if this lasts more than a minute)…',
-                                    )
-                                } else if (s.status === 'processing') {
-                                    setPublishProgressMessage(
-                                        'Baking MP4 on the server (this can take a while for long clips)…',
-                                    )
-                                } else {
-                                    setPublishProgressMessage('Finishing up…')
-                                }
-                            })
-                        },
-                    })
-                    if (final.status === 'failed') {
-                        const err = final.error
-                        const msg =
-                            err && typeof err === 'object' && 'message' in err
-                                ? String((err as { message?: unknown }).message)
-                                : 'Video export failed'
-                        throw new Error(msg || 'Video export failed')
-                    }
-                    if (final.status !== 'complete' || !final.output_asset_id) {
-                        throw new Error(
-                            final.status === 'complete'
-                                ? 'Video export finished but no output file was recorded. Try again or contact support.'
-                                : `Video export ended unexpectedly (status: ${final.status}).`,
-                        )
-                    }
-                    void snapshotCheckpoint('Published video to library', documentRef.current)
-                    setPromoteOk(true)
+                    const displayTitle = name.length > 72 ? `${name.slice(0, 72)}…` : name
                     setPublishModalOpen(false)
-                    setPublishSuccessCelebration(true)
-                    setActivityToast('Your asset has been sent to Jackpot and will be processed.')
-                    window.setTimeout(() => setPublishSuccessCelebration(false), 4000)
-                    window.setTimeout(() => setPromoteOk(false), 5000)
+                    setPromoteSaving(false)
+                    setPublishProgressMessage(null)
+                    setLibraryVideoExportNotice({ kind: 'working', title: displayTitle })
+
+                    void (async () => {
+                        try {
+                            const final = await pollVideoExportUntilTerminal(compId, created.id, {
+                                intervalMs: 2000,
+                                queuedStallMs: 120_000,
+                            })
+                            if (!editorShellMountedRef.current) {
+                                return
+                            }
+                            if (final.status === 'failed') {
+                                const err = final.error
+                                const msg =
+                                    err && typeof err === 'object' && 'message' in err
+                                        ? String((err as { message?: unknown }).message)
+                                        : 'Video export failed'
+                                throw new Error(msg || 'Video export failed')
+                            }
+                            if (final.status !== 'complete' || !final.output_asset_id) {
+                                throw new Error(
+                                    final.status === 'complete'
+                                        ? 'Video export finished but no output file was recorded. Try again or contact support.'
+                                        : `Video export ended unexpectedly (status: ${final.status}).`,
+                                )
+                            }
+                            void snapshotCheckpoint('Published video to library', documentRef.current)
+                            setPromoteOk(true)
+                            setLibraryVideoExportNotice({ kind: 'ok' })
+                            setPublishSuccessCelebration(true)
+                            setActivityToast('Your asset has been sent to Jackpot and will be processed.')
+                            window.setTimeout(() => {
+                                if (editorShellMountedRef.current) {
+                                    setPublishSuccessCelebration(false)
+                                }
+                            }, 4000)
+                            window.setTimeout(() => {
+                                if (editorShellMountedRef.current) {
+                                    setPromoteOk(false)
+                                }
+                            }, 5000)
+                        } catch (e) {
+                            if (!editorShellMountedRef.current) {
+                                return
+                            }
+                            setLibraryVideoExportNotice({ kind: 'fail', message: handleAIError(e) })
+                        }
+                    })()
                 } else {
                     let dataUrl: string
                     try {
@@ -7868,6 +7896,38 @@ export default function AssetEditor() {
                                 {activityToast && (
                                     <span className="max-w-[140px] truncate text-[11px] text-gray-500" role="status" title={activityToast}>
                                         {activityToast}
+                                    </span>
+                                )}
+                                {libraryVideoExportNotice?.kind === 'working' && (
+                                    <span
+                                        className="flex min-w-0 max-w-[min(22rem,50vw)] items-center gap-1.5 text-[11px] text-indigo-300"
+                                        role="status"
+                                        aria-live="polite"
+                                    >
+                                        <ArrowPathIcon className="h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden />
+                                        <span className="truncate" title={libraryVideoExportNotice.title}>
+                                            Publishing “{libraryVideoExportNotice.title}” — baking MP4 on server…
+                                        </span>
+                                    </span>
+                                )}
+                                {libraryVideoExportNotice?.kind === 'ok' && (
+                                    <span className="text-[11px] font-medium text-emerald-400" role="status">
+                                        Video publish finished — sent to Jackpot
+                                    </span>
+                                )}
+                                {libraryVideoExportNotice?.kind === 'fail' && (
+                                    <span className="flex min-w-0 max-w-[min(26rem,55vw)] items-center gap-2 text-[11px] text-red-300" role="alert">
+                                        <span className="min-w-0 truncate" title={libraryVideoExportNotice.message}>
+                                            {libraryVideoExportNotice.message}
+                                        </span>
+                                        <button
+                                            type="button"
+                                            className="shrink-0 rounded p-0.5 text-red-200 hover:bg-red-950/40 hover:text-white"
+                                            aria-label="Dismiss publish error"
+                                            onClick={() => setLibraryVideoExportNotice(null)}
+                                        >
+                                            <XMarkIcon className="h-3.5 w-3.5" />
+                                        </button>
                                     </span>
                                 )}
                             </span>
@@ -13924,7 +13984,7 @@ export default function AssetEditor() {
                                 <div className="space-y-3 px-4 pb-3 pt-4 text-sm text-gray-900">
                                     <p className="text-xs leading-relaxed text-gray-600">
                                         {hasVisibleVideoLayerInDoc && compositionId
-                                            ? 'Renders a baked MP4 and creates a new library asset. Pick a library or deliverable category — metadata uses the same schema as file uploads. Export runs in a background queue; the dialog stays open until baking finishes (thumbnails may update shortly after).'
+                                            ? 'Renders a baked MP4 and creates a new library asset. Pick a library or deliverable category — metadata uses the same schema as file uploads. Export runs on a server queue; after you publish you can keep editing — progress and errors show in the top bar (thumbnails may update shortly after the job completes).'
                                             : 'Publishes a JPEG export of the canvas. The file is compressed so publish works on servers with a strict upload size cap (about 1MB for the whole request).'}
                                     </p>
                                     {publishCategoriesLoading && (
@@ -13985,8 +14045,8 @@ export default function AssetEditor() {
                                         </div>
                                         {hasVisibleVideoLayerInDoc && Boolean(compositionId) && (
                                             <p className="mt-2 text-xs leading-snug text-gray-500">
-                                                Video publish bakes a full MP4 (clip + image overlays), then sends it to
-                                                the library with the details beside this preview.
+                                                Video publish bakes a full MP4 on the server (clip + image overlays), then
+                                                uploads to the library with the metadata you set here.
                                             </p>
                                         )}
                                     </div>
