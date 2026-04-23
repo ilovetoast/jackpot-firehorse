@@ -569,7 +569,9 @@ export default function OperationsCenterIndex({
                                 <div className="px-4 py-4 sm:px-6">
                                     <h2 className="text-lg font-semibold text-gray-900">Application errors</h2>
                                     <p className="mt-1 text-sm text-gray-500">
-                                        User-impacting errors that are not queue hard-failures (for example AI provider overload). Newest first.
+                                        User-impacting errors that are not queue hard-failures (for example AI provider overload). Studio
+                                        canvas worker / Playwright dependency issues appear as category{' '}
+                                        <span className="font-mono text-gray-700">studio_worker_infra</span>. Newest first.
                                     </p>
                                 </div>
                                 <div className="border-t border-gray-200 overflow-x-auto">

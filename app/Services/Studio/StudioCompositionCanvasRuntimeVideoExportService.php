@@ -8,6 +8,7 @@ use App\Models\Composition;
 use App\Models\StudioCompositionVideoExportJob;
 use App\Models\Tenant;
 use App\Models\User;
+use App\Services\ApplicationErrorEventService;
 use App\Support\EditorAssetOriginalBytesLoader;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Log;
@@ -104,7 +105,25 @@ final class StudioCompositionCanvasRuntimeVideoExportService
         try {
             $result = $this->playwrightInvoker->run($command, $cwd, $timeoutSeconds);
         } catch (Throwable $e) {
-            $this->fail($row, 'canvas_runtime_playwright_process_exception', $e->getMessage(), array_merge($preRunDiagnostics, [
+            $exMsg = $e->getMessage();
+            if (ApplicationErrorEventService::shouldRecordStudioPlaywrightWorkerInfra(-1, $exMsg, $exMsg)) {
+                try {
+                    app(ApplicationErrorEventService::class)->recordStudioCanvasPlaywrightWorkerIssue(
+                        $row,
+                        'canvas_playwright_process_exception',
+                        -1,
+                        $exMsg,
+                        'Playwright capture subprocess error: '.$exMsg,
+                        array_merge($preRunDiagnostics, ['exception_class' => $e::class]),
+                    );
+                } catch (Throwable $inner) {
+                    Log::warning('[StudioCompositionCanvasRuntimeVideoExportService] worker infra event record failed', [
+                        'export_job_id' => $row->id,
+                        'error' => $inner->getMessage(),
+                    ]);
+                }
+            }
+            $this->fail($row, 'canvas_runtime_playwright_process_exception', $exMsg, array_merge($preRunDiagnostics, [
                 'exception_class' => $e::class,
             ]), $preserved, $workDir);
 
@@ -118,6 +137,26 @@ final class StudioCompositionCanvasRuntimeVideoExportService
         if ($exitCode !== 0) {
             $fromDisk = $this->readOptionalJsonFile($workDir.'/capture-diagnostics.json');
             $humanMessage = $this->buildPlaywrightCaptureFailureMessage((int) $exitCode, $stderr, $fromDisk);
+            $eventCode = 'canvas_playwright_exit_'.(int) $exitCode;
+            if (ApplicationErrorEventService::shouldRecordStudioPlaywrightWorkerInfra((int) $exitCode, $stderr, $humanMessage)) {
+                try {
+                    app(ApplicationErrorEventService::class)->recordStudioCanvasPlaywrightWorkerIssue(
+                        $row,
+                        $eventCode,
+                        (int) $exitCode,
+                        $stderr,
+                        $humanMessage,
+                        array_merge($preRunDiagnostics, [
+                            'exit_code_hint' => self::playwrightExitCodeHintLine((int) $exitCode),
+                        ]),
+                    );
+                } catch (Throwable $inner) {
+                    Log::warning('[StudioCompositionCanvasRuntimeVideoExportService] worker infra event record failed', [
+                        'export_job_id' => $row->id,
+                        'error' => $inner->getMessage(),
+                    ]);
+                }
+            }
             $this->fail($row, 'canvas_runtime_playwright_failed', $humanMessage, array_merge($preRunDiagnostics, [
                 'exit_code' => $exitCode,
                 'exit_code_hint' => self::playwrightExitCodeHintLine((int) $exitCode),
@@ -627,6 +666,7 @@ final class StudioCompositionCanvasRuntimeVideoExportService
     private static function playwrightExitCodeHintLine(int $exitCode): string
     {
         return match ($exitCode) {
+            1 => 'exit_1_unhandled: Node/Playwright failed before controlled exits (missing module, bad node path, or crash).',
             2 => 'exit_2_bad_args: invalid CLI flags, paths, or numeric parameters.',
             3 => 'exit_3_navigation: Chromium could not load the signed render URL (timeouts, DNS/TLS, or worker cannot reach APP_URL).',
             4 => 'exit_4_readiness: page loaded but export bridge never became ready=true (fonts, assets, raster preload, or readiness timeout).',
@@ -647,6 +687,7 @@ final class StudioCompositionCanvasRuntimeVideoExportService
             $detail = is_string($e) ? $e : '';
         }
         $hint = match ($exitCode) {
+            1 => 'The capture process exited before the script\'s normal error codes (often missing Playwright/Chromium, wrong Node path, or an uncaught exception in the driver).',
             2 => 'The Node driver rejected its arguments.',
             3 => 'The headless browser could not open the signed export URL before navigation-timeout-ms.',
             4 => 'The export page did not become ready before readiness-timeout-ms (fonts, images, or bridge checks).',

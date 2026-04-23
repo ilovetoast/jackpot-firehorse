@@ -89,4 +89,18 @@ return [
         'STUDIO_VIDEO_CANVAS_RUNTIME_RETENTION_POLICY_NOTE',
         'Success: working_dir + manifest snapshot in meta_json; PNG frames optional-delete only after DB row marked complete. Failure: PNGs and working_dir kept for debugging unless ops prune manually.'
     ),
+
+    /**
+     * When canvas-runtime Playwright looks like a worker/dependency issue (exit 1, missing playwright, etc.),
+     * a row is written to application_error_events (Operations Center → Application errors) if that table exists.
+     */
+    'worker_infra_event_dedupe_minutes' => (int) env('STUDIO_WORKER_INFRA_EVENT_DEDUPE_MINUTES', 30),
+
+    /**
+     * Optional: send a plain-text alert when the above fires. Throttled by worker_infra_alert_mail_minutes per alert code.
+     * Leave empty to disable. Use site owner (user id 1) email when worker_infra_alert_use_site_owner_email is true.
+     */
+    'worker_infra_alert_email' => env('STUDIO_WORKER_INFRA_ALERT_EMAIL', ''),
+    'worker_infra_alert_use_site_owner_email' => (bool) env('STUDIO_WORKER_INFRA_ALERT_USE_SITE_OWNER_EMAIL', false),
+    'worker_infra_alert_mail_minutes' => (int) env('STUDIO_WORKER_INFRA_ALERT_MAIL_MINUTES', 360),
 ];
