@@ -88,7 +88,6 @@ import {
     createGuidedLayoutLayers,
     createImageLayerFromDamAsset,
     createInitialDocument,
-    fillLayerBackgroundCss,
     isBlankUnsavedCanvas,
     LAYER_BLEND_MODE_OPTIONS,
     labeledBrandPalette,
@@ -104,9 +103,11 @@ import {
     normalizeZ,
     isFillLayer,
     isCtaButtonFillLayer,
+    isGenerativeImageLayer,
+    isImageLayer,
     isMaskLayer,
+    isTextLayer,
     isVideoLayer,
-    buildMaskStyleForLayer,
     findGroupForLayer,
     groupMemberLayers,
     unionRectForGroup,
@@ -224,6 +225,8 @@ import {
 } from './editorStudioVideoBridge'
 import { VersionsRail, type StudioVersionsHandoffChrome } from './components/VersionsRail/VersionsRail'
 import { EditorCompositionVideoPlaybackBar } from './components/EditorCompositionVideoPlaybackBar'
+import { CompositionScene } from '../../components/studio/composition/CompositionScene'
+import type { CompositionSceneEditorHandlers } from '../../components/studio/composition/types'
 import { EditorStudioAnimationCanvasPreviewBar } from './components/EditorStudioAnimationCanvasPreviewBar'
 import {
     firstScrollTargetCompositionId,
@@ -686,14 +689,6 @@ function isUntitledDraftName(name: string): boolean {
     return name.trim().toLowerCase() === UNTITLED_DRAFT_NAME.toLowerCase()
 }
 
-function isImageLayer(l: Layer): l is ImageLayer {
-    return l.type === 'image'
-}
-
-function isGenerativeImageLayer(l: Layer): l is GenerativeImageLayer {
-    return l.type === 'generative_image'
-}
-
 /** CSS object-fit for canvas `<img>` — Tailwind class names (JIT-safe) + canonical value. */
 function canvasImageObjectFit(
     fit: ImageLayer['fit'] | GenerativeImageLayer['fit'] | VideoLayer['fit'] | undefined,
@@ -786,10 +781,6 @@ function AddLayerTypeMenu({ onPick }: { onPick: (choice: AddLayerMenuChoice) => 
             </div>
         </div>
     )
-}
-
-function isTextLayer(l: Layer): l is TextLayer {
-    return l.type === 'text'
 }
 
 /** Image-like layers: lock aspect ratio on resize by default (Shift inverts). */
@@ -1345,6 +1336,22 @@ function replaceUrlCompositionParam(id: string | null) {
     window.dispatchEvent(new Event(JP_COMPOSITION_SEARCH_UPDATED_EVENT))
 }
 
+/**
+ * Studio loads `?composition=` into URL before `compositionId` state hydrates.
+ * AI + credit APIs need the numeric id immediately — use refs so payloads match the open design.
+ */
+function resolveNumericCompositionIdForStudioApi(
+    stateRef: { current: string | null },
+    urlRef: { current: string | null },
+): string | undefined {
+    const raw = stateRef.current ?? urlRef.current
+    if (raw == null || raw === '') {
+        return undefined
+    }
+    const s = String(raw).trim()
+    return /^\d+$/.test(s) ? s : undefined
+}
+
 /** GET /app/api/editor/ai-credit-status JSON — shared by state + refresh helper. */
 type EditorAiCreditStatus = {
     credits_used: number
@@ -1451,6 +1458,10 @@ export default function AssetEditor() {
         setSelectedGroupIdState(id)
     }, [])
     const [editingTextLayerId, setEditingTextLayerId] = useState<string | null>(null)
+    const selectedLayerIdRef = useRef<string | null>(null)
+    selectedLayerIdRef.current = selectedLayerId
+    const editingTextLayerIdRef = useRef<string | null>(null)
+    editingTextLayerIdRef.current = editingTextLayerId
     const [pickerOpen, setPickerOpen] = useState(false)
     const [pickerMode, setPickerMode] = useState<'add' | 'add_video' | 'replace' | 'references' | null>(null)
     /**
@@ -1696,6 +1707,8 @@ export default function AssetEditor() {
     const [studioAnimationCanvasPreviewJobId, setStudioAnimationCanvasPreviewJobId] = useState<string | null>(null)
     /** Bumped when the user selects a video layer so composition playback starts under the stack. */
     const [compositionPlaybackAutoplayNonce, setCompositionPlaybackAutoplayNonce] = useState(0)
+    /** Shared with {@link CompositionScene} so composition video layers track the playback bar / export playhead. */
+    const [compositionPlayheadMs, setCompositionPlayheadMs] = useState(0)
     const [compositionAnimations, setCompositionAnimations] = useState<StudioAnimationJobDto[]>([])
     const [animationsLoading, setAnimationsLoading] = useState(false)
     const [studioApplyScope, setStudioApplyScope] = useState<StudioApplyScope>('this_version')
@@ -1781,7 +1794,7 @@ export default function AssetEditor() {
         }
     }, [studioVersionsPanelOpen])
     /** Shown when an image URL failed; cleared when the layer’s src changes away from placeholder. */
-    const [imageLoadFailedByLayerId, setImageLoadFailedByLayerId] = useState<Record<string, true>>({})
+    const [imageLoadFailedByLayerId, setImageLoadFailedByLayerId] = useState<Record<string, boolean>>({})
     const [genUsage, setGenUsage] = useState<{
         remaining: number
         limit: number
@@ -2040,16 +2053,13 @@ export default function AssetEditor() {
     /** Full document JSON captured at move/resize pointer-down; compared on pointer-up. */
     const dragUndoBaselineRef = useRef<string | null>(null)
 
-    const layersForCanvas = useMemo(
-        () =>
-            [...document.layers].sort((a, b) => {
-                const za = Number(a.z)
-                const zb = Number(b.z)
-                const d = (Number.isFinite(za) ? za : 0) - (Number.isFinite(zb) ? zb : 0)
-                return d !== 0 ? d : a.id.localeCompare(b.id)
-            }),
-        [document.layers]
-    )
+    /** Server-driven doc replaces (e.g. studio video layer) must not leave stale local undo that reverts under persisted state. */
+    const clearCanvasUndoHistory = useCallback(() => {
+        undoStackRef.current = []
+        redoStackRef.current = []
+        dragUndoBaselineRef.current = null
+    }, [])
+
     const layersForPanel = useMemo(() => sortLayersPanelFrontAtTop(document.layers), [document.layers])
     const toggleGroupingSelection = useCallback((layerId: string) => {
         setGroupingSelection((prev) => {
@@ -2584,10 +2594,11 @@ export default function AssetEditor() {
             const ser = JSON.stringify(doc)
             setLastSavedSerialized(ser)
             lastAutosaveSnapshotSerializedRef.current = ser
+            clearCanvasUndoHistory()
             setActivityToast('Video added to the composition')
             return doc
         },
-        [compositionId]
+        [compositionId, clearCanvasUndoHistory]
     )
 
     const handleRequestBakedCompositionVideoExport = useCallback(async (): Promise<string | null> => {
@@ -3417,10 +3428,36 @@ export default function AssetEditor() {
             return
         }
         const prevJson = stack.pop()!
+        let restored: DocumentModel
+        try {
+            restored = parseDocumentFromApi(JSON.parse(prevJson))
+        } catch {
+            stack.push(prevJson)
+            undoStackRef.current = stack
+            return
+        }
         redoStackRef.current.push(JSON.stringify(documentRef.current))
         undoStackRef.current = stack
-        setDocument(parseDocumentFromApi(JSON.parse(prevJson)))
-    }, [])
+        setDocument(restored)
+
+        const sel = selectedLayerIdRef.current
+        if (!sel || !restored.layers.some((l) => l.id === sel)) {
+            setSelectedLayerId(null)
+            setSelectedGroupId(null)
+            setEditingTextLayerId(null)
+            setGroupingSelection(new Set())
+            layerPanelRangeAnchorIdRef.current = null
+        } else {
+            const gid = selectedGroupIdRef.current
+            if (gid && !(restored.groups ?? []).some((g) => g.id === gid)) {
+                setSelectedGroupId(null)
+            }
+            const edit = editingTextLayerIdRef.current
+            if (edit && !restored.layers.some((l) => l.id === edit && l.type === 'text')) {
+                setEditingTextLayerId(null)
+            }
+        }
+    }, [setSelectedGroupId])
 
     const performCanvasRedo = useCallback(() => {
         if (dragRef.current) {
@@ -3431,10 +3468,36 @@ export default function AssetEditor() {
             return
         }
         const nextJson = stack.pop()!
+        let restored: DocumentModel
+        try {
+            restored = parseDocumentFromApi(JSON.parse(nextJson))
+        } catch {
+            stack.push(nextJson)
+            redoStackRef.current = stack
+            return
+        }
         undoStackRef.current.push(JSON.stringify(documentRef.current))
         redoStackRef.current = stack
-        setDocument(parseDocumentFromApi(JSON.parse(nextJson)))
-    }, [])
+        setDocument(restored)
+
+        const sel = selectedLayerIdRef.current
+        if (!sel || !restored.layers.some((l) => l.id === sel)) {
+            setSelectedLayerId(null)
+            setSelectedGroupId(null)
+            setEditingTextLayerId(null)
+            setGroupingSelection(new Set())
+            layerPanelRangeAnchorIdRef.current = null
+        } else {
+            const gid = selectedGroupIdRef.current
+            if (gid && !(restored.groups ?? []).some((g) => g.id === gid)) {
+                setSelectedGroupId(null)
+            }
+            const edit = editingTextLayerIdRef.current
+            if (edit && !restored.layers.some((l) => l.id === edit && l.type === 'text')) {
+                setEditingTextLayerId(null)
+            }
+        }
+    }, [setSelectedGroupId])
 
     useEffect(() => {
         const isTypingTarget = () => {
@@ -3615,10 +3678,18 @@ export default function AssetEditor() {
         setSaveError(null)
         try {
             const docSnapshot = documentRef.current
+            const urlWait = compositionIdFromUrlRef.current
+            const urlLooksNumeric = urlWait != null && /^\d+$/.test(String(urlWait).trim())
+
             let nameToSave =
                 compositionNameRef.current.trim() || defaultCompositionName(docSnapshot)
 
             if (!compositionId) {
+                if (urlLooksNumeric && compositionBootstrapping) {
+                    setSaveState('idle')
+                    setActivityToast('Still loading this composition…')
+                    return
+                }
                 nameToSave = UNTITLED_DRAFT_NAME
             } else if (isUntitledDraftName(compositionNameRef.current)) {
                 const suggested = defaultCompositionName(docSnapshot)
@@ -3692,13 +3763,25 @@ export default function AssetEditor() {
             setLastSavedAt(Date.now())
             setSaveState('saved')
             setActivityToast('Version saved')
-            trackEvent('save_composition', { composition_id: compositionId ?? 'new' })
+            trackEvent('save_composition', {
+                composition_id:
+                    resolveNumericCompositionIdForStudioApi(compositionIdRef, compositionIdFromUrlRef) ??
+                    'new',
+            })
             await refreshVersions()
         } catch (e) {
             setSaveState('error')
             setSaveError(handleAIError(e))
         }
-    }, [compositionId, compositionName, compositionVisibility, compositionFolder, refreshVersions, promptForText])
+    }, [
+        compositionId,
+        compositionName,
+        compositionVisibility,
+        compositionFolder,
+        compositionBootstrapping,
+        refreshVersions,
+        promptForText,
+    ])
 
     const handleSave = useCallback(() => {
         void performManualSave()
@@ -5202,6 +5285,7 @@ export default function AssetEditor() {
                     const ser = JSON.stringify(doc)
                     setLastSavedSerialized(ser)
                     lastAutosaveSnapshotSerializedRef.current = ser
+                    clearCanvasUndoHistory()
                     setPickerOpen(false)
                     setPickerMode(null)
                     setReplaceLayerId(null)
@@ -5281,7 +5365,15 @@ export default function AssetEditor() {
                 setPickerPickingAssetId(null)
             }
         },
-        [pickerMode, replaceLayerId, updateLayer, document.layers, setDocument, setLastSavedSerialized]
+        [
+            pickerMode,
+            replaceLayerId,
+            updateLayer,
+            document.layers,
+            setDocument,
+            setLastSavedSerialized,
+            clearCanvasUndoHistory,
+        ]
     )
 
     const runPickerLibraryUpload = useCallback(
@@ -5681,6 +5773,10 @@ export default function AssetEditor() {
                 const promptString = buildBrandAugmentedPrompt(structuredPrompt, applyBrand && brandContext ? brandContext : null, {
                     referenceCount: refs.length,
                 })
+                const studioCompositionId = resolveNumericCompositionIdForStudioApi(
+                    compositionIdRef,
+                    compositionIdFromUrlRef,
+                )
 
                 const res = await withAIConcurrency(() =>
                     generateEditorImage(
@@ -5696,7 +5792,7 @@ export default function AssetEditor() {
                             ...(layer.advancedModel && layer.modelOverride?.trim()
                                 ? { model_override: layer.modelOverride.trim() }
                                 : {}),
-                            ...(compositionId ? { composition_id: compositionId } : {}),
+                            ...(studioCompositionId ? { composition_id: studioCompositionId } : {}),
                             ...(activeBrandId != null ? { brand_id: activeBrandId } : {}),
                             generative_layer_uuid: layerId,
                         },
@@ -5817,7 +5913,7 @@ export default function AssetEditor() {
                 }))
             }
         },
-        [genUsage, updateLayer, brandContext, snapshotCheckpoint, compositionId, activeBrandId, refreshAfterAiAndBumpDraftCredits]
+        [genUsage, updateLayer, brandContext, snapshotCheckpoint, activeBrandId, refreshAfterAiAndBumpDraftCredits]
     )
 
     const runImageLayerEdit = useCallback(
@@ -5874,6 +5970,10 @@ export default function AssetEditor() {
 
             let finishedOk = false
             try {
+                const studioCompositionIdEdit = resolveNumericCompositionIdForStudioApi(
+                    compositionIdRef,
+                    compositionIdFromUrlRef,
+                )
                 const res = await withAIConcurrency(() =>
                     editImage(
                         {
@@ -5883,7 +5983,7 @@ export default function AssetEditor() {
                             instruction,
                             modelKey: normalizeEditModelKey(layer.aiEdit?.editModelKey),
                             brandContext: brandContext ?? undefined,
-                            ...(compositionId ? { compositionId } : {}),
+                            ...(studioCompositionIdEdit ? { compositionId: studioCompositionIdEdit } : {}),
                             ...(activeBrandId != null ? { brandId: activeBrandId } : {}),
                             generativeLayerUuid: layerId,
                         },
@@ -6035,7 +6135,7 @@ export default function AssetEditor() {
                 }))
             }
         },
-        [genUsage, updateLayer, brandContext, snapshotCheckpoint, compositionId, activeBrandId, refreshAfterAiAndBumpDraftCredits]
+        [genUsage, updateLayer, brandContext, snapshotCheckpoint, activeBrandId, refreshAfterAiAndBumpDraftCredits]
     )
 
     const runGenerativeVariations = useCallback(
@@ -6102,6 +6202,10 @@ export default function AssetEditor() {
                 const promptString = buildBrandAugmentedPrompt(structuredPrompt, applyBrand && brandContext ? brandContext : null, {
                     referenceCount: refs.length,
                 })
+                const studioCompositionIdVar = resolveNumericCompositionIdForStudioApi(
+                    compositionIdRef,
+                    compositionIdFromUrlRef,
+                )
                 // Omit generative_layer_uuid: parallel variation requests would contend for the same versioned asset.
                 const payload = {
                     prompt: structuredPrompt,
@@ -6115,7 +6219,7 @@ export default function AssetEditor() {
                     ...(layer.advancedModel && layer.modelOverride?.trim()
                         ? { model_override: layer.modelOverride.trim() }
                         : {}),
-                    ...(compositionId ? { composition_id: compositionId } : {}),
+                    ...(studioCompositionIdVar ? { composition_id: studioCompositionIdVar } : {}),
                     ...(activeBrandId != null ? { brand_id: activeBrandId } : {}),
                 }
                 const results = await Promise.all(
@@ -6244,7 +6348,7 @@ export default function AssetEditor() {
                 }))
             }
         },
-        [genUsage, updateLayer, brandContext, compositionId, activeBrandId, refreshAfterAiAndBumpDraftCredits]
+        [genUsage, updateLayer, brandContext, activeBrandId, refreshAfterAiAndBumpDraftCredits]
     )
 
     const applyVariationChoice = useCallback(
@@ -7081,6 +7185,60 @@ export default function AssetEditor() {
         },
         [clientToDoc]
     )
+
+    const studioCompositionEditorHandlers = useMemo((): CompositionSceneEditorHandlers => {
+        return {
+            onLayerMouseDown: (layer, e, opts) => {
+                selectLayerOrGroup(layer.id, { alt: e.altKey })
+                if (!opts.isText || !opts.isEditingText) {
+                    beginMove(layer.id, e)
+                }
+            },
+            onLayerDoubleClick: (layer, e) => {
+                if (isTextLayer(layer)) {
+                    if (layer.locked) {
+                        return
+                    }
+                    e.stopPropagation()
+                    setSelectedLayerId(layer.id)
+                    setEditingTextLayerId(layer.id)
+                    return
+                }
+                if (layer.type !== 'image' || layer.locked) {
+                    return
+                }
+                e.stopPropagation()
+                openPickerForReplaceImage(layer.id)
+            },
+            updateLayer,
+            setEditingTextLayerId,
+            setSelectedLayerId,
+            beginMove,
+            beginResize,
+            openPickerForReplaceImage,
+            runGenerativeGeneration,
+            runGenerativeVariations,
+            runImageLayerEdit,
+            variationRequestCount: (u) => variationRequestCount(u as GenerateImageUsage | null),
+            genUsage,
+            setImageLoadFailedByLayerId,
+            activeLayerAnimationBySourceLayerId,
+        }
+    }, [
+        selectLayerOrGroup,
+        beginMove,
+        updateLayer,
+        setEditingTextLayerId,
+        setSelectedLayerId,
+        beginResize,
+        openPickerForReplaceImage,
+        runGenerativeGeneration,
+        runGenerativeVariations,
+        runImageLayerEdit,
+        genUsage,
+        setImageLoadFailedByLayerId,
+        activeLayerAnimationBySourceLayerId,
+    ])
 
     useEffect(() => {
         const onMove = (e: MouseEvent) => {
@@ -9337,588 +9495,79 @@ export default function AssetEditor() {
                                     preload="auto"
                                 />
                             ) : null}
-                            {!(uiMode === 'edit' && showStudioAnimCanvasPreview)
-                                ? layersForCanvas.map((layer) => {
-                                if (!layer.visible) {
-                                    return null
-                                }
-                                // Mask layers are rendered as a non-exported
-                                // gizmo in edit mode (dashed outline so users
-                                // can move/resize/select them) and completely
-                                // omitted in preview/export mode — their job
-                                // is to alter other layers, not to be visible
-                                // themselves. The actual clipping is applied
-                                // to target layers via `buildMaskStyleForLayer`
-                                // below.
-                                if (isMaskLayer(layer) && uiMode === 'preview') {
-                                    return null
-                                }
-                                const isSelected = layer.id === selectedLayerId
-                                // When the active selection is a group, we
-                                // draw the ring once around the union rect
-                                // (see `selectedGroupRect` overlay below) and
-                                // suppress per-member rings so members don't
-                                // look like they were individually selected.
-                                const showMemberRing = isSelected && !selectedGroupId
-                                // Highlight non-primary group members with a
-                                // subtle teal outline so the user can see the
-                                // link without losing the primary selection.
-                                const isGroupMate =
-                                    !!selectedGroupId &&
-                                    !isSelected &&
-                                    layer.groupId === selectedGroupId
-                                const t = layer.transform
-                                const rot = t.rotation ?? 0
-                                return (
-                                    <div
-                                        key={layer.id}
-                                        data-studio-layer-id={layer.id}
-                                        role="presentation"
-                                        className={`group relative box-border ${
-                                            showMemberRing
-                                                ? isTextLayer(layer)
-                                                    ? 'ring-2 ring-indigo-500 ring-offset-0 outline outline-1 outline-dashed outline-indigo-400/90 dark:ring-indigo-400 dark:outline-indigo-500/80'
-                                                    : 'ring-2 ring-indigo-500 ring-offset-0 dark:ring-indigo-400'
-                                                : isGroupMate
-                                                    ? 'outline outline-1 outline-dashed outline-teal-400/70'
-                                                    : ''
-                                        }`}
-                                        style={{
-                                            position: 'absolute',
-                                            left: t.x,
-                                            top: t.y,
-                                            width: t.width,
-                                            height: t.height,
-                                            zIndex: Number.isFinite(Number(layer.z)) ? Number(layer.z) : 0,
-                                            overflow: isTextLayer(layer)
-                                                ? layer.style?.autoFit
-                                                    ? 'hidden'
-                                                    : 'visible'
-                                                : 'hidden',
-                                            transform: rot !== 0 ? `rotate(${rot}deg)` : undefined,
-                                            ...(layer.blendMode && layer.blendMode !== 'normal'
-                                                ? {
-                                                      mixBlendMode:
-                                                          layer.blendMode as CSSProperties['mixBlendMode'],
-                                                  }
-                                                : {}),
-                                            // Apply any masks that target this layer. Spread AFTER
-                                            // the other style props so mask-related props can't be
-                                            // accidentally overwritten. Mask layers themselves never
-                                            // get masked (guarded by buildMaskStyleForLayer returning
-                                            // {} for type==='mask').
-                                            ...(buildMaskStyleForLayer(layer, document.layers) as CSSProperties),
-                                        }}
-                                        onMouseDown={(e) => {
-                                            e.stopPropagation()
-                                            if (selectedLayerId !== layer.id) {
-                                                setEditingTextLayerId(null)
-                                            }
-                                            // Alt/Option → drill into a single grouped member; plain
-                                            // click selects the whole group if this layer belongs to
-                                            // one. Must run BEFORE beginMove so the latter can read
-                                            // `selectedGroupId` and decide rigid-body vs single.
-                                            selectLayerOrGroup(layer.id, { alt: e.altKey })
-                                            if (!isTextLayer(layer) || editingTextLayerId !== layer.id) {
-                                                beginMove(layer.id, e)
-                                            }
-                                        }}
-                                        onDoubleClick={(e) => {
-                                            if (isTextLayer(layer)) {
-                                                if (layer.locked) {
-                                                    return
-                                                }
-                                                e.stopPropagation()
-                                                setSelectedLayerId(layer.id)
-                                                setEditingTextLayerId(layer.id)
-                                                return
-                                            }
-                                            if (layer.type !== 'image' || layer.locked) {
-                                                return
-                                            }
-                                            e.stopPropagation()
-                                            openPickerForReplaceImage(layer.id)
-                                        }}
-                                    >
-                                        {layer.locked && (
-                                            <div
-                                                className="pointer-events-none absolute right-1 top-1 z-20 rounded bg-black/55 p-0.5 text-white"
-                                                title="Layer locked — won&apos;t change when regenerating"
-                                            >
-                                                <LockClosedIcon className="h-3.5 w-3.5" aria-hidden />
-                                            </div>
-                                        )}
-                                        {isMaskLayer(layer) && uiMode === 'edit' && (
-                                            // Non-exported gizmo: dashed outline + small label so the
-                                            // user can see and manipulate the mask's extent. This div
-                                            // gets clipped out of the PNG/JPG export because the export
-                                            // path switches uiMode to 'preview' before rasterizing (and
-                                            // the mask layer is omitted from the render entirely in
-                                            // preview — see the guard up above).
-                                            <div
-                                                className="pointer-events-none absolute inset-0 rounded border-2 border-dashed border-amber-400/80 bg-amber-400/5"
-                                                aria-hidden
-                                            >
-                                                <span className="absolute left-1 top-1 rounded bg-amber-400 px-1 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-black">
-                                                    Mask · {layer.shape}
-                                                </span>
-                                            </div>
-                                        )}
-                                        {isGenerativeImageLayer(layer) && (
-                                            <div className="pointer-events-none absolute bottom-full left-1/2 z-30 mb-1 flex -translate-x-1/2 opacity-0 transition-opacity duration-200 group-hover:pointer-events-auto group-hover:opacity-100">
-                                                <div className="pointer-events-auto flex flex-nowrap gap-0.5 rounded-md border border-gray-200 bg-white/95 px-1 py-0.5 text-[10px] font-medium text-gray-800 shadow-md dark:border-gray-700 dark:bg-gray-900/95 dark:text-gray-100">
-                                                    <button
-                                                        type="button"
-                                                        title="Regenerate this layer"
-                                                        disabled={
-                                                            layer.locked ||
-                                                            layer.status === 'generating' ||
-                                                            !layer.prompt?.scene?.trim()
-                                                        }
-                                                        className="rounded px-1.5 py-0.5 hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-gray-800"
-                                                        onClick={(e) => {
-                                                            e.stopPropagation()
-                                                            void runGenerativeGeneration(layer.id)
-                                                        }}
-                                                    >
-                                                        Regenerate
-                                                    </button>
-                                                    <button
-                                                        type="button"
-                                                        title="Variations (up to four, or fewer if credits are low)"
-                                                        disabled={
-                                                            layer.locked ||
-                                                            layer.status === 'generating' ||
-                                                            layer.variationPending ||
-                                                            !layer.prompt?.scene?.trim() ||
-                                                            variationRequestCount(genUsage) < 1
-                                                        }
-                                                        className="rounded px-1.5 py-0.5 hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-gray-800"
-                                                        onClick={(e) => {
-                                                            e.stopPropagation()
-                                                            void runGenerativeVariations(layer.id)
-                                                        }}
-                                                    >
-                                                        Variations
-                                                    </button>
-                                                    <button
-                                                        type="button"
-                                                        title="Prevent this layer from changing"
-                                                        className="rounded px-1.5 py-0.5 hover:bg-gray-100 dark:hover:bg-gray-800"
-                                                        onClick={(e) => {
-                                                            e.stopPropagation()
-                                                            updateLayer(layer.id, (l) => ({
-                                                                ...l,
-                                                                locked: !l.locked,
-                                                            }))
-                                                        }}
-                                                    >
-                                                        {layer.locked ? 'Unlock' : 'Lock'}
-                                                    </button>
-                                                </div>
-                                            </div>
-                                        )}
-                                        {isFillLayer(layer) && (
-                                            <div className="pointer-events-none absolute bottom-full left-1/2 z-30 mb-1 flex -translate-x-1/2 opacity-0 transition-opacity duration-200 group-hover:pointer-events-auto group-hover:opacity-100">
-                                                <div className="pointer-events-auto flex gap-0.5 rounded-md border border-gray-200 bg-white/95 px-1 py-0.5 text-[10px] font-medium text-gray-800 shadow-md dark:border-gray-700 dark:bg-gray-900/95 dark:text-gray-100">
-                                                    <button
-                                                        type="button"
-                                                        title="Lock this fill layer"
-                                                        className="rounded px-1.5 py-0.5 hover:bg-gray-100 dark:hover:bg-gray-800"
-                                                        onClick={(e) => {
-                                                            e.stopPropagation()
-                                                            updateLayer(layer.id, (l) => ({
-                                                                ...l,
-                                                                locked: !l.locked,
-                                                            }))
-                                                        }}
-                                                    >
-                                                        {layer.locked ? 'Unlock' : 'Lock'}
-                                                    </button>
-                                                </div>
-                                            </div>
-                                        )}
-                                        {layer.type === 'image' && (
-                                            <div className="pointer-events-none absolute bottom-full left-1/2 z-30 mb-1 flex -translate-x-1/2 opacity-0 transition-opacity duration-200 group-hover:pointer-events-auto group-hover:opacity-100">
-                                                <div className="pointer-events-auto flex gap-0.5 rounded-md border border-gray-200 bg-white/95 px-1 py-0.5 text-[10px] font-medium text-gray-800 shadow-md dark:border-gray-700 dark:bg-gray-900/95 dark:text-gray-100">
-                                                    <button
-                                                        type="button"
-                                                        title="Replace image"
-                                                        disabled={layer.locked}
-                                                        className="rounded px-1.5 py-0.5 hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-gray-800"
-                                                        onClick={(e) => {
-                                                            e.stopPropagation()
-                                                            openPickerForReplaceImage(layer.id)
-                                                        }}
-                                                    >
-                                                        Replace
-                                                    </button>
-                                                    <button
-                                                        type="button"
-                                                        title="Prevent this layer from changing"
-                                                        className="rounded px-1.5 py-0.5 hover:bg-gray-100 dark:hover:bg-gray-800"
-                                                        onClick={(e) => {
-                                                            e.stopPropagation()
-                                                            updateLayer(layer.id, (l) => ({
-                                                                ...l,
-                                                                locked: !l.locked,
-                                                            }))
-                                                        }}
-                                                    >
-                                                        {layer.locked ? 'Unlock' : 'Lock'}
-                                                    </button>
-                                                </div>
-                                            </div>
-                                        )}
-                                        {isGenerativeImageLayer(layer) && (
-                                            <div className="relative h-full min-h-0 w-full min-w-0 overflow-hidden">
-                                                {layer.resultSrc ? (
-                                                    (() => {
-                                                        const o = canvasImageObjectFit(layer.fit)
-                                                        return (
-                                                    <img
-                                                        key={`${layer.resultSrc}-${o.value}`}
-                                                        src={layer.resultSrc}
-                                                        alt=""
-                                                        draggable={false}
-                                                        className={`editor-gen-fade-in pointer-events-none absolute inset-0 !h-full !w-full min-h-0 min-w-0 max-w-none max-h-full select-none ${o.className}`}
-                                                        style={{
-                                                            objectPosition: 'center',
-                                                        }}
-                                                        onError={() =>
-                                                            updateLayer(layer.id, (l) =>
-                                                                isGenerativeImageLayer(l)
-                                                                    ? {
-                                                                          ...l,
-                                                                          status: 'error',
-                                                                          lastError:
-                                                                              'The generated image could not be loaded.',
-                                                                      }
-                                                                    : l
-                                                            )
-                                                        }
-                                                    />
-                                                        )
-                                                    })()
-                                                ) : (
-                                                    <div className="flex h-full w-full flex-col items-center justify-center gap-1 border-2 border-dashed border-violet-300 bg-violet-50/80 px-2 text-center text-[10px] text-violet-800 dark:border-violet-600 dark:bg-violet-950/40 dark:text-violet-200">
-                                                        <SparklesIcon className="h-5 w-5 opacity-70" aria-hidden />
-                                                        <span>Add a prompt in the panel, then Generate.</span>
-                                                    </div>
-                                                )}
-                                                {layer.status === 'generating' && (
-                                                    <div
-                                                        className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-white/88 dark:bg-gray-950/88"
-                                                        role="status"
-                                                        aria-busy="true"
-                                                        aria-label={
-                                                            layer.variationPending
-                                                                ? 'Creating image variations'
-                                                                : 'Generating image'
-                                                        }
-                                                    >
-                                                        {layer.variationPending ? (
-                                                            <EditorSlotReelLoader label="Variations…">
-                                                                <div className="grid w-[88px] grid-cols-2 gap-1">
-                                                                    {Array.from({
-                                                                        length: layer.variationBatchSize ?? VARIATION_MAX,
-                                                                    }).map((_, i) => (
-                                                                        <div
-                                                                            key={i}
-                                                                            className="aspect-square animate-pulse rounded bg-gradient-to-br from-violet-200 to-indigo-200 dark:from-violet-800 dark:to-indigo-900"
-                                                                        />
-                                                                    ))}
-                                                                </div>
-                                                            </EditorSlotReelLoader>
-                                                        ) : (
-                                                            <EditorSlotReelLoader label="Generating…" />
-                                                        )}
-                                                    </div>
-                                                )}
-                                                {layer.status === 'error' && (
-                                                    <div className="pointer-events-none absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-red-950/25 px-2 text-center dark:bg-red-950/50">
-                                                        <ExclamationTriangleIcon
-                                                            className="h-6 w-6 text-red-400"
-                                                            aria-hidden
-                                                        />
-                                                        <span className="max-h-[4.5rem] overflow-y-auto text-[10px] font-medium leading-snug text-red-900 dark:text-red-100">
-                                                            {isGenerativeImageLayer(layer) && layer.lastError
-                                                                ? layer.lastError
-                                                                : 'Generation failed'}
-                                                        </span>
-                                                        <button
-                                                            type="button"
-                                                            className="pointer-events-auto rounded-md border border-red-300 bg-white px-2.5 py-1 text-[10px] font-semibold text-red-900 shadow-sm hover:bg-red-50 dark:border-red-700 dark:bg-gray-900 dark:text-red-100 dark:hover:bg-red-950/50"
-                                                            onClick={(e) => {
-                                                                e.stopPropagation()
-                                                                runGenerativeGeneration(layer.id)
-                                                            }}
-                                                        >
-                                                            Retry
-                                                        </button>
-                                                    </div>
-                                                )}
-                                                {activeLayerAnimationBySourceLayerId.has(layer.id) && (
-                                                    <div
-                                                        className="absolute inset-0 z-[22] flex flex-col items-center justify-center gap-2 bg-white/88 dark:bg-gray-950/88"
-                                                        role="status"
-                                                        aria-busy="true"
-                                                        aria-label="Animating image"
-                                                    >
-                                                        <EditorSlotReelLoader label="Animating…" />
-                                                    </div>
-                                                )}
-                                            </div>
-                                        )}
-                                        {layer.type === 'image' && (
-                                            <div className="relative h-full min-h-0 w-full min-w-0 overflow-hidden">
-                                                {layer.src ? (
-                                                    (() => {
-                                                        const o = canvasImageObjectFit(layer.fit)
-                                                        return (
-                                                            <img
-                                                                key={`${layer.id}-${o.value}`}
-                                                                src={layer.src}
-                                                                alt=""
-                                                                draggable={false}
-                                                                className={`pointer-events-none absolute inset-0 !h-full !w-full min-h-0 min-w-0 max-w-none max-h-full select-none ${o.className}`}
-                                                                style={{
-                                                                    objectPosition: 'center',
-                                                                }}
-                                                                onError={() => {
-                                                                    setImageLoadFailedByLayerId((p) => ({
-                                                                        ...p,
-                                                                        [layer.id]: true,
-                                                                    }))
-                                                                    updateLayer(layer.id, (l) =>
-                                                                        l.type === 'image' && l.src !== PLACEHOLDER_IMAGE_SRC
-                                                                            ? { ...l, src: PLACEHOLDER_IMAGE_SRC }
-                                                                            : l
-                                                                    )
-                                                                }}
-                                                            />
-                                                        )
-                                                    })()
-                                                ) : (
-                                                /*
-                                                 * Empty image slot — now that templates default to real-photo
-                                                 * backgrounds (BG_LAYER type: 'image'), this placeholder is the
-                                                 * brand's first signal when their library has no tag-matched
-                                                 * candidates. We show a click-to-pick CTA instead of a bare
-                                                 * gray box so they can resolve the empty slot without hunting
-                                                 * through the right-panel buttons.
-                                                 */
-                                                <button
-                                                    type="button"
-                                                    disabled={layer.locked}
-                                                    onClick={(e) => {
-                                                        e.stopPropagation()
-                                                        openPickerForReplaceImage(layer.id)
-                                                    }}
-                                                    // Hard-coded dark palette + translucency so an empty
-                                                    // slot never renders as an opaque white square when the
-                                                    // editor root drops its dark-mode class (happens briefly
-                                                    // during template applies). Translucent + muted keeps
-                                                    // the slot legible without dominating the canvas.
-                                                    className="flex h-full w-full cursor-pointer flex-col items-center justify-center gap-1 border-2 border-dashed border-gray-600/70 bg-gray-900/40 px-2 text-center text-[10px] text-gray-300 backdrop-blur-sm transition-colors hover:border-indigo-500 hover:bg-indigo-950/40 hover:text-indigo-200 disabled:cursor-not-allowed disabled:opacity-50"
-                                                >
-                                                    <svg className="h-6 w-6 opacity-70" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909M3.75 21h16.5A2.25 2.25 0 0 0 22.5 18.75V5.25A2.25 2.25 0 0 0 20.25 3H3.75A2.25 2.25 0 0 0 1.5 5.25v13.5A2.25 2.25 0 0 0 3.75 21Z" /></svg>
-                                                    <span className="font-medium">Click to pick a photo</span>
-                                                </button>
-                                                )}
-                                                {imageLoadFailedByLayerId[layer.id] && (
-                                                    <div
-                                                        className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-1 bg-black/40 px-1 text-center"
-                                                        aria-live="polite"
-                                                    >
-                                                        <ExclamationTriangleIcon
-                                                            className="h-6 w-6 shrink-0 text-amber-200"
-                                                            aria-hidden
-                                                        />
-                                                        <span className="text-[10px] font-medium leading-tight text-white">
-                                                            Image failed to load
-                                                        </span>
-                                                    </div>
-                                                )}
-                                                {layer.aiEdit?.status === 'editing' && (
-                                                    <div
-                                                        className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-white/88 dark:bg-gray-950/88"
-                                                        role="status"
-                                                        aria-busy="true"
-                                                        aria-label="Editing image"
-                                                    >
-                                                        <EditorSlotReelLoader label="Editing…" />
-                                                    </div>
-                                                )}
-                                                {layer.aiEdit?.status === 'error' && (
-                                                    <div className="pointer-events-none absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-red-950/25 px-2 text-center dark:bg-red-950/50">
-                                                        <ExclamationTriangleIcon
-                                                            className="h-6 w-6 text-red-400"
-                                                            aria-hidden
-                                                        />
-                                                        <span className="max-h-[4.5rem] overflow-y-auto text-[10px] font-medium leading-snug text-red-900 dark:text-red-100">
-                                                            {layer.aiEdit?.lastError || 'Edit failed'}
-                                                        </span>
-                                                        <button
-                                                            type="button"
-                                                            className="pointer-events-auto rounded-md border border-red-300 bg-white px-2.5 py-1 text-[10px] font-semibold text-red-900 shadow-sm hover:bg-red-50 dark:border-red-700 dark:bg-gray-900 dark:text-red-100 dark:hover:bg-red-950/50"
-                                                            onClick={(e) => {
-                                                                e.stopPropagation()
-                                                                void runImageLayerEdit(layer.id)
-                                                            }}
-                                                        >
-                                                            Retry
-                                                        </button>
-                                                    </div>
-                                                )}
-                                                {activeLayerAnimationBySourceLayerId.has(layer.id) && (
-                                                    <div
-                                                        className="absolute inset-0 z-[22] flex flex-col items-center justify-center gap-2 bg-white/88 dark:bg-gray-950/88"
-                                                        role="status"
-                                                        aria-busy="true"
-                                                        aria-label="Animating image"
-                                                    >
-                                                        <EditorSlotReelLoader label="Animating…" />
-                                                    </div>
-                                                )}
-                                            </div>
-                                        )}
-                                        {layer.type === 'video' && (
-                                            <div className="relative h-full min-h-0 w-full min-w-0 overflow-hidden">
-                                                {layer.src ? (
-                                                    (() => {
-                                                        const o = canvasImageObjectFit(layer.fit)
-                                                        const showCanvasVideoControls = isSelected && uiMode === 'edit'
-                                                        return (
-                                                            <video
-                                                                key={`${layer.id}-${o.value}`}
-                                                                data-jp-editor-layer={layer.id}
-                                                                src={layer.src}
-                                                                className={`absolute inset-0 !h-full !w-full min-h-0 min-w-0 max-w-none max-h-full select-none ${showCanvasVideoControls ? 'pointer-events-auto' : 'pointer-events-none'} ${o.className}`}
-                                                                style={{ objectPosition: 'center' }}
-                                                                controls={showCanvasVideoControls}
-                                                                muted
-                                                                loop
-                                                                playsInline
-                                                                preload="metadata"
-                                                                draggable={false}
-                                                            />
-                                                        )
-                                                    })()
-                                                ) : (
-                                                    <div className="flex h-full w-full items-center justify-center border-2 border-dashed border-gray-600 bg-gray-900/30 px-2 text-center text-[10px] text-gray-500">
-                                                        Missing video source
-                                                    </div>
-                                                )}
-                                            </div>
-                                        )}
-                                        {isFillLayer(layer) && (
-                                            <div
-                                                className="relative h-full min-h-0 w-full min-w-0"
-                                                style={{
-                                                    background: fillLayerBackgroundCss(layer),
-                                                    borderRadius: layer.borderRadius != null ? `${layer.borderRadius}px` : undefined,
-                                                    // Optional border: holds the "frame" look for the holding-shape
-                                                    // primitive in the recipe engine. `box-sizing: border-box` keeps
-                                                    // the border inside the layer's transform so template math stays
-                                                    // consistent between editor + export.
-                                                    border: layer.borderStrokeWidth && layer.borderStrokeWidth > 0
-                                                        ? `${layer.borderStrokeWidth}px solid ${layer.borderStrokeColor ?? layer.color}`
-                                                        : undefined,
-                                                    boxSizing: 'border-box',
-                                                }}
-                                            />
-                                        )}
-                                        {isTextLayer(layer) && (
-                                            <TextLayerEditable
-                                                layer={layer}
-                                                editing={editingTextLayerId === layer.id}
-                                                assistLoading={copyAssistLoadingId === layer.id}
-                                                brandContext={brandContext}
-                                                brandFontsEpoch={brandFontsEpoch}
-                                                onChange={(text) =>
-                                                    updateLayer(layer.id, (l) =>
-                                                        isTextLayer(l) ? { ...l, content: text } : l
-                                                    )
-                                                }
-                                                onStopEdit={() =>
-                                                    setEditingTextLayerId((id) =>
-                                                        id === layer.id ? null : id
-                                                    )
-                                                }
-                                                onTextHeightChange={(h) =>
-                                                    updateLayer(layer.id, (l) =>
-                                                        isTextLayer(l)
-                                                            ? {
-                                                                  ...l,
-                                                                  transform: {
-                                                                      ...l.transform,
-                                                                      height: Math.max(20, h),
-                                                                  },
-                                                              }
-                                                            : l
-                                                    )
-                                                }
-                                                onAutoFitFontSize={(size) =>
-                                                    updateLayer(layer.id, (l) =>
-                                                        isTextLayer(l)
-                                                            ? {
-                                                                  ...l,
-                                                                  style: { ...l.style, fontSize: size },
-                                                              }
-                                                            : l
-                                                    )
-                                                }
-                                            />
-                                        )}
-
-                                        {isSelected && !layer.locked && (
-                                            <>
-                                                {(['nw', 'ne', 'sw', 'se'] as const).map((corner) => (
-                                                    <button
-                                                        key={corner}
-                                                        type="button"
-                                                        aria-label={`Resize ${corner}`}
-                                                        className="absolute z-10 h-2.5 w-2.5 rounded-sm border border-white bg-indigo-500 shadow dark:bg-indigo-400"
-                                                        style={{
-                                                            cursor: `${corner}-resize`,
-                                                            ...(corner === 'nw' ? { top: -4, left: -4 } : {}),
-                                                            ...(corner === 'ne' ? { top: -4, right: -4 } : {}),
-                                                            ...(corner === 'sw' ? { bottom: -4, left: -4 } : {}),
-                                                            ...(corner === 'se' ? { bottom: -4, right: -4 } : {}),
-                                                        }}
-                                                        onMouseDown={(e) => {
-                                                            e.stopPropagation()
-                                                            beginResize(layer.id, corner, e)
-                                                        }}
-                                                    />
-                                                ))}
-                                            </>
-                                        )}
-                                    </div>
-                                )
-                            })
-                            : null}
-                            {uiMode === 'edit' && !showStudioAnimCanvasPreview && selectedGroupRect && (
-                                // Single dashed outline enclosing every group
-                                // member. Sits above the per-layer rings (which
-                                // are suppressed when a group is active) so
-                                // it's visually unambiguous that "this is the
-                                // thing that will move/resize". pointer-events
-                                // off — we still want the underlying layers
-                                // handling the click.
-                                <div
-                                    className="pointer-events-none absolute outline outline-2 outline-dashed outline-indigo-400"
-                                    style={{
-                                        left: selectedGroupRect.x - 2,
-                                        top: selectedGroupRect.y - 2,
-                                        width: selectedGroupRect.width + 4,
-                                        height: selectedGroupRect.height + 4,
-                                        zIndex: 9999,
-                                    }}
-                                    aria-hidden
+                            {!(uiMode === 'edit' && showStudioAnimCanvasPreview) ? (
+                                <CompositionScene
+                                    mode={uiMode === 'edit' ? 'editor' : 'export'}
+                                    compositionUiMode={uiMode}
+                                    document={document}
+                                    currentTimeMs={
+                                        uiMode === 'edit' && !showStudioAnimCanvasPreview ? compositionPlayheadMs : 0
+                                    }
+                                    brandContext={brandContext}
+                                    brandFontsEpoch={brandFontsEpoch}
+                                    stageScale={1}
+                                    selectedLayerId={selectedLayerId}
+                                    selectedGroupId={selectedGroupId}
+                                    editingTextLayerId={editingTextLayerId}
+                                    editorHandlers={
+                                        uiMode === 'edit' && !showStudioAnimCanvasPreview
+                                            ? studioCompositionEditorHandlers
+                                            : undefined
+                                    }
+                                    renderTextLayer={
+                                        uiMode === 'edit' && !showStudioAnimCanvasPreview
+                                            ? (layer: TextLayer) => (
+                                                  <TextLayerEditable
+                                                      layer={layer}
+                                                      editing={editingTextLayerId === layer.id}
+                                                      assistLoading={copyAssistLoadingId === layer.id}
+                                                      brandContext={brandContext}
+                                                      brandFontsEpoch={brandFontsEpoch}
+                                                      onChange={(text) =>
+                                                          updateLayer(layer.id, (l) =>
+                                                              isTextLayer(l) ? { ...l, content: text } : l
+                                                          )
+                                                      }
+                                                      onStopEdit={() =>
+                                                          setEditingTextLayerId((id) =>
+                                                              id === layer.id ? null : id
+                                                          )
+                                                      }
+                                                      onTextHeightChange={(h) =>
+                                                          updateLayer(layer.id, (l) =>
+                                                              isTextLayer(l)
+                                                                  ? {
+                                                                        ...l,
+                                                                        transform: {
+                                                                            ...l.transform,
+                                                                            height: Math.max(20, h),
+                                                                        },
+                                                                    }
+                                                                  : l
+                                                          )
+                                                      }
+                                                      onAutoFitFontSize={(size) =>
+                                                          updateLayer(layer.id, (l) =>
+                                                              isTextLayer(l)
+                                                                  ? {
+                                                                        ...l,
+                                                                        style: { ...l.style, fontSize: size },
+                                                                    }
+                                                                  : l
+                                                          )
+                                                      }
+                                                  />
+                                              )
+                                            : undefined
+                                    }
+                                    imageLoadFailedByLayerId={imageLoadFailedByLayerId}
+                                    selectedGroupRect={
+                                        uiMode === 'edit' && !showStudioAnimCanvasPreview
+                                            ? selectedGroupRect
+                                            : null
+                                    }
                                 />
-                            )}
+                            ) : null}
                             </div>
                     </div>
 
@@ -9951,6 +9600,8 @@ export default function AssetEditor() {
                                     document={document}
                                     getStageEl={getEditorStageEl}
                                     autoplayNonce={compositionPlaybackAutoplayNonce}
+                                    playheadMs={compositionPlayheadMs}
+                                    onPlayheadMsChange={setCompositionPlayheadMs}
                                 />
                             )}
                         </div>
@@ -12354,7 +12005,9 @@ export default function AssetEditor() {
                                         <p className="text-[10px] leading-snug text-gray-500">
                                             Image is drawn inside the layer&apos;s box (resize the layer to change the
                                             frame). Choose how the file maps into that box — tooltips explain each
-                                            mode.
+                                            mode. Cover, Fit, and Fill keep the bitmap{' '}
+                                            <span className="font-medium text-gray-400">centered</span> in the box;
+                                            there is no separate pan / focal-offset control yet.
                                         </p>
                                         <div
                                             className="grid grid-cols-3 gap-px overflow-hidden rounded-lg bg-gray-800/50 p-px ring-1 ring-inset ring-gray-700/40"
@@ -12447,9 +12100,12 @@ export default function AssetEditor() {
                                                             })
                                                         }
                                                         className="w-full rounded-md border border-indigo-800 bg-indigo-950/40 px-3 py-2 text-left text-xs font-medium text-indigo-200 shadow-sm hover:bg-indigo-900/40 disabled:cursor-not-allowed disabled:opacity-50"
-                                                        title="Resize the layer so it matches the image's natural aspect ratio"
+                                                        title="Match the source file’s width:height (not the canvas). Keeps roughly the same pixel area and re-centers."
                                                     >
-                                                        Fit layer to image shape
+                                                        <span className="block">Fit layer to image shape</span>
+                                                        <span className="mt-0.5 block text-[9px] font-normal leading-snug text-indigo-300/80">
+                                                            Natural file aspect · not document aspect
+                                                        </span>
                                                     </button>
                                                 )
                                             })()}
@@ -12623,6 +12279,14 @@ export default function AssetEditor() {
                                                     </p>
                                                 </div>
                                             </div>
+                                            <p className="mb-3 text-[10px] leading-snug text-indigo-200/75">
+                                                The model receives the{' '}
+                                                <span className="font-semibold text-indigo-100">underlying image file</span>{' '}
+                                                (full pixels from the library when this layer is linked to an asset),
+                                                not only the part visible inside this frame. If Cover is hiding edges
+                                                you care about, try Fit, resize the frame, or crop/replace the asset in
+                                                the library so the edit matches the region you mean.
+                                            </p>
 
                                             <div className="mb-3 space-y-1.5">
                                                 <p className="text-[9px] font-bold uppercase tracking-wider text-indigo-300/80">

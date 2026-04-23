@@ -12,8 +12,12 @@ From the `jackpot/` app root:
 
 ```bash
 npm ci
-npx playwright install chromium
+# Optional: verify planned browser + OS deps without installing (CI or hardened hosts)
+npx playwright install --with-deps --dry-run chromium
+npx playwright install --with-deps chromium
 ```
+
+Canonical production worker checklist (Node, `npm ci`, full vs dry install): [Server requirements — Node.js / Playwright](../environments/SERVER_REQUIREMENTS.md#nodejs--playwright-video-heavy--studio).
 
 Enable:
 

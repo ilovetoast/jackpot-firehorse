@@ -9,14 +9,17 @@ function hasVisibleVideoLayer(layers: Layer[]): boolean {
 
 /**
  * Composition playback: sync visible stage videos to a shared playhead (strip sits under the canvas).
+ * Playhead is controlled by the parent so the shared {@link CompositionScene} can mirror `currentTimeMs`.
  */
 export function EditorCompositionVideoPlaybackBar(props: {
     document: DocumentModel
     getStageEl: () => HTMLElement | null
     /** Increment to start synced playback (e.g. user selected a video layer). */
     autoplayNonce?: number
+    playheadMs: number
+    onPlayheadMsChange: (ms: number) => void
 }) {
-    const { document: doc, getStageEl, autoplayNonce = 0 } = props
+    const { document: doc, getStageEl, autoplayNonce = 0, playheadMs, onPlayheadMsChange } = props
     const durationMs = Math.max(1000, doc.studio_timeline?.duration_ms ?? 30_000)
     const videoLayerCount = useMemo(
         () => doc.layers.filter((l) => l.visible && isVideoLayer(l)).length,
@@ -24,7 +27,6 @@ export function EditorCompositionVideoPlaybackBar(props: {
     )
     const anyVideo = useMemo(() => hasVisibleVideoLayer(doc.layers), [doc.layers])
 
-    const [playheadMs, setPlayheadMs] = useState(0)
     const [playing, setPlaying] = useState(false)
 
     const queryVideos = useCallback(() => {
@@ -50,9 +52,9 @@ export function EditorCompositionVideoPlaybackBar(props: {
                     /* ignore */
                 }
             }
-            setPlayheadMs(Math.round(t * 1000))
+            onPlayheadMsChange(Math.round(t * 1000))
         },
-        [durationMs, queryVideos],
+        [durationMs, queryVideos, onPlayheadMsChange],
     )
 
     useEffect(() => {
@@ -64,13 +66,13 @@ export function EditorCompositionVideoPlaybackBar(props: {
             const vids = queryVideos()
             const v0 = vids[0]
             if (v0) {
-                setPlayheadMs(Math.min(Math.round(v0.currentTime * 1000), durationMs))
+                onPlayheadMsChange(Math.min(Math.round(v0.currentTime * 1000), durationMs))
             }
             raf = requestAnimationFrame(tick)
         }
         raf = requestAnimationFrame(tick)
         return () => cancelAnimationFrame(raf)
-    }, [playing, durationMs, queryVideos])
+    }, [playing, durationMs, queryVideos, onPlayheadMsChange])
 
     useEffect(() => {
         if (!autoplayNonce) {

@@ -44,7 +44,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense } from 'react'
 import { createPortal } from 'react-dom'
-import { XMarkIcon, ArrowPathIcon, ChevronLeftIcon, ChevronRightIcon, ChevronDownIcon, ExclamationTriangleIcon, EyeIcon, ArrowDownTrayIcon, CheckCircleIcon, CheckIcon, ArrowUturnLeftIcon, ClockIcon, XCircleIcon, CloudArrowUpIcon, RectangleStackIcon, TicketIcon, InformationCircleIcon, PhotoIcon, SparklesIcon } from '@heroicons/react/24/outline'
+import { XMarkIcon, ArrowPathIcon, ChevronLeftIcon, ChevronRightIcon, ChevronDownIcon, ExclamationTriangleIcon, EyeIcon, ArrowDownTrayIcon, CheckCircleIcon, CheckIcon, ArrowUturnLeftIcon, ClockIcon, XCircleIcon, CloudArrowUpIcon, RectangleStackIcon, TicketIcon, InformationCircleIcon, PhotoIcon, SparklesIcon, TagIcon } from '@heroicons/react/24/outline'
 import { usePage, router, Link } from '@inertiajs/react'
 import AssetImage from './AssetImage'
 import AssetTimeline from './AssetTimeline'
@@ -465,6 +465,9 @@ export default function AssetDrawer({
     const [commentsLoading, setCommentsLoading] = useState(false)
     // Reference materials: Publish & categorize modal (builder-staged assets)
     const [showFinalizeFromBuilderModal, setShowFinalizeFromBuilderModal] = useState(false)
+    /** `publish_staged` = finalize-from-builder (publish + clear staging). `assign_only` = category move / recategorize on already-filed assets. */
+    const [finalizeModalMode, setFinalizeModalMode] = useState('publish_staged')
+    const [assignCategoryRunAi, setAssignCategoryRunAi] = useState(true)
     const [finalizeCategoryId, setFinalizeCategoryId] = useState(null)
     const [finalizeLoading, setFinalizeLoading] = useState(false)
     const [promoteModalOpen, setPromoteModalOpen] = useState(false)
@@ -4593,11 +4596,17 @@ export default function AssetDrawer({
                                 </button>
                             )}
 
-                            {/* Publish & categorize - for builder-staged reference materials (no category yet) */}
-                            {displayAsset.builder_staged && canPublish && !displayAsset.archived_at && (
+                            {/* Publish & categorize — staged intake (no category yet) or Brand Builder reference materials */}
+                            {(displayAsset.builder_staged === true ||
+                                displayAsset.intake_state === 'staged') &&
+                                canPublish &&
+                                !displayAsset.archived_at && (
                                 <button
                                     type="button"
-                                    onClick={() => setShowFinalizeFromBuilderModal(true)}
+                                    onClick={() => {
+                                        setFinalizeModalMode('publish_staged')
+                                        setShowFinalizeFromBuilderModal(true)
+                                    }}
                                     className="w-full inline-flex items-center justify-center rounded-md bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
                                 >
                                     <CloudArrowUpIcon className="h-5 w-5 mr-2" />
@@ -4638,13 +4647,14 @@ export default function AssetDrawer({
                                 // 1. User has publish permission AND
                                 // 2. Asset is not published AND
                                 // 3. Asset is not archived AND
-                                // 4. Asset is NOT builder-staged (those use Publish & categorize)
+                                // 4. Asset is NOT awaiting staged publish flow (those use Publish & categorize)
                                 // 5. Contributors are blocked when approval is enabled
                                 // 6. If asset is pending approval or rejected, only approvers can publish
                                 const canShowPublishButton = canPublish && 
                                                              displayAsset.is_published === false && 
                                                              !displayAsset.archived_at &&
                                                              !displayAsset.builder_staged &&
+                                                             displayAsset.intake_state !== 'staged' &&
                                                              !contributorBlocked &&
                                                              (!isPendingApproval || isApprover) &&
                                                              (!isRejected || isApprover);
@@ -4728,6 +4738,29 @@ export default function AssetDrawer({
                                 >
                                     <CheckCircleIcon className="h-4 w-4 mr-2" />
                                     Publish
+                                </button>
+                            )}
+
+                            {can('metadata.edit_post_upload') &&
+                                !displayAsset.archived_at &&
+                                !displayAsset.builder_staged &&
+                                displayAsset.intake_state !== 'staged' && (
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setFinalizeModalMode('assign_only')
+                                        setAssignCategoryRunAi(true)
+                                        setFinalizeCategoryId(
+                                            displayAsset.metadata?.category_id != null
+                                                ? parseInt(String(displayAsset.metadata.category_id), 10)
+                                                : null,
+                                        )
+                                        setShowFinalizeFromBuilderModal(true)
+                                    }}
+                                    className="w-full inline-flex items-center justify-center rounded-md border border-indigo-500/70 bg-white px-3 py-2 text-sm font-semibold text-indigo-800 shadow-sm hover:bg-indigo-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 dark:border-indigo-400/50 dark:bg-gray-900 dark:text-indigo-100 dark:hover:bg-indigo-950/40"
+                                >
+                                    <TagIcon className="h-4 w-4 mr-2 shrink-0" aria-hidden />
+                                    Assign or change category…
                                 </button>
                             )}
                             
@@ -7014,16 +7047,20 @@ export default function AssetDrawer({
                 </div>
             )}
 
-            {/* Publish & categorize modal - for builder-staged reference materials */}
+            {/* Publish & categorize / assign category modal */}
             {showFinalizeFromBuilderModal && displayAsset?.id && (
                 <div className="fixed inset-0 z-[10060] bg-black/50 flex items-center justify-center p-4">
                     <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center mb-4">
                             <CloudArrowUpIcon className="h-6 w-6 text-indigo-600 mr-3" />
-                            <h3 className="text-lg font-semibold text-gray-900">Publish & categorize</h3>
+                            <h3 className="text-lg font-semibold text-gray-900">
+                                {finalizeModalMode === 'assign_only' ? 'Assign category' : 'Publish & categorize'}
+                            </h3>
                         </div>
                         <p className="text-sm text-gray-600 mb-4">
-                            Choose a category for this reference material. It will be published and appear in the main asset grid.
+                            {finalizeModalMode === 'assign_only'
+                                ? 'Choose a category for this asset. After saving, use Edit asset in the drawer if you need to complete required fields for that category. You can optionally run the AI pipeline (vision tagging, video insights, suggestions) below.'
+                                : 'Choose a category. The asset will be published and appear in the main asset grid.'}
                         </p>
                         <div className="mb-4">
                             <label className="block text-sm font-medium text-gray-700 mb-2">Category</label>
@@ -7038,10 +7075,26 @@ export default function AssetDrawer({
                                 ))}
                             </select>
                         </div>
+                        {finalizeModalMode === 'assign_only' && (
+                            <label className="flex items-start gap-2 mb-4 text-sm text-gray-700 cursor-pointer">
+                                <input
+                                    type="checkbox"
+                                    className="mt-1 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                    checked={assignCategoryRunAi}
+                                    onChange={(e) => setAssignCategoryRunAi(e.target.checked)}
+                                />
+                                <span>Run AI pipeline after assigning category (tagging, video insights, metadata suggestions)</span>
+                            </label>
+                        )}
                         <div className="flex justify-end gap-3">
                             <button
                                 type="button"
-                                onClick={() => { setShowFinalizeFromBuilderModal(false); setFinalizeCategoryId(null) }}
+                                onClick={() => {
+                                    setShowFinalizeFromBuilderModal(false)
+                                    setFinalizeCategoryId(null)
+                                    setFinalizeModalMode('publish_staged')
+                                    setAssignCategoryRunAi(true)
+                                }}
                                 disabled={finalizeLoading}
                                 className="rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50 disabled:opacity-50"
                             >
@@ -7053,19 +7106,47 @@ export default function AssetDrawer({
                                     if (!finalizeCategoryId) return
                                     setFinalizeLoading(true)
                                     try {
-                                        const response = await window.axios.post(`/app/assets/${displayAsset.id}/finalize-from-builder`, { category_id: finalizeCategoryId })
-                                        if (response.data?.message) {
-                                            setToastMessage('Asset published and categorized')
-                                            setToastType('success')
-                                            setTimeout(() => setToastMessage(null), 5000)
-                                            setShowFinalizeFromBuilderModal(false)
-                                            setFinalizeCategoryId(null)
-                                            // Reload so asset leaves reference materials view and appears in main grid
-                                            router.reload({ only: ['assets', 'next_page_url', 'reference_materials_count'], preserveState: true, preserveScroll: true })
-                                            onClose?.()
+                                        if (finalizeModalMode === 'assign_only') {
+                                            const response = await window.axios.post(`/app/assets/${displayAsset.id}/assign-category`, {
+                                                category_id: finalizeCategoryId,
+                                                run_ai_pipeline: assignCategoryRunAi,
+                                            })
+                                            if (response.data?.message) {
+                                                setToastMessage(response.data.message)
+                                                setToastType('success')
+                                                setTimeout(() => setToastMessage(null), 5000)
+                                                setShowFinalizeFromBuilderModal(false)
+                                                setFinalizeCategoryId(null)
+                                                setFinalizeModalMode('publish_staged')
+                                                setAssignCategoryRunAi(true)
+                                                router.reload({
+                                                    only: ['assets', 'next_page_url', 'reference_materials_count', 'staged_count'],
+                                                    preserveState: true,
+                                                    preserveScroll: true,
+                                                })
+                                                onAssetUpdate?.()
+                                            }
+                                        } else {
+                                            const response = await window.axios.post(`/app/assets/${displayAsset.id}/finalize-from-builder`, { category_id: finalizeCategoryId })
+                                            if (response.data?.message) {
+                                                setToastMessage('Asset published and categorized')
+                                                setToastType('success')
+                                                setTimeout(() => setToastMessage(null), 5000)
+                                                setShowFinalizeFromBuilderModal(false)
+                                                setFinalizeCategoryId(null)
+                                                setFinalizeModalMode('publish_staged')
+                                                setAssignCategoryRunAi(true)
+                                                router.reload({
+                                                    only: ['assets', 'next_page_url', 'reference_materials_count', 'staged_count'],
+                                                    preserveState: true,
+                                                    preserveScroll: true,
+                                                })
+                                                onClose?.()
+                                                onAssetUpdate?.()
+                                            }
                                         }
                                     } catch (err) {
-                                        setToastMessage(err.response?.data?.message || 'Failed to publish asset')
+                                        setToastMessage(err.response?.data?.message || (finalizeModalMode === 'assign_only' ? 'Failed to assign category' : 'Failed to publish asset'))
                                         setToastType('error')
                                         setTimeout(() => setToastMessage(null), 5000)
                                     } finally {
@@ -7078,12 +7159,12 @@ export default function AssetDrawer({
                                 {finalizeLoading ? (
                                     <>
                                         <ArrowPathIcon className="h-4 w-4 mr-2 animate-spin" />
-                                        Publishing...
+                                        {finalizeModalMode === 'assign_only' ? 'Saving…' : 'Publishing...'}
                                     </>
                                 ) : (
                                     <>
                                         <CheckIcon className="h-4 w-4 mr-2" />
-                                        Publish & categorize
+                                        {finalizeModalMode === 'assign_only' ? 'Save category' : 'Publish & categorize'}
                                     </>
                                 )}
                             </button>

@@ -5,7 +5,9 @@ namespace App\Jobs;
 use App\Models\StudioCompositionVideoExportJob;
 use App\Models\Tenant;
 use App\Models\User;
-use App\Services\Studio\StudioCompositionVideoExportService;
+use App\Services\Studio\StudioCompositionVideoExportOrchestrator;
+use App\Services\Studio\StudioCompositionVideoExportRenderMode;
+use App\Support\StudioCanvasExportQueue;
 use App\Support\StudioVideoQueue;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -24,10 +26,15 @@ class ProcessStudioCompositionVideoExportJob implements ShouldQueue
     public function __construct(
         public readonly int $exportJobRowId,
     ) {
-        $this->onQueue(StudioVideoQueue::heavy());
+        $row = StudioCompositionVideoExportJob::query()->find($exportJobRowId);
+        $queue = StudioVideoQueue::heavy();
+        if ($row && $row->render_mode === StudioCompositionVideoExportRenderMode::CANVAS_RUNTIME->value) {
+            $queue = StudioCanvasExportQueue::heavy();
+        }
+        $this->onQueue($queue);
     }
 
-    public function handle(StudioCompositionVideoExportService $exportService): void
+    public function handle(StudioCompositionVideoExportOrchestrator $orchestrator): void
     {
         $row = StudioCompositionVideoExportJob::query()->find($this->exportJobRowId);
         if (! $row) {
@@ -54,6 +61,6 @@ class ProcessStudioCompositionVideoExportJob implements ShouldQueue
 
             return;
         }
-        $exportService->run($row, $tenant, $user);
+        $orchestrator->run($row, $tenant, $user);
     }
 }

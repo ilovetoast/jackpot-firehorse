@@ -17,6 +17,9 @@ use Illuminate\Support\Facades\Log;
 /**
  * When a studio-animation MP4 leaves intake staging (filed into a category), run vision tagging / metadata
  * and (for video) the video-insights job — deferred from {@see \App\Jobs\ProcessAssetJob} while intake_state was staged.
+ *
+ * Also used after manual "Publish & categorize" / assign-category flows for other staged uploads so video AI
+ * and tagging can start once a category exists.
  */
 final class StagedFiledAssetAiService
 {
@@ -36,7 +39,30 @@ final class StagedFiledAssetAiService
         $asset->metadata = $meta;
         $asset->saveQuietly();
 
-        $asset = $asset->fresh();
+        $this->queueVisionTaggingAndVideoInsights($asset->fresh());
+    }
+
+    /**
+     * After an asset is filed into a category (builder finalize, intake staged publish, or assign-category),
+     * run deferred studio AI if applicable; otherwise queue standard vision/metadata/video-insights when allowed.
+     */
+    public function queueAfterStagedCategorization(?Asset $asset): void
+    {
+        if ($asset === null) {
+            return;
+        }
+        $meta = $asset->metadata ?? [];
+        if (! empty($meta['_studio_staged_defer_ai'])) {
+            $this->runIfDeferred($asset);
+
+            return;
+        }
+
+        $this->queueVisionTaggingAndVideoInsights($asset->fresh());
+    }
+
+    private function queueVisionTaggingAndVideoInsights(?Asset $asset): void
+    {
         if ($asset === null) {
             return;
         }

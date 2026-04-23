@@ -6,6 +6,8 @@ use App\Http\Controllers\Controller;
 use App\Jobs\ProcessStudioCompositionVideoExportJob;
 use App\Models\Composition;
 use App\Models\StudioCompositionVideoExportJob;
+use App\Support\StudioCanvasRuntimeExportJobDiagnostics;
+use App\Services\Studio\StudioCompositionVideoExportRenderMode;
 use App\Models\Tenant;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
@@ -245,6 +247,10 @@ class EditorCompositionStudioVideoController extends Controller
         }
 
         $request->validate([
+            'render_mode' => ['nullable', 'string', Rule::in([
+                StudioCompositionVideoExportRenderMode::LEGACY_BITMAP->value,
+                StudioCompositionVideoExportRenderMode::CANVAS_RUNTIME->value,
+            ])],
             'include_audio' => 'nullable|boolean',
             'editor_publish' => 'nullable|array',
             'editor_publish.name' => 'nullable|string|max:255',
@@ -264,8 +270,11 @@ class EditorCompositionStudioVideoController extends Controller
 
         $includeAudio = (bool) $request->input('include_audio', true);
         $editorPublish = $request->input('editor_publish');
+        $renderMode = StudioCompositionVideoExportRenderMode::tryFrom((string) $request->input('render_mode', 'legacy_bitmap'))
+            ?? StudioCompositionVideoExportRenderMode::LEGACY_BITMAP;
         $metaJson = [
             'include_audio' => $includeAudio,
+            'render_mode' => $renderMode->value,
         ];
         if (is_array($editorPublish) && $editorPublish !== []) {
             $metaJson['editor_publish'] = $editorPublish;
@@ -278,6 +287,7 @@ class EditorCompositionStudioVideoController extends Controller
                 'brand_id' => $brand->id,
                 'user_id' => $user->id,
                 'composition_id' => $composition->id,
+                'render_mode' => $renderMode->value,
                 'status' => StudioCompositionVideoExportJob::STATUS_QUEUED,
                 'meta_json' => $metaJson,
             ]);
@@ -304,6 +314,7 @@ class EditorCompositionStudioVideoController extends Controller
         return response()->json([
             'id' => (string) $row->id,
             'status' => $row->status,
+            'render_mode' => $row->render_mode,
         ], 202);
     }
 
@@ -326,13 +337,20 @@ class EditorCompositionStudioVideoController extends Controller
             return response()->json(['message' => 'Not found'], 404);
         }
 
-        return response()->json([
+        $payload = [
             'id' => (string) $row->id,
             'status' => $row->status,
+            'render_mode' => $row->render_mode,
             'output_asset_id' => $row->output_asset_id !== null ? (string) $row->output_asset_id : null,
             'error' => $row->error_json,
             'meta' => $row->meta_json,
-        ]);
+        ];
+
+        if ($row->render_mode === StudioCompositionVideoExportRenderMode::CANVAS_RUNTIME->value) {
+            $payload['canvas_runtime_debug'] = StudioCanvasRuntimeExportJobDiagnostics::canvasRuntimeDebugBlock($row);
+        }
+
+        return response()->json($payload);
     }
 
     /**

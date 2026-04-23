@@ -19,7 +19,7 @@ final class StudioAnimationRolloutNotesCommand extends Command
         $this->line('Studio Animation 1.0 — rollout & manual validation');
         $this->newLine();
         $this->line('Playwright (official locked frame)');
-        $this->line('  • Repo root: npm ci && npx playwright install chromium');
+        $this->line('  • Repo root: npm ci && npx playwright install --with-deps chromium');
         $this->line('  • STUDIO_ANIMATION_OFFICIAL_PLAYWRIGHT_ENABLED=true');
         $this->line('  • STUDIO_ANIMATION_OFFICIAL_PLAYWRIGHT_SCRIPT=/abs/path/to/jackpot/scripts/studio-animation/playwright-locked-frame.mjs');
         $this->line('  • Optional: STUDIO_ANIMATION_OFFICIAL_PLAYWRIGHT_REQUIRE_HIGH_FI=true (jobs need high_fidelity_submit)');

@@ -119,7 +119,7 @@ return [
 
     /**
      * First-party Playwright renderer (scripts/studio-animation/playwright-locked-frame.mjs).
-     * Install (app root): npm ci && npx playwright install chromium
+     * Install (app root): npm ci && npx playwright install --with-deps chromium
      * Env: STUDIO_ANIMATION_OFFICIAL_PLAYWRIGHT_ENABLED, SCRIPT, NODE, TIMEOUT, REQUIRE_HIGH_FI, DISABLE_LEGACY.
      * If disabled or script fails, CompositionSnapshotRenderer falls back to legacy browser command (if enabled),
      * then Imagick server_basic, then client_snapshot (see parity note in docs/internal/studio-animation-rollout.md).

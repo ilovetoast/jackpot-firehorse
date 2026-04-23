@@ -20,6 +20,7 @@ class StudioCompositionVideoExportJob extends Model
         'brand_id',
         'user_id',
         'composition_id',
+        'render_mode',
         'status',
         'error_json',
         'meta_json',

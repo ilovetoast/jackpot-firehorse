@@ -76,9 +76,11 @@ export async function postStoreVideoLayer(
     return data as PostStoreVideoLayerResponse
 }
 
-export type PostVideoExportResponse = { id: string; status: string }
+export type PostVideoExportResponse = { id: string; status: string; render_mode?: string }
 
 export type PostRequestVideoExportBody = {
+    /** `legacy_bitmap` = current FFmpeg-only overlays. `canvas_runtime` = headless browser scene (feature-flagged). */
+    render_mode?: 'legacy_bitmap' | 'canvas_runtime'
     include_audio?: boolean
     editor_publish?: {
         name?: string
@@ -120,6 +122,7 @@ export async function postRequestVideoExport(
 export type VideoExportStatusResponse = {
     id: string
     status: string
+    render_mode?: string
     output_asset_id: string | null
     error: unknown
     meta: unknown

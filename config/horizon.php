@@ -309,6 +309,8 @@ return [
             'timeout' => (int) env('HORIZON_VIDEO_LIGHT_WORKER_TIMEOUT', 600),
             'nice' => 0,
         ],
+        // Studio canvas-runtime export defaults to the same queue; set QUEUE_VIDEO_HEAVY_STUDIO_CANVAS_QUEUE + a
+        // second supervisor to isolate Playwright/Chromium workloads. See docs/studio/CANVAS_RUNTIME_EXPORT.md.
         'supervisor-video-heavy' => [
             'connection' => 'redis',
             'queue' => [env('QUEUE_VIDEO_HEAVY_QUEUE', 'video-heavy')],

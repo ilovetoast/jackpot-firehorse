@@ -24,6 +24,7 @@ use App\Services\AssetPublicationService;
 use App\Services\Assets\AssetProcessingGuardService;
 use App\Services\AssetSearchService;
 use App\Services\AssetSortService;
+use App\Services\Assets\StagedFiledAssetAiService;
 use App\Services\BrandDNA\GoogleFontLibraryEntriesService;
 use App\Services\BrandLibraryCategoryCountService;
 use App\Services\FeatureGate;
@@ -1045,6 +1046,8 @@ class AssetController extends Controller
                         'health_status' => $asset->computeHealthStatus($incidentSeverityByAsset[$asset->id] ?? null),
                         // Brand Guidelines Builder: staged reference materials (unpublished, no category)
                         'builder_staged' => (bool) ($asset->builder_staged ?? false),
+                        // Intake queue: staged = awaiting category before main library grid
+                        'intake_state' => (string) ($asset->intake_state ?? 'normal'),
                         // Brand Intelligence (EBI): human-readable drawer payload (no raw overall score)
                         'brand_intelligence' => $asset->brandIntelligencePayloadForFrontend(),
                         'reference_promotion' => $asset->brandReferenceAsset?->toFrontendArray(),
@@ -2659,7 +2662,10 @@ class AssetController extends Controller
     }
 
     /**
-     * Finalize a builder-staged asset: assign category, clear builder_staged, and publish.
+     * Finalize a staged asset: assign category, clear builder staging when applicable, set intake to normal, publish.
+     *
+     * Covers Brand Guidelines reference materials ({@see Asset::$builder_staged}) and standard intake-staged
+     * uploads ({@see Asset::$intake_state} = staged) that have not yet been filed into a library category.
      *
      * POST /assets/{asset}/finalize-from-builder
      */
@@ -2677,8 +2683,10 @@ class AssetController extends Controller
             return response()->json(['message' => 'Asset not found'], 404);
         }
 
-        if (! $asset->builder_staged) {
-            return response()->json(['message' => 'Asset is not a reference material'], 422);
+        $isBuilderStaged = (bool) $asset->builder_staged;
+        $isIntakeStaged = (string) ($asset->intake_state ?? 'normal') === 'staged';
+        if (! $isBuilderStaged && ! $isIntakeStaged) {
+            return response()->json(['message' => 'This asset is not awaiting categorization (not staged).'], 422);
         }
 
         $validated = $request->validate([
@@ -2703,10 +2711,14 @@ class AssetController extends Controller
                 $metadata['category_id'] = $category->id;
                 $asset->metadata = $metadata;
                 $asset->builder_staged = false;
+                $asset->intake_state = 'normal';
                 $asset->save();
 
                 $this->publicationService->publish($asset, $user);
             });
+
+            $asset->refresh();
+            app(StagedFiledAssetAiService::class)->queueAfterStagedCategorization($asset);
 
             return response()->json([
                 'message' => 'Asset published and categorized successfully',
@@ -2721,6 +2733,75 @@ class AssetController extends Controller
             Log::error('[AssetController::finalizeFromBuilder]', ['asset_id' => $asset->id, 'error' => $e->getMessage()]);
 
             return response()->json(['message' => 'Failed to finalize asset'], 500);
+        }
+    }
+
+    /**
+     * Assign or change library category; optionally queue vision tagging / video insights (same chain as staged release).
+     *
+     * POST /assets/{asset}/assign-category
+     */
+    public function assignCategory(Request $request, Asset $asset): JsonResponse
+    {
+        $tenant = app('tenant');
+        $brand = app('brand');
+        $user = auth()->user();
+
+        if (! $user) {
+            return response()->json(['message' => 'Unauthenticated'], 401);
+        }
+
+        if ($asset->tenant_id !== $tenant->id || $asset->brand_id !== $brand->id) {
+            return response()->json(['message' => 'Asset not found'], 404);
+        }
+
+        $validated = $request->validate([
+            'category_id' => 'required|integer|exists:categories,id',
+            'run_ai_pipeline' => 'sometimes|boolean',
+        ]);
+
+        $categoryId = (int) $validated['category_id'];
+        $category = Category::where('id', $categoryId)
+            ->where('tenant_id', $tenant->id)
+            ->where('brand_id', $brand->id)
+            ->first();
+
+        if (! $category) {
+            return response()->json(['message' => 'Category not found'], 404);
+        }
+
+        $runAi = $request->boolean('run_ai_pipeline', true);
+
+        try {
+            Gate::forUser($user)->authorize('update', $asset);
+
+            DB::transaction(function () use ($asset, $category) {
+                $metadata = $asset->metadata ?? [];
+                $metadata['category_id'] = $category->id;
+                $asset->metadata = $metadata;
+                if ((string) ($asset->intake_state ?? 'normal') === 'staged') {
+                    $asset->intake_state = 'normal';
+                }
+                $asset->save();
+            });
+
+            if ($runAi) {
+                $asset->refresh();
+                app(StagedFiledAssetAiService::class)->queueAfterStagedCategorization($asset);
+            }
+
+            return response()->json([
+                'message' => 'Category updated',
+                'asset_id' => $asset->id,
+                'category_id' => $category->id,
+                'run_ai_pipeline' => $runAi,
+            ], 200);
+        } catch (\Illuminate\Auth\Access\AuthorizationException $e) {
+            return response()->json(['message' => $e->getMessage()], 403);
+        } catch (\Exception $e) {
+            Log::error('[AssetController::assignCategory]', ['asset_id' => $asset->id, 'error' => $e->getMessage()]);
+
+            return response()->json(['message' => 'Failed to update category'], 500);
         }
     }
 

@@ -71,6 +71,40 @@ class CompositionThumbnailAssetService
     }
 
     /**
+     * Cross-request mutex for {@see appendVersionToExistingAsset()}.
+     *
+     * `SELECT … FOR UPDATE` on `assets` alone is not always enough when multiple HTTP workers race on
+     * `max(asset_versions.version_number)` (nested savepoints, FK paths, or timing). MySQL named locks
+     * serialize per asset id for the whole append (S3 put + row insert).
+     *
+     * @template T
+     *
+     * @param  callable(): T  $callback
+     * @return T
+     */
+    private function withMysqlAssetVersionAppendLock(string $assetId, callable $callback): mixed
+    {
+        $driver = DB::connection()->getDriverName();
+        if (! in_array($driver, ['mysql', 'mariadb'], true)) {
+            return $callback();
+        }
+
+        // GET_LOCK name max 64 chars (MySQL); hash keeps length stable for UUIDs.
+        $name = 'jpav'.substr(sha1($assetId), 0, 56);
+
+        $row = DB::selectOne('select get_lock(?, 30) as ok', [$name]);
+        if (! is_object($row) || (int) ($row->ok ?? 0) !== 1) {
+            throw new RuntimeException('Could not acquire composition preview version lock.');
+        }
+
+        try {
+            return $callback();
+        } finally {
+            DB::selectOne('select release_lock(?) as r', [$name]);
+        }
+    }
+
+    /**
      * @return non-empty-string
      */
     private function appendVersionToExistingAsset(
@@ -81,7 +115,8 @@ class CompositionThumbnailAssetService
         string $pngBinary,
         ?int $compositionId
     ): string {
-        return DB::transaction(function () use ($tenant, $user, $asset, $pngBinary, $compositionId) {
+        return $this->withMysqlAssetVersionAppendLock((string) $asset->id, function () use ($tenant, $user, $asset, $pngBinary, $compositionId): string {
+            return DB::transaction(function () use ($tenant, $user, $asset, $pngBinary, $compositionId) {
             // Serialize concurrent thumbnail saves for the same asset: otherwise two requests can
             // read the same max(version_number) and both insert the same next number (unique violation).
             Asset::query()->whereKey($asset->id)->lockForUpdate()->firstOrFail();
@@ -170,6 +205,7 @@ class CompositionThumbnailAssetService
             ]);
 
             return $asset->id;
+            });
         });
     }
 

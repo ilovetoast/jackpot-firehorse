@@ -29,7 +29,7 @@ This page is the **environment and operations** story. It does not replace:
 
 | Document | Contents |
 |----------|----------|
-| [SERVER_REQUIREMENTS.md](SERVER_REQUIREMENTS.md) | OS binaries on workers (ImageMagick, FFmpeg, Poppler, etc.) |
+| [SERVER_REQUIREMENTS.md](SERVER_REQUIREMENTS.md) | OS binaries on workers (ImageMagick, FFmpeg, Poppler, etc.); **Node + Playwright** (`npx playwright install --with-deps chromium`; `--with-deps --dry-run` preflight) on **video-heavy** when Studio canvas-runtime or official animation renderer is enabled |
 | [../STORAGE.md](../STORAGE.md) | Tenant buckets, upload behaviour |
 | [../UPLOAD_AND_QUEUE.md](../UPLOAD_AND_QUEUE.md) | Queue dispatch, pipeline |
 | [../compliance/PATH_TO_GDPR.md](../compliance/PATH_TO_GDPR.md) | Privacy; AWS as processor |

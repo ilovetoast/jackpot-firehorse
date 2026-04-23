@@ -108,6 +108,16 @@ class AppServiceProvider extends ServiceProvider
             return new ImageEmbeddingService;
         });
 
+        $this->app->singleton(
+            \App\Contracts\StudioCanvasRuntimePlaywrightInvokerContract::class,
+            \App\Services\Studio\DefaultStudioCanvasRuntimePlaywrightInvoker::class,
+        );
+
+        $this->app->singleton(
+            \App\Contracts\StudioCanvasRuntimeFfmpegProcessInvokerContract::class,
+            \App\Services\Studio\DefaultStudioCanvasRuntimeFfmpegProcessInvoker::class,
+        );
+
         $this->app->singleton(\App\Services\SpatieRoleLookup::class);
 
         $this->app->singleton(\App\Services\NotificationOrchestrator::class, function ($app) {

@@ -10,7 +10,7 @@ Processing (thumbnails, PDF text, SVG, video frames) depends on **CLI tools** in
 
 | Role | Typical processes | Required packages (summary) |
 |------|-------------------|------------------------------|
-| **Worker** | `queue:work`, `ProcessAssetJob`, thumbnail generation | ImageMagick, Poppler (`pdftotext`, etc.), `librsvg`, FFmpeg, `python3-opencv` (if Python uses OpenCV) — see [Packages](#packages) |
+| **Worker** | `queue:work`, `ProcessAssetJob`, thumbnail generation | ImageMagick, Poppler (`pdftotext`, etc.), `librsvg`, FFmpeg, `python3-opencv` (if Python uses OpenCV) — see [Packages](#packages). **Video-heavy / studio canvas lanes** also need [Node.js / Playwright](#nodejs--playwright-video-heavy--studio) when those features are enabled. |
 | **Web** | PHP-FPM, HTTP | Often same image as worker; if split, web still benefits from matching versions for any inline processing |
 | **Local (Sail)** | Docker Compose services | Uses Dockerfile above |
 
@@ -66,6 +66,53 @@ If the web container does **not** run queue workers, it may omit heavy tools **o
 
 ---
 
+## Node.js / Playwright (video-heavy + studio)
+
+Use this on **queue workers** that run **Studio** workloads driven by headless Chromium (not the PHP-only thumbnail lane):
+
+| Feature | Queue / service | App entry |
+|--------|-------------------|-----------|
+| **Studio canvas-runtime video export** | `video-heavy` (or `QUEUE_VIDEO_HEAVY_STUDIO_CANVAS_QUEUE` if set) | `scripts/studio-canvas-export.mjs` via `StudioCompositionCanvasRuntimeVideoExportService` |
+| **Studio animation official renderer** | Configured studio animation queue | Locked-frame Playwright script (see `docs/internal/studio-animation-rollout.md`) |
+
+**Production software checklist**
+
+1. **Node.js** — LTS or version pinned to what `jackpot/package.json` / CI expects; on the worker image, `node` and `npm` must be on `PATH` for the same user that runs Horizon/`queue:work`.
+2. **Application JS dependencies** — from the **`jackpot/`** app root (same path as `artisan`), run `npm ci` in the image bake or deploy hook so `node_modules/playwright` matches lockfile.
+3. **Chromium + OS libraries (server-side)** — from **`jackpot/`** after `npm ci`, use Playwright’s combined install so **browser binaries and system packages** match the pinned `playwright` version:
+
+   **`npx playwright install --with-deps chromium`**
+
+   Prefer baking this into the **worker image** (not at container start on every replica). Optionally set **`PLAYWRIGHT_BROWSERS_PATH`** to a shared or cached directory so builds are reproducible and downloads are controlled.
+
+   *Alternative:* `docker/8.5/Dockerfile` uses a standalone **`npx playwright install-deps`** layer for Sail; on bare production workers the **`--with-deps`** form above is the usual single command.
+
+**Verify installs without downloading (required for production docs / CI gates)**
+
+Run from the **`jackpot/`** directory after `npm ci`:
+
+```bash
+# Print planned browser + system-dependency steps, without apt/dnf or browser download
+npx playwright install --with-deps --dry-run chromium
+```
+
+Use this in **CI or image-build smoke steps** to confirm the Playwright CLI resolves, the lockfile version matches expectations, and the dependency plan is acceptable on hardened hosts.
+
+**Full install (typical worker image layer)**
+
+```bash
+cd /path/to/jackpot
+npm ci
+npx playwright install --with-deps chromium
+```
+
+**Related docs**
+
+- [Studio canvas-runtime export](../studio/CANVAS_RUNTIME_EXPORT.md) — rollout, queues, env flags.
+- [Studio animation Playwright rollout](../internal/studio-animation-rollout.md) — official renderer env vars.
+
+---
+
 ## Verification
 
 After deploy, confirm binaries are on `PATH` for the user that runs workers:
@@ -98,6 +145,17 @@ rsvg-convert -w 512 public/jp-wordmark-inverted.svg -o /tmp/svg-smoke.png && fil
 
 A sibling command exists for PDFs: `php artisan pdf:verify`.
 
+### Playwright (studio / canvas workers)
+
+After `npm ci` in **`jackpot/`** (same directory as `artisan`):
+
+```bash
+npx playwright --version
+npx playwright install --with-deps --dry-run chromium
+```
+
+Expect the dry-run output to list the Chromium revision and dependency steps Playwright would run. For a host that already baked browsers, optionally smoke **`node scripts/studio-canvas-export.mjs --help`** (canvas) or the official animation script path from env (see internal rollout doc).
+
 ---
 
 ## Related documentation
@@ -105,3 +163,4 @@ A sibling command exists for PDFs: `php artisan pdf:verify`.
 - [MEDIA_PIPELINE.md](../MEDIA_PIPELINE.md) — thumbnails, PDFs, formats
 - [UPLOAD_AND_QUEUE.md](../UPLOAD_AND_QUEUE.md) — worker processes and pipeline
 - [DEV_TOOLING.md](../DEV_TOOLING.md) — local development utilities
+- [PRODUCTION_ARCHITECTURE_AWS.md](PRODUCTION_ARCHITECTURE_AWS.md) — worker tiers; **video-heavy** hosts should satisfy this file’s FFmpeg **and** (when Studio flags are on) Node/Playwright sections

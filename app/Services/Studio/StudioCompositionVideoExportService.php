@@ -2,24 +2,13 @@
 
 namespace App\Services\Studio;
 
-use App\Enums\ApprovalStatus;
-use App\Enums\AssetStatus;
-use App\Enums\AssetType;
-use App\Enums\ThumbnailStatus;
-use App\Jobs\ProcessAssetJob;
 use App\Models\Asset;
-use App\Models\AssetVersion;
 use App\Models\Composition;
 use App\Models\StudioCompositionVideoExportJob;
 use App\Models\Tenant;
 use App\Models\User;
-use App\Services\AssetPathGenerator;
-use App\Services\TenantBucketService;
 use App\Support\EditorAssetOriginalBytesLoader;
-use App\Support\PipelineQueueResolver;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Symfony\Component\Process\Process;
 
@@ -33,8 +22,7 @@ use Symfony\Component\Process\Process;
 final class StudioCompositionVideoExportService
 {
     public function __construct(
-        protected AssetPathGenerator $pathGenerator,
-        protected EditorStudioVideoPublishApplier $videoPublishApplier,
+        protected StudioCompositionVideoExportMp4Publisher $mp4Publisher,
     ) {}
 
     public function run(StudioCompositionVideoExportJob $row, Tenant $tenant, User $user): void
@@ -72,7 +60,7 @@ final class StudioCompositionVideoExportService
         $w = (int) ($doc['width'] ?? 0);
         $h = (int) ($doc['height'] ?? 0);
         $layers = is_array($doc['layers'] ?? null) ? $doc['layers'] : [];
-        $videoLayer = $this->selectPrimaryVideoLayer($layers);
+        $videoLayer = StudioCompositionVideoExportMediaHelper::selectPrimaryVideoLayer($layers);
         if ($videoLayer === null || $w < 2 || $h < 2) {
             $row->update([
                 'status' => StudioCompositionVideoExportJob::STATUS_FAILED,
@@ -160,27 +148,21 @@ final class StudioCompositionVideoExportService
 
             $ffmpeg = (string) config('studio_video.ffmpeg_binary', 'ffmpeg');
             $ffprobe = (string) config('studio_video.ffprobe_binary', 'ffprobe');
-            $probedS = $this->ffprobeDurationSeconds($ffprobe, $tmpIn);
+            $probedS = StudioCompositionVideoExportMediaHelper::ffprobeDurationSeconds($ffprobe, $tmpIn);
             if ($probedS <= 0) {
                 throw new \RuntimeException('Could not read source video duration (ffprobe).');
             }
             $tl = is_array($videoLayer['timeline'] ?? null) ? $videoLayer['timeline'] : [];
-            $trimInMs = max(0, (int) ($tl['trim_in_ms'] ?? 0));
-            $trimOutMs = max(0, (int) ($tl['trim_out_ms'] ?? 0));
-            $trimInS = $trimInMs / 1000.0;
-            $trimOutS = $trimOutMs / 1000.0;
-            $availableS = max(0.04, $probedS - $trimInS - $trimOutS);
-            $compMs = 0;
-            $stDoc = is_array($doc['studio_timeline'] ?? null) ? $doc['studio_timeline'] : null;
-            if (is_array($stDoc) && isset($stDoc['duration_ms'])) {
-                $compMs = max(0, (int) $stDoc['duration_ms']);
-            }
-            $compS = $compMs > 0 ? $compMs / 1000.0 : $availableS;
-            $outDurS = min($availableS, $compS);
-            $hasAudio = $this->ffprobeHasAudio($ffprobe, $tmpIn);
+            $timing = StudioCompositionVideoExportMediaHelper::computeTrimAndOutputDuration($doc, $videoLayer, $probedS);
+            $trimInMs = $timing['trim_in_ms'];
+            $trimOutMs = $timing['trim_out_ms'];
+            $trimInS = $timing['trim_in_s'];
+            $outDurS = $timing['output_duration_s'];
+            $compMs = $timing['composition_duration_ms'];
+            $hasAudio = StudioCompositionVideoExportMediaHelper::ffprobeHasAudio($ffprobe, $tmpIn);
             $tlMuted = (bool) ($tl['muted'] ?? false);
             $wantAudio = $includeAudioPref && ! $tlMuted && $hasAudio;
-            $padColor = $this->resolvePadColorForFfmpeg($layers, $videoZ);
+            $padColor = StudioCompositionVideoExportMediaHelper::resolvePadColorForFfmpeg($layers, $videoZ);
             if ($stacks === []) {
                 $fc = "[0:v]scale={$w}:{$h}:force_original_aspect_ratio=decrease,pad={$w}:{$h}:(ow-iw)/2:(oh-ih)/2:{$padColor},format=yuv420p,setsar=1[vout]";
                 $mapLabel = 'vout';
@@ -265,98 +247,6 @@ final class StudioCompositionVideoExportService
                 throw new \RuntimeException('FFmpeg failed: '.substr($process->getErrorOutput() ?: $process->getOutput(), 0, 2000));
             }
 
-            $bytes = @file_get_contents($tmpOut);
-            if ($bytes === false || $bytes === '') {
-                throw new \RuntimeException('Export file was empty.');
-            }
-            $size = strlen($bytes);
-            $brand = $composition->brand;
-            if (! $brand) {
-                throw new \RuntimeException('Composition brand missing.');
-            }
-            $outDisk = (string) config('studio_animation.output_disk', 's3');
-            $newAssetId = (string) Str::uuid();
-            $path = $this->pathGenerator->generateOriginalPathForAssetId($tenant, $newAssetId, 1, 'mp4');
-            Storage::disk($outDisk)->put($path, $bytes, 'private');
-
-            // Align with normal uploads: link the asset row to the tenant’s provisioned StorageBucket so jobs that
-            // still expect storage_bucket_id (hover preview, older thumbnail paths) resolve the same S3 context.
-            $storageBucketId = null;
-            try {
-                $storageBucketId = app(TenantBucketService::class)->getOrProvisionBucket($tenant)->id;
-            } catch (\Throwable $e) {
-                Log::warning('[StudioCompositionVideoExportService] Could not resolve tenant storage bucket; asset will rely on disk fallback', [
-                    'tenant_id' => $tenant->id,
-                    'error' => $e->getMessage(),
-                ]);
-            }
-
-            $asset = Asset::forceCreate([
-                'id' => $newAssetId,
-                'tenant_id' => $tenant->id,
-                'brand_id' => $brand->id,
-                'user_id' => $user->id,
-                'status' => AssetStatus::VISIBLE,
-                'type' => AssetType::AI_GENERATED,
-                'title' => 'Studio video export',
-                'original_filename' => 'studio-export-'.$row->id.'.mp4',
-                'mime_type' => 'video/mp4',
-                'size_bytes' => $size,
-                'width' => $w,
-                'height' => $h,
-                'storage_bucket_id' => $storageBucketId,
-                'storage_root_path' => $path,
-                'thumbnail_status' => ThumbnailStatus::PENDING,
-                'analysis_status' => 'uploading',
-                'approval_status' => ApprovalStatus::NOT_REQUIRED,
-                'published_at' => null,
-                'source' => 'studio_composition_video_export',
-                'metadata' => [
-                    'studio_composition_video_export_job_id' => (string) $row->id,
-                    'composition_id' => (string) $composition->id,
-                ],
-            ]);
-
-            $pub = is_array($requestMeta['editor_publish'] ?? null) ? $requestMeta['editor_publish'] : null;
-            if (is_array($pub) && $pub !== [] && $brand) {
-                try {
-                    $this->videoPublishApplier->apply($asset, $user, $tenant, $brand, $pub);
-                } catch (\Throwable $e) {
-                    Log::warning('[StudioCompositionVideoExportService] editor_publish apply failed', [
-                        'job_id' => $row->id,
-                        'asset_id' => $asset->id,
-                        'error' => $e->getMessage(),
-                    ]);
-                }
-            }
-
-            // Grid requires metadata.category_id; exports without editor_publish would never appear otherwise.
-            $this->videoPublishApplier->ensureShelfCategoryWhenMissing($asset->fresh(), $tenant, $brand);
-
-            AssetVersion::query()->create([
-                'id' => (string) Str::uuid(),
-                'asset_id' => $asset->id,
-                'version_number' => 1,
-                'file_path' => $path,
-                'file_size' => $size,
-                'mime_type' => 'video/mp4',
-                'width' => $w,
-                'height' => $h,
-                'checksum' => hash('sha256', $bytes),
-                'is_current' => true,
-                // Must NOT be `complete` here: {@see ProcessAssetJob} exits immediately when the current
-                // version is already complete, so the pipeline chain never runs (asset stuck on uploading).
-                'pipeline_status' => 'pending',
-                'uploaded_by' => $user->id,
-            ]);
-
-            // File is already on disk; without this the row stays on analysis_status=uploading forever
-            // (no thumbnails / metadata / finalize). Mirrors {@see StudioAnimationCompletionService}.
-            DB::afterCommit(function () use ($asset): void {
-                ProcessAssetJob::dispatch((string) $asset->id)
-                    ->onQueue(PipelineQueueResolver::imagesQueueForAsset($asset));
-            });
-
             $technical = [
                 'include_audio' => $includeAudioPref,
                 'audio_muxed' => $wantAudio,
@@ -373,8 +263,10 @@ final class StudioCompositionVideoExportService
                 'overlays_skipped' => $overlaysSkipped,
                 'overlays_total_candidates' => $overlaysAttempted,
                 'text_layers_note' => 'Text layers, masks, blend modes, and non-raster fills are not baked; only image/generative_image overlays.',
-                'output_asset_id' => $asset->id,
             ];
+            $published = $this->mp4Publisher->publish($row, $composition, $tenant, $user, $tmpOut, $w, $h, $technical);
+            $asset = $published['asset'];
+            $technical = $published['technical'];
             $preserved = is_array($row->meta_json) ? $row->meta_json : [];
             $row->update([
                 'status' => StudioCompositionVideoExportJob::STATUS_COMPLETE,
@@ -402,74 +294,6 @@ final class StudioCompositionVideoExportService
                 }
             }
         }
-    }
-
-    /**
-     * Picks the base video for export: primaryForExport (visible) first, else lowest-z visible
-     * video, else lowest-z of any video with an asset.
-     *
-     * @param  array<int, mixed>  $layers
-     * @return array<string, mixed>|null
-     */
-    private function selectPrimaryVideoLayer(array $layers): ?array
-    {
-        $candidates = [];
-        foreach ($layers as $layer) {
-            if (! is_array($layer) || ($layer['type'] ?? '') !== 'video' || empty($layer['assetId'])) {
-                continue;
-            }
-            $candidates[] = $layer;
-        }
-        if ($candidates === []) {
-            return null;
-        }
-        $visible = array_values(array_filter(
-            $candidates,
-            static fn (array $v): bool => ($v['visible'] ?? true) !== false
-        ));
-        $pool = $visible !== [] ? $visible : $candidates;
-        foreach ($pool as $v) {
-            if (! empty($v['primaryForExport'])) {
-                return $v;
-            }
-        }
-        usort($pool, static function (array $a, array $b): int {
-            return ((int) ($a['z'] ?? 0)) <=> ((int) ($b['z'] ?? 0));
-        });
-
-        return $pool[0] ?? null;
-    }
-
-    private function ffprobeDurationSeconds(string $ffprobe, string $path): float
-    {
-        if (! is_file($path)) {
-            return 0.0;
-        }
-        $p = new Process([$ffprobe, '-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', $path]);
-        $p->setTimeout(60);
-        $p->run();
-        if (! $p->isSuccessful()) {
-            return 0.0;
-        }
-        $raw = trim($p->getOutput() ?: '');
-        if ($raw === '' || $raw === 'N/A') {
-            return 0.0;
-        }
-        $f = (float) $raw;
-
-        return $f > 0 ? $f : 0.0;
-    }
-
-    private function ffprobeHasAudio(string $ffprobe, string $path): bool
-    {
-        if (! is_file($path)) {
-            return false;
-        }
-        $p = new Process([$ffprobe, '-v', 'error', '-select_streams', 'a:0', '-show_entries', 'stream=index', '-of', 'csv=p=0', $path]);
-        $p->setTimeout(60);
-        $p->run();
-
-        return $p->isSuccessful() && trim($p->getOutput() ?: '') !== '';
     }
 
     /**
@@ -518,94 +342,5 @@ final class StudioCompositionVideoExportService
         file_put_contents($path, $raw);
 
         return $path;
-    }
-
-    /**
-     * FFmpeg pad filter color for letterboxing the base video to the canvas.
-     * Defaults to black when no usable fill is found (legacy behavior).
-     *
-     * @param  array<int, mixed>  $layers
-     */
-    private function resolvePadColorForFfmpeg(array $layers, int $videoZ): string
-    {
-        $resolved = $this->resolveBackgroundFillCssColor($layers, $videoZ);
-        if ($resolved === null) {
-            return 'black';
-        }
-        $ffmpeg = $this->cssColorToFfmpegPadColor($resolved);
-
-        return $ffmpeg ?? 'black';
-    }
-
-    /**
-     * Prefer the lowest-z visible fill that sits beneath the export video (typical canvas wash).
-     * Falls back to lowest-z visible fill in the document.
-     *
-     * @param  array<int, mixed>  $layers
-     */
-    private function resolveBackgroundFillCssColor(array $layers, int $videoZ): ?string
-    {
-        $below = [];
-        $any = [];
-        foreach ($layers as $ly) {
-            if (! is_array($ly) || ($ly['type'] ?? '') !== 'fill') {
-                continue;
-            }
-            if (($ly['visible'] ?? true) === false) {
-                continue;
-            }
-            $z = (int) ($ly['z'] ?? 0);
-            $any[] = ['z' => $z, 'layer' => $ly];
-            if ($z < $videoZ) {
-                $below[] = ['z' => $z, 'layer' => $ly];
-            }
-        }
-        $pool = $below !== [] ? $below : $any;
-        if ($pool === []) {
-            return null;
-        }
-        usort($pool, static fn (array $a, array $b): int => $a['z'] <=> $b['z']);
-        $fill = $pool[0]['layer'];
-        $fillKind = (string) ($fill['fillKind'] ?? 'solid');
-        if ($fillKind === 'gradient') {
-            $g = (string) ($fill['gradientEndColor'] ?? $fill['gradientStartColor'] ?? $fill['color'] ?? '');
-
-            return $g !== '' ? $g : null;
-        }
-
-        $c = (string) ($fill['color'] ?? '');
-        if ($c === '') {
-            return null;
-        }
-
-        return $c;
-    }
-
-    /**
-     * @return non-empty-string|null  FFmpeg pad color (named color or {@code 0xRRGGBB})
-     */
-    private function cssColorToFfmpegPadColor(string $css): ?string
-    {
-        $s = trim($css);
-        if ($s === '') {
-            return null;
-        }
-        if (preg_match('/^#([0-9a-f]{3})$/i', $s, $m)) {
-            $x = $m[1];
-
-            return '0x'.strtoupper($x[0].$x[0].$x[1].$x[1].$x[2].$x[2]);
-        }
-        if (preg_match('/^#([0-9a-f]{6})([0-9a-f]{2})?$/i', $s, $m)) {
-            return '0x'.strtoupper($m[1]);
-        }
-        if (preg_match('/^rgba?\(\s*([0-9]+)\s*,\s*([0-9]+)\s*,\s*([0-9]+)/i', $s, $m)) {
-            $r = max(0, min(255, (int) $m[1]));
-            $g = max(0, min(255, (int) $m[2]));
-            $b = max(0, min(255, (int) $m[3]));
-
-            return sprintf('0x%02X%02X%02X', $r, $g, $b);
-        }
-
-        return null;
     }
 }

@@ -34,6 +34,19 @@ class EditorBrandContextController extends Controller
     }
 
     /**
+     * Same JSON shape as `brand_context` from GET /app/api/editor/brand-context, for server-driven surfaces
+     * (e.g. signed composition export render) where there is no interactive editor session.
+     *
+     * @return array<string, mixed>
+     */
+    public function serializeBrandContextForBrand(Brand $brand): array
+    {
+        $brand->loadMissing(['brandModel.activeVersion']);
+
+        return $this->serializeBrandContext($brand);
+    }
+
+    /**
      * @return array<string, mixed>
      */
     private function serializeBrandContext(Brand $brand): array

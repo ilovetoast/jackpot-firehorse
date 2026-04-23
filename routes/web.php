@@ -119,6 +119,11 @@ Route::middleware('guest')->group(function () {
 Route::get('/email/verify/{id}/{hash}', [\App\Http\Controllers\Auth\EmailVerificationController::class, 'verify'])->middleware('signed')->name('verification.verify');
 Route::post('/email/resend', [\App\Http\Controllers\Auth\EmailVerificationController::class, 'resend'])->middleware('auth')->name('verification.resend');
 
+// Studio canvas-runtime export: signed URL for headless Chromium (Playwright). No session auth — signature gates access.
+Route::get('/internal/studio/composition-export-render/{exportJob}', [\App\Http\Controllers\Internal\StudioCompositionExportRenderController::class, 'show'])
+    ->middleware(['web', 'signed'])
+    ->name('internal.studio.composition-export-render');
+
 // Phase C12.0: Collection-only invite accept (guest or auth; no tenant required)
 Route::get('/invite/collection/{token}', [\App\Http\Controllers\CollectionAccessInviteController::class, 'acceptShow'])->name('collection-invite.accept');
 Route::post('/invite/collection/{token}/accept', [\App\Http\Controllers\CollectionAccessInviteController::class, 'accept'])->middleware('auth')->name('collection-invite.accept.submit');
@@ -914,6 +919,7 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
             Route::post('/assets/{asset}/publish', [\App\Http\Controllers\AssetController::class, 'publish'])->name('assets.publish');
             Route::post('/assets/{asset}/unpublish', [\App\Http\Controllers\AssetController::class, 'unpublish'])->name('assets.unpublish');
             Route::post('/assets/{asset}/finalize-from-builder', [\App\Http\Controllers\AssetController::class, 'finalizeFromBuilder'])->name('assets.finalize-from-builder');
+            Route::post('/assets/{asset}/assign-category', [\App\Http\Controllers\AssetController::class, 'assignCategory'])->name('assets.assign-category');
             // Phase J.3.1: File replacement for rejected contributor assets
             Route::patch('/assets/{asset}/filename', [\App\Http\Controllers\AssetController::class, 'updateFilename'])->name('assets.filename.update');
             Route::patch('/assets/{asset}/focal-point', [\App\Http\Controllers\AssetFocalPointController::class, 'update'])->name('assets.focal-point.update');

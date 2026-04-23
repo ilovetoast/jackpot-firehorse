@@ -544,6 +544,18 @@ export function isVideoLayer(l: Layer): l is VideoLayer {
     return l.type === 'video'
 }
 
+export function isTextLayer(l: Layer): l is TextLayer {
+    return l.type === 'text'
+}
+
+export function isImageLayer(l: Layer): l is ImageLayer {
+    return l.type === 'image'
+}
+
+export function isGenerativeImageLayer(l: Layer): l is GenerativeImageLayer {
+    return l.type === 'generative_image'
+}
+
 /** Same primary rules as the composition MP4 export job (for preview / publish UI). */
 export function getPrimaryVideoLayerForDocumentExport(layers: Layer[]): VideoLayer | null {
     const candidates = layers.filter(

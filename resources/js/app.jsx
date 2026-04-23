@@ -125,7 +125,8 @@ createInertiaApp({
             name.startsWith('Gateway/') ||
             name.startsWith('Auth/CollectionInvite') ||
             name.startsWith('Auth/VerifyEmail') ||
-            name.startsWith('Onboarding/')
+            name.startsWith('Onboarding/') ||
+            name.startsWith('StudioExport/')
         if (isExperience) {
             return (props) => (
                 <>
