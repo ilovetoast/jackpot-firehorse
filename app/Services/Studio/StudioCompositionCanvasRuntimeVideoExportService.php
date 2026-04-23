@@ -75,8 +75,8 @@ final class StudioCompositionCanvasRuntimeVideoExportService
             '--width='.(string) (int) ($payload['width'] ?? 1080),
             '--height='.(string) (int) ($payload['height'] ?? 1080),
             '--export-job-id='.(string) $row->id,
-            '--readiness-timeout-ms='.(string) (int) config('studio_video.canvas_export_readiness_timeout_ms', 120_000),
-            '--navigation-timeout-ms='.(string) (int) config('studio_video.canvas_export_navigation_timeout_ms', 120_000),
+            '--readiness-timeout-ms='.(string) $readinessMs,
+            '--navigation-timeout-ms='.(string) $navigationMs,
             '--frame-settle-ms='.(string) (int) config('studio_video.canvas_export_frame_settle_ms', 50),
             '--device-scale-factor='.(string) (float) config('studio_video.canvas_export_device_scale_factor', 1.0),
         ];
@@ -84,12 +84,18 @@ final class StudioCompositionCanvasRuntimeVideoExportService
         $timeoutSeconds = max(60, (int) config('studio_video.canvas_export_capture_timeout_seconds', 7200));
         $cwd = base_path();
 
+        $readinessMs = (int) config('studio_video.canvas_export_readiness_timeout_ms', 120_000);
+        $navigationMs = (int) config('studio_video.canvas_export_navigation_timeout_ms', 120_000);
+        $signedRoot = trim((string) config('studio_video.canvas_export_signed_url_root', ''));
         $preRunDiagnostics = [
             'export_mode' => StudioCompositionVideoExportRenderMode::CANVAS_RUNTIME->value,
             'implementation' => 'canvas_runtime_playwright_capture_v1',
             'render_contract_version' => $payload['version'] ?? null,
             'render_page_url_host' => parse_url($renderUrl, PHP_URL_HOST),
             'render_url_ttl_minutes' => $ttl,
+            'readiness_timeout_ms_php' => $readinessMs,
+            'navigation_timeout_ms_php' => $navigationMs,
+            'canvas_export_signed_url_root_configured' => $signedRoot !== '',
             'fps' => $payload['fps'] ?? null,
             'duration_ms' => $payload['duration_ms'] ?? null,
             'composition_id' => (string) $composition->id,
@@ -723,7 +729,7 @@ final class StudioCompositionCanvasRuntimeVideoExportService
         if ($exitCode === 3 && str_contains($detail, 'ERR_CONNECTION_REFUSED')) {
             $msg .= ' Connection refused usually means the URL host is not listening inside the worker network (browser-only DNS like jackpot.local). Set STUDIO_VIDEO_CANVAS_EXPORT_SIGNED_URL_ROOT to a worker-reachable origin (Sail: http://laravel.test).';
         }
-        if ($exitCode === 5 && self::exportDiagnosticsMentionConnectionRefused($captureDiagnosticsFile)) {
+        if (in_array($exitCode, [4, 5], true) && self::exportDiagnosticsMentionConnectionRefused($captureDiagnosticsFile)) {
             $msg .= ' Browser console shows ERR_CONNECTION_REFUSED for sub-resources (fonts, images, or media). With STUDIO_VIDEO_CANVAS_EXPORT_SIGNED_URL_ROOT set, the server rewrites APP_URL-prefixed URLs in the export payload; ensure that env is deployed and config cached, or fix any absolute URLs that do not start with APP_URL.';
         }
 

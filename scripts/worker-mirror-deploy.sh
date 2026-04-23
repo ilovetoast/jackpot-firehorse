@@ -90,6 +90,19 @@ cd "$RELEASE_DIR"
 sudo -u "$APP_USER" git checkout "$GIT_REF"
 sudo -u "$APP_USER" git reset --hard "origin/$GIT_REF"
 
+# Monorepo checkout is .../jackpot-firehorse/jackpot; single-app checkout has artisan at release root.
+if [ -f "$RELEASE_DIR/jackpot/artisan" ]; then
+  APP_CODE="$RELEASE_DIR/jackpot"
+elif [ -f "$RELEASE_DIR/artisan" ]; then
+  APP_CODE="$RELEASE_DIR"
+else
+  echo "❌ Cannot find artisan (tried $RELEASE_DIR/jackpot and $RELEASE_DIR)"
+  exit 1
+fi
+echo "📁 Laravel app root: $APP_CODE"
+
+cd "$APP_CODE"
+
 COMMIT_SHA="$(git rev-parse HEAD)"
 COMMIT_MSG="$(git log -1 --pretty=%B | tr -d '\n')"
 COMMIT_AUTHOR="$(git log -1 --pretty=%an)"
@@ -122,7 +135,7 @@ sudo -u "$APP_USER" "$COMPOSER" install \
 # NODE / PLAYWRIGHT
 ############################################
 
-echo "📦 Installing Node dependencies"
+echo "📦 Installing Node dependencies (Studio canvas export: cwd must match base_path / node_modules)"
 if ! command -v npm >/dev/null; then
   echo "❌ npm missing"
   exit 1
@@ -131,7 +144,11 @@ fi
 sudo -u "$APP_USER" npm ci --no-audit --no-fund
 
 echo "🎭 Installing Playwright Chromium"
-sudo -u "$APP_USER" npx playwright install chromium
+if [[ "${PLAYWRIGHT_BROWSERS_PATH:-}" == "0" ]]; then
+  sudo -u "$APP_USER" env PLAYWRIGHT_BROWSERS_PATH=0 npx playwright install chromium
+else
+  sudo -u "$APP_USER" npx playwright install --with-deps chromium
+fi
 
 ############################################
 # LARAVEL
@@ -155,9 +172,10 @@ sudo -u "$APP_USER" "$PHP" artisan optimize
 # DEPLOY METADATA
 ############################################
 
-cat <<EOF > "$RELEASE_DIR/DEPLOYED_AT"
+cat <<EOF > "$APP_CODE/DEPLOYED_AT"
 Deployed at:  $(date -u)
 Release dir:  $RELEASE_DIR
+App root:     $APP_CODE
 Git ref:      $GIT_REF
 Commit:       $COMMIT_SHA
 Author:       $COMMIT_AUTHOR
@@ -169,8 +187,8 @@ EOF
 # ATOMIC SWITCH
 ############################################
 
-ln -sfn "$RELEASE_DIR" "$CURRENT_LINK"
-echo "🔁 current → $RELEASE_DIR"
+ln -sfn "$APP_CODE" "$CURRENT_LINK"
+echo "🔁 current → $APP_CODE"
 
 ############################################
 # GRACEFUL WORKER RESTART (NEW CODE)
@@ -182,7 +200,7 @@ echo "🔁 current → $RELEASE_DIR"
 # Interrupted jobs are recorded in system_incidents / failed_jobs for visibility.
 # See docs/UPLOAD_AND_QUEUE.md (Deploy interruption behavior)
 
-cd "$RELEASE_DIR"
+cd "$APP_CODE"
 if command -v "$PHP" >/dev/null; then
   echo "♻️ Signaling queue workers to restart (finish current job, then exit)"
   sudo -u "$APP_USER" "$PHP" artisan queue:restart || true

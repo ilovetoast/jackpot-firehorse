@@ -136,6 +136,8 @@ If deploy only runs **`composer install`** and **never `npm ci`**, each new rele
 3. Install browsers: **`PLAYWRIGHT_BROWSERS_PATH=0 npx playwright install chromium`** when your image sets that env, else **`npx playwright install --with-deps chromium`**.
 4. Add those lines to your **Forge deploy script** (or CI) every release. Repo helper: **`bash scripts/forge-studio-npm-ci.sh`** from the app root.
 
+**Worker mirror deploy:** `scripts/worker-mirror-deploy.sh` resolves the Laravel app as either `releases/<id>/jackpot` (monorepo) or `releases/<id>` (single-app), runs **`npm ci`** and Playwright there, and symlinks **`current` → that app directory** so Horizon’s `base_path()` matches `node_modules` and `scripts/studio-canvas-export.mjs`.
+
 The app also **preflight-checks** for `node_modules/playwright/package.json` before spawning capture; if it is missing you get failure code **`canvas_runtime_playwright_module_missing`** with this explanation instead of a raw Node stack trace.
 
 Further rollout detail: [CANVAS_RUNTIME_EXPORT.md](../studio/CANVAS_RUNTIME_EXPORT.md), [studio-animation-rollout.md](../internal/studio-animation-rollout.md).

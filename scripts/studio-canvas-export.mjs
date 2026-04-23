@@ -54,7 +54,11 @@ export function parseStudioCanvasExportArgs(argv) {
     const frameSettleRaw = Number(raw['frame-settle-ms'] ?? 50)
     const deviceScaleRaw = Number(raw['device-scale-factor'] ?? 1)
     const totalRaw = Number(raw['total-timeout-ms'] ?? 3_600_000)
-    /** Playwright defaults to ~30s when timeout is 0/NaN — clamp so PHP `0` cast does not silently shorten waits. */
+    /**
+     * Playwright defaults to ~30s when timeout is 0/NaN — clamp so PHP `0` cast does not silently shorten waits.
+     * Readiness/navigation use a 60s floor: env values like 30000ms are too small for font + asset loads and match
+     * Playwright’s confusing default timeout wording.
+     */
     const clampMs = (n, fallback, min) =>
         Number.isFinite(n) && n >= min ? Math.floor(n) : fallback
 
@@ -68,8 +72,8 @@ export function parseStudioCanvasExportArgs(argv) {
             width,
             height,
             exportJobId: String(raw['export-job-id']),
-            readinessTimeoutMs: clampMs(readinessRaw, 120_000, 5000),
-            navigationTimeoutMs: clampMs(navigationRaw, 120_000, 5000),
+            readinessTimeoutMs: clampMs(readinessRaw, 120_000, 60_000),
+            navigationTimeoutMs: clampMs(navigationRaw, 120_000, 60_000),
             frameSettleMs: clampMs(frameSettleRaw, 50, 0),
             deviceScaleFactor: Number.isFinite(deviceScaleRaw) && deviceScaleRaw > 0 ? deviceScaleRaw : 1,
             totalTimeoutMs: clampMs(totalRaw, 3_600_000, 60_000),
@@ -136,6 +140,7 @@ async function main() {
             javaScriptEnabled: true,
         })
         const page = await context.newPage()
+        page.setDefaultTimeout(Math.max(cfg.readinessTimeoutMs, cfg.navigationTimeoutMs, 60_000))
         page.on('console', (msg) => {
             const t = msg.type()
             const text = msg.text()

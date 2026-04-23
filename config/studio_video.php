@@ -74,10 +74,14 @@ return [
      */
     'canvas_export_capture_timeout_seconds' => (int) env('STUDIO_VIDEO_CANVAS_EXPORT_CAPTURE_TIMEOUT_SECONDS', 7200),
 
-    /** Max wait for {@code __COMPOSITION_EXPORT_BRIDGE__.getState().ready} after navigation. */
+    /**
+     * Max wait for {@code __COMPOSITION_EXPORT_BRIDGE__.getState().ready} after navigation.
+     * The Node driver enforces a minimum of 60s so values like 30000 are not passed to Playwright (which otherwise
+     * surfaces misleading 30s timeouts during slow font/asset loads).
+     */
     'canvas_export_readiness_timeout_ms' => (int) env('STUDIO_VIDEO_CANVAS_EXPORT_READINESS_TIMEOUT_MS', 120_000),
 
-    /** Max wait for {@code page.goto} (signed URL). */
+    /** Max wait for {@code page.goto} (signed URL). Minimum 60s in {@see scripts/studio-canvas-export.mjs}. */
     'canvas_export_navigation_timeout_ms' => (int) env('STUDIO_VIDEO_CANVAS_EXPORT_NAVIGATION_TIMEOUT_MS', 120_000),
 
     /** Extra deterministic delay after each {@code setTimeMs} (after double rAF). */
