@@ -372,7 +372,6 @@ export default function AssetDrawer({
     externalCollectionGuest = false,
 }) {
     const pageProps = usePage().props
-    const videoAiShowCost = pageProps.video_ai?.show_cost_in_drawer !== false
     const { auth, download_policy_disable_single_asset: policyDisableSingleAsset = false } = pageProps
     const damUploadAccept = pageProps.dam_file_types?.upload_accept || getUploadAcceptAttribute()
     const categories = pageProps.categories ?? []
@@ -467,7 +466,7 @@ export default function AssetDrawer({
     const [showFinalizeFromBuilderModal, setShowFinalizeFromBuilderModal] = useState(false)
     /** `publish_staged` = finalize-from-builder (publish + clear staging). `assign_only` = category move / recategorize on already-filed assets. */
     const [finalizeModalMode, setFinalizeModalMode] = useState('publish_staged')
-    const [assignCategoryRunAi, setAssignCategoryRunAi] = useState(true)
+    const [assignCategoryRunAi, setAssignCategoryRunAi] = useState(false)
     const [finalizeCategoryId, setFinalizeCategoryId] = useState(null)
     const [finalizeLoading, setFinalizeLoading] = useState(false)
     const [promoteModalOpen, setPromoteModalOpen] = useState(false)
@@ -4744,12 +4743,12 @@ export default function AssetDrawer({
                             {can('metadata.edit_post_upload') &&
                                 !displayAsset.archived_at &&
                                 !displayAsset.builder_staged &&
-                                displayAsset.intake_state !== 'staged' && (
+                                displayAsset.intake_state === 'staged' && (
                                 <button
                                     type="button"
                                     onClick={() => {
                                         setFinalizeModalMode('assign_only')
-                                        setAssignCategoryRunAi(true)
+                                        setAssignCategoryRunAi(false)
                                         setFinalizeCategoryId(
                                             displayAsset.metadata?.category_id != null
                                                 ? parseInt(String(displayAsset.metadata.category_id), 10)
@@ -4760,7 +4759,7 @@ export default function AssetDrawer({
                                     className="w-full inline-flex items-center justify-center rounded-md border border-indigo-500/70 bg-white px-3 py-2 text-sm font-semibold text-indigo-800 shadow-sm hover:bg-indigo-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 dark:border-indigo-400/50 dark:bg-gray-900 dark:text-indigo-100 dark:hover:bg-indigo-950/40"
                                 >
                                     <TagIcon className="h-4 w-4 mr-2 shrink-0" aria-hidden />
-                                    Assign or change category…
+                                    Assign category…
                                 </button>
                             )}
                             
@@ -4945,21 +4944,6 @@ export default function AssetDrawer({
                         </div>
                     )}
                 </div>
-
-                {displayAsset?.id &&
-                    !isVirtualGoogleFont &&
-                    isVideo &&
-                    displayAsset.metadata?.ai_video_insights_completed_at &&
-                    videoAiShowCost &&
-                    typeof displayAsset.metadata?.ai_video_insights_total_cost_usd === 'number' &&
-                    displayAsset.metadata.ai_video_insights_total_cost_usd > 0 && (
-                        <div className="px-4 md:px-6 pt-2">
-                            <p className="text-xs text-gray-400">
-                                AI cost (cumulative): $
-                                {Number(displayAsset.metadata.ai_video_insights_total_cost_usd).toFixed(4)}
-                            </p>
-                        </div>
-                    )}
 
                 {displayAsset?.id &&
                     !isVirtualGoogleFont &&
@@ -5968,22 +5952,6 @@ export default function AssetDrawer({
                                                                                     displayAsset.metadata
                                                                                         .ai_video_insights_completed_at,
                                                                                 )}
-                                                                            </p>
-                                                                        )}
-                                                                    {videoAiShowCost &&
-                                                                        typeof (displayAsset?.metadata
-                                                                            ?.ai_video_insights_total_cost_usd) ===
-                                                                            'number' &&
-                                                                        Number(
-                                                                            displayAsset.metadata
-                                                                                .ai_video_insights_total_cost_usd,
-                                                                        ) > 0 && (
-                                                                            <p className="mt-0.5 text-[11px] text-gray-500">
-                                                                                Cumulative cost: $
-                                                                                {Number(
-                                                                                    displayAsset.metadata
-                                                                                        .ai_video_insights_total_cost_usd,
-                                                                                ).toFixed(4)}
                                                                             </p>
                                                                         )}
                                                                 </div>
@@ -7059,7 +7027,7 @@ export default function AssetDrawer({
                         </div>
                         <p className="text-sm text-gray-600 mb-4">
                             {finalizeModalMode === 'assign_only'
-                                ? 'Choose a category for this asset. After saving, use Edit asset in the drawer if you need to complete required fields for that category. You can optionally run the AI pipeline (vision tagging, video insights, suggestions) below.'
+                                ? 'Choose a category for this staged asset. After saving, use Edit asset in the drawer if you need to complete required fields for that category.'
                                 : 'Choose a category. The asset will be published and appear in the main asset grid.'}
                         </p>
                         <div className="mb-4">
@@ -7075,17 +7043,19 @@ export default function AssetDrawer({
                                 ))}
                             </select>
                         </div>
-                        {finalizeModalMode === 'assign_only' && (
-                            <label className="flex items-start gap-2 mb-4 text-sm text-gray-700 cursor-pointer">
-                                <input
-                                    type="checkbox"
-                                    className="mt-1 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                                    checked={assignCategoryRunAi}
-                                    onChange={(e) => setAssignCategoryRunAi(e.target.checked)}
-                                />
-                                <span>Run AI pipeline after assigning category (tagging, video insights, metadata suggestions)</span>
-                            </label>
-                        )}
+                        <label className="flex items-start gap-2 mb-4 text-sm text-gray-700 cursor-pointer">
+                            <input
+                                type="checkbox"
+                                className="mt-1 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                checked={assignCategoryRunAi}
+                                onChange={(e) => setAssignCategoryRunAi(e.target.checked)}
+                            />
+                            <span>
+                                Run AI pipeline after saving (vision tagging, video content analysis, metadata suggestions). Leave
+                                unchecked to file the asset only — you can run video analysis later from bulk actions or when
+                                preparing brand alignment.
+                            </span>
+                        </label>
                         <div className="flex justify-end gap-3">
                             <button
                                 type="button"
@@ -7093,7 +7063,7 @@ export default function AssetDrawer({
                                     setShowFinalizeFromBuilderModal(false)
                                     setFinalizeCategoryId(null)
                                     setFinalizeModalMode('publish_staged')
-                                    setAssignCategoryRunAi(true)
+                                    setAssignCategoryRunAi(false)
                                 }}
                                 disabled={finalizeLoading}
                                 className="rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50 disabled:opacity-50"
@@ -7118,7 +7088,7 @@ export default function AssetDrawer({
                                                 setShowFinalizeFromBuilderModal(false)
                                                 setFinalizeCategoryId(null)
                                                 setFinalizeModalMode('publish_staged')
-                                                setAssignCategoryRunAi(true)
+                                                setAssignCategoryRunAi(false)
                                                 router.reload({
                                                     only: ['assets', 'next_page_url', 'reference_materials_count', 'staged_count'],
                                                     preserveState: true,
@@ -7127,7 +7097,10 @@ export default function AssetDrawer({
                                                 onAssetUpdate?.()
                                             }
                                         } else {
-                                            const response = await window.axios.post(`/app/assets/${displayAsset.id}/finalize-from-builder`, { category_id: finalizeCategoryId })
+                                            const response = await window.axios.post(`/app/assets/${displayAsset.id}/finalize-from-builder`, {
+                                                category_id: finalizeCategoryId,
+                                                run_ai_pipeline: assignCategoryRunAi,
+                                            })
                                             if (response.data?.message) {
                                                 setToastMessage('Asset published and categorized')
                                                 setToastType('success')
@@ -7135,7 +7108,7 @@ export default function AssetDrawer({
                                                 setShowFinalizeFromBuilderModal(false)
                                                 setFinalizeCategoryId(null)
                                                 setFinalizeModalMode('publish_staged')
-                                                setAssignCategoryRunAi(true)
+                                                setAssignCategoryRunAi(false)
                                                 router.reload({
                                                     only: ['assets', 'next_page_url', 'reference_materials_count', 'staged_count'],
                                                     preserveState: true,

@@ -83,7 +83,12 @@ class BrandIntelligenceScheduleService
             return false;
         }
 
-        return (bool) config('assets.video_ai.enabled', true);
+        if (! (bool) config('assets.video_ai.enabled', true)) {
+            return false;
+        }
+
+        // Only wait for video insights when uploads can auto-queue that work.
+        return (bool) config('assets.video_ai.auto_run_after_upload', false);
     }
 
     /**

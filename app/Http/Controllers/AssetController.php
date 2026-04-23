@@ -2691,6 +2691,7 @@ class AssetController extends Controller
 
         $validated = $request->validate([
             'category_id' => 'required|integer|exists:categories,id',
+            'run_ai_pipeline' => 'sometimes|boolean',
         ]);
 
         $categoryId = (int) $validated['category_id'];
@@ -2702,6 +2703,8 @@ class AssetController extends Controller
         if (! $category) {
             return response()->json(['message' => 'Category not found'], 404);
         }
+
+        $runAi = $request->boolean('run_ai_pipeline', false);
 
         Gate::forUser($user)->authorize('publish', $asset);
 
@@ -2718,12 +2721,15 @@ class AssetController extends Controller
             });
 
             $asset->refresh();
-            app(StagedFiledAssetAiService::class)->queueAfterStagedCategorization($asset);
+            if ($runAi) {
+                app(StagedFiledAssetAiService::class)->queueAfterStagedCategorization($asset, true);
+            }
 
             return response()->json([
                 'message' => 'Asset published and categorized successfully',
                 'asset_id' => $asset->id,
                 'category_id' => $category->id,
+                'run_ai_pipeline' => $runAi,
             ], 200);
         } catch (\Illuminate\Auth\Access\AuthorizationException $e) {
             return response()->json(['message' => $e->getMessage()], 403);
@@ -2770,7 +2776,7 @@ class AssetController extends Controller
             return response()->json(['message' => 'Category not found'], 404);
         }
 
-        $runAi = $request->boolean('run_ai_pipeline', true);
+        $runAi = $request->boolean('run_ai_pipeline', false);
 
         try {
             Gate::forUser($user)->authorize('update', $asset);
@@ -2787,7 +2793,7 @@ class AssetController extends Controller
 
             if ($runAi) {
                 $asset->refresh();
-                app(StagedFiledAssetAiService::class)->queueAfterStagedCategorization($asset);
+                app(StagedFiledAssetAiService::class)->queueAfterStagedCategorization($asset, true);
             }
 
             return response()->json([

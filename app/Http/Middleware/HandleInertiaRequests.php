@@ -443,7 +443,8 @@ class HandleInertiaRequests extends Middleware
                 ];
             })(),
             'video_ai' => [
-                'show_cost_in_drawer' => (bool) config('assets.video_ai.show_cost_in_drawer', true),
+                'show_cost_in_drawer' => (bool) config('assets.video_ai.show_cost_in_drawer', false),
+                'auto_run_after_upload' => (bool) config('assets.video_ai.auto_run_after_upload', false),
             ],
             // Phase C12.0: Collection-only mode (no brand; user has only collection access)
             'collection_only' => app()->bound('collection_only') && app('collection_only'),

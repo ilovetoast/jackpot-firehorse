@@ -430,6 +430,12 @@ return [
     */
     'video_ai' => [
         'enabled' => (bool) env('ASSET_VIDEO_AI_ENABLED', true),
+        /**
+         * When true, library uploads dispatch async video insights after the asset pipeline completes
+         * ({@see \App\Jobs\ProcessAssetJob}). When false, use bulk actions, the asset drawer (failed retry),
+         * or staged publish with "Run AI pipeline" checked.
+         */
+        'auto_run_after_upload' => (bool) env('ASSET_VIDEO_AI_AUTO_RUN_AFTER_UPLOAD', false),
         'max_frames' => (int) env('ASSET_VIDEO_AI_MAX_FRAMES', 20),
         'frame_interval_seconds' => (int) env('ASSET_VIDEO_AI_FRAME_INTERVAL', 3),
         'max_duration_seconds' => (int) env('ASSET_VIDEO_AI_MAX_DURATION', 120),
@@ -444,8 +450,8 @@ return [
          * (video insights may release() many times while storage paths appear).
          */
         'queue' => env('ASSET_VIDEO_AI_QUEUE', null),
-        /** Surface cumulative video AI USD in asset drawer (metadata-backed). */
-        'show_cost_in_drawer' => (bool) env('ASSET_VIDEO_AI_SHOW_COST_IN_DRAWER', true),
+        /** Surface cumulative video AI USD in asset drawer (metadata-backed). Off by default. */
+        'show_cost_in_drawer' => (bool) env('ASSET_VIDEO_AI_SHOW_COST_IN_DRAWER', false),
     ],
 
     /*

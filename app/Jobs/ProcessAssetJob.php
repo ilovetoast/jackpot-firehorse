@@ -503,7 +503,7 @@ class ProcessAssetJob implements ShouldQueue
             ->onQueue($pipelineQueue)
             ->dispatch();
 
-        if ($isVideo && config('assets.video_ai.enabled', true)) {
+        if ($isVideo && config('assets.video_ai.enabled', true) && config('assets.video_ai.auto_run_after_upload', false)) {
             $asset->refresh();
             $policyCheck = app(\App\Services\AiTagPolicyService::class)->shouldProceedWithAiTagging($asset);
             $assetMeta = $asset->metadata ?? [];
