@@ -126,9 +126,13 @@ class CompositionThumbnailAssetService
             $width = isset($dims[0]) ? (int) $dims[0] : null;
             $height = isset($dims[1]) ? (int) $dims[1] : null;
 
-            $maxVersion = (int) (AssetVersion::query()
+            // Use the query builder (no soft-delete scope) + FOR UPDATE so concurrent thumbnail saves
+            // cannot both read the same MAX() and insert the same next version_number (1062 duplicate).
+            // Eloquent aggregates with lockForUpdate are driver‑sensitive; this stays inside the txn
+            // opened after the asset row lock and the cross-request GET_LOCK above.
+            $maxVersion = (int) (DB::table('asset_versions')
                 ->where('asset_id', $asset->id)
-                ->withTrashed()
+                ->lockForUpdate()
                 ->max('version_number') ?? 0);
 
             $nextVersion = $maxVersion + 1;

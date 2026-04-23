@@ -14,12 +14,17 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use Throwable;
 
 class ProcessStudioCompositionVideoExportJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public int $tries = 1;
+    /**
+     * Must stay ≤ Horizon {@see config('horizon.defaults.supervisor-video-heavy.tries')} so workers do not
+     * throw {@see \Illuminate\Queue\MaxAttemptsExceededException} before the last attempt runs {@see handle()}.
+     */
+    public int $tries = 3;
 
     public int $timeout = 3600;
 
@@ -32,6 +37,14 @@ class ProcessStudioCompositionVideoExportJob implements ShouldQueue
             $queue = StudioCanvasExportQueue::heavy();
         }
         $this->onQueue($queue);
+    }
+
+    /**
+     * @return array<int, int>
+     */
+    public function backoff(): array
+    {
+        return [30, 120, 300];
     }
 
     public function handle(StudioCompositionVideoExportOrchestrator $orchestrator): void
@@ -62,5 +75,28 @@ class ProcessStudioCompositionVideoExportJob implements ShouldQueue
             return;
         }
         $orchestrator->run($row, $tenant, $user);
+    }
+
+    /**
+     * When the queue gives up (timeouts, MaxAttemptsExceeded, worker crash), ensure the studio export row
+     * is not left stuck in {@see StudioCompositionVideoExportJob::STATUS_PROCESSING}.
+     */
+    public function failed(?Throwable $exception): void
+    {
+        $row = StudioCompositionVideoExportJob::query()->find($this->exportJobRowId);
+        if ($row === null) {
+            return;
+        }
+        if ($row->status === StudioCompositionVideoExportJob::STATUS_COMPLETE) {
+            return;
+        }
+        $msg = $exception !== null ? $exception->getMessage() : 'Video export job failed on the queue.';
+        $row->update([
+            'status' => StudioCompositionVideoExportJob::STATUS_FAILED,
+            'error_json' => [
+                'message' => $msg,
+                'source' => 'queue_failed_handler',
+            ],
+        ]);
     }
 }
