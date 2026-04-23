@@ -149,6 +149,20 @@ RUN if [ -f /etc/ImageMagick-6/policy.xml ]; then \
 # End of PDF thumbnail support additions
 # ============================================================================
 
+# Studio FFmpeg-native composition export: TTF/OTF for TextOverlayRasterizer (Imagick/GD).
+# fonts-dejavu-core provides /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf (see compose.yaml / .env.example).
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        fonts-dejavu-core \
+        fontconfig \
+        libfreetype6 \
+        libjpeg-turbo8 \
+        libpng16-16t64 \
+    && fc-cache -f \
+    && apt-get -y autoremove \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+
 RUN setcap "cap_net_bind_service=+ep" /usr/bin/php8.5
 
 RUN userdel -r ubuntu

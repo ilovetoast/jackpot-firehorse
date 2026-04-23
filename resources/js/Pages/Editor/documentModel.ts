@@ -1718,6 +1718,10 @@ export function convertGenerativeLayerToImage(
         transform: { ...layer.transform },
         src: layer.resultSrc,
         fit: layer.fit ?? 'cover',
+        /** Required for server-side FFmpeg-native export (stages bytes via Asset, not remote src). */
+        ...(layer.resultAssetId?.trim()
+            ? { assetId: layer.resultAssetId.trim() }
+            : {}),
     }
     return {
         doc: {

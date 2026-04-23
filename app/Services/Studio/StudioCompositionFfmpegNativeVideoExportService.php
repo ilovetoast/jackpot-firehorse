@@ -11,6 +11,7 @@ use App\Studio\Rendering\CompositionRenderNormalizer;
 use App\Studio\Rendering\CompositionRenderValidator;
 use App\Studio\Rendering\Dto\CompositionRenderRequest;
 use App\Studio\Rendering\Dto\RenderLayer;
+use App\Studio\Rendering\FillShapeOverlayRasterizer;
 use App\Studio\Rendering\FfmpegNativeCompositionRenderer;
 use App\Studio\Rendering\RenderAssetStager;
 use App\Studio\Rendering\RenderWorkspace;
@@ -27,6 +28,7 @@ final class StudioCompositionFfmpegNativeVideoExportService
         private CompositionRenderNormalizer $normalizer,
         private RenderAssetStager $stager,
         private TextOverlayRasterizer $textRasterizer,
+        private FillShapeOverlayRasterizer $fillShapeRasterizer,
         private CompositionRenderValidator $validator,
         private FfmpegNativeCompositionRenderer $renderer,
         private StudioCompositionVideoExportMp4Publisher $mp4Publisher,
@@ -119,17 +121,80 @@ final class StudioCompositionFfmpegNativeVideoExportService
             $tlMuted = (bool) ($tl['muted'] ?? false);
 
             $timeline = $this->normalizer->buildTimeline($composition, $videoLayer, $probedS);
-            $overlays = $this->normalizer->buildOverlayLayers($composition, $videoLayer, $timeline);
+            $plan = $this->normalizer->buildOverlayPlan($composition, $videoLayer, $timeline);
+            $layerDiagnostics = $plan->diagnostics;
+            $strictLayers = (bool) config('studio_rendering.fail_on_unsupported_visible_layers', true);
+            $u = $layerDiagnostics['unsupported_visible'] ?? [];
+            $s = $layerDiagnostics['skipped_below_primary_video'] ?? [];
+            if ($strictLayers) {
+                if ($u !== [] || $s !== []) {
+                    $this->fail($row, 'ffmpeg_native_strict_layer_policy', 'One or more visible composition layers cannot be represented in FFmpeg-native V1 (unknown type, below-primary-video z-order, empty text, unsupported radial scrim, etc.).', [
+                        'layer_diagnostics' => $layerDiagnostics,
+                    ], $workspace);
+
+                    return;
+                }
+            } elseif ($u !== [] || $s !== []) {
+                Log::warning('[StudioCompositionFfmpegNativeVideoExportService] FFmpeg-native export with fail_on_unsupported_visible_layers=false; some visible layers were omitted', $layerDiagnostics);
+            }
+
+            $exportRasterDebug = [
+                'resolved_font_paths' => [],
+                'text_png_paths' => [],
+                'shape_fill_png_paths' => [],
+            ];
+
+            $overlays = $plan->overlayLayers;
 
             $stagedLayers = [];
             foreach ($overlays as $ly) {
+                if (($ly->extra['studio_preraster'] ?? '') === 'fill_shape') {
+                    try {
+                        $png = $this->fillShapeRasterizer->rasterizeToPath($ly, $workspace);
+                    } catch (\Throwable $e) {
+                        $this->fail($row, 'fill_shape_rasterization_failed', $e->getMessage(), [
+                            'layer_id' => $ly->id,
+                            'exception_class' => $e::class,
+                        ], $workspace);
+
+                        return;
+                    }
+                    $exportRasterDebug['shape_fill_png_paths'][] = ['layer_id' => $ly->id, 'path' => $png];
+                    $stagedLayers[] = new RenderLayer(
+                        id: $ly->id,
+                        type: 'image',
+                        zIndex: $ly->zIndex,
+                        startSeconds: $ly->startSeconds,
+                        endSeconds: $ly->endSeconds,
+                        visible: $ly->visible,
+                        x: $ly->x,
+                        y: $ly->y,
+                        width: $ly->width,
+                        height: $ly->height,
+                        opacity: $ly->opacity,
+                        rotationDegrees: $ly->rotationDegrees,
+                        fit: 'fill',
+                        isPrimaryVideo: false,
+                        mediaPath: $png,
+                        trimInMs: $ly->trimInMs,
+                        trimOutMs: $ly->trimOutMs,
+                        muted: $ly->muted,
+                        fadeInMs: $ly->fadeInMs,
+                        fadeOutMs: $ly->fadeOutMs,
+                        extra: ['from_fill_shape' => true],
+                    );
+
+                    continue;
+                }
                 if ($ly->type === 'text') {
+                    $textMeta = null;
                     try {
                         $png = $this->textRasterizer->rasterizeToPath(
                             $ly,
                             $workspace,
                             $tenant,
                             $composition->brand_id !== null ? (int) $composition->brand_id : null,
+                            $textMeta,
                         );
                     } catch (StudioFontResolutionException $e) {
                         $this->fail($row, 'studio_font:'.$e->errorCode, $e->getMessage(), array_merge($e->context, [
@@ -145,6 +210,10 @@ final class StudioCompositionFfmpegNativeVideoExportService
                         ], $workspace);
 
                         return;
+                    }
+                    if (is_array($textMeta)) {
+                        $exportRasterDebug['resolved_font_paths'][] = $textMeta;
+                        $exportRasterDebug['text_png_paths'][] = ['layer_id' => $ly->id, 'path' => $png];
                     }
                     $stagedLayers[] = new RenderLayer(
                         id: $ly->id,
@@ -221,19 +290,38 @@ final class StudioCompositionFfmpegNativeVideoExportService
                         'fps' => $timeline->fps,
                         'duration_ms' => $timeline->durationMs,
                         'overlay_count' => count($stagedLayers),
+                        'native_export_layer_diagnostics' => $layerDiagnostics,
+                        'native_export_raster_debug' => $exportRasterDebug,
                     ]],
                 ), $workspace);
 
                 return;
             }
 
-            $technical = array_merge([
+            $renderedLayerSummary = [];
+            foreach ($stagedLayers as $sl) {
+                $renderedLayerSummary[] = [
+                    'id' => $sl->id,
+                    'type' => $sl->type,
+                    'z' => $sl->zIndex,
+                    'has_media' => $sl->mediaPath !== null && is_file((string) $sl->mediaPath),
+                ];
+            }
+            $ffmpegDiag = is_array($rendered->diagnostics) ? $rendered->diagnostics : [];
+            $technical = array_merge($ffmpegDiag, [
                 'implementation' => 'ffmpeg_native_filtergraph_v1',
                 'render_mode' => StudioCompositionVideoExportRenderMode::FFMPEG_NATIVE->value,
                 'include_audio' => $includeAudio,
                 'audio_muxed' => $includeAudio && $hasAudio && ! $tlMuted,
-                'ffmpeg_diagnostics' => $rendered->diagnostics ?? [],
-            ], is_array($rendered->diagnostics) ? $rendered->diagnostics : []);
+                'ffmpeg_diagnostics' => $ffmpegDiag,
+                'native_export_layer_diagnostics' => $layerDiagnostics,
+                'native_export_raster_debug' => $exportRasterDebug,
+                'native_export_rendered_layer_summary' => $renderedLayerSummary,
+                'native_export_overlay_input_count' => 1 + count(array_filter(
+                    $stagedLayers,
+                    static fn (RenderLayer $l): bool => $l->mediaPath !== null && is_file((string) $l->mediaPath)
+                )),
+            ]);
 
             $published = $this->mp4Publisher->publish(
                 $row,
@@ -277,9 +365,6 @@ final class StudioCompositionFfmpegNativeVideoExportService
         }
     }
 
-    /**
-     * @param  array<string, mixed>  $debug
-     */
     /**
      * @param  array<int, mixed>  $layers
      */

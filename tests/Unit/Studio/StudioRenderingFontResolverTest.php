@@ -91,6 +91,21 @@ class StudioRenderingFontResolverTest extends TestCase
         }
     }
 
+    public function test_default_font_path_must_exist_on_disk(): void
+    {
+        Config::set('studio_rendering.default_font_path', '/nonexistent/dejavu_missing.ttf');
+        Config::set('studio_rendering.font_family_map', []);
+        $this->expectException(StudioFontResolutionException::class);
+        $this->expectExceptionMessage('is not a file');
+
+        $this->resolver()->resolveForTextLayer(
+            new Tenant(['id' => 1]),
+            null,
+            ['font_family' => 'Unknown, serif'],
+            'Unknown, serif',
+        );
+    }
+
     public function test_layer_has_explicit_custom_font_selection(): void
     {
         $resolver = $this->resolver();

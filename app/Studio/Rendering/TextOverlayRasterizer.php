@@ -22,6 +22,7 @@ final class TextOverlayRasterizer
     ) {}
 
     /**
+     * @param  array<string, mixed>|null  $exportRasterMeta  When non-null, filled with font path/source for export diagnostics
      * @return string absolute path to PNG
      */
     public function rasterizeToPath(
@@ -29,13 +30,14 @@ final class TextOverlayRasterizer
         string $workspacePath,
         Tenant $tenant,
         ?int $compositionBrandId,
+        ?array &$exportRasterMeta = null,
     ): string {
         $w = max(1, $layer->width);
         $h = max(1, $layer->height);
         $content = (string) ($layer->extra['content'] ?? '');
         $fontFamily = (string) ($layer->extra['font_family'] ?? '');
 
-        $resolved = $this->fonts->resolveForTextLayer($tenant, $compositionBrandId, $layer->extra, $fontFamily);
+        $resolved = $this->fonts->resolveForTextLayer($tenant, $compositionBrandId, $layer->extra, $fontFamily, $layer->id);
 
         $fontPath = $resolved->absolutePath;
         $this->assertRasterizerLocalFont($fontPath, $layer->id, $resolved);
@@ -71,6 +73,9 @@ final class TextOverlayRasterizer
         if (is_file($cached) && filesize($cached) > 32) {
             $copy = $workspacePath.DIRECTORY_SEPARATOR.'text_'.$layer->id.'_'.Str::random(4).'.png';
             File::copy($cached, $copy);
+            if ($exportRasterMeta !== null) {
+                $exportRasterMeta = array_merge(['layer_id' => $layer->id, 'png_path' => $copy], $fontDebug);
+            }
 
             return $copy;
         }
@@ -102,6 +107,9 @@ final class TextOverlayRasterizer
         file_put_contents($cached, $png);
         $copy = $workspacePath.DIRECTORY_SEPARATOR.'text_'.$layer->id.'_'.Str::random(4).'.png';
         file_put_contents($copy, $png);
+        if ($exportRasterMeta !== null) {
+            $exportRasterMeta = array_merge(['layer_id' => $layer->id, 'png_path' => $copy], $fontDebug);
+        }
 
         return $copy;
     }

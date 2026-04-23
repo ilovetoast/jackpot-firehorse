@@ -47,13 +47,20 @@ return [
     'max_output_duration_seconds' => (float) env('STUDIO_RENDERING_MAX_OUTPUT_DURATION_SECONDS', 7200),
 
     /**
-     * Absolute path to a TTF/OTF used when no font mapping matches (required for text export).
-     * Defaults to the standard Debian/Ubuntu DejaVu path when env is unset or empty; override with
-     * STUDIO_RENDERING_DEFAULT_FONT_PATH (e.g. on macOS or minimal images). After changing .env,
-     * run `php artisan config:clear` or rebuild `config:cache` so workers pick up the value.
+     * Absolute path to a TTF/OTF when no tenant/font_family_map match (see StudioRenderingFontResolver).
+     * Uses STUDIO_RENDERING_DEFAULT_FONT_PATH; when empty, falls back to Debian/Ubuntu DejaVu.
+     * With config:cache, set the variable in the process environment as well so workers see it.
      */
-    'default_font_path' => trim((string) env('STUDIO_RENDERING_DEFAULT_FONT_PATH', ''))
-        ?: '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+    'default_font_path' => trim((string) (env('STUDIO_RENDERING_DEFAULT_FONT_PATH') ?: '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf')),
+
+    /**
+     * When true, visible layers FFmpeg-native cannot render (unknown type, under-primary-video, etc.)
+     * fail the export after normalization. When false, they are logged in export diagnostics only.
+     */
+    'fail_on_unsupported_visible_layers' => match (strtolower(trim((string) env('STUDIO_RENDERING_FAIL_ON_UNSUPPORTED_VISIBLE_LAYERS', 'true')))) {
+        'false', '0', 'no', 'off' => false,
+        default => true,
+    },
 
     /**
      * Directory under storage_path('app') for staged tenant font binaries (TTF/OTF only).

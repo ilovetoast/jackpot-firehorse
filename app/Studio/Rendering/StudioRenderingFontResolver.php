@@ -6,6 +6,7 @@ use App\Models\Asset;
 use App\Models\Tenant;
 use App\Studio\Rendering\Dto\ResolvedStudioFont;
 use App\Studio\Rendering\Exceptions\StudioFontResolutionException;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 
 /**
@@ -28,6 +29,7 @@ final class StudioRenderingFontResolver
         ?int $compositionBrandId,
         array $textLayerExtra,
         string $fontFamilyFromStyle,
+        ?string $layerId = null,
     ): ResolvedStudioFont {
         $hadExplicit = $this->computeExplicitCustomFontSelection($textLayerExtra);
         $debug = [
@@ -39,6 +41,7 @@ final class StudioRenderingFontResolver
             $path = $this->tryExplicitLocalPath($textLayerExtra, $hadExplicit);
             if ($path !== null) {
                 $this->assertLocalFontFile($path, 'explicit_path');
+                $this->logFontResolved($layerId, $path, 'explicit_path');
 
                 return new ResolvedStudioFont($path, 'explicit_path', $hadExplicit, array_merge($debug, [
                     'resolved_path' => $path,
@@ -48,6 +51,7 @@ final class StudioRenderingFontResolver
             $path = $this->tryTenantFontAsset($tenant, $compositionBrandId, $textLayerExtra);
             if ($path !== null) {
                 $this->assertLocalFontFile($path, 'tenant_asset');
+                $this->logFontResolved($layerId, $path, 'tenant_asset');
 
                 return new ResolvedStudioFont($path, 'tenant_asset', $hadExplicit, array_merge($debug, [
                     'resolved_path' => $path,
@@ -57,6 +61,7 @@ final class StudioRenderingFontResolver
             $path = $this->tryLocalDiskFontPath($textLayerExtra, $hadExplicit);
             if ($path !== null) {
                 $this->assertLocalFontFile($path, 'local_disk_font');
+                $this->logFontResolved($layerId, $path, 'local_disk_font');
 
                 return new ResolvedStudioFont($path, 'local_disk_font', $hadExplicit, array_merge($debug, [
                     'resolved_path' => $path,
@@ -74,6 +79,7 @@ final class StudioRenderingFontResolver
             $path = $this->tryFamilyMap($fontFamilyFromStyle);
             if ($path !== null) {
                 $this->assertLocalFontFile($path, 'family_map');
+                $this->logFontResolved($layerId, $path, 'family_map');
 
                 return new ResolvedStudioFont($path, 'family_map', false, array_merge($debug, [
                     'resolved_path' => $path,
@@ -83,6 +89,7 @@ final class StudioRenderingFontResolver
             $path = $this->tryDefaultFontPath();
             if ($path !== null) {
                 $this->assertLocalFontFile($path, 'default');
+                $this->logFontResolved($layerId, $path, 'default');
 
                 return new ResolvedStudioFont($path, 'default', false, array_merge($debug, [
                     'resolved_path' => $path,
@@ -98,6 +105,15 @@ final class StudioRenderingFontResolver
             .'configure studio_rendering.font_family_map, or attach a tenant font asset (font_asset_id) on the text layer.',
             $debug,
         );
+    }
+
+    private function logFontResolved(?string $layerId, string $fontPath, string $source): void
+    {
+        Log::info('Studio font resolved', [
+            'layer_id' => $layerId,
+            'font_path' => $fontPath,
+            'source' => $source,
+        ]);
     }
 
     /**
@@ -358,9 +374,40 @@ final class StudioRenderingFontResolver
 
     private function tryDefaultFontPath(): ?string
     {
-        $default = trim((string) config('studio_rendering.default_font_path', ''));
+        $default = trim((string) (config('studio_rendering.default_font_path') ?? ''));
+        if ($default === '') {
+            $default = $this->readDefaultFontPathFromProcessEnv();
+        }
+        if ($default === '') {
+            return null;
+        }
+        if (! is_file($default)) {
+            throw new StudioFontResolutionException(
+                'default_font_path_not_found',
+                'Default font path is not a file: '.$default.'. Set STUDIO_RENDERING_DEFAULT_FONT_PATH (or config studio_rendering.default_font_path) to a valid TTF/OTF on workers.',
+                ['path' => $default],
+            );
+        }
+        if (! is_readable($default)) {
+            throw new StudioFontResolutionException(
+                'default_font_path_not_readable',
+                'Default font file is not readable: '.$default,
+                ['path' => $default],
+            );
+        }
 
-        return $default !== '' && is_file($default) ? $default : null;
+        return $default;
+    }
+
+    private function readDefaultFontPathFromProcessEnv(): string
+    {
+        $v = getenv('STUDIO_RENDERING_DEFAULT_FONT_PATH');
+        if (is_string($v) && trim($v) !== '') {
+            return trim($v);
+        }
+        $v = $_SERVER['STUDIO_RENDERING_DEFAULT_FONT_PATH'] ?? null;
+
+        return is_string($v) && trim($v) !== '' ? trim($v) : '';
     }
 
     /**

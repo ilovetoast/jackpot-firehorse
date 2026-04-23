@@ -18,6 +18,8 @@ services:
             XDEBUG_MODE: '${SAIL_XDEBUG_MODE:-off}'
             XDEBUG_CONFIG: '${SAIL_XDEBUG_CONFIG:-client_host=host.docker.internal}'
             IGNITION_LOCAL_SITES_PATH: '${PWD}'
+            # Sail image installs fonts-dejavu-core (see docker/8.5/Dockerfile); native Studio text needs a local TTF path.
+            STUDIO_RENDERING_DEFAULT_FONT_PATH: '${STUDIO_RENDERING_DEFAULT_FONT_PATH:-/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf}'
         volumes:
             - '.:/var/www/html'
         networks:
@@ -126,6 +128,7 @@ services:
         environment:
             WWWUSER: '${WWWUSER}'
             LARAVEL_SAIL: 1
+            STUDIO_RENDERING_DEFAULT_FONT_PATH: '${STUDIO_RENDERING_DEFAULT_FONT_PATH:-/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf}'
         volumes:
             - '.:/var/www/html'
         networks:
@@ -157,6 +160,7 @@ services:
         environment:
             WWWUSER: '${WWWUSER}'
             LARAVEL_SAIL: 1
+            STUDIO_RENDERING_DEFAULT_FONT_PATH: '${STUDIO_RENDERING_DEFAULT_FONT_PATH:-/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf}'
         volumes:
             - '.:/var/www/html'
         networks:

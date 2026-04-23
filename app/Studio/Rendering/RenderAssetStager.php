@@ -26,9 +26,18 @@ final class RenderAssetStager
 
                 continue;
             }
+            if ($ly->mediaPath !== null && $ly->mediaPath !== '' && is_file($ly->mediaPath)) {
+                $out[] = $ly;
+
+                continue;
+            }
             $assetId = (string) ($ly->extra['asset_id'] ?? '');
             if ($assetId === '') {
-                throw new \RuntimeException('Overlay layer '.$ly->id.' is missing asset_id.');
+                throw new \RuntimeException(
+                    'Overlay layer '.$ly->id.' is missing a DAM asset id (assetId / asset_id / resultAssetId). '
+                    .'Image layers saved with only a remote or data URL src cannot be exported server-side; '
+                    .'use a library asset or ensure generative results keep resultAssetId when converted to image.'
+                );
             }
             $asset = Asset::query()
                 ->where('id', $assetId)
