@@ -270,8 +270,40 @@ class EditorCompositionStudioVideoController extends Controller
 
         $includeAudio = (bool) $request->input('include_audio', true);
         $editorPublish = $request->input('editor_publish');
-        $renderMode = StudioCompositionVideoExportRenderMode::tryFrom((string) $request->input('render_mode', 'legacy_bitmap'))
-            ?? StudioCompositionVideoExportRenderMode::LEGACY_BITMAP;
+
+        $canvasRuntimeEnabled = (bool) config('studio_video.canvas_runtime_export_enabled', false);
+        $needsCanvasRuntime = $this->compositionNeedsCanvasRuntimeExport($composition);
+        $requestedRaw = $request->input('render_mode');
+        $requestedMode = is_string($requestedRaw) && $requestedRaw !== ''
+            ? (StudioCompositionVideoExportRenderMode::tryFrom($requestedRaw) ?? null)
+            : null;
+
+        if ($needsCanvasRuntime && ! $canvasRuntimeEnabled) {
+            return response()->json([
+                'message' => 'This composition includes text (or other layers) that are not supported by the legacy FFmpeg export. Enable STUDIO_VIDEO_CANVAS_RUNTIME_EXPORT_ENABLED and run the canvas export workers (Playwright), then try again.',
+            ], 422);
+        }
+        if ($requestedMode === StudioCompositionVideoExportRenderMode::CANVAS_RUNTIME && ! $canvasRuntimeEnabled) {
+            return response()->json([
+                'message' => 'Canvas runtime export is disabled on this server.',
+            ], 422);
+        }
+
+        if (! $canvasRuntimeEnabled) {
+            $renderMode = StudioCompositionVideoExportRenderMode::LEGACY_BITMAP;
+        } elseif ($requestedMode === StudioCompositionVideoExportRenderMode::CANVAS_RUNTIME) {
+            $renderMode = StudioCompositionVideoExportRenderMode::CANVAS_RUNTIME;
+        } elseif ($needsCanvasRuntime) {
+            $renderMode = StudioCompositionVideoExportRenderMode::CANVAS_RUNTIME;
+            if ($requestedMode === StudioCompositionVideoExportRenderMode::LEGACY_BITMAP) {
+                Log::info('[EditorCompositionStudioVideoController] Upgrading video export to canvas_runtime (composition requires it)', [
+                    'composition_id' => $composition->id,
+                ]);
+            }
+        } else {
+            $renderMode = StudioCompositionVideoExportRenderMode::LEGACY_BITMAP;
+        }
+
         $metaJson = [
             'include_audio' => $includeAudio,
             'render_mode' => $renderMode->value,
@@ -351,6 +383,91 @@ class EditorCompositionStudioVideoController extends Controller
         }
 
         return response()->json($payload);
+    }
+
+    /**
+     * GET /app/api/compositions/{id}/studio/video-export
+     *
+     * Lists recent Studio MP4 export jobs for this composition (newest first).
+     */
+    public function listVideoExports(Request $request, int $id): JsonResponse
+    {
+        $user = $request->user();
+        if (! $user instanceof User) {
+            return response()->json(['message' => 'Unauthorized'], 401);
+        }
+        $tenant = app('tenant');
+        $brand = app('brand');
+        if (! $tenant instanceof Tenant || ! $brand) {
+            return response()->json(['message' => 'Workspace required'], 422);
+        }
+
+        $composition = Composition::query()
+            ->where('id', $id)
+            ->where('tenant_id', $tenant->id)
+            ->where('brand_id', $brand->id)
+            ->visibleToUser($user)
+            ->first();
+        if (! $composition) {
+            return response()->json(['message' => 'Not found'], 404);
+        }
+
+        $rows = StudioCompositionVideoExportJob::query()
+            ->where('composition_id', $composition->id)
+            ->where('tenant_id', $tenant->id)
+            ->orderByDesc('id')
+            ->limit(100)
+            ->get([
+                'id',
+                'status',
+                'render_mode',
+                'output_asset_id',
+                'duration_ms',
+                'created_at',
+                'updated_at',
+            ]);
+
+        $jobs = $rows->map(static function (StudioCompositionVideoExportJob $row): array {
+            return [
+                'id' => (string) $row->id,
+                'status' => (string) $row->status,
+                'render_mode' => $row->render_mode !== null ? (string) $row->render_mode : null,
+                'output_asset_id' => $row->output_asset_id !== null ? (string) $row->output_asset_id : null,
+                'duration_ms' => $row->duration_ms !== null ? (int) $row->duration_ms : null,
+                'created_at' => $row->created_at?->toIso8601String(),
+                'updated_at' => $row->updated_at?->toIso8601String(),
+            ];
+        })->values()->all();
+
+        return response()->json(['jobs' => $jobs]);
+    }
+
+    /**
+     * True when the composition document uses features the legacy FFmpeg exporter does not bake
+     * (text, masks, fills, non-normal blend on raster/video). In that case export must use canvas runtime when enabled.
+     */
+    private function compositionNeedsCanvasRuntimeExport(Composition $composition): bool
+    {
+        $doc = is_array($composition->document_json) ? $composition->document_json : [];
+        $layers = isset($doc['layers']) && is_array($doc['layers']) ? $doc['layers'] : [];
+        foreach ($layers as $ly) {
+            if (! is_array($ly)) {
+                continue;
+            }
+            if (($ly['visible'] ?? true) === false) {
+                continue;
+            }
+            $type = (string) ($ly['type'] ?? '');
+            if (in_array($type, ['text', 'mask', 'fill'], true)) {
+                return true;
+            }
+            $blend = (string) ($ly['blendMode'] ?? 'normal');
+            if ($blend !== '' && $blend !== 'normal' && in_array($type, ['image', 'generative_image', 'video'], true)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

@@ -737,6 +737,9 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
                 Route::post('/api/compositions/{id}/studio/video-export', [\App\Http\Controllers\Editor\EditorCompositionStudioVideoController::class, 'requestExport'])
                     ->whereNumber('id')
                     ->name('api.editor.compositions.studio.video-export');
+                Route::get('/api/compositions/{id}/studio/video-export', [\App\Http\Controllers\Editor\EditorCompositionStudioVideoController::class, 'listVideoExports'])
+                    ->whereNumber('id')
+                    ->name('api.editor.compositions.studio.video-export.index');
                 Route::get('/api/compositions/{id}/studio/video-export/{exportJobId}', [\App\Http\Controllers\Editor\EditorCompositionStudioVideoController::class, 'exportStatus'])
                     ->whereNumber('id')
                     ->whereNumber('exportJobId')

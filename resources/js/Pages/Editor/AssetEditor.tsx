@@ -18,6 +18,7 @@ import MetadataGroups from '../../Components/Upload/MetadataGroups'
 import { toJpeg, toPng } from 'html-to-image'
 import {
     ArrowDownIcon,
+    ArrowDownTrayIcon,
     ArrowPathIcon,
     ArrowUpIcon,
     ArrowsRightLeftIcon,
@@ -219,6 +220,7 @@ import {
     type StudioAnimationJobDto,
 } from './editorStudioAnimationBridge'
 import {
+    getListVideoExportJobs,
     pollVideoExportUntilTerminal,
     postRequestVideoExport,
     postStoreVideoLayer,
@@ -1744,6 +1746,11 @@ export default function AssetEditor() {
         import('./editorCompositionBridge').CompositionVersionMeta[]
     >([])
     const [versionsLoading, setVersionsLoading] = useState(false)
+    const [videoExportJobs, setVideoExportJobs] = useState<
+        import('./editorStudioVideoBridge').VideoExportJobListItem[]
+    >([])
+    const [videoExportJobsLoading, setVideoExportJobsLoading] = useState(false)
+    const [videoExportJobsError, setVideoExportJobsError] = useState<string | null>(null)
     /** Per image-layer id: DAM asset version rows for the version strip (no new versions on switch). */
     const [layerVersions, setLayerVersions] = useState<Record<string, EditorAssetVersionRow[]>>({})
     const [compareOpen, setCompareOpen] = useState(false)
@@ -1762,6 +1769,7 @@ export default function AssetEditor() {
     compositionIdFromUrlRef.current = compositionIdFromUrl
     /** Lets {@link refreshVersions} ignore stale completions when multiple fetches overlap. */
     const compositionVersionsFetchSeqRef = useRef(0)
+    const videoExportJobsFetchSeqRef = useRef(0)
     /** Bumps on each `compositionId` change so in-flight studio animation list fetches don't apply stale data. */
     const studioAnimFetchGenRef = useRef(0)
     /** Last seen `status` per job id — detects transitions to `complete` without treating initial fetch as “just finished”. */
@@ -1870,7 +1878,9 @@ export default function AssetEditor() {
         }
     }, [])
 
-    const [leftPanel, setLeftPanel] = useState<'layers' | 'assets' | 'templates' | 'menu' | 'history' | null>('layers')
+    const [leftPanel, setLeftPanel] = useState<'layers' | 'assets' | 'templates' | 'menu' | 'history' | 'outputs' | null>(
+        'layers',
+    )
     const leftPanelRef = useRef(leftPanel)
     leftPanelRef.current = leftPanel
     /** Add-layer menu: `null` closed; which control opened it (popover position). */
@@ -2520,6 +2530,34 @@ export default function AssetEditor() {
         }
     }, [])
 
+    const refreshVideoExportJobs = useCallback(async () => {
+        const id = compositionIdRef.current
+        if (!id) {
+            setVideoExportJobs([])
+            setVideoExportJobsError(null)
+            setVideoExportJobsLoading(false)
+            return
+        }
+        const seq = ++videoExportJobsFetchSeqRef.current
+        setVideoExportJobsLoading(true)
+        setVideoExportJobsError(null)
+        try {
+            const { jobs } = await getListVideoExportJobs(id)
+            if (seq === videoExportJobsFetchSeqRef.current) {
+                setVideoExportJobs(jobs)
+            }
+        } catch (e) {
+            if (seq === videoExportJobsFetchSeqRef.current) {
+                setVideoExportJobsError(e instanceof Error ? e.message : 'Could not load video exports.')
+                setVideoExportJobs([])
+            }
+        } finally {
+            if (seq === videoExportJobsFetchSeqRef.current) {
+                setVideoExportJobsLoading(false)
+            }
+        }
+    }, [])
+
     const refreshCompositionAnimations = useCallback(async () => {
         const id = compositionIdRef.current
         if (!id) {
@@ -2758,9 +2796,12 @@ export default function AssetEditor() {
         if (!libraryVideoExportNotice || libraryVideoExportNotice.kind !== 'ok') {
             return undefined
         }
+        if (leftPanelRef.current === 'outputs') {
+            void refreshVideoExportJobs()
+        }
         const t = window.setTimeout(() => setLibraryVideoExportNotice(null), 5500)
         return () => window.clearTimeout(t)
-    }, [libraryVideoExportNotice])
+    }, [libraryVideoExportNotice, refreshVideoExportJobs])
 
     const editorShellMountedRef = useRef(true)
     useEffect(() => {
@@ -4934,6 +4975,18 @@ export default function AssetEditor() {
             void refreshVersions()
         }
     }, [leftPanel, compositionId, refreshVersions])
+
+    useEffect(() => {
+        if (leftPanel === 'outputs' && compositionId) {
+            void refreshVideoExportJobs()
+        }
+    }, [leftPanel, compositionId, refreshVideoExportJobs])
+
+    useEffect(() => {
+        videoExportJobsFetchSeqRef.current += 1
+        setVideoExportJobs([])
+        setVideoExportJobsError(null)
+    }, [compositionId])
 
     useEffect(() => {
         if (!compositionId) {
@@ -8190,6 +8243,18 @@ export default function AssetEditor() {
                                     <ClockIcon className="h-7 w-7" aria-hidden />
                                     <span className="mt-1 text-[10px] font-medium leading-none">History</span>
                                 </button>
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setLeftPanel(leftPanel === 'outputs' ? null : 'outputs')
+                                        if (leftPanel !== 'outputs' && compositionId) void refreshVideoExportJobs()
+                                    }}
+                                    className={`flex h-14 w-14 flex-col items-center justify-center rounded-xl transition-colors ${leftPanel === 'outputs' ? 'bg-gray-700 text-white' : 'text-gray-400 hover:bg-gray-800 hover:text-white'}`}
+                                    title="Video exports from this composition"
+                                >
+                                    <ArrowDownTrayIcon className="h-7 w-7" aria-hidden />
+                                    <span className="mt-1 text-[10px] font-medium leading-none">Exports</span>
+                                </button>
                             </div>
 
                             {/* Bottom utilities — pinned to bottom */}
@@ -9268,6 +9333,79 @@ export default function AssetEditor() {
                                                     Compare versions
                                                 </button>
                                             )}
+                                        </div>
+                                    </div>
+                                )}
+                                {leftPanel === 'outputs' && (
+                                    <div className="flex flex-1 flex-col">
+                                        <div className="flex items-center justify-between border-b border-gray-700 px-3 py-2">
+                                            <h2 className="text-xs font-semibold uppercase tracking-wide text-gray-400">Exports</h2>
+                                            <div className="flex items-center gap-1">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => compositionId && void refreshVideoExportJobs()}
+                                                    disabled={!compositionId || videoExportJobsLoading}
+                                                    className="rounded p-1 text-gray-500 hover:bg-gray-800 hover:text-gray-300 disabled:opacity-40"
+                                                    title="Refresh"
+                                                >
+                                                    <ArrowPathIcon className={`h-4 w-4 ${videoExportJobsLoading ? 'animate-spin text-indigo-400' : ''}`} />
+                                                </button>
+                                                <button type="button" onClick={() => setLeftPanel(null)} className="text-gray-500 hover:text-gray-300">
+                                                    <XMarkIcon className="h-4 w-4" />
+                                                </button>
+                                            </div>
+                                        </div>
+                                        <div className="flex-1 overflow-y-auto p-2 text-xs">
+                                            <p className="mb-3 px-1 text-[10px] leading-snug text-gray-500">
+                                                Baked MP4 publish jobs for this composition. Open the asset when a row shows Complete.
+                                            </p>
+                                            {!compositionId && <p className="px-2 py-4 text-gray-500">Save the composition first.</p>}
+                                            {compositionId && videoExportJobsLoading && videoExportJobs.length === 0 && (
+                                                <div className="flex items-center gap-2 py-6 text-gray-400" role="status" aria-busy="true">
+                                                    <ArrowPathIcon className="h-4 w-4 shrink-0 animate-spin text-indigo-400" />
+                                                    Loading exports…
+                                                </div>
+                                            )}
+                                            {videoExportJobsError && <p className="px-2 py-2 text-red-400">{videoExportJobsError}</p>}
+                                            {compositionId &&
+                                                !videoExportJobsLoading &&
+                                                videoExportJobs.length === 0 &&
+                                                !videoExportJobsError && <p className="px-2 py-4 text-gray-500">No video exports yet.</p>}
+                                            {videoExportJobs.map((job) => {
+                                                const badgeClass =
+                                                    job.status === 'complete'
+                                                        ? 'bg-emerald-900/40 text-emerald-200 ring-1 ring-emerald-800/60'
+                                                        : job.status === 'failed'
+                                                          ? 'bg-red-950/50 text-red-200 ring-1 ring-red-900/50'
+                                                          : 'bg-gray-800 text-gray-300 ring-1 ring-gray-700'
+                                                const when = job.created_at ? new Date(job.created_at).toLocaleString() : '—'
+                                                return (
+                                                    <div key={job.id} className="mb-2 rounded-md border border-gray-800 bg-gray-900/40 px-2 py-2">
+                                                        <div className="flex items-start justify-between gap-2">
+                                                            <div className="min-w-0 flex-1">
+                                                                <div className="truncate font-mono text-[11px] text-gray-400">Job #{job.id}</div>
+                                                                <div className="mt-0.5 text-[10px] text-gray-500">{when}</div>
+                                                                {job.render_mode && (
+                                                                    <div className="mt-1 text-[10px] text-gray-500">
+                                                                        Mode: <span className="text-gray-400">{job.render_mode}</span>
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                            <span className={`shrink-0 rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase ${badgeClass}`}>
+                                                                {job.status}
+                                                            </span>
+                                                        </div>
+                                                        {job.status === 'complete' && job.output_asset_id && (
+                                                            <a
+                                                                href={`/app/assets/${encodeURIComponent(job.output_asset_id)}/view`}
+                                                                className="mt-2 inline-flex w-full items-center justify-center rounded bg-gray-700 px-2 py-1.5 text-[11px] font-medium text-gray-100 hover:bg-gray-600"
+                                                            >
+                                                                Open in library
+                                                            </a>
+                                                        )}
+                                                    </div>
+                                                )
+                                            })}
                                         </div>
                                     </div>
                                 )}

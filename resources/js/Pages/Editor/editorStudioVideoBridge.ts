@@ -1,6 +1,6 @@
 /**
  * Compositions: insert a video layer (DAM asset) and export a baked MP4.
- * Server export composites image / generative_image layers only (no text, masks, or blend modes).
+ * Legacy FFmpeg export composites image / generative_image overlays only; text and related effects use canvas runtime when enabled.
  */
 
 function csrf(): string {
@@ -150,6 +150,41 @@ export type VideoExportStatusResponse = {
     output_asset_id: string | null
     error: unknown
     meta: unknown
+}
+
+export type VideoExportJobListItem = {
+    id: string
+    status: string
+    render_mode: string | null
+    output_asset_id: string | null
+    duration_ms: number | null
+    created_at: string | null
+    updated_at: string | null
+}
+
+export async function getListVideoExportJobs(compositionId: string): Promise<{ jobs: VideoExportJobListItem[] }> {
+    const res = await fetchWithTimeout(
+        `/app/api/compositions/${encodeURIComponent(compositionId)}/studio/video-export`,
+        {
+            headers: { Accept: 'application/json', 'X-CSRF-TOKEN': csrf() },
+            credentials: 'same-origin',
+        },
+        60_000,
+    )
+    const text = await res.text()
+    let data: unknown
+    try {
+        data = JSON.parse(text)
+    } catch {
+        throw new Error(text || 'Video export list failed')
+    }
+    if (!res.ok) {
+        throw new Error((data as { message?: string })?.message || text || 'Video export list failed')
+    }
+    const jobs = Array.isArray((data as { jobs?: unknown }).jobs)
+        ? ((data as { jobs: VideoExportJobListItem[] }).jobs as VideoExportJobListItem[])
+        : []
+    return { jobs }
 }
 
 export async function getVideoExportStatus(

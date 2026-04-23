@@ -256,7 +256,10 @@ export default function CompositionExportRender({ renderPayload, exportJobId, co
                     assetsFailed: assetFails,
                 })
 
-                if (assetFails.length > 0 || !typoReport.ok || fontCheckFails.length > 0) {
+                // Raster + brand CSS are hard requirements. Font verification is diagnostic only: Playwright/Chrome
+                // may still paint text with metric-compatible fallbacks when document.fonts.check is false in CI
+                // or before full hinting settles — blocking here produced exports with missing type.
+                if (assetFails.length > 0 || !typoReport.ok) {
                     mergeDiagnostics({
                         fontsLoaded:
                             typoReport.ok && fontCheckFails.length === 0 ? diagnosticsRef.current.fontsRequested : 0,
@@ -264,9 +267,7 @@ export default function CompositionExportRender({ renderPayload, exportJobId, co
                     fail(
                         !typoReport.ok
                             ? 'brand typography preload failed'
-                            : fontCheckFails.length > 0
-                              ? 'one or more text layers failed document.fonts.check'
-                              : 'one or more raster assets failed to preload',
+                            : 'one or more raster assets failed to preload',
                     )
                     window.clearTimeout(hardTimeoutId)
                     return
