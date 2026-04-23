@@ -14,6 +14,7 @@ use App\Models\StudioCompositionVideoExportJob;
 use App\Models\Tenant;
 use App\Models\User;
 use App\Services\AssetPathGenerator;
+use App\Services\TenantBucketService;
 use App\Support\EditorAssetOriginalBytesLoader;
 use App\Support\PipelineQueueResolver;
 use Illuminate\Support\Facades\DB;
@@ -274,6 +275,18 @@ final class StudioCompositionVideoExportService
             $path = $this->pathGenerator->generateOriginalPathForAssetId($tenant, $newAssetId, 1, 'mp4');
             Storage::disk($outDisk)->put($path, $bytes, 'private');
 
+            // Align with normal uploads: link the asset row to the tenant’s provisioned StorageBucket so jobs that
+            // still expect storage_bucket_id (hover preview, older thumbnail paths) resolve the same S3 context.
+            $storageBucketId = null;
+            try {
+                $storageBucketId = app(TenantBucketService::class)->getOrProvisionBucket($tenant)->id;
+            } catch (\Throwable $e) {
+                Log::warning('[StudioCompositionVideoExportService] Could not resolve tenant storage bucket; asset will rely on disk fallback', [
+                    'tenant_id' => $tenant->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+
             $asset = Asset::forceCreate([
                 'id' => $newAssetId,
                 'tenant_id' => $tenant->id,
@@ -287,6 +300,7 @@ final class StudioCompositionVideoExportService
                 'size_bytes' => $size,
                 'width' => $w,
                 'height' => $h,
+                'storage_bucket_id' => $storageBucketId,
                 'storage_root_path' => $path,
                 'thumbnail_status' => ThumbnailStatus::PENDING,
                 'analysis_status' => 'uploading',

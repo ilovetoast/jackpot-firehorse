@@ -21,6 +21,7 @@ use App\Models\Tenant;
 use App\Models\User;
 use App\Services\AiUsageService;
 use App\Services\AssetPathGenerator;
+use App\Services\TenantBucketService;
 use App\Studio\Animation\Enums\StudioAnimationStatus;
 use App\Studio\Animation\Support\StudioAnimationFinalizeFingerprint;
 use App\Studio\Animation\Support\StudioAnimationFinalizeVideoProbe;
@@ -184,6 +185,16 @@ final class StudioAnimationCompletionService
 
             Storage::disk($disk)->put($path, $binary, 'private');
 
+            $storageBucketId = null;
+            try {
+                $storageBucketId = app(TenantBucketService::class)->getOrProvisionBucket($tenant)->id;
+            } catch (\Throwable $e) {
+                Log::warning('[StudioAnimationCompletionService] Could not resolve tenant storage bucket; asset will rely on disk fallback', [
+                    'tenant_id' => $tenant->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+
             $assetTitle = 'Studio animation';
             if ($locked->composition_id) {
                 $comp = Composition::query()
@@ -211,6 +222,7 @@ final class StudioAnimationCompletionService
                 'size_bytes' => $size,
                 'width' => $outW,
                 'height' => $outH,
+                'storage_bucket_id' => $storageBucketId,
                 'storage_root_path' => $path,
                 'thumbnail_status' => ThumbnailStatus::PENDING,
                 // ProcessAssetJob only runs when analysis_status is the post-upload state (same as normal uploads).

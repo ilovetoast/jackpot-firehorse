@@ -5,11 +5,13 @@ namespace App\Services;
 use App\Models\Asset;
 use App\Models\AssetVersion;
 use App\Models\StorageBucket;
+use App\Support\EditorAssetOriginalBytesLoader;
 use App\Support\ThumbnailMode;
 use App\Support\VideoDisplayProbe;
 use Aws\S3\Exception\S3Exception;
 use Aws\S3\S3Client;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
 /**
@@ -127,11 +129,21 @@ class ThumbnailGenerationService
     {
         $mode = ThumbnailMode::normalize($mode);
 
-        if (! $asset->storage_root_path || ! $asset->storageBucket) {
-            throw new \RuntimeException('Asset missing storage path or bucket');
+        if (! $asset->storage_root_path) {
+            throw new \RuntimeException('Asset missing storage path');
         }
 
+        $asset->loadMissing('storageBucket');
+        $sourceS3Path = $asset->storage_root_path;
         $bucket = $asset->storageBucket;
+        $fallbackUploadDisk = null;
+        if (! $bucket) {
+            $fallbackUploadDisk = EditorAssetOriginalBytesLoader::resolveFallbackDiskForObjectKey($asset, $sourceS3Path);
+            if ($fallbackUploadDisk === null) {
+                throw new \RuntimeException('Asset missing storage path or bucket');
+            }
+        }
+
         $allStyles = config('assets.thumbnail_styles', []);
 
         // Filter to only requested styles
@@ -148,9 +160,10 @@ class ThumbnailGenerationService
         }
 
         // Download source file (same logic as generateThumbnails)
-        $sourceS3Path = $asset->storage_root_path;
         $outputBasePath = dirname($sourceS3Path);
-        $tempPath = $this->downloadFromS3($bucket, $sourceS3Path, $asset->id);
+        $tempPath = $bucket !== null
+            ? $this->downloadFromS3($bucket, $sourceS3Path, $asset->id)
+            : $this->downloadSourceToTempForThumbnails($asset, $sourceS3Path);
 
         if (! file_exists($tempPath) || filesize($tempPath) === 0) {
             throw new \RuntimeException('Downloaded source file is invalid or empty');
@@ -182,7 +195,8 @@ class ThumbnailGenerationService
                             $styleName,
                             $outputBasePath,
                             null,
-                            $mode
+                            $mode,
+                            $fallbackUploadDisk
                         );
 
                         // Get metadata
@@ -284,11 +298,20 @@ class ThumbnailGenerationService
         $sourceS3Path = $sourceS3Path ?? $asset->storage_root_path;
         $outputBasePath = $outputBasePath ?? ($sourceS3Path ? dirname($sourceS3Path) : null);
 
-        if (! $sourceS3Path || ! $asset->storageBucket) {
-            throw new \RuntimeException('Asset missing storage path or bucket');
+        if (! $sourceS3Path) {
+            throw new \RuntimeException('Asset missing storage path');
         }
 
+        $asset->loadMissing('storageBucket');
         $bucket = $asset->storageBucket;
+        $fallbackUploadDisk = null;
+        if (! $bucket) {
+            $fallbackUploadDisk = EditorAssetOriginalBytesLoader::resolveFallbackDiskForObjectKey($asset, $sourceS3Path);
+            if ($fallbackUploadDisk === null) {
+                throw new \RuntimeException('Asset missing storage path or bucket');
+            }
+        }
+
         $styles = config('assets.thumbnail_styles', []);
 
         if (empty($styles)) {
@@ -298,12 +321,15 @@ class ThumbnailGenerationService
         Log::info('[ThumbnailGenerationService] Generating thumbnails from source', [
             'asset_id' => $asset->id,
             'source_s3_path' => $sourceS3Path,
-            'bucket' => $bucket->name,
+            'bucket' => $bucket?->name,
+            'fallback_disk' => $fallbackUploadDisk,
         ]);
 
         // Download original file to temporary location
         // This is the SAME source file used for metadata extraction
-        $tempPath = $this->downloadFromS3($bucket, $sourceS3Path, $asset->id);
+        $tempPath = $bucket !== null
+            ? $this->downloadFromS3($bucket, $sourceS3Path, $asset->id)
+            : $this->downloadSourceToTempForThumbnails($asset, $sourceS3Path);
 
         // Verify downloaded file is valid
         if (! file_exists($tempPath) || filesize($tempPath) === 0) {
@@ -567,7 +593,8 @@ class ThumbnailGenerationService
                             'preview',
                             $outputBasePath,
                             $version,
-                            $mode
+                            $mode,
+                            $fallbackUploadDisk
                         );
 
                         // Get preview thumbnail metadata
@@ -658,7 +685,8 @@ class ThumbnailGenerationService
                             $styleName,
                             $outputBasePath,
                             $version,
-                            $mode
+                            $mode,
+                            $fallbackUploadDisk
                         );
 
                         // Get thumbnail metadata
@@ -1111,13 +1139,14 @@ class ThumbnailGenerationService
      * @throws \RuntimeException If upload fails
      */
     protected function uploadThumbnailToS3(
-        StorageBucket $bucket,
+        ?StorageBucket $bucket,
         Asset $asset,
         string $localThumbnailPath,
         string $styleName,
         ?string $outputBasePath = null,
         ?AssetVersion $version = null,
-        string $mode = 'original'
+        string $mode = 'original',
+        ?string $laravelDiskWhenNoBucket = null,
     ): string {
         $mode = ThumbnailMode::normalize($mode);
         $versionNumber = $version?->version_number ?? $asset->currentVersion?->version_number ?? 1;
@@ -1126,29 +1155,67 @@ class ThumbnailGenerationService
         $pathGenerator = app(AssetPathGenerator::class);
         $s3ThumbnailPath = $pathGenerator->generateThumbnailPath($asset->tenant, $asset, $versionNumber, $mode, $styleName, $thumbnailFilename);
 
-        try {
-            $this->s3Client->putObject([
-                'Bucket' => $bucket->name,
-                'Key' => $s3ThumbnailPath,
-                'Body' => file_get_contents($localThumbnailPath),
-                'ContentType' => $this->getMimeTypeForExtension($extension),
-                'Metadata' => [
-                    'original-asset-id' => $asset->id,
-                    'style' => $styleName,
-                    'mode' => $mode,
-                    'generated-at' => now()->toIso8601String(),
-                ],
-            ]);
+        $body = file_get_contents($localThumbnailPath);
+        if ($body === false) {
+            throw new \RuntimeException('Failed to read local thumbnail for upload');
+        }
 
-            return $s3ThumbnailPath;
-        } catch (S3Exception $e) {
-            Log::error('Failed to upload thumbnail to S3', [
-                'bucket' => $bucket->name,
+        if ($bucket !== null) {
+            try {
+                $this->s3Client->putObject([
+                    'Bucket' => $bucket->name,
+                    'Key' => $s3ThumbnailPath,
+                    'Body' => $body,
+                    'ContentType' => $this->getMimeTypeForExtension($extension),
+                    'Metadata' => [
+                        'original-asset-id' => $asset->id,
+                        'style' => $styleName,
+                        'mode' => $mode,
+                        'generated-at' => now()->toIso8601String(),
+                    ],
+                ]);
+
+                return $s3ThumbnailPath;
+            } catch (S3Exception $e) {
+                Log::error('Failed to upload thumbnail to S3', [
+                    'bucket' => $bucket->name,
+                    'key' => $s3ThumbnailPath,
+                    'error' => $e->getMessage(),
+                ]);
+                throw new \RuntimeException("Failed to upload thumbnail to S3: {$e->getMessage()}", 0, $e);
+            }
+        }
+
+        if (! is_string($laravelDiskWhenNoBucket) || $laravelDiskWhenNoBucket === '' || ! config("filesystems.disks.{$laravelDiskWhenNoBucket}")) {
+            throw new \RuntimeException('Thumbnail upload requires a storage bucket or resolved Laravel disk.');
+        }
+
+        try {
+            Storage::disk($laravelDiskWhenNoBucket)->put($s3ThumbnailPath, $body, ['visibility' => 'private']);
+        } catch (\Throwable $e) {
+            Log::error('Failed to upload thumbnail to fallback disk', [
+                'disk' => $laravelDiskWhenNoBucket,
                 'key' => $s3ThumbnailPath,
                 'error' => $e->getMessage(),
             ]);
-            throw new \RuntimeException("Failed to upload thumbnail to S3: {$e->getMessage()}", 0, $e);
+            throw new \RuntimeException("Failed to upload thumbnail: {$e->getMessage()}", 0, $e);
         }
+
+        return $s3ThumbnailPath;
+    }
+
+    /**
+     * Download original bytes when the asset has no {@see StorageBucket} row (studio outputs, etc.).
+     */
+    protected function downloadSourceToTempForThumbnails(Asset $asset, string $sourceS3Path): string
+    {
+        $bytes = EditorAssetOriginalBytesLoader::loadFromStorage($asset, $sourceS3Path);
+        $tempPath = tempnam(sys_get_temp_dir(), 'thumb_src_'.$asset->id.'_');
+        if ($tempPath === false || @file_put_contents($tempPath, $bytes) === false) {
+            throw new \RuntimeException('Failed to materialize source file for thumbnail generation');
+        }
+
+        return $tempPath;
     }
 
     /**

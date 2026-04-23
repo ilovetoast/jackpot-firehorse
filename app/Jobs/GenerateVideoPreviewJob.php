@@ -14,6 +14,8 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
+use App\Support\EditorAssetOriginalBytesLoader;
 
 /**
  * Generate Video Preview Job
@@ -141,31 +143,47 @@ class GenerateVideoPreviewJob implements ShouldQueue
             // Generate preview
             $previewPath = $previewService->generatePreview($asset);
 
-            // Verify preview file exists in S3 before marking as complete
+            $asset->refresh();
             $bucket = $asset->storageBucket;
-            $s3Client = $this->createS3Client();
+            if ($bucket !== null) {
+                $s3Client = $this->createS3Client();
+                try {
+                    $result = $s3Client->headObject([
+                        'Bucket' => $bucket->name,
+                        'Key' => $previewPath,
+                    ]);
 
-            try {
-                $result = $s3Client->headObject([
-                    'Bucket' => $bucket->name,
-                    'Key' => $previewPath,
-                ]);
+                    $fileSize = $result['ContentLength'] ?? 0;
+                    if ($fileSize < 1000) { // Minimum 1KB for valid video file
+                        throw new \RuntimeException("Preview file too small (likely corrupted): {$fileSize} bytes");
+                    }
 
-                $fileSize = $result['ContentLength'] ?? 0;
-                if ($fileSize < 1000) { // Minimum 1KB for valid video file
+                    Log::info('[GenerateVideoPreviewJob] Preview file verified in S3', [
+                        'asset_id' => $asset->id,
+                        'preview_path' => $previewPath,
+                        'file_size' => $fileSize,
+                    ]);
+                } catch (\Aws\S3\Exception\S3Exception $e) {
+                    if ($e->getStatusCode() === 404) {
+                        throw new \RuntimeException("Preview file not found in S3 after generation: {$previewPath}");
+                    }
+                    throw new \RuntimeException("Failed to verify preview file in S3: {$e->getMessage()}", 0, $e);
+                }
+            } else {
+                $disk = EditorAssetOriginalBytesLoader::resolveFallbackDiskForObjectKey($asset, $asset->storage_root_path);
+                if ($disk === null || ! Storage::disk($disk)->exists($previewPath)) {
+                    throw new \RuntimeException("Preview file not found in object storage after generation: {$previewPath}");
+                }
+                $fileSize = (int) Storage::disk($disk)->size($previewPath);
+                if ($fileSize < 1000) {
                     throw new \RuntimeException("Preview file too small (likely corrupted): {$fileSize} bytes");
                 }
-
-                Log::info('[GenerateVideoPreviewJob] Preview file verified in S3', [
+                Log::info('[GenerateVideoPreviewJob] Preview file verified on fallback disk', [
                     'asset_id' => $asset->id,
                     'preview_path' => $previewPath,
+                    'disk' => $disk,
                     'file_size' => $fileSize,
                 ]);
-            } catch (\Aws\S3\Exception\S3Exception $e) {
-                if ($e->getStatusCode() === 404) {
-                    throw new \RuntimeException("Preview file not found in S3 after generation: {$previewPath}");
-                }
-                throw new \RuntimeException("Failed to verify preview file in S3: {$e->getMessage()}", 0, $e);
             }
 
             // Update asset with preview path (stored as S3 key, not signed URL)

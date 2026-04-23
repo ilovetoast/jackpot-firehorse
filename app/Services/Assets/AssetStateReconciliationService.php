@@ -9,6 +9,7 @@ use App\Models\Asset;
 use App\Models\Brand;
 use App\Models\Tenant;
 use App\Services\Reliability\ReliabilityEngine;
+use App\Services\TenantBucketService;
 use App\Services\Studio\EditorStudioVideoPublishApplier;
 use App\Support\PipelineQueueResolver;
 use Illuminate\Support\Facades\Log;
@@ -99,6 +100,10 @@ class AssetStateReconciliationService
 
         // Rule 8 — Studio composition video export: completed pipeline but still unpublished → default grid hides asset
         $promotions = $this->applyRule8($asset->fresh());
+        $changes = array_merge($changes, $promotions);
+
+        // Rule 9 — Studio MP4 rows created before storage_bucket_id was set: backfill tenant bucket when missing
+        $promotions = $this->applyRule9($asset->fresh());
         $changes = array_merge($changes, $promotions);
 
         return [
@@ -367,6 +372,60 @@ class AssetStateReconciliationService
         ]);
 
         return ['Rule 8: published_at set for studio composition video export'];
+    }
+
+    /**
+     * Rule 9: Studio composition export / studio animation assets with a storage path but no {@see Asset::$storage_bucket_id}.
+     * Older code wrote objects to the tenant disk without linking the row to {@see \App\Models\StorageBucket}, which broke
+     * jobs that required the FK. Backfill from {@see TenantBucketService::getOrProvisionBucket} so reconcile / admin repair
+     * can heal existing rows without a migration.
+     *
+     * @return list<string>
+     */
+    protected function applyRule9(Asset $asset): array
+    {
+        $allowedSources = ['studio_composition_video_export', 'studio_animation'];
+        if (! in_array((string) ($asset->source ?? ''), $allowedSources, true)) {
+            return [];
+        }
+        if ($asset->deleted_at !== null) {
+            return [];
+        }
+        if ($asset->storage_bucket_id !== null) {
+            return [];
+        }
+        $path = trim((string) ($asset->storage_root_path ?? ''));
+        if ($path === '') {
+            return [];
+        }
+        if (! $asset->tenant_id) {
+            return [];
+        }
+        $tenant = Tenant::query()->find($asset->tenant_id);
+        if (! $tenant) {
+            return [];
+        }
+
+        try {
+            $bucketId = app(TenantBucketService::class)->getOrProvisionBucket($tenant)->id;
+        } catch (\Throwable $e) {
+            Log::warning('[AssetStateReconciliationService] Rule 9 skipped (tenant bucket unavailable)', [
+                'asset_id' => $asset->id,
+                'tenant_id' => $tenant->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return [];
+        }
+
+        $asset->update(['storage_bucket_id' => $bucketId]);
+        Log::info('[AssetStateReconciliationService] Rule 9 applied (storage_bucket_id backfilled)', [
+            'asset_id' => $asset->id,
+            'storage_bucket_id' => $bucketId,
+            'source' => $asset->source,
+        ]);
+
+        return ['Rule 9: storage_bucket_id backfilled for studio output asset'];
     }
 
     private function assetHasGridCategoryId(Asset $asset): bool

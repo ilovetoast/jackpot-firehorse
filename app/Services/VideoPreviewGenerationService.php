@@ -9,6 +9,7 @@ use App\Support\VideoDisplayProbe;
 use Aws\S3\Exception\S3Exception;
 use Aws\S3\S3Client;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 
 /**
  * Video Preview Generation Service
@@ -92,17 +93,24 @@ class VideoPreviewGenerationService
         }
 
         $asset->loadMissing('storageBucket');
-        if ($asset->storageBucket === null) {
-            throw new \RuntimeException('Hover preview generation requires a storage bucket (S3 tenant bucket).');
-        }
-
-        $bucket = $asset->storageBucket;
         $sourceS3Path = $asset->storage_root_path;
+        $bucket = $asset->storageBucket;
+        $fallbackDisk = $bucket === null
+            ? EditorAssetOriginalBytesLoader::resolveFallbackDiskForObjectKey($asset, $sourceS3Path)
+            : null;
+        if ($bucket === null && $fallbackDisk === null) {
+            throw new \RuntimeException(
+                'Video source is not reachable: no storage_bucket_id on the asset and the file was not found on '
+                .'configured disks ('.implode(', ', EditorAssetOriginalBytesLoader::fallbackDiskNamesInPriorityOrder()).'). '
+                .'Confirm storage_root_path and deploy preview/thumbnail fallback fixes, or assign the tenant’s StorageBucket to this asset.'
+            );
+        }
 
         Log::info('[VideoPreviewGenerationService] Generating preview video', [
             'asset_id' => $asset->id,
             'source_s3_path' => $sourceS3Path,
-            'bucket' => $bucket->name,
+            'bucket' => $bucket?->name,
+            'fallback_disk' => $fallbackDisk,
         ]);
 
         // Download original video to temporary location
@@ -112,6 +120,7 @@ class VideoPreviewGenerationService
             throw new \RuntimeException('Downloaded source video file is invalid or empty');
         }
 
+        $encodedPreviewPath = null;
         try {
             // Get video information
             $ffmpegPath = $this->findFFmpegPath();
@@ -163,7 +172,7 @@ class VideoPreviewGenerationService
             // Longest side capped ~320px after rotation is baked; keeps portrait and landscape correct
             $targetBox = 320;
 
-            $previewPath = $this->extractPreviewSegment(
+            $encodedPreviewPath = $this->extractPreviewSegment(
                 $tempPath,
                 $ffmpegPath,
                 $startTime,
@@ -172,12 +181,9 @@ class VideoPreviewGenerationService
                 (int) $rotation
             );
 
-            // Upload preview to S3
-            $s3PreviewPath = $this->uploadPreviewToS3(
-                $bucket,
-                $asset,
-                $previewPath
-            );
+            $s3PreviewPath = $bucket !== null
+                ? $this->uploadPreviewToS3($bucket, $asset, $encodedPreviewPath)
+                : $this->uploadPreviewToFallbackDisk((string) $fallbackDisk, $asset, $encodedPreviewPath);
 
             Log::info('[VideoPreviewGenerationService] Preview video generated and uploaded', [
                 'asset_id' => $asset->id,
@@ -188,11 +194,41 @@ class VideoPreviewGenerationService
 
             return $s3PreviewPath;
         } finally {
+            if (is_string($encodedPreviewPath) && $encodedPreviewPath !== '' && file_exists($encodedPreviewPath)) {
+                @unlink($encodedPreviewPath);
+            }
             // Clean up temporary file
             if (file_exists($tempPath)) {
                 @unlink($tempPath);
             }
         }
+    }
+
+    /**
+     * Upload hover preview next to the original when there is no tenant {@see StorageBucket} model
+     * (same relative key layout as {@see self::uploadPreviewToS3()}).
+     */
+    protected function uploadPreviewToFallbackDisk(string $diskName, Asset $asset, string $localPreviewPath): string
+    {
+        $assetPathInfo = pathinfo($asset->storage_root_path);
+        $relativePreviewPath = "{$assetPathInfo['dirname']}/previews/video_preview.mp4";
+        $body = file_get_contents($localPreviewPath);
+        if ($body === false || $body === '') {
+            throw new \RuntimeException('Empty preview file for upload');
+        }
+        try {
+            Storage::disk($diskName)->put($relativePreviewPath, $body, ['visibility' => 'private']);
+        } catch (\Throwable $e) {
+            Log::error('[VideoPreviewGenerationService] Failed to upload preview to fallback disk', [
+                'asset_id' => $asset->id,
+                'disk' => $diskName,
+                'key' => $relativePreviewPath,
+                'error' => $e->getMessage(),
+            ]);
+            throw new \RuntimeException("Failed to upload preview video: {$e->getMessage()}", 0, $e);
+        }
+
+        return $relativePreviewPath;
     }
 
     /**

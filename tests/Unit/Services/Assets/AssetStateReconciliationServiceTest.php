@@ -217,4 +217,57 @@ class AssetStateReconciliationServiceTest extends TestCase
         $this->assertNotNull($asset->published_at);
         $this->assertTrue($asset->isVisibleInGrid());
     }
+
+    public function test_rule_9_backfills_storage_bucket_id_for_studio_output_without_bucket(): void
+    {
+        config(['storage.shared_bucket' => 'test-bucket']);
+
+        $tenant = Tenant::create(['name' => 'Test', 'slug' => 'test']);
+        $brand = Brand::create([
+            'tenant_id' => $tenant->id,
+            'name' => 'Test Brand',
+            'slug' => 'test-brand',
+        ]);
+        $bucket = StorageBucket::create([
+            'tenant_id' => $tenant->id,
+            'name' => 'test-bucket',
+            'status' => StorageBucketStatus::ACTIVE,
+            'region' => 'us-east-1',
+        ]);
+        $session = UploadSession::create([
+            'tenant_id' => $tenant->id,
+            'brand_id' => $brand->id,
+            'storage_bucket_id' => $bucket->id,
+            'status' => UploadStatus::COMPLETED,
+            'type' => UploadType::DIRECT,
+            'expected_size' => 1024,
+            'uploaded_size' => 1024,
+        ]);
+
+        $asset = Asset::create([
+            'tenant_id' => $tenant->id,
+            'brand_id' => $brand->id,
+            'upload_session_id' => $session->id,
+            'storage_bucket_id' => null,
+            'storage_root_path' => 'tenants/'.$tenant->id.'/originals/x.mp4',
+            'original_filename' => 'anim.mp4',
+            'mime_type' => 'video/mp4',
+            'size_bytes' => 1024,
+            'status' => AssetStatus::VISIBLE,
+            'type' => AssetType::AI_GENERATED,
+            'analysis_status' => 'complete',
+            'thumbnail_status' => ThumbnailStatus::COMPLETED,
+            'source' => 'studio_animation',
+            'metadata' => [],
+        ]);
+
+        $service = app(AssetStateReconciliationService::class);
+        $result = $service->reconcile($asset->fresh());
+
+        $this->assertTrue($result['updated']);
+        $this->assertContains('Rule 9: storage_bucket_id backfilled for studio output asset', $result['changes']);
+
+        $asset->refresh();
+        $this->assertSame($bucket->id, $asset->storage_bucket_id);
+    }
 }

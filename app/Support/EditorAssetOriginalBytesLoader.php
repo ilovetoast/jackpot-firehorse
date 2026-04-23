@@ -38,6 +38,58 @@ final class EditorAssetOriginalBytesLoader
     }
 
     /**
+     * Ordered Laravel disk names used when an asset has no {@see Asset::$storageBucket} row
+     * (studio outputs, etc.). Same order as {@see self::loadViaFallbackDisks()}.
+     *
+     * @return list<string>
+     */
+    public static function fallbackDiskNamesInPriorityOrder(): array
+    {
+        $candidates = [];
+        $outputDisk = config('studio_animation.output_disk');
+        if (is_string($outputDisk) && $outputDisk !== '') {
+            $candidates[] = $outputDisk;
+        }
+        $candidates[] = 's3';
+
+        $out = [];
+        foreach (array_unique($candidates) as $diskName) {
+            if (! is_string($diskName) || $diskName === '' || ! config("filesystems.disks.{$diskName}")) {
+                continue;
+            }
+            $out[] = $diskName;
+        }
+
+        return $out;
+    }
+
+    /**
+     * Which fallback disk successfully reads this object key (no storage_bucket row).
+     */
+    public static function resolveFallbackDiskForObjectKey(Asset $asset, ?string $objectKey = null): ?string
+    {
+        $asset->loadMissing('storageBucket');
+        if ($asset->storageBucket !== null) {
+            return null;
+        }
+        $key = ($objectKey !== null && $objectKey !== '') ? $objectKey : $asset->storage_root_path;
+        if (! is_string($key) || $key === '') {
+            return null;
+        }
+        foreach (self::fallbackDiskNamesInPriorityOrder() as $diskName) {
+            try {
+                $contents = Storage::disk($diskName)->get($key);
+                if (is_string($contents) && $contents !== '') {
+                    return $diskName;
+                }
+            } catch (\Throwable) {
+            }
+        }
+
+        return null;
+    }
+
+    /**
      * @throws \InvalidArgumentException
      */
     private static function loadViaBucket(Asset $asset, string $key): string
@@ -106,17 +158,7 @@ final class EditorAssetOriginalBytesLoader
      */
     private static function loadViaFallbackDisks(Asset $asset, string $key): string
     {
-        $candidates = [];
-        $outputDisk = config('studio_animation.output_disk');
-        if (is_string($outputDisk) && $outputDisk !== '') {
-            $candidates[] = $outputDisk;
-        }
-        $candidates[] = 's3';
-
-        foreach (array_unique($candidates) as $diskName) {
-            if (! is_string($diskName) || $diskName === '' || ! config("filesystems.disks.{$diskName}")) {
-                continue;
-            }
+        foreach (self::fallbackDiskNamesInPriorityOrder() as $diskName) {
             try {
                 $contents = Storage::disk($diskName)->get($key);
                 if (is_string($contents) && $contents !== '') {
