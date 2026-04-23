@@ -1324,7 +1324,7 @@ function findStudioAiVideoLayerForSourceStill(
     return null
 }
 
-/** Fired after `history.replaceState` updates the composition query so React can re-read `window.location`. */
+/** Fired after `history.replaceState`  updates the composition query so React can re-read `window.location`. */
 const JP_COMPOSITION_SEARCH_UPDATED_EVENT = 'jackpot:composition-search-updated'
 
 function replaceUrlCompositionParam(id: string | null) {
