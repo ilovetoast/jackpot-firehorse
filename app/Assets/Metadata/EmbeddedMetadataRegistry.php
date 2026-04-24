@@ -14,7 +14,7 @@ class EmbeddedMetadataRegistry
     }
 
     /**
-     * @return array<string, array<string, mixed>>
+     * @return array<string, array<string, mixed>> 
      */
     public function allowlistedKeys(): array
     {
