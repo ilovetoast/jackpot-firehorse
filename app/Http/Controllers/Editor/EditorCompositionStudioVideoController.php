@@ -10,6 +10,7 @@ use App\Support\StudioCanvasRuntimeExportJobDiagnostics;
 use App\Services\Studio\StudioCompositionFfmpegNativeFeaturePolicy;
 use App\Services\Studio\StudioCompositionVideoExportRenderMode;
 use App\Services\Studio\StudioRenderingDriverResolver;
+use App\Studio\Rendering\StudioRenderingFontPaths;
 use App\Studio\Rendering\StudioRenderingFontResolver;
 use App\Studio\Rendering\StudioTextLayerFontExtras;
 use App\Models\Tenant;
@@ -562,8 +563,20 @@ class EditorCompositionStudioVideoController extends Controller
             if (! is_array($ly) || ($ly['visible'] ?? true) === false || ($ly['type'] ?? '') !== 'text') {
                 continue;
             }
+            $merged = StudioTextLayerFontExtras::mergeShallowStyleSources($ly);
             $style = is_array($ly['style'] ?? null) ? $ly['style'] : [];
-            $base = ['font_family' => (string) ($style['fontFamily'] ?? 'sans-serif')];
+            $fontFamily = 'sans-serif';
+            foreach (['fontFamily', 'font_family'] as $fk) {
+                if (isset($merged[$fk]) && is_string($merged[$fk]) && trim($merged[$fk]) !== '') {
+                    $fontFamily = trim($merged[$fk]);
+                    break;
+                }
+                if (isset($style[$fk]) && is_string($style[$fk]) && trim($style[$fk]) !== '') {
+                    $fontFamily = trim($style[$fk]);
+                    break;
+                }
+            }
+            $base = ['font_family' => $fontFamily];
             $extra = StudioTextLayerFontExtras::mergeFromDocumentLayer($ly, $base);
             if (! $resolver->layerHasExplicitCustomFontSelection($extra)) {
                 $needsDefaultFallback = true;
@@ -573,9 +586,9 @@ class EditorCompositionStudioVideoController extends Controller
         if (! $needsDefaultFallback) {
             return null;
         }
-        $path = trim((string) (config('studio_rendering.default_font_path') ?? ''));
-        if ($path === '' || ! is_file($path)) {
-            return 'At least one text layer has no tenant font (font_asset_id) or explicit local font path; set STUDIO_RENDERING_DEFAULT_FONT_PATH to a readable TTF/OTF on workers for CSS font-family fallback.';
+        $path = StudioRenderingFontPaths::effectiveDefaultFontPath();
+        if ($path === '' || ! is_file($path) || ! is_readable($path)) {
+            return 'At least one text layer has no tenant font (font_asset_id) or explicit font key; ensure bundled fonts exist under resources/fonts/ or set STUDIO_RENDERING_DEFAULT_FONT_PATH to a readable TTF/OTF on workers.';
         }
 
         return null;
@@ -602,7 +615,7 @@ class EditorCompositionStudioVideoController extends Controller
 
     /**
      * True when the composition document uses features the legacy FFmpeg exporter does not bake
-     * (text, masks, fills, non-normal blend on raster/video). In that case export must use canvas runtime when enabled.
+     * (text, masks, fills, non-normal blend on video). Image / generative_image blend modes are handled in FFmpeg-native.
      */
     private function compositionNeedsCanvasRuntimeExport(Composition $composition): bool
     {
@@ -619,8 +632,11 @@ class EditorCompositionStudioVideoController extends Controller
             if (in_array($type, ['text', 'mask', 'fill'], true)) {
                 return true;
             }
-            $blend = (string) ($ly['blendMode'] ?? 'normal');
-            if ($blend !== '' && $blend !== 'normal' && in_array($type, ['image', 'generative_image', 'video'], true)) {
+            $blend = strtolower(trim((string) ($ly['blendMode'] ?? $ly['blend_mode'] ?? 'normal')));
+            if ($blend === '') {
+                $blend = 'normal';
+            }
+            if ($blend !== 'normal' && $type === 'video') {
                 return true;
             }
         }

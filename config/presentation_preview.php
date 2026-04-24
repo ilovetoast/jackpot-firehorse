@@ -32,4 +32,13 @@ return [
      * then allowed_model_keys.
      */
     'allowed_model_keys' => null,
+
+    /**
+     * Prepended to every presentation-preview image-edit prompt (before optional user scene text).
+     * Emphasize: preserve supplied creative; only environmental integration.
+     */
+    'ai_instruction_prefix' => 'Take this piece of creative and preserve it exactly: do not modify, redraw, replace, or crop away the artwork itself—only integrate it believably into a scene. The output will be used for marketing presentations and asset reviews. ',
+
+    /** Max length for optional user "environment" line from the compare modal (stored & echoed in metadata). */
+    'max_scene_description_length' => max(32, min(2000, (int) env('PRESENTATION_PREVIEW_MAX_SCENE_CHARS', 500))),
 ];

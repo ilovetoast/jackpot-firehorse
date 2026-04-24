@@ -3,7 +3,7 @@
 namespace Tests\Unit\Studio;
 
 use App\Models\Tenant;
-use App\Studio\Rendering\Exceptions\StudioFontResolutionException;
+use App\Studio\Rendering\StudioGoogleFontFileCache;
 use App\Studio\Rendering\StudioRenderingFontFileCache;
 use App\Studio\Rendering\StudioRenderingFontResolver;
 use Illuminate\Support\Facades\Config;
@@ -72,7 +72,7 @@ class StudioRenderingDefaultFontConfigTest extends TestCase
 
         $this->assertSame($tmp, config('studio_rendering.default_font_path'));
 
-        $r = new StudioRenderingFontResolver(new StudioRenderingFontFileCache);
+        $r = new StudioRenderingFontResolver(new StudioRenderingFontFileCache, new StudioGoogleFontFileCache);
         $resolved = $r->resolveForTextLayer(
             new Tenant(['id' => 1]),
             null,
@@ -85,19 +85,22 @@ class StudioRenderingDefaultFontConfigTest extends TestCase
         @unlink($tmp);
     }
 
-    public function test_resolver_throws_when_default_font_path_config_is_empty_string(): void
+    public function test_resolver_resolves_when_default_font_path_config_is_empty_string(): void
     {
         Config::set('studio_rendering.default_font_path', '');
         Config::set('studio_rendering.font_family_map', []);
-
-        $this->expectException(StudioFontResolutionException::class);
-        $this->expectExceptionMessage('config("studio_rendering.default_font_path") is empty');
-
-        (new StudioRenderingFontResolver(new StudioRenderingFontFileCache))->resolveForTextLayer(
+        $inter = resource_path('fonts/inter/Inter-Regular.ttf');
+        if (! is_file($inter)) {
+            $this->markTestSkipped('Bundled Inter font not present');
+        }
+        $r = new StudioRenderingFontResolver(new StudioRenderingFontFileCache, new StudioGoogleFontFileCache);
+        $resolved = $r->resolveForTextLayer(
             new Tenant(['id' => 1]),
             null,
             ['font_family' => 'Z, serif'],
             'Z, serif',
         );
+        $this->assertContains($resolved->source, ['default', 'legacy_bundled']);
+        $this->assertFileExists($resolved->absolutePath);
     }
 }

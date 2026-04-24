@@ -31,6 +31,7 @@ import {
     ChevronUpIcon,
     ClipboardDocumentListIcon,
     Squares2X2Icon,
+    VideoCameraIcon,
 } from '@heroicons/react/24/outline'
 
 const STATUS_COLORS = {
@@ -132,6 +133,12 @@ export default function AdminDashboard({ auth, metrics: initialMetrics }) {
 
     const operationsItems = [
         { name: 'Operations Center', description: `Critical: ${incidents.critical ?? 0} | Errors: ${incidents.error ?? 0}`, href: '/app/admin/operations-center', icon: ExclamationTriangleIcon },
+        {
+            name: 'Studio video export failures',
+            description: `${failures.studio_video_export_failures_24h ?? 0} failed (24h) · codes & FFmpeg stderr`,
+            href: '/app/admin/operations-center?tab=studio-exports',
+            icon: VideoCameraIcon,
+        },
         { name: 'Asset Operations', description: 'Cross-tenant asset search, repair, restore', href: '/app/admin/assets', icon: FolderIcon },
         {
             name: 'AI content & analysis',

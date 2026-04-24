@@ -135,6 +135,11 @@ final class CompositionRenderNormalizer
             $fadeInMs = max(0, (int) ($this->readAnimationMs($ly, 'fadeIn') ?? 0));
             $fadeOutMs = max(0, (int) ($this->readAnimationMs($ly, 'fadeOut') ?? 0));
 
+            $blendModeNorm = strtolower(trim((string) ($ly['blendMode'] ?? $ly['blend_mode'] ?? 'normal')));
+            if ($blendModeNorm === '') {
+                $blendModeNorm = 'normal';
+            }
+
             if ($canonical === 'text') {
                 $textBody = $this->extractTextContent($ly);
                 if (trim($textBody) === '') {
@@ -151,6 +156,7 @@ final class CompositionRenderNormalizer
                 $fontSize = max(8, (int) round((float) $this->firstNumericKey($style, ['fontSize', 'font_size', 'size'], 24)));
                 $color = (string) $this->firstStringKey($style, ['color', 'fill', 'fillColor', 'textColor'], '#ffffff');
                 $fontFamily = (string) $this->firstStringKey($style, ['fontFamily', 'font_family'], 'sans-serif');
+                $fontWeight = (int) round((float) $this->firstNumericKey($style, ['fontWeight', 'font_weight'], 400));
                 $lineHeight = isset($style['lineHeight']) ? (float) $style['lineHeight'] : (isset($style['line_height']) ? (float) $style['line_height'] : 1.25);
                 $textAlign = (string) $this->firstStringKey($style, ['textAlign', 'text_align'], 'left');
                 if (! in_array($textAlign, ['left', 'center', 'right'], true)) {
@@ -159,12 +165,14 @@ final class CompositionRenderNormalizer
                 $extra = [
                     'content' => $textBody,
                     'font_family' => $fontFamily,
+                    'font_weight' => $fontWeight,
                     'font_size' => $fontSize,
                     'color' => $color,
                     'line_height' => $lineHeight,
                     'text_align' => $textAlign,
                 ];
                 $extra = StudioTextLayerFontExtras::mergeFromDocumentLayer($ly, $extra);
+                $extra['blend_mode'] = $blendModeNorm;
                 $outLayers[] = new RenderLayer(
                     id: $id,
                     type: 'text',
@@ -194,7 +202,10 @@ final class CompositionRenderNormalizer
 
             if ($canonical === 'image') {
                 $docType = $rawType === 'generative_image' ? 'generative_image' : 'image';
-                $extra = ['asset_id' => $this->resolveOverlayImageAssetId($ly, $docType)];
+                $extra = [
+                    'asset_id' => $this->resolveOverlayImageAssetId($ly, $docType),
+                    'blend_mode' => $blendModeNorm,
+                ];
                 $outLayers[] = new RenderLayer(
                     id: $id,
                     type: 'image',
@@ -259,6 +270,7 @@ final class CompositionRenderNormalizer
                         'studio_preraster' => 'fill_shape',
                         'fill_shape_spec' => $spec,
                         'asset_id' => '',
+                        'blend_mode' => $blendModeNorm,
                     ],
                 );
 
@@ -301,6 +313,7 @@ final class CompositionRenderNormalizer
                         'studio_preraster' => 'fill_shape',
                         'fill_shape_spec' => $spec,
                         'asset_id' => '',
+                        'blend_mode' => $blendModeNorm,
                     ],
                 );
             }
@@ -448,27 +461,7 @@ final class CompositionRenderNormalizer
      */
     private function mergeStyleSources(array $ly): array
     {
-        $merged = [];
-        foreach (['defaults', 'style', 'props'] as $k) {
-            $v = $ly[$k] ?? null;
-            if (is_array($v)) {
-                foreach ($v as $kk => $vv) {
-                    if (is_string($kk)) {
-                        $merged[$kk] = $vv;
-                    }
-                }
-            }
-        }
-        $props = $ly['props'] ?? null;
-        if (is_array($props) && isset($props['style']) && is_array($props['style'])) {
-            foreach ($props['style'] as $kk => $vv) {
-                if (is_string($kk)) {
-                    $merged[$kk] = $vv;
-                }
-            }
-        }
-
-        return $merged;
+        return StudioTextLayerFontExtras::mergeShallowStyleSources($ly);
     }
 
     /**
@@ -507,11 +500,31 @@ final class CompositionRenderNormalizer
      */
     private function buildFillRasterSpec(array $ly, string $layerId): ?array
     {
-        if (strtolower((string) ($ly['textBoostStyle'] ?? '')) === 'radial') {
-            return null;
-        }
-        $fillKind = (string) ($ly['fillKind'] ?? $ly['fill_kind'] ?? 'solid');
         $radius = (float) ($ly['borderRadius'] ?? $ly['border_radius'] ?? 0);
+
+        if (strtolower((string) ($ly['textBoostStyle'] ?? '')) === 'radial') {
+            $opacity = max(0.0, min(1.0, (float) ($ly['textBoostOpacity'] ?? 0.7)));
+            $primaryHex = (string) ($ly['textBoostColor'] ?? $ly['color'] ?? '#000000');
+            $secondary = trim((string) ($ly['textBoostSecondaryColor'] ?? ''));
+            $scaleRaw = $ly['textBoostGradientScale'] ?? null;
+            $scale = 1.0;
+            if ($scaleRaw !== null && $scaleRaw !== '' && is_numeric($scaleRaw)) {
+                $scale = (float) $scaleRaw;
+            }
+            $scale = min(2.5, max(0.35, $scale));
+
+            return [
+                'kind' => 'fill_radial_text_boost',
+                'color_center_hex' => $secondary !== '' ? $secondary : 'transparent',
+                'color_edge_hex' => $primaryHex,
+                'opacity' => $opacity,
+                'gradient_scale' => $scale,
+                'border_radius' => $radius,
+                'layer_id' => $layerId,
+            ];
+        }
+
+        $fillKind = (string) ($ly['fillKind'] ?? $ly['fill_kind'] ?? 'solid');
         if ($fillKind === 'gradient') {
             $start = (string) ($ly['gradientStartColor'] ?? 'transparent');
             $end = (string) ($ly['gradientEndColor'] ?? $ly['color'] ?? '#000000');

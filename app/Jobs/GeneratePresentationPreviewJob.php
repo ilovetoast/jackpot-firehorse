@@ -38,6 +38,7 @@ class GeneratePresentationPreviewJob implements ShouldQueue
         public readonly string $assetId,
         public readonly string $versionId,
         public readonly bool $force = false,
+        public readonly ?string $sceneDescription = null,
     ) {
         $this->timeout = max(180, (int) config('assets.thumbnail.job_timeout_seconds', 900));
     }
@@ -168,7 +169,7 @@ class GeneratePresentationPreviewJob implements ShouldQueue
             return;
         }
 
-        $prompt = $promptBuilder->build($asset);
+        $prompt = $promptBuilder->build($asset, $this->sceneDescription);
         $agentId = (string) config('presentation_preview.agent_id', 'presentation_preview');
         $modelKey = (string) config('presentation_preview.model_key', 'gpt-image-1');
         $imageBinary = file_get_contents($localRaster);
@@ -312,7 +313,8 @@ class GeneratePresentationPreviewJob implements ShouldQueue
             $tokensIn,
             $tokensOut,
             $cost,
-            $durationMs
+            $durationMs,
+            $this->normalizedSceneDescriptionForMeta(),
         );
 
         Log::info('[GeneratePresentationPreviewJob] Presentation previews complete', [
@@ -320,6 +322,24 @@ class GeneratePresentationPreviewJob implements ShouldQueue
             'ai_task_id' => $aiTaskId,
             'duration_ms' => $durationMs,
         ]);
+    }
+
+    protected function normalizedSceneDescriptionForMeta(): ?string
+    {
+        $s = $this->sceneDescription;
+        if (! is_string($s)) {
+            return null;
+        }
+        $t = trim($s);
+        if ($t === '') {
+            return null;
+        }
+        $max = max(32, (int) config('presentation_preview.max_scene_description_length', 500));
+        if (strlen($t) > $max) {
+            return substr($t, 0, $max);
+        }
+
+        return $t;
     }
 
     /**
@@ -338,7 +358,8 @@ class GeneratePresentationPreviewJob implements ShouldQueue
         int $tokensIn,
         int $tokensOut,
         float $cost,
-        int $durationMs
+        int $durationMs,
+        ?string $lastSceneDescription = null,
     ): void {
         $mode = ThumbnailMode::Presentation->value;
         $finalThumbnails = $result['thumbnails'][$mode] ?? [];
@@ -357,7 +378,8 @@ class GeneratePresentationPreviewJob implements ShouldQueue
             $tokensIn,
             $tokensOut,
             $cost,
-            $durationMs
+            $durationMs,
+            $lastSceneDescription
         ): array {
             $thumbs = $base['thumbnails'] ?? [];
             if (! is_array($thumbs)) {
@@ -386,7 +408,7 @@ class GeneratePresentationPreviewJob implements ShouldQueue
             }
             $prev = is_array($mm['presentation'] ?? null) ? $mm['presentation'] : [];
             unset($prev['failure_message'], $prev['failed_at'], $prev['skip_reason']);
-            $mm['presentation'] = array_merge($prev, [
+            $presentationRow = array_merge($prev, [
                 'model' => $model,
                 'prompt' => $prompt,
                 'style' => $style,
@@ -399,6 +421,10 @@ class GeneratePresentationPreviewJob implements ShouldQueue
                 'attempts' => $attemptsDone,
                 'last_attempt_at' => now()->toIso8601String(),
             ]);
+            if ($lastSceneDescription !== null && $lastSceneDescription !== '') {
+                $presentationRow['last_scene_description'] = $lastSceneDescription;
+            }
+            $mm['presentation'] = $presentationRow;
             $base['thumbnail_modes_meta'] = $mm;
 
             return $base;

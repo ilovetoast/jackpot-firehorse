@@ -38,6 +38,7 @@ use App\Services\SystemCategoryService;
 use App\Services\UploadInitiationService;
 use App\Support\AssetVariant;
 use App\Support\DeliveryContext;
+use App\Support\EditorAssetOriginalBytesLoader;
 use App\Support\Metadata\CategoryTypeResolver;
 use App\Support\ThumbnailMetadata;
 use App\Support\ThumbnailModeDeliveryUrls;
@@ -2153,12 +2154,16 @@ class AssetController extends Controller
      *
      * GET /assets/{asset}/view
      */
-    public function view(Request $request, Asset $asset): JsonResponse|Response
+    public function view(Request $request, Asset $asset): JsonResponse|\Illuminate\Http\Response|Response
     {
         Gate::authorize('view', $asset);
 
         if ($request->wantsJson() || $request->header('Accept') === 'application/json') {
             return $this->previewUrl($asset);
+        }
+
+        if ($this->mayStreamInlineFontPreview($asset) && $this->requestLooksLikeInlineFontFetch($request)) {
+            return $this->inlineWebFontBinaryResponse($asset);
         }
 
         $tenant = app('tenant');
@@ -3396,5 +3401,104 @@ class AssetController extends Controller
         }
 
         return false;
+    }
+
+    /**
+     * Browser {@see FontFace} / CSS {@code @font-face} GETs {@code /assets/{id}/view} without {@code Accept: application/json}.
+     * Without this branch the HTML Inertia shell is returned and the font loader shows OTS decode errors.
+     */
+    private function requestLooksLikeInlineFontFetch(Request $request): bool
+    {
+        if (strtolower((string) $request->query('font_inline', '')) === '1') {
+            return true;
+        }
+
+        return strtolower((string) $request->header('Sec-Fetch-Dest', '')) === 'font';
+    }
+
+    private function assetMimeLooksLikeWebFont(Asset $asset): bool
+    {
+        $mime = strtolower((string) ($asset->mime_type ?? ''));
+        if (str_starts_with($mime, 'font/')) {
+            return true;
+        }
+        if (in_array($mime, [
+            'application/font-woff',
+            'application/font-woff2',
+            'application/vnd.ms-opentype',
+            'application/x-font-ttf',
+            'application/x-font-otf',
+        ], true)) {
+            return true;
+        }
+
+        $ext = strtolower(pathinfo((string) ($asset->original_filename ?? ''), PATHINFO_EXTENSION));
+        if (in_array($ext, ['woff2', 'woff', 'ttf', 'otf', 'eot'], true)) {
+            return true;
+        }
+
+        return $mime === 'application/octet-stream'
+            && in_array($ext, ['woff2', 'woff', 'ttf', 'otf', 'eot'], true);
+    }
+
+    /**
+     * Same allow-list idea as {@see \App\Http\Controllers\Editor\EditorAssetBridgeController::editorMayStreamOriginalFile}
+     * for binary font bytes (not HTML).
+     */
+    private function mayStreamInlineFontPreview(Asset $asset): bool
+    {
+        if (! $this->assetMimeLooksLikeWebFont($asset)) {
+            return false;
+        }
+        if (in_array($asset->type, [AssetType::ASSET, AssetType::DELIVERABLE, AssetType::AI_GENERATED], true)) {
+            return true;
+        }
+
+        return $asset->type === AssetType::REFERENCE;
+    }
+
+    private function guessWebFontMimeType(Asset $asset): string
+    {
+        $ext = strtolower(pathinfo((string) ($asset->original_filename ?? ''), PATHINFO_EXTENSION));
+
+        return match ($ext) {
+            'woff2' => 'font/woff2',
+            'woff' => 'font/woff',
+            'ttf' => 'font/ttf',
+            'otf' => 'font/otf',
+            'eot' => 'application/vnd.ms-fontobject',
+            default => 'application/octet-stream',
+        };
+    }
+
+    private function inlineWebFontBinaryResponse(Asset $asset): \Illuminate\Http\Response
+    {
+        $tenant = app('tenant');
+        if (! $tenant || $asset->tenant_id !== $tenant->id) {
+            abort(403);
+        }
+
+        try {
+            $bytes = EditorAssetOriginalBytesLoader::loadFromStorage($asset);
+        } catch (\Throwable $e) {
+            Log::notice('[AssetController] Inline font preview bytes unavailable', [
+                'asset_id' => $asset->id,
+                'error' => $e->getMessage(),
+            ]);
+            abort(404, 'Font file not available.');
+        }
+        if ($bytes === '') {
+            abort(404, 'Font file is empty.');
+        }
+
+        $mime = trim((string) ($asset->mime_type ?? ''));
+        if ($mime === '' || strtolower($mime) === 'application/octet-stream') {
+            $mime = $this->guessWebFontMimeType($asset);
+        }
+
+        return response($bytes, 200, [
+            'Content-Type' => $mime,
+            'Cache-Control' => 'private, max-age=300',
+        ]);
     }
 }

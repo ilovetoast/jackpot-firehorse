@@ -897,7 +897,14 @@ class AssetThumbnailController extends Controller
             return response()->json(['error' => 'Presentation preview generation already in progress'], 409);
         }
 
-        GeneratePresentationPreviewJob::dispatch((string) $asset->id, (string) $version->id, $force)
+        $maxScene = max(32, (int) config('presentation_preview.max_scene_description_length', 500));
+        $validated = $request->validate([
+            'scene_description' => ['nullable', 'string', 'max:'.$maxScene],
+        ]);
+        $sceneRaw = isset($validated['scene_description']) ? trim((string) $validated['scene_description']) : '';
+        $sceneForJob = $sceneRaw === '' ? null : $sceneRaw;
+
+        GeneratePresentationPreviewJob::dispatch((string) $asset->id, (string) $version->id, $force, $sceneForJob)
             ->onQueue(PipelineQueueResolver::imagesQueueForAsset($asset));
 
         return response()->json([

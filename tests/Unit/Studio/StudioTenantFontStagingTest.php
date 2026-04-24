@@ -13,6 +13,7 @@ use App\Models\StorageBucket;
 use App\Models\Tenant;
 use App\Models\UploadSession;
 use App\Studio\Rendering\Exceptions\StudioFontResolutionException;
+use App\Studio\Rendering\StudioGoogleFontFileCache;
 use App\Studio\Rendering\StudioRenderingFontFileCache;
 use App\Studio\Rendering\StudioRenderingFontResolver;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -77,7 +78,7 @@ class StudioTenantFontStagingTest extends TestCase
             'size_bytes' => 10,
         ]);
 
-        $resolver = new StudioRenderingFontResolver(new StudioRenderingFontFileCache);
+        $resolver = new StudioRenderingFontResolver(new StudioRenderingFontFileCache, new StudioGoogleFontFileCache);
         try {
             $resolver->resolveForTextLayer(
                 $tenant,

@@ -1,6 +1,7 @@
 /**
  * Executions drawer: compare Source, Studio, Presentation (CSS), and AI in one modal.
  */
+import { useEffect, useState } from 'react'
 import { Dialog, DialogPanel, DialogTitle } from '@headlessui/react'
 import { ArrowDownTrayIcon, ArrowPathIcon, XMarkIcon } from '@heroicons/react/24/outline'
 import {
@@ -8,6 +9,9 @@ import {
     formatThumbnailPipelineAttemptParts,
 } from '../utils/thumbnailModes'
 import ExecutionPresentationFrame from './execution/ExecutionPresentationFrame'
+
+/** Aligned with config/presentation_preview.max_scene_description_length (default 500). */
+const AI_SCENE_DESCRIPTION_MAX = 500
 
 const PRESENTATION_PRESETS = [
     { id: 'neutral_studio', label: 'Neutral studio' },
@@ -88,7 +92,8 @@ function downloadButton(onClick, busy, disabled, label) {
  * @param {string} props.aiPipelineStatus
  * @param {boolean} props.showAiGenerate
  * @param {string} props.aiGenerateLabel
- * @param {() => void} [props.onAiGenerate]
+ * @param {string} [props.initialAiSceneDescription] — last saved scene line from asset metadata (optional).
+ * @param {(ctx?: { sceneDescription: string }) => void} [props.onAiGenerate]
  * @param {boolean} props.aiGenerateLoading
  * @param {boolean} props.aiGenerateDisabled
  * @param {() => void} [props.onDownloadOriginal]
@@ -100,7 +105,7 @@ function downloadButton(onClick, busy, disabled, label) {
  * @param {boolean} [props.showStudioRequeue]
  * @param {boolean} [props.studioRequeueDisabled]
  * @param {boolean} [props.studioRequeueBusy]
- * @param {() => void} [props.onAiRequeue]
+ * @param {(ctx?: { sceneDescription: string }) => void} [props.onAiRequeue]
  * @param {boolean} [props.showAiRequeue]
  * @param {boolean} [props.aiRequeueDisabled]
  * @param {boolean} [props.aiRequeueBusy]
@@ -154,10 +159,20 @@ export default function ExecutionTripleCompareModal({
     aiRequeueBusy = false,
     studioStatusNote = null,
     aiStatusNote = null,
+    initialAiSceneDescription = '',
 }) {
+    const [aiSceneDescription, setAiSceneDescription] = useState('')
     const studioSt = String(studioPipelineStatus || '').toLowerCase()
     const aiSt = String(aiPipelineStatus || '').toLowerCase()
     const dl = downloadLoadingMode
+
+    useEffect(() => {
+        if (!open) return
+        const next = String(initialAiSceneDescription || '').slice(0, AI_SCENE_DESCRIPTION_MAX)
+        setAiSceneDescription(next)
+    }, [open, initialAiSceneDescription])
+
+    const showAiSceneField = Boolean(showAiGenerate || showAiRequeue)
 
     const col = (title, sub, meta, body, footer) => (
         <div className="flex min-w-0 flex-col gap-2">
@@ -351,7 +366,36 @@ export default function ExecutionTripleCompareModal({
                                 <span className="px-3 text-center text-xs text-gray-500">No AI view yet</span>
                             ),
                             <>
+                                {showAiSceneField ? (
+                                    <div className="flex flex-col gap-1">
+                                        <label className="text-[10px] font-medium text-gray-600" htmlFor="compare-ai-scene">
+                                            Environment (optional)
+                                        </label>
+                                        <textarea
+                                            id="compare-ai-scene"
+                                            rows={2}
+                                            maxLength={AI_SCENE_DESCRIPTION_MAX}
+                                            value={aiSceneDescription}
+                                            onChange={(e) =>
+                                                setAiSceneDescription(e.target.value.slice(0, AI_SCENE_DESCRIPTION_MAX))
+                                            }
+                                            disabled={aiGenerateLoading || aiRequeueBusy || aiSt === 'processing'}
+                                            placeholder="e.g. Architect's desk, warm afternoon light"
+                                            className="resize-y rounded-md border border-gray-300 bg-white px-2 py-1.5 text-[10px] text-gray-900 placeholder:text-gray-400 disabled:bg-gray-50 disabled:text-gray-500"
+                                        />
+                                        <p className="text-[9px] leading-snug text-gray-500">
+                                            We prepend standard instructions to preserve your creative and only place it
+                                            in this scene for presentation.
+                                        </p>
+                                    </div>
+                                ) : null}
                                 {downloadButton(onDownloadAi, dl === 'presentation', false, 'Download AI view')}
+                                {(aiGenerateLoading || aiRequeueBusy) && aiSt !== 'processing' ? (
+                                    <div className="flex items-center gap-1 text-[10px] text-gray-600">
+                                        <ArrowPathIcon className="h-3.5 w-3.5 shrink-0 animate-spin text-gray-500" />
+                                        <span>Submitting request…</span>
+                                    </div>
+                                ) : null}
                                 {aiSt === 'processing' ? (
                                     <div className="flex items-center gap-1 text-[10px] text-gray-600">
                                         <ArrowPathIcon className="h-3.5 w-3.5 shrink-0 animate-spin text-gray-500" />
@@ -362,7 +406,7 @@ export default function ExecutionTripleCompareModal({
                                     <button
                                         type="button"
                                         title='Starts a new job even if status is still "in progress".'
-                                        onClick={onAiRequeue}
+                                        onClick={() => onAiRequeue({ sceneDescription: aiSceneDescription })}
                                         disabled={aiRequeueDisabled}
                                         className="w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-[10px] font-semibold text-slate-800 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
                                     >
@@ -372,7 +416,7 @@ export default function ExecutionTripleCompareModal({
                                 {showAiGenerate && onAiGenerate ? (
                                     <button
                                         type="button"
-                                        onClick={onAiGenerate}
+                                        onClick={() => onAiGenerate({ sceneDescription: aiSceneDescription })}
                                         disabled={aiGenerateDisabled || aiGenerateLoading}
                                         className="w-full rounded-md px-2 py-1.5 text-[10px] font-semibold text-white shadow-sm disabled:cursor-not-allowed disabled:opacity-50"
                                         style={{ backgroundColor: primaryColor }}

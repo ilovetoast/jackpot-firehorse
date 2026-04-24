@@ -4,8 +4,10 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\ApplicationErrorEvent;
+use App\Models\StudioCompositionVideoExportJob;
 use App\Models\SystemIncident;
 use App\Models\Tenant;
+use App\Services\Admin\StudioCompositionVideoExportAdminMetrics;
 use App\Services\Reliability\ReliabilityMetricsService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -22,7 +24,7 @@ use Inertia\Response;
 /**
  * Unified Operations Center.
  *
- * Data from system_incidents, failed_jobs, and application_error_events. No log scraping.
+ * Data from system_incidents, failed_jobs, application_error_events, and Studio export failures. No log scraping.
  */
 class OperationsCenterController extends Controller
 {
@@ -42,7 +44,7 @@ class OperationsCenterController extends Controller
         $this->authorizeAdmin();
 
         $tab = (string) $request->get('tab', 'overview');
-        $allowedTabs = ['overview', 'queue', 'incidents', 'application-errors', 'reliability', 'failed-jobs'];
+        $allowedTabs = ['overview', 'queue', 'incidents', 'application-errors', 'reliability', 'failed-jobs', 'studio-exports'];
         if (! in_array($tab, $allowedTabs, true)) {
             $tab = 'overview';
         }
@@ -125,6 +127,8 @@ class OperationsCenterController extends Controller
         $horizonAvailable = class_exists(\Laravel\Horizon\Horizon::class);
         $horizonUrl = $horizonAvailable ? url(config('horizon.path', 'horizon')) : null;
 
+        $studioVideoExports = StudioCompositionVideoExportAdminMetrics::operationsCenterPayload();
+
         return Inertia::render('Admin/OperationsCenter/Index', [
             'tab' => $tab,
             'incidents' => $incidents,
@@ -135,6 +139,7 @@ class OperationsCenterController extends Controller
             'reliabilityMetrics' => $reliabilityMetrics,
             'horizonAvailable' => $horizonAvailable,
             'horizonUrl' => $horizonUrl,
+            'studioVideoExports' => $studioVideoExports,
         ]);
     }
 
@@ -154,6 +159,33 @@ class OperationsCenterController extends Controller
             'message' => $before === 0
                 ? 'No failed job records to remove.'
                 : "Removed {$before} failed job record(s).",
+        ]);
+    }
+
+    /**
+     * Remove a **failed** Studio composition video export job row (diagnostics / cleanup only).
+     * Does not cancel queued work; completed or in-flight rows are rejected.
+     */
+    public function destroyStudioVideoExportJob(int $id): JsonResponse
+    {
+        $this->authorizeAdmin();
+
+        $row = StudioCompositionVideoExportJob::query()->find($id);
+        if ($row === null) {
+            return response()->json(['ok' => false, 'message' => 'Export job not found.'], 404);
+        }
+        if ($row->status !== StudioCompositionVideoExportJob::STATUS_FAILED) {
+            return response()->json([
+                'ok' => false,
+                'message' => 'Only failed export rows can be deleted here. Other statuses are retained for history and reconciliation.',
+            ], 422);
+        }
+
+        $row->delete();
+
+        return response()->json([
+            'ok' => true,
+            'message' => 'Failed export job record removed.',
         ]);
     }
 

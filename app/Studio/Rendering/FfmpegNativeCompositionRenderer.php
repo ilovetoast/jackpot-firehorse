@@ -122,7 +122,7 @@ final class FfmpegNativeCompositionRenderer implements CompositionRenderer
         $want = $includeAudio && ($staged['base_has_audio'] ?? false) && ! ($staged['layer_muted'] ?? false);
         if ($want) {
             return array_merge($argv, [
-                '-map', '0:a:0',
+                '-map', '0:a:0?',
                 '-c:a', 'aac',
                 '-b:a', '192k',
             ]);

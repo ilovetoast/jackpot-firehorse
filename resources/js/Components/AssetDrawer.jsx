@@ -408,6 +408,8 @@ export default function AssetDrawer({
     const [studioViewSaving, setStudioViewSaving] = useState(false)
     const [presentationPresetSaving, setPresentationPresetSaving] = useState(false)
     const [presentationPreviewLoading, setPresentationPreviewLoading] = useState(false)
+    /** Prevents double-submit before React re-renders (stays true until loading clears after queue). */
+    const presentationPreviewSubmitLockRef = useRef(false)
     /** Preview styles: enhanced / presentation one-file download */
     const [previewModeDownloadLoading, setPreviewModeDownloadLoading] = useState(null)
     /** Preview & Styles sidebar: “Actions” (thumbnail rebuild) collapsed by default. */
@@ -1975,6 +1977,25 @@ export default function AssetDrawer({
         getThumbnailModesStatus(displayAsset).presentation || '',
     ).toLowerCase()
 
+    useEffect(() => {
+        if (!presentationPreviewLoading) {
+            presentationPreviewSubmitLockRef.current = false
+        }
+    }, [presentationPreviewLoading])
+
+    /** After 202, keep compare-modal AI action disabled until pipeline shows processing (or timeout). */
+    useEffect(() => {
+        if (!presentationPreviewLoading) {
+            return undefined
+        }
+        if (presentationPipelineStatus === 'processing') {
+            setPresentationPreviewLoading(false)
+            return undefined
+        }
+        const t = window.setTimeout(() => setPresentationPreviewLoading(false), 5000)
+        return () => window.clearTimeout(t)
+    }, [presentationPreviewLoading, presentationPipelineStatus])
+
     const displayPresentationMeta = useMemo(
         () => getThumbnailModesModeMeta(displayAsset, 'presentation'),
         [
@@ -2525,6 +2546,26 @@ export default function AssetDrawer({
         }
     }
 
+    /** Same as formatDate plus local time when the value parses to a valid instant (e.g. ISO from API). */
+    const formatDateTime = (dateString) => {
+        if (!dateString) return 'Unknown date'
+        try {
+            const date = new Date(dateString)
+            if (Number.isNaN(date.getTime())) {
+                return 'Unknown date'
+            }
+            return date.toLocaleString('en-US', {
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric',
+                hour: 'numeric',
+                minute: '2-digit',
+            })
+        } catch (e) {
+            return 'Unknown date'
+        }
+    }
+
     // Get category name
     // Use displayAsset (with live updates) instead of prop asset
     const categoryName = displayAsset.category?.name || 'Uncategorized'
@@ -2712,19 +2753,29 @@ export default function AssetDrawer({
     const handleGeneratePresentationPreview = async (opts = {}) => {
         const force = Boolean(opts.force)
         if (!displayAsset?.id || !canRetryThumbnails) return
+        if (presentationPreviewSubmitLockRef.current) {
+            return
+        }
+        presentationPreviewSubmitLockRef.current = true
         setPresentationPreviewLoading(true)
+        let response = null
         try {
-            const res = await window.axios.post(
+            const rawScene = typeof opts.sceneDescription === 'string' ? opts.sceneDescription.trim() : ''
+            const payload = {}
+            if (rawScene) {
+                payload.scene_description = rawScene
+            }
+            response = await window.axios.post(
                 `/app/assets/${displayAsset.id}/presentation-preview/generate`,
-                null,
+                Object.keys(payload).length > 0 ? payload : {},
                 {
                     params: { force: force ? 1 : 0 },
                     validateStatus: (s) => s >= 200 && s < 500,
                 },
             )
-            if (res.status === 202) {
+            if (response.status === 202) {
                 setToastType('success')
-                setToastMessage(res.data?.message || 'AI view generation started.')
+                setToastMessage(response.data?.message || 'AI view generation started.')
                 const meta = displayAsset.metadata || {}
                 const nestedStatus = meta.thumbnail_modes_status || {}
                 const topStatus = displayAsset.thumbnail_modes_status || {}
@@ -2738,33 +2789,36 @@ export default function AssetDrawer({
                 })
                 return
             }
-            if (res.status === 409) {
+            if (response.status === 409) {
                 setToastType('error')
-                setToastMessage(res.data?.error || 'AI view generation already in progress.')
+                setToastMessage(response.data?.error || 'AI view generation already in progress.')
                 return
             }
-            if (res.status === 403) {
+            if (response.status === 403) {
                 setToastType('error')
-                setToastMessage(res.data?.error || 'You do not have permission to force this action.')
+                setToastMessage(response.data?.error || 'You do not have permission to force this action.')
                 return
             }
-            if (res.status === 422) {
+            if (response.status === 422) {
                 setToastType('error')
-                setToastMessage(res.data?.error || 'Cannot start AI view for this asset.')
+                setToastMessage(response.data?.error || 'Cannot start AI view for this asset.')
                 return
             }
-            if (res.status >= 200 && res.status < 300) {
+            if (response.status >= 200 && response.status < 300) {
                 setToastType('success')
-                setToastMessage(res.data?.message || 'OK')
+                setToastMessage(response.data?.message || 'OK')
                 return
             }
             setToastType('error')
-            setToastMessage(res.data?.error || 'Could not start AI view generation.')
+            setToastMessage(response.data?.error || 'Could not start AI view generation.')
         } catch (err) {
             setToastType('error')
             setToastMessage(err.response?.data?.error || 'Could not start AI view generation.')
         } finally {
-            setPresentationPreviewLoading(false)
+            const queued = response && response.status === 202
+            if (!queued) {
+                setPresentationPreviewLoading(false)
+            }
         }
     }
 
@@ -4930,9 +4984,29 @@ export default function AssetDrawer({
                                             <p className="text-xs text-slate-500">Your organization&apos;s policy does not permit downloading individual assets. Use &quot;Add to download&quot; to create a packaged download.</p>
                                         )}
                                         {isFontFile && canSingleAssetDownload && (
-                                            <p className="text-xs text-slate-600">
-                                                By downloading, you confirm you have the right to use this font. {auth?.activeBrand?.name || 'This brand'} does not provide font licensing or redistribution; you are responsible for complying with the font license.
-                                            </p>
+                                            <div
+                                                className="mt-2 rounded-lg border border-gray-100 bg-gray-50/90 px-3 py-2.5 text-left shadow-sm"
+                                                role="note"
+                                                aria-label="Font licensing notice"
+                                            >
+                                                <div className="flex gap-2.5">
+                                                    <InformationCircleIcon
+                                                        className="mt-0.5 h-4 w-4 shrink-0 text-slate-500"
+                                                        aria-hidden
+                                                    />
+                                                    <div className="min-w-0">
+                                                        <p className="text-[11px] font-semibold leading-tight text-slate-800">
+                                                            Font licensing
+                                                        </p>
+                                                        <p className="mt-1 text-[11px] leading-snug text-slate-600 [text-wrap:pretty]">
+                                                            By downloading, you confirm you have the right to use this
+                                                            font. {auth?.activeBrand?.name || 'This brand'} does not
+                                                            provide font licensing or redistribution; you are
+                                                            responsible for complying with the font license.
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                            </div>
                                         )}
                                     </div>
                                 )
@@ -6304,7 +6378,7 @@ export default function AssetDrawer({
                             <div className="flex items-start gap-4">
                                 <dt className="text-sm text-gray-500 w-32 flex-shrink-0">Uploaded</dt>
                                 <dd className="text-sm font-semibold text-gray-900 flex-1 min-w-0 break-words text-left">
-                                    {formatDate(displayAsset.created_at)}
+                                    {formatDateTime(displayAsset.created_at)}
                                 </dd>
                             </div>
                         )}
@@ -6636,6 +6710,11 @@ export default function AssetDrawer({
             <ExecutionTripleCompareModal
                 open={Boolean(executionTripleCompareOpen && showExecutionPreviewChrome)}
                 onClose={() => setExecutionTripleCompareOpen(false)}
+                initialAiSceneDescription={
+                    displayPresentationMeta?.last_scene_description != null
+                        ? String(displayPresentationMeta.last_scene_description)
+                        : ''
+                }
                 primaryColor={brandPrimary}
                 originalUrl={executionDrawerOriginalUrl}
                 studioUrl={executionDrawerEnhancedDisplayUrl}
@@ -6668,9 +6747,10 @@ export default function AssetDrawer({
                 aiPipelineStatus={presentationPipelineStatus}
                 showAiGenerate={compareModalShowPresentationGenerate}
                 aiGenerateLabel={presentationPreviewPrimaryLabel}
-                onAiGenerate={() =>
+                onAiGenerate={(ctx) =>
                     handleGeneratePresentationPreview({
                         force: presentationPreviewForce,
+                        sceneDescription: ctx?.sceneDescription,
                     })
                 }
                 aiGenerateLoading={presentationPreviewLoading}
@@ -6711,14 +6791,15 @@ export default function AssetDrawer({
                 }
                 studioRequeueDisabled={enhancedPreviewLoading}
                 studioRequeueBusy={enhancedPreviewLoading}
-                onAiRequeue={() => void handleGeneratePresentationPreview({ force: true })}
-                showAiRequeue={
-                    presentationPipelineStatus === 'processing' &&
-                    canOfferEnhancedPreviewGenerate &&
-                    showAiViewOption
+                onAiRequeue={(ctx) =>
+                    void handleGeneratePresentationPreview({
+                        force: true,
+                        sceneDescription: ctx?.sceneDescription,
+                    })
                 }
-                aiRequeueDisabled={presentationPreviewLoading}
-                aiRequeueBusy={presentationPreviewLoading}
+                showAiRequeue={false}
+                aiRequeueDisabled={true}
+                aiRequeueBusy={false}
                 studioStatusNote={compareModalStudioStatusNote}
                 aiStatusNote={compareModalAiStatusNote}
             />

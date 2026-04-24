@@ -23,8 +23,8 @@ The queued job still resolves the tenant/user and calls `StudioCompositionVideoE
 
 1. Deploy with `STUDIO_RENDERING_DRIVER=ffmpeg_native` (default in config).
 2. Ensure workers have **FFmpeg/ffprobe**.
-3. **Fonts (text layers):** tenant fonts are copied from Laravel storage (e.g. S3) into **`storage/app/{STUDIO_RENDERING_FONT_CACHE_DIR}`** (default `studio/font-cache`) as **TTF/OTF** only. Imagick or GD+FreeType renders text using **absolute local paths** — never signed URLs or HTTP fetches for font binaries.
-4. Set **`STUDIO_RENDERING_DEFAULT_FONT_PATH`** when any visible text layer relies on CSS **font-family** only (no `font_asset_id` / explicit local path). If every text layer references a tenant font asset, the default path is optional at request time, but a default remains useful as a safety net for partial payloads.
+3. **Fonts (text layers):** see **[FONTS_RENDERING.md](./FONTS_RENDERING.md)** — bundled repo fonts, curated Google downloads, and tenant staging into **`storage/app/{STUDIO_RENDERING_FONT_CACHE_DIR}`** (default `studio/font-cache`) as **TTF/OTF** only. Rasterizers use **absolute local paths** only.
+4. Set **`STUDIO_RENDERING_DEFAULT_FONT_PATH`** only if you need to override the automatic default (**`STUDIO_RENDERING_DEFAULT_FONT_KEY`** → bundled Inter, then DejaVu). Legacy CSS-only `font-family` stacks still map to bundled fonts when possible.
 5. Keep Playwright optional unless you rely on browser fallback or `browser_canvas` driver.
 6. Optional: set `QUEUE_VIDEO_HEAVY_STUDIO_CANVAS_QUEUE` only for browser jobs; FFmpeg-native jobs use the standard heavy video queue.
 
@@ -48,12 +48,16 @@ The queued job still resolves the tenant/user and calls `StudioCompositionVideoE
 | `rasterizer_missing_imagick_and_gd` | Install **Imagick** or **PHP GD** with FreeType on workers. |
 | `font_remote_disk_requires_asset_id` | Do not point `font.disk` at `s3` without an asset id — use DAM font assets. |
 
+### Strict layer policy (`ffmpeg_native_strict_layer_policy`)
+
+When `studio_rendering.fail_on_unsupported_visible_layers` is **true** (default), export fails if a **visible** layer cannot be normalized (unknown `type`, **empty text**, exotic fill scrims the rasterizer still rejects, etc.) or is **skipped** because its **z-index is below the primary video**. Radial **text boost** fills are rasterized for FFmpeg-native when Imagick supports `radial-gradient:` (otherwise a linear fallback with the same colors is used). The job’s `error_json.debug.layer_diagnostics` lists each row (`layer_id`, `type`, `reason`). To **omit** unsupported layers and still get an MP4 (with a worker warning), set **`STUDIO_RENDERING_FAIL_ON_UNSUPPORTED_VISIBLE_LAYERS=false`** — only when missing overlays are acceptable.
+
 Server packages: **PHP Imagick** (recommended) or **GD + FreeType**, plus **ffmpeg** (includes **ffprobe** on Ubuntu/Debian), **fontconfig**, and common image libs — see the install snippets in [PRODUCTION_WORKER_SOFTWARE.md](../environments/PRODUCTION_WORKER_SOFTWARE.md#studio-ffmpeg-native-export-workers).
 
 ## Unsupported in FFmpeg native V1
 
 - **Mask** layers (fail or browser fallback).
-- **Non-normal** `blendMode` on raster/video (fail or browser fallback).
+- **Non-normal** `blendMode` on **video** layers (fail or browser fallback). **Image** / **generative_image** / **text** / **fill** / **shape** overlays: `blend_mode` is passed into the FFmpeg graph; supported non-`normal` modes use the `blend` filter (`all_mode=…`) after placing the raster on a full-canvas transparent sheet. **Hue / saturation / color / luminosity** (HSL-style CSS modes) are **not** FFmpeg `blend` modes in current libavfilter — they **fall back to `overlay`**. `color-dodge` / `color-burn` map to **`dodge`** / **`burn`**. Very old FFmpeg builds without `blend` may still fail—use a current `ffmpeg` on workers.
 - **Gradient** fills are **not** drawn as true gradients in V1; pad/letterbox color uses the same **solid approximation** as legacy FFmpeg (`gradientEndColor` → `gradientStartColor` → `color` via {@see \App\Services\Studio\StudioCompositionVideoExportMediaHelper::resolvePadColorForFfmpeg}). A notice is logged when a visible gradient fill is present.
 - **Multiple stacked video layers** as overlays: only the **primary** video is fully supported as the base track; extra video layers above the base may be rejected in V1 depending on document complexity.
 

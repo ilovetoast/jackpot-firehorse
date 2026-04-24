@@ -11,6 +11,27 @@ use App\Studio\Rendering\Dto\RenderTimeline;
 final class FfmpegFilterGraphBuilder
 {
     /**
+     * Document {@code blendMode} (CSS mix-blend-mode) → FFmpeg {@code blend} filter {@code all_mode} value.
+     * Keys are lowercased editor strings; values match libavfilter blend modes. Unknown / normal → omitted (use overlay).
+     *
+     * @var array<string, string>
+     */
+    private const DOCUMENT_BLEND_TO_FFMPEG_ALL_MODE = [
+        'multiply' => 'multiply',
+        'screen' => 'screen',
+        'overlay' => 'overlay',
+        'darken' => 'darken',
+        'lighten' => 'lighten',
+        'color-dodge' => 'dodge',
+        'color-burn' => 'burn',
+        'hard-light' => 'hardlight',
+        'soft-light' => 'softlight',
+        'difference' => 'difference',
+        'exclusion' => 'exclusion',
+        // CSS hue / saturation / color / luminosity are not libavfilter `blend` modes — omit so we use classic `overlay`.
+    ];
+
+    /**
      * @param  list<RenderLayer>  $overlays
      * @return array{filter_complex: string, video_out_label: string, input_count: int}
      */
@@ -76,15 +97,48 @@ final class FfmpegFilterGraphBuilder
             $st = sprintf('%.6f', max(0.0, $ly->startSeconds));
             $en = sprintf('%.6f', max($ly->startSeconds + 0.001, $ly->endSeconds));
             $enable = sprintf("between(t\\,%s\\,%s)", $st, $en);
-            $parts[] = sprintf(
-                '[%s][%s]overlay=%d:%d:enable=\'%s\':shortest=1:format=auto[%s]',
-                $cur,
-                $alphaLabel,
-                $x,
-                $y,
-                $enable,
-                $next
-            );
+            $blendMode = strtolower(trim((string) ($ly->extra['blend_mode'] ?? 'normal')));
+            $ffmpegBlend = self::DOCUMENT_BLEND_TO_FFMPEG_ALL_MODE[$blendMode] ?? null;
+            if ($ffmpegBlend !== null) {
+                $trans = 'tr'.$oi;
+                $ovfull = 'ovfull'.$oi;
+                $dStr = sprintf('%.6f', $timeline->outputDurationSeconds());
+                $fpsInt = max(1, $timeline->fps);
+                $parts[] = sprintf(
+                    'color=c=black@0.0:s=%dx%d:r=%d:d=%s,format=rgba,setpts=PTS-STARTPTS[%s]',
+                    $w,
+                    $h,
+                    $fpsInt,
+                    $dStr,
+                    $trans
+                );
+                $parts[] = sprintf(
+                    '[%s][%s]overlay=%d:%d:enable=\'%s\':shortest=1:format=auto[%s]',
+                    $trans,
+                    $alphaLabel,
+                    $x,
+                    $y,
+                    $enable,
+                    $ovfull
+                );
+                $parts[] = sprintf(
+                    '[%s][%s]blend=all_mode=%s:shortest=1[%s]',
+                    $cur,
+                    $ovfull,
+                    $ffmpegBlend,
+                    $next
+                );
+            } else {
+                $parts[] = sprintf(
+                    '[%s][%s]overlay=%d:%d:enable=\'%s\':shortest=1:format=auto[%s]',
+                    $cur,
+                    $alphaLabel,
+                    $x,
+                    $y,
+                    $enable,
+                    $next
+                );
+            }
             $cur = $next;
             $idx++;
         }

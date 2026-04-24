@@ -30,50 +30,66 @@ import ProcessingActionCard from './ProcessingActionCard'
 
 const EASING_TOOLBAR = 'cubic-bezier(0.16, 1, 0.3, 1)'
 
-/** Creative super-section: metadata, names, and Video AI */
-const CREATIVE_BULK_GROUP_LABELS = new Set(['Metadata', 'Names'])
-
-function partitionBulkModalGroups(groups) {
-    const general = []
-    const creative = []
-    for (const g of groups) {
-        if (CREATIVE_BULK_GROUP_LABELS.has(g.label)) {
-            creative.push(g)
-        } else {
-            general.push(g)
-        }
-    }
-    return { general, creative }
-}
-
 /** Compact rail header — matches metadata / bulk density */
-function BulkModalSuperSection({ title, children }) {
+function BulkModalSuperSection({ title, description, children }) {
     return (
         <section className="space-y-3">
-            <div className="flex items-center gap-2 border-b border-gray-200 pb-1.5">
+            <div className="border-b border-gray-200 pb-1.5">
                 <h2 className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">{title}</h2>
+                {description ? (
+                    <p className="mt-1 max-w-prose text-[11px] leading-snug text-gray-500">{description}</p>
+                ) : null}
             </div>
             <div className="space-y-5">{children}</div>
         </section>
     )
 }
 
-function BulkActionGroupBlock({ group, groupIndex, onPick }) {
+function pickBulkGroupByLabel(groups, label) {
+    return groups.find((g) => g.label === label)
+}
+
+function assetLooksLikeVideo(a) {
+    if (!a || typeof a !== 'object') return false
+    const mime = String(a.mime_type || '').toLowerCase()
+    if (mime.startsWith('video/')) return true
+    const name = String(a.original_filename || a.title || a.name || '')
+    const ext = name.includes('.') ? name.split('.').pop().toLowerCase() : ''
+    return ['mp4', 'mov', 'avi', 'mkv', 'webm', 'm4v', 'mpeg', 'mpg'].includes(ext)
+}
+
+function BulkActionGroupBlock({ group, groupIndex, onPick, hideSectionHeader = false, workflowColumn = false }) {
     return (
         <div className="space-y-2">
             {groupIndex > 0 && group.label === 'Trash' && <div className="border-t border-gray-100 pt-4 -mt-1" />}
-            <div className="flex flex-wrap items-end justify-between gap-x-3 gap-y-0.5">
-                <h3 className="text-xs font-semibold text-gray-800">{group.label}</h3>
-                {group.sectionDescription ? (
-                    <p className="max-w-full text-[11px] leading-snug text-gray-500 sm:max-w-[70%] sm:text-right">
-                        {group.sectionDescription}
-                    </p>
-                ) : null}
-            </div>
+            {!hideSectionHeader && (
+                <div
+                    className={
+                        workflowColumn
+                            ? 'flex flex-col gap-1'
+                            : 'flex flex-wrap items-end justify-between gap-x-3 gap-y-0.5'
+                    }
+                >
+                    <h3 className="text-xs font-semibold text-gray-800">{group.label}</h3>
+                    {group.sectionDescription ? (
+                        <p
+                            className={
+                                workflowColumn
+                                    ? 'max-w-full text-[11px] leading-snug text-gray-500'
+                                    : 'max-w-full text-[11px] leading-snug text-gray-500 sm:max-w-[70%] sm:text-right'
+                            }
+                        >
+                            {group.sectionDescription}
+                        </p>
+                    ) : null}
+                </div>
+            )}
             <div
                 className={
                     group.validActions.length === 1
-                        ? 'mt-1.5 flex justify-start'
+                        ? workflowColumn
+                            ? 'mt-1.5 flex w-full justify-stretch'
+                            : 'mt-1.5 flex justify-start'
                         : 'mt-1.5 grid grid-cols-[repeat(auto-fill,minmax(13.5rem,1fr))] gap-2.5'
                 }
             >
@@ -85,7 +101,7 @@ function BulkActionGroupBlock({ group, groupIndex, onPick }) {
                             type="button"
                             onClick={() => onPick(id)}
                             className={`flex w-full items-start gap-2.5 rounded-lg border border-gray-100 bg-white p-3 text-left shadow-sm transition-all duration-150 ease-out hover:-translate-y-px hover:shadow-md active:scale-[0.99] active:duration-75 ${
-                                group.validActions.length === 1 ? 'max-w-sm' : ''
+                                group.validActions.length === 1 && !workflowColumn ? 'max-w-sm' : ''
                             } ${
                                 warningTint
                                     ? 'hover:bg-amber-50/80'
@@ -206,28 +222,34 @@ const BULK_ACTION_GROUPS = [
     },
     {
         label: 'Classification',
-        sectionDescription: 'Assign category (library or execution) and move to main grid.',
+        sectionDescription:
+            'Sets the primary category for each asset — it drives folder placement, visibility, and how items sort on the grid. Choose Library or Execution type when applicable.',
         actions: [
-            { id: 'ASSIGN_CATEGORY', label: 'Assign Category', helper: 'Set category, asset type, and move to main grid', icon: DocumentCheckIcon },
+            {
+                id: 'ASSIGN_CATEGORY',
+                label: 'Assign Category',
+                helper: 'Set the top-level category, asset type, and main-grid placement as a group',
+                icon: DocumentCheckIcon,
+            },
         ],
     },
     {
-        label: 'Metadata',
-        sectionDescription: 'Add, replace, clear, or remove specific tags.',
+        label: 'Asset data',
+        sectionDescription: 'Structured fields and tags: add or merge values, replace wholesale, clear fields, or strip specific tags only.',
         actions: [
-            { id: 'METADATA_ADD', label: 'Add Metadata', helper: 'Add or merge field values', icon: PencilSquareIcon },
-            { id: 'METADATA_REPLACE', label: 'Replace Metadata', helper: 'Overwrite field values', icon: PencilSquareIcon },
-            { id: 'METADATA_CLEAR', label: 'Clear Metadata', helper: 'Remove field values', icon: PencilSquareIcon },
-            { id: 'METADATA_REMOVE_TAGS', label: 'Remove Tags', helper: 'Strip chosen tag(s) only; other tags stay', icon: PencilSquareIcon },
+            { id: 'METADATA_ADD', label: 'Add fields', helper: 'Add or merge metadata field values', icon: PencilSquareIcon },
+            { id: 'METADATA_REPLACE', label: 'Replace fields', helper: 'Overwrite metadata field values', icon: PencilSquareIcon },
+            { id: 'METADATA_CLEAR', label: 'Clear fields', helper: 'Remove metadata field values', icon: PencilSquareIcon },
+            { id: 'METADATA_REMOVE_TAGS', label: 'Remove tags', helper: 'Strip chosen tag(s) only; other tags stay', icon: PencilSquareIcon },
         ],
     },
     {
-        label: 'Names',
+        label: 'Rename',
         sectionDescription: 'Rename display names and filenames in sequence (same pattern as batch upload).',
         actions: [
             {
                 id: RENAME_ASSETS_ACTION,
-                label: 'Rename assets',
+                label: 'Rename',
                 helper: 'Base name with 1 of N titles and matching filenames',
                 icon: PencilSquareIcon,
             },
@@ -264,7 +286,7 @@ const BULK_ASSET_TYPE_OPTIONS = [
  *
  * @param {Array<{ id: string, is_published?: boolean, published_at?: string|null, archived_at?: string|null, deleted_at?: string|null, approval_status?: string|null }>} assets
  * @param {string[]} selectedIds
- * @returns {{ publishedCount: number, unpublishedCount: number, archivedCount: number, deletedCount: number, approvalStates: { approved: number, pending: number, rejected: number } } | null}
+ * @returns {{ publishedCount: number, unpublishedCount: number, archivedCount: number, deletedCount: number, videoCount: number, approvalStates: { approved: number, pending: number, rejected: number } } | null}
  */
 export function computeSelectionSummary(assets, selectedIds) {
     if (!Array.isArray(assets) || !Array.isArray(selectedIds) || selectedIds.length === 0) return null
@@ -274,6 +296,7 @@ export function computeSelectionSummary(assets, selectedIds) {
     let unpublishedCount = 0
     let archivedCount = 0
     let deletedCount = 0
+    let videoCount = 0
     const approvalStates = { approved: 0, pending: 0, rejected: 0 }
     for (const a of selected) {
         const published = a.is_published === true || (a.published_at != null && a.published_at !== '')
@@ -281,6 +304,7 @@ export function computeSelectionSummary(assets, selectedIds) {
         else unpublishedCount++
         if (a.archived_at != null && a.archived_at !== '') archivedCount++
         if (a.deleted_at != null && a.deleted_at !== '') deletedCount++
+        if (assetLooksLikeVideo(a)) videoCount++
         const status = (a.approval_status || '').toLowerCase()
         if (status === 'approved') approvalStates.approved++
         else if (status === 'pending') approvalStates.pending++
@@ -291,6 +315,7 @@ export function computeSelectionSummary(assets, selectedIds) {
         unpublishedCount,
         archivedCount,
         deletedCount,
+        videoCount,
         approvalStates,
     }
 }
@@ -421,7 +446,7 @@ export default function BulkActionsModal({
     onClose,
     onComplete,
     onOpenMetadataEdit = null,
-    /** Optional: { publishedCount, unpublishedCount, archivedCount, deletedCount, approvalStates } for contextual actions */
+    /** Optional: { publishedCount, unpublishedCount, archivedCount, deletedCount, videoCount, approvalStates } for contextual actions */
     selectionSummary = null,
     /** Optional: minimal asset data for pre-action summary */
     selectedAssetSummary = null,
@@ -489,10 +514,31 @@ export default function BulkActionsModal({
         return g
     }, [validIds, categories, bulkCategoriesByAssetType, n, canBulkRename, canBulkRemoveTags])
 
-    const { general: generalBulkGroups, creative: creativeBulkGroups } = useMemo(
-        () => partitionBulkModalGroups(groupsWithValidActions),
-        [groupsWithValidActions],
-    )
+    const publicationGroup = pickBulkGroupByLabel(groupsWithValidActions, 'Publication')
+    const archiveGroup = pickBulkGroupByLabel(groupsWithValidActions, 'Archive')
+    const renameGroup = pickBulkGroupByLabel(groupsWithValidActions, 'Rename')
+    const approvalGroup = pickBulkGroupByLabel(groupsWithValidActions, 'Approval')
+    const trashGroup = pickBulkGroupByLabel(groupsWithValidActions, 'Trash')
+    const classificationGroup = pickBulkGroupByLabel(groupsWithValidActions, 'Classification')
+    const assetDataGroup = pickBulkGroupByLabel(groupsWithValidActions, 'Asset data')
+
+    const workflowTopGroups = [publicationGroup, archiveGroup, renameGroup].filter(Boolean)
+    const workflowTopColClass =
+        workflowTopGroups.length >= 3
+            ? 'lg:grid-cols-3'
+            : workflowTopGroups.length === 2
+              ? 'md:grid-cols-2'
+              : 'grid-cols-1'
+
+    const videoCountForContext =
+        selectionSummary && typeof selectionSummary.videoCount === 'number'
+            ? selectionSummary.videoCount
+            : Array.isArray(selectedAssetSummary)
+              ? selectedAssetSummary.filter(assetLooksLikeVideo).length
+              : null
+    const selectionIncludesVideos = videoCountForContext === null || videoCountForContext > 0
+    const showVideoAiBulk = canQueueVideoInsights && selectionIncludesVideos
+    const showVideoAdminPipeline = selectionIncludesVideos
 
     const renamePreview = useMemo(() => {
         if (!bulkRenameBase.trim() || n < 2) return []
@@ -716,71 +762,122 @@ export default function BulkActionsModal({
                             }}
                         >
                             <div className="space-y-8">
-                                {generalBulkGroups.length > 0 && (
-                                    <BulkModalSuperSection title="General">
-                                        {generalBulkGroups.map((group, gIdx) => (
-                                            <BulkActionGroupBlock
-                                                key={group.label}
-                                                group={group}
-                                                groupIndex={gIdx}
-                                                onPick={handleSelectAction}
-                                            />
-                                        ))}
+                                {(workflowTopGroups.length > 0 || approvalGroup || trashGroup) && (
+                                    <BulkModalSuperSection
+                                        title="Workflow"
+                                        description="Publish, archive, rename, approvals, and trash — quick lifecycle controls for the selection."
+                                    >
+                                        {workflowTopGroups.length > 0 && (
+                                            <div className={`grid grid-cols-1 gap-3 ${workflowTopColClass}`}>
+                                                {workflowTopGroups.map((group, gIdx) => (
+                                                    <BulkActionGroupBlock
+                                                        key={group.label}
+                                                        group={group}
+                                                        groupIndex={gIdx}
+                                                        onPick={handleSelectAction}
+                                                        workflowColumn
+                                                    />
+                                                ))}
+                                            </div>
+                                        )}
+                                        {(approvalGroup || trashGroup) && (
+                                            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                                                {approvalGroup ? (
+                                                    <BulkActionGroupBlock
+                                                        key={approvalGroup.label}
+                                                        group={approvalGroup}
+                                                        groupIndex={0}
+                                                        onPick={handleSelectAction}
+                                                    />
+                                                ) : null}
+                                                {trashGroup ? (
+                                                    <BulkActionGroupBlock
+                                                        key={trashGroup.label}
+                                                        group={trashGroup}
+                                                        groupIndex={approvalGroup ? 1 : 0}
+                                                        onPick={handleSelectAction}
+                                                    />
+                                                ) : null}
+                                            </div>
+                                        )}
                                     </BulkModalSuperSection>
                                 )}
 
-                                {(creativeBulkGroups.length > 0 || canQueueVideoInsights) && (
-                                    <BulkModalSuperSection title="Creative">
-                                        {creativeBulkGroups.map((group, gIdx) => (
-                                            <BulkActionGroupBlock
-                                                key={group.label}
-                                                group={group}
-                                                groupIndex={gIdx}
-                                                onPick={handleSelectAction}
-                                            />
-                                        ))}
-                                        {canQueueVideoInsights && (
-                                            <div className="rounded-xl border border-violet-200/90 bg-violet-50/35 p-3.5 shadow-sm">
-                                                <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 border-b border-violet-100/90 pb-1.5">
-                                                    <span className="inline-flex items-center rounded bg-violet-600 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">
-                                                        Video AI
-                                                    </span>
-                                                    <h3 className="text-xs font-semibold text-gray-800">
-                                                        Searchable video insights
-                                                    </h3>
-                                                </div>
-                                                <p className="mt-2 text-[11px] leading-snug text-gray-600">
-                                                    Queue analysis for video files (summary, tags, transcript cues). Non-videos are
-                                                    skipped. Respects tenant video AI job and minute limits. Jobs run in the background.
-                                                </p>
-                                                {pipelineSelectionOverLimit && (
-                                                    <div className="mt-2 flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-900">
-                                                        <ExclamationTriangleIcon className="h-3.5 w-3.5 shrink-0" />
-                                                        <span>
-                                                            Select at most {MAX_BULK_PIPELINE_ASSETS} assets per processing bulk action.
-                                                        </span>
-                                                    </div>
-                                                )}
-                                                <button
-                                                    type="button"
-                                                    onClick={() => handleSelectAction(GENERATE_VIDEO_INSIGHTS)}
-                                                    disabled={pipelineSelectionOverLimit}
-                                                    className="mt-2.5 flex w-full items-start gap-2.5 rounded-lg border border-violet-200 bg-white p-3 text-left shadow-sm transition-all hover:-translate-y-px hover:shadow-md disabled:cursor-not-allowed disabled:opacity-50"
-                                                >
-                                                    <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-violet-100">
-                                                        <SparklesIcon className="h-4 w-4 text-violet-700" />
-                                                    </span>
-                                                    <div className="min-w-0 pt-0.5">
-                                                        <span className="block text-xs font-semibold text-gray-900">
-                                                            Analyze video content
-                                                        </span>
-                                                        <span className="mt-0.5 block text-[11px] leading-snug text-gray-500">
-                                                            Make videos discoverable in search (tags, scenes, summary)
-                                                        </span>
-                                                    </div>
-                                                </button>
+                                {classificationGroup ? (
+                                    <BulkModalSuperSection
+                                        title="Category"
+                                        description="This is the primary classification for the grid and library routing. Get it right before fine-tuning metadata or tags below."
+                                    >
+                                        <BulkActionGroupBlock
+                                            group={classificationGroup}
+                                            groupIndex={0}
+                                            onPick={handleSelectAction}
+                                            hideSectionHeader
+                                        />
+                                    </BulkModalSuperSection>
+                                ) : null}
+
+                                {assetDataGroup ? (
+                                    <BulkModalSuperSection
+                                        title="Asset data"
+                                        description="Bulk edits to custom fields and tags. Category above stays separate so placement stays intentional."
+                                    >
+                                        <BulkActionGroupBlock
+                                            group={assetDataGroup}
+                                            groupIndex={0}
+                                            onPick={handleSelectAction}
+                                            hideSectionHeader
+                                        />
+                                    </BulkModalSuperSection>
+                                ) : null}
+
+                                {showVideoAiBulk && (
+                                    <BulkModalSuperSection
+                                        title="AI-assisted"
+                                        description="Video-only tools. This block appears when at least one selected file looks like a video; jobs still skip non-video rows."
+                                    >
+                                        <div className="rounded-xl border border-violet-200/90 bg-violet-50/35 p-3.5 shadow-sm">
+                                            <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 border-b border-violet-100/90 pb-1.5">
+                                                <span className="inline-flex items-center rounded bg-violet-600 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">
+                                                    Video
+                                                </span>
+                                                <h3 className="text-xs font-semibold text-gray-800">Searchable video insights</h3>
                                             </div>
-                                        )}
+                                            <p className="mt-2 text-[11px] leading-snug text-gray-600">
+                                                {videoCountForContext != null &&
+                                                n > 0 &&
+                                                videoCountForContext > 0 &&
+                                                videoCountForContext < n
+                                                    ? `${videoCountForContext} of ${n} selected look like video — analysis runs for those only.`
+                                                    : 'Queue analysis for video files (summary, tags, transcript cues). Non-videos are skipped. Respects tenant video AI job and minute limits. Jobs run in the background.'}
+                                            </p>
+                                            {pipelineSelectionOverLimit && (
+                                                <div className="mt-2 flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-900">
+                                                    <ExclamationTriangleIcon className="h-3.5 w-3.5 shrink-0" />
+                                                    <span>
+                                                        Select at most {MAX_BULK_PIPELINE_ASSETS} assets per processing bulk action.
+                                                    </span>
+                                                </div>
+                                            )}
+                                            <button
+                                                type="button"
+                                                onClick={() => handleSelectAction(GENERATE_VIDEO_INSIGHTS)}
+                                                disabled={pipelineSelectionOverLimit}
+                                                className="mt-2.5 flex w-full items-start gap-2.5 rounded-lg border border-violet-200 bg-white p-3 text-left shadow-sm transition-all hover:-translate-y-px hover:shadow-md disabled:cursor-not-allowed disabled:opacity-50"
+                                            >
+                                                <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-violet-100">
+                                                    <SparklesIcon className="h-4 w-4 text-violet-700" />
+                                                </span>
+                                                <div className="min-w-0 pt-0.5">
+                                                    <span className="block text-xs font-semibold text-gray-900">
+                                                        Analyze video content
+                                                    </span>
+                                                    <span className="mt-0.5 block text-[11px] leading-snug text-gray-500">
+                                                        Make videos discoverable in search (tags, scenes, summary)
+                                                    </span>
+                                                </div>
+                                            </button>
+                                        </div>
                                     </BulkModalSuperSection>
                                 )}
 
@@ -811,7 +908,7 @@ export default function BulkActionsModal({
                                                     </span>
                                                 </div>
                                             )}
-                                            <div className="mt-2.5 grid grid-cols-1 gap-2">
+                                            <div className="mt-2.5 grid grid-cols-1 gap-2 sm:grid-cols-2">
                                                 <ProcessingActionCard
                                                     compact
                                                     icon="sparkles"
@@ -828,23 +925,27 @@ export default function BulkActionsModal({
                                                     onClick={() => handleSelectAction(SITE_RERUN_THUMBNAILS)}
                                                     disabled={pipelineSelectionOverLimit}
                                                 />
-                                                <ProcessingActionCard
-                                                    compact
-                                                    icon="video"
-                                                    title="Generate video previews"
-                                                    description="Rebuild hover/quick preview MP4s with correct phone/MOV rotation"
-                                                    onClick={() => handleSelectAction(SITE_GENERATE_VIDEO_PREVIEWS)}
-                                                    disabled={pipelineSelectionOverLimit}
-                                                />
-                                                <ProcessingActionCard
-                                                    compact
-                                                    icon="trash"
-                                                    title="Delete video quick previews"
-                                                    description="Remove hover MP4 from storage and clear paths (no regeneration)"
-                                                    variant="danger"
-                                                    onClick={() => handleSelectAction(SITE_DELETE_VIDEO_PREVIEWS)}
-                                                    disabled={pipelineSelectionOverLimit}
-                                                />
+                                                {showVideoAdminPipeline ? (
+                                                    <>
+                                                        <ProcessingActionCard
+                                                            compact
+                                                            icon="video"
+                                                            title="Generate video previews"
+                                                            description="Rebuild hover/quick preview MP4s with correct phone/MOV rotation"
+                                                            onClick={() => handleSelectAction(SITE_GENERATE_VIDEO_PREVIEWS)}
+                                                            disabled={pipelineSelectionOverLimit}
+                                                        />
+                                                        <ProcessingActionCard
+                                                            compact
+                                                            icon="trash"
+                                                            title="Delete video quick previews"
+                                                            description="Remove hover MP4 from storage and clear paths (no regeneration)"
+                                                            variant="danger"
+                                                            onClick={() => handleSelectAction(SITE_DELETE_VIDEO_PREVIEWS)}
+                                                            disabled={pipelineSelectionOverLimit}
+                                                        />
+                                                    </>
+                                                ) : null}
                                                 <ProcessingActionCard
                                                     compact
                                                     icon="refresh"
@@ -1119,7 +1220,7 @@ export default function BulkActionsModal({
                                         : isAssignCategory
                                         ? 'Assign Category'
                                         : isRename
-                                        ? 'Rename assets'
+                                        ? 'Rename'
                                         : 'Apply'}
                                 </button>
                             </div>

@@ -1,5 +1,5 @@
 import { Link, router } from '@inertiajs/react'
-import { useState, useRef, useEffect } from 'react'
+import { Fragment, useState, useRef, useEffect } from 'react'
 import axios from 'axios'
 import AppNav from '../../../Components/AppNav'
 import AppFooter from '../../../Components/AppFooter'
@@ -16,6 +16,7 @@ import {
     ChartBarIcon,
     ChartBarSquareIcon,
     BoltIcon,
+    VideoCameraIcon,
 } from '@heroicons/react/24/outline'
 
 function IncidentRow({ incident: i, onAction, selected, onSelect, onSourceClick }) {
@@ -124,6 +125,7 @@ const TABS = [
     { id: 'queue', label: 'Queue', icon: QueueListIcon },
     { id: 'incidents', label: 'Incidents', icon: ExclamationTriangleIcon },
     { id: 'application-errors', label: 'Application errors', icon: BoltIcon },
+    { id: 'studio-exports', label: 'Studio video exports', icon: VideoCameraIcon },
     { id: 'reliability', label: 'Reliability Metrics', icon: ChartBarIcon },
     { id: 'failed-jobs', label: 'Failed Jobs', icon: ServerStackIcon },
 ]
@@ -139,10 +141,12 @@ export default function OperationsCenterIndex({
     reliabilityMetrics,
     horizonAvailable,
     horizonUrl,
+    studioVideoExports = {},
 }) {
     const [selectedIds, setSelectedIds] = useState(new Set())
     const [bulkLoading, setBulkLoading] = useState(null)
     const [flushFailedLoading, setFlushFailedLoading] = useState(false)
+    const [studioExportDeleteId, setStudioExportDeleteId] = useState(null)
     const [quickViewData, setQuickViewData] = useState(null)
     const [quickViewLoading, setQuickViewLoading] = useState(false)
     const selectAllRef = useRef(null)
@@ -195,6 +199,25 @@ export default function OperationsCenterIndex({
     }, [someSelected, allSelected])
 
     const setTab = (t) => router.get(route('admin.operations-center.index'), { tab: t }, { preserveState: true })
+
+    const deleteStudioExportJobRow = async (jobId) => {
+        if (
+            !window.confirm(
+                'Delete this failed export job row from the database? This only removes the diagnostic record (not the composition). Queued or completed jobs cannot be deleted here.'
+            )
+        ) {
+            return
+        }
+        setStudioExportDeleteId(jobId)
+        try {
+            await axios.delete(route('admin.studio-composition-video-export-jobs.destroy', jobId))
+            router.reload({ only: ['studioVideoExports'] })
+        } catch (e) {
+            window.alert(e?.response?.data?.message || e?.message || 'Delete failed.')
+        } finally {
+            setStudioExportDeleteId(null)
+        }
+    }
 
     const flushFailedJobRecords = async () => {
         if (
@@ -285,6 +308,27 @@ export default function OperationsCenterIndex({
         }
     }
 
+    /** Compact local time for Studio export rows (browser timezone). */
+    const formatStudioExportWhen = (d) => {
+        if (!d) return '—'
+        try {
+            const dt = new Date(d)
+            if (Number.isNaN(dt.getTime())) {
+                return String(d)
+            }
+            return dt.toLocaleString(undefined, {
+                month: 'short',
+                day: 'numeric',
+                year: 'numeric',
+                hour: 'numeric',
+                minute: '2-digit',
+                timeZoneName: 'short',
+            })
+        } catch {
+            return String(d)
+        }
+    }
+
     /** Hover text: same instant in UTC + which zone the table uses (browser). */
     const formatDateHoverUtc = (d) => {
         if (!d) return ''
@@ -316,7 +360,8 @@ export default function OperationsCenterIndex({
                     </Link>
                     <h1 className="text-3xl font-bold tracking-tight text-gray-900">Operations Center</h1>
                     <p className="mt-2 text-sm text-gray-700">
-                        Unified view of incidents, application errors, queue, scheduler, and failed jobs. Data from system_incidents, application_error_events, and failed_jobs.
+                        Unified view of incidents, application errors, Studio composition export failures, queue, scheduler, and failed jobs.
+                        Data from system_incidents, application_error_events, studio_composition_video_export_jobs, and failed_jobs.
                     </p>
 
                     {/* Tabs */}
@@ -410,6 +455,29 @@ export default function OperationsCenterIndex({
                                             View Incidents
                                         </button>
                                     )}
+                                </div>
+                                <div className="overflow-hidden rounded-lg bg-white shadow ring-1 ring-gray-200 p-6 lg:col-span-2">
+                                    <div className="flex items-center justify-between">
+                                        <div className="flex items-center">
+                                            <VideoCameraIcon className="h-6 w-6 text-gray-400 mr-3" />
+                                            <h3 className="text-sm font-medium text-gray-900">Studio video exports (failed)</h3>
+                                        </div>
+                                        <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                                            (studioVideoExports?.last_24h ?? 0) === 0 ? 'bg-green-100 text-green-800' : 'bg-amber-100 text-amber-800'
+                                        }`}>
+                                            {studioVideoExports?.last_24h ?? 0} in 24h / {studioVideoExports?.last_7d ?? 0} in 7d
+                                        </span>
+                                    </div>
+                                    <p className="mt-4 text-sm text-gray-500">
+                                        <span className="font-medium text-gray-700">Failed jobs only</span> on the tab (stderr inline, optional row delete for cleanup). Counts help spot fleet-wide FFmpeg or blend issues.
+                                    </p>
+                                    <button
+                                        type="button"
+                                        onClick={() => setTab('studio-exports')}
+                                        className="mt-4 inline-flex rounded bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500"
+                                    >
+                                        View Studio export failures
+                                    </button>
                                 </div>
                             </div>
                         )}
@@ -629,6 +697,146 @@ export default function OperationsCenterIndex({
                                             No application errors recorded yet, or the table has not been migrated on this environment.
                                         </p>
                                     )}
+                                </div>
+                            </div>
+                        )}
+
+                        {tab === 'studio-exports' && (
+                            <div className="space-y-6">
+                                <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                                    <div className="rounded-lg bg-white p-5 shadow ring-1 ring-gray-200">
+                                        <p className="text-sm font-medium text-gray-500">Failed (24h)</p>
+                                        <p className="mt-1 text-2xl font-semibold text-gray-900">{studioVideoExports?.last_24h ?? 0}</p>
+                                    </div>
+                                    <div className="rounded-lg bg-white p-5 shadow ring-1 ring-gray-200">
+                                        <p className="text-sm font-medium text-gray-500">Failed (7d)</p>
+                                        <p className="mt-1 text-2xl font-semibold text-gray-900">{studioVideoExports?.last_7d ?? 0}</p>
+                                    </div>
+                                    <div className="rounded-lg bg-white p-5 shadow ring-1 ring-gray-200 sm:col-span-1">
+                                        <p className="text-sm font-medium text-gray-500">Top error codes (7d)</p>
+                                        <p className="mt-1 text-sm text-gray-600">
+                                            {(studioVideoExports?.by_code ?? []).length === 0
+                                                ? '—'
+                                                : (studioVideoExports.by_code || []).map((x) => `${x.code} (${x.count})`).join(' · ')}
+                                        </p>
+                                    </div>
+                                </div>
+                                <div className="overflow-hidden rounded-lg bg-white shadow ring-1 ring-gray-200">
+                                    <div className="px-4 py-4 sm:px-6">
+                                        <h2 className="text-lg font-semibold text-gray-900">Failed Studio export jobs</h2>
+                                        <p className="mt-1 text-sm text-gray-500">
+                                            This list is <span className="font-medium text-gray-800">failed rows only</span> (newest first, up to 100). Successful
+                                            exports are not shown here — use tenant tools or asset history for completed MP4s.{' '}
+                                            <span className="font-mono text-gray-700">blend</span> marks graphs that used{' '}
+                                            <span className="font-mono text-gray-700">blend=all_mode=…</span>. Full <span className="font-mono text-gray-700">filter_complex</span> lives in{' '}
+                                            <span className="font-mono text-gray-700">error_json</span> in the database. You may <span className="font-medium text-gray-800">delete</span> a row to
+                                            tidy diagnostics (optional); that does not fix the underlying composition.
+                                        </p>
+                                    </div>
+                                    <div className="border-t border-gray-200 overflow-x-auto">
+                                        <table className="w-full min-w-[56rem] table-fixed divide-y divide-gray-300">
+                                            <thead>
+                                                <tr>
+                                                    <th className="w-[11rem] py-3.5 pl-4 pr-2 text-left text-xs font-semibold uppercase tracking-wide text-gray-600">When (local)</th>
+                                                    <th className="w-[4.5rem] py-3.5 px-2 text-left text-xs font-semibold uppercase tracking-wide text-gray-600">Status</th>
+                                                    <th className="w-[7.5rem] py-3.5 px-2 text-left text-xs font-semibold uppercase tracking-wide text-gray-600">Tenant</th>
+                                                    <th className="w-[5rem] py-3.5 px-2 text-left text-xs font-semibold uppercase tracking-wide text-gray-600">Comp.</th>
+                                                    <th className="w-[8.5rem] py-3.5 px-2 text-left text-xs font-semibold uppercase tracking-wide text-gray-600">Mode</th>
+                                                    <th className="w-[9rem] py-3.5 px-2 text-left text-xs font-semibold uppercase tracking-wide text-gray-600">Code</th>
+                                                    <th className="min-w-0 py-3.5 px-2 text-left text-xs font-semibold uppercase tracking-wide text-gray-600">Message</th>
+                                                    <th className="w-[5.5rem] py-3.5 pr-4 pl-2 text-right text-xs font-semibold uppercase tracking-wide text-gray-600">Actions</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-gray-200">
+                                                {(studioVideoExports?.rows ?? []).map((row) => (
+                                                    <Fragment key={row.id}>
+                                                        <tr className="align-top">
+                                                            <td
+                                                                className="py-2.5 pl-4 pr-2 align-top text-xs leading-snug text-gray-600"
+                                                                title={formatDateHoverUtc(row.updated_at) || undefined}
+                                                            >
+                                                                {formatStudioExportWhen(row.updated_at)}
+                                                            </td>
+                                                            <td className="py-2.5 px-2 align-top">
+                                                                <span className="inline-flex rounded-full bg-red-50 px-1.5 py-0.5 text-[10px] font-medium text-red-800">
+                                                                    {row.status || 'failed'}
+                                                                </span>
+                                                            </td>
+                                                            <td className="min-w-0 py-2.5 px-2 align-top text-xs text-gray-700">
+                                                                <span className="block truncate font-medium text-gray-900" title={row.tenant_name || ''}>
+                                                                    {row.tenant_name || `Tenant #${row.tenant_id}`}
+                                                                </span>
+                                                                {row.tenant_slug ? (
+                                                                    <span className="block truncate text-[10px] text-gray-500" title={row.tenant_slug}>{row.tenant_slug}</span>
+                                                                ) : null}
+                                                            </td>
+                                                            <td className="py-2.5 px-2 align-top font-mono text-xs text-gray-700">{row.composition_id}</td>
+                                                            <td className="min-w-0 py-2.5 px-2 align-top text-xs text-gray-600">
+                                                                <span className="break-all">{row.render_mode || '—'}</span>
+                                                                {row.has_blend_graph ? (
+                                                                    <span className="mt-0.5 inline-block rounded bg-violet-100 px-1 py-0.5 text-[10px] font-medium text-violet-800">blend</span>
+                                                                ) : null}
+                                                            </td>
+                                                            <td className="min-w-0 py-2.5 px-2 align-top text-xs text-gray-600">
+                                                                <span className="break-all font-mono text-[10px]">{row.error_code || '—'}</span>
+                                                                {row.exit_code != null ? (
+                                                                    <span className="block text-[10px] text-gray-500">exit {row.exit_code}</span>
+                                                                ) : null}
+                                                            </td>
+                                                            <td className="min-w-0 py-2.5 px-2 align-top text-xs text-gray-900">
+                                                                <p className="break-words hyphens-auto text-left leading-snug" title={row.error_message}>
+                                                                    {row.error_message || '—'}
+                                                                </p>
+                                                            </td>
+                                                            <td className="py-2.5 pr-4 pl-2 align-top text-right">
+                                                                <button
+                                                                    type="button"
+                                                                    disabled={studioExportDeleteId === row.id}
+                                                                    onClick={() => void deleteStudioExportJobRow(row.id)}
+                                                                    className="inline-flex shrink-0 rounded border border-gray-300 bg-white px-2 py-1 text-[11px] font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                                                                    aria-label={`Delete failed export job ${row.id}`}
+                                                                >
+                                                                    {studioExportDeleteId === row.id ? '…' : 'Delete'}
+                                                                </button>
+                                                            </td>
+                                                        </tr>
+                                                        <tr className="bg-slate-50/90">
+                                                            <td colSpan={8} className="min-w-0 px-4 pb-4 pt-0">
+                                                                {row.stderr_preview ? (
+                                                                    <>
+                                                                        <div className="pt-2 text-xs font-semibold uppercase tracking-wide text-slate-600">
+                                                                            FFmpeg stderr (tail)
+                                                                        </div>
+                                                                        <pre className="mt-1 max-h-60 overflow-auto whitespace-pre-wrap break-words rounded-md border border-slate-200 bg-white p-3 font-mono text-[11px] leading-snug text-slate-900 shadow-inner">
+                                                                            {row.stderr_preview}
+                                                                        </pre>
+                                                                    </>
+                                                                ) : null}
+                                                                {row.diagnostics_detail ? (
+                                                                    <>
+                                                                        <div className={`text-xs font-semibold uppercase tracking-wide text-slate-600 ${row.stderr_preview ? 'mt-3' : 'pt-2'}`}>
+                                                                            Structured diagnostics (JSON)
+                                                                        </div>
+                                                                        <pre className="mt-1 max-h-72 overflow-auto whitespace-pre-wrap break-all rounded-md border border-slate-200 bg-white p-3 font-mono text-[11px] leading-snug text-slate-900 shadow-inner">
+                                                                            {row.diagnostics_detail}
+                                                                        </pre>
+                                                                    </>
+                                                                ) : null}
+                                                                {!row.stderr_preview && !row.diagnostics_detail ? (
+                                                                    <p className="pt-2 text-xs text-slate-500">
+                                                                        No FFmpeg stderr or structured diagnostics payload for this failure.
+                                                                    </p>
+                                                                ) : null}
+                                                            </td>
+                                                        </tr>
+                                                    </Fragment>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                        {(studioVideoExports?.rows ?? []).length === 0 && (
+                                            <p className="py-8 text-center text-sm text-gray-500">No failed Studio video export jobs in this environment.</p>
+                                        )}
+                                    </div>
                                 </div>
                             </div>
                         )}

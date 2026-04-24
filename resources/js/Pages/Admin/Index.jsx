@@ -27,6 +27,7 @@ import {
     ArrowDownTrayIcon,
     CloudArrowUpIcon,
     Squares2X2Icon,
+    VideoCameraIcon,
 } from '@heroicons/react/24/outline'
 import AppNav from '../../Components/AppNav'
 import { usePermission } from '../../hooks/usePermission'
@@ -160,6 +161,12 @@ export default function AdminIndex({ companies: initialCompanies, users: initial
                 { name: 'Activity Logs', icon: DocumentTextIcon, description: 'View system activity and events', href: '/app/admin/activity-logs' },
                 { name: 'System Status', icon: CogIcon, description: 'Monitor system health', href: '/app/admin/system-status' },
                 { name: 'Operations Center', icon: ExclamationTriangleIcon, description: 'Unified incidents, queue, scheduler, failed jobs', href: '/app/admin/operations-center' },
+                {
+                    name: 'Studio video export failures',
+                    icon: VideoCameraIcon,
+                    description: stats ? `Failed: ${stats.studio_video_export_failures_24h ?? 0} (24h) · Operations Center tab` : 'Studio MP4 export errors (FFmpeg, canvas, legacy) with diagnostics',
+                    href: '/app/admin/operations-center?tab=studio-exports',
+                },
                 { name: 'Logs', icon: DocumentTextIcon, description: 'Web/worker (Redis) and deploy script tail', href: '/app/admin/logs' },
                 ...(canViewMetadataRegistry ? [{ name: 'Metadata Registry', icon: TagIcon, description: 'Inspect system metadata fields and their behavior', href: '/app/admin/metadata/registry' }] : []),
                 { name: 'Stripe Management', icon: CreditCardIcon, description: 'Manage Stripe integration, subscriptions, and billing', href: '/app/admin/stripe-status' },

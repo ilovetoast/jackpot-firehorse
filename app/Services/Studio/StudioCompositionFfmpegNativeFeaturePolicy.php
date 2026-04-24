@@ -29,8 +29,13 @@ final class StudioCompositionFfmpegNativeFeaturePolicy
             if ($type === 'mask') {
                 $codes[] = 'mask_layer';
             }
-            $blend = (string) ($ly['blendMode'] ?? 'normal');
-            if ($blend !== '' && $blend !== 'normal' && in_array($type, ['image', 'generative_image', 'video'], true)) {
+            $blend = strtolower(trim((string) ($ly['blendMode'] ?? $ly['blend_mode'] ?? 'normal')));
+            if ($blend === '') {
+                $blend = 'normal';
+            }
+            // Image / generative_image: FFmpeg V1 uses overlay (normal-style composite). Non-normal blend
+            // modes are not reproduced faithfully but are allowed so publish does not hard-fail.
+            if ($blend !== 'normal' && $type === 'video') {
                 $codes[] = 'non_normal_blend:'.$type;
             }
         }

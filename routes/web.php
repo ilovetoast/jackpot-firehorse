@@ -415,6 +415,9 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
     Route::post('/admin/assets/{asset}/versions/{version}/restore', [\App\Http\Controllers\Admin\AdminAssetController::class, 'restoreVersion'])->name('admin.assets.versions.restore');
     Route::get('/admin/operations-center', [\App\Http\Controllers\Admin\OperationsCenterController::class, 'index'])->name('admin.operations-center.index');
     Route::post('/admin/operations-center/failed-jobs/flush', [\App\Http\Controllers\Admin\OperationsCenterController::class, 'flushFailedJobs'])->name('admin.operations-center.failed-jobs.flush');
+    Route::delete('/admin/studio-composition-video-export-jobs/{id}', [\App\Http\Controllers\Admin\OperationsCenterController::class, 'destroyStudioVideoExportJob'])
+        ->whereNumber('id')
+        ->name('admin.studio-composition-video-export-jobs.destroy');
     Route::post('/admin/incidents/bulk-actions', [\App\Http\Controllers\Admin\IncidentActionsController::class, 'bulkActions'])->name('admin.incidents.bulk-actions');
     Route::post('/admin/incidents/{incident}/attempt-repair', [\App\Http\Controllers\Admin\IncidentActionsController::class, 'attemptRepair'])->name('admin.incidents.attempt-repair');
     Route::post('/admin/incidents/{incident}/create-ticket', [\App\Http\Controllers\Admin\IncidentActionsController::class, 'createTicket'])->name('admin.incidents.create-ticket');
@@ -712,6 +715,7 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
                 Route::post('/api/generate-image', [\App\Http\Controllers\Editor\EditorGenerateImageController::class, 'generate'])->name('api.editor.generate-image');
                 Route::post('/api/edit-image', [\App\Http\Controllers\Editor\EditorEditImageController::class, 'edit'])->name('api.editor.edit-image');
                 Route::get('/api/editor/brand-context', [\App\Http\Controllers\Editor\EditorBrandContextController::class, 'show'])->name('api.editor.brand-context');
+                Route::get('/api/editor/studio-fonts', [\App\Http\Controllers\Editor\EditorStudioFontsController::class, 'index'])->name('api.editor.studio-fonts');
                 Route::post('/api/generate-copy', [\App\Http\Controllers\Editor\EditorGenerateCopyController::class, 'store'])->name('api.editor.generate-copy');
                 Route::post('/api/generate-layout', [\App\Http\Controllers\Editor\EditorGenerateLayoutController::class, 'generate'])->name('api.editor.generate-layout');
                 Route::get('/api/editor/ai-credit-status', [\App\Http\Controllers\Editor\EditorGenerateLayoutController::class, 'creditStatus'])->name('api.editor.ai-credit-status');

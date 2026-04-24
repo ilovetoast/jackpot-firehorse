@@ -374,6 +374,7 @@ export default function CategoryList({
     onRevert,
     onAddCategory,
     onAfterAddSystemCategory,
+    onSaveNotice,
     editingCategoryId,
     editingCategoryName,
     onEditingCategoryNameChange,
@@ -469,6 +470,7 @@ export default function CategoryList({
                     if (typeof window !== 'undefined' && window.toast) {
                         window.toast(`Added “${template.name}”`, 'success')
                     }
+                    onSaveNotice?.(`Added “${template.name}” from catalog.`)
                     onAfterAddSystemCategory?.(data.category)
                     setCatalogSelectedId((s) => ({
                         ...s,
@@ -487,7 +489,7 @@ export default function CategoryList({
                 setAddingTemplateId(null)
             }
         },
-        [brandId, canManageBrandCategories, onAfterAddSystemCategory]
+        [brandId, canManageBrandCategories, onAfterAddSystemCategory, onSaveNotice]
     )
 
     const replaceGroup = useCallback(
@@ -523,14 +525,16 @@ export default function CategoryList({
             setReorderLoading(true)
             try {
                 await persistCategoryReorder(brandId, assetTypeKey, merged, getCsrfToken)
+                onSaveNotice?.('Folder order saved.')
             } catch (e) {
                 onCategoriesChange(previous)
                 console.error('[CategoryList] Reorder failed:', e)
+                onSaveNotice?.('Could not save folder order.', { variant: 'error' })
             } finally {
                 setReorderLoading(false)
             }
         },
-        [groupedCategories, brandId, replaceGroup, onCategoriesChange]
+        [groupedCategories, brandId, replaceGroup, onCategoriesChange, onSaveNotice]
     )
 
     const handleToggleHidden = useCallback(
@@ -570,9 +574,13 @@ export default function CategoryList({
                     throw new Error(err.message || 'Failed to update')
                 }
                 await persistCategoryReorder(brandId, typeKey, merged, getCsrfToken)
+                onSaveNotice?.(
+                    nextHidden ? 'Folder hidden from the library; order saved.' : 'Folder shown in the library; order saved.'
+                )
             } catch (e) {
                 onCategoriesChange(previous)
                 console.error('[CategoryList] Toggle hidden failed:', e)
+                onSaveNotice?.('Could not update folder visibility.', { variant: 'error' })
             } finally {
                 setToggleLoading((prev) => {
                     const next = new Set(prev)
@@ -581,7 +589,7 @@ export default function CategoryList({
                 })
             }
         },
-        [groupedCategories, brandId, replaceGroup, onCategoriesChange]
+        [groupedCategories, brandId, replaceGroup, onCategoriesChange, onSaveNotice]
     )
 
     const sensors = useSensors(

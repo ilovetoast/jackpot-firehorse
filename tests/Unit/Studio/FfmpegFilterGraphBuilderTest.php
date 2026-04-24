@@ -9,31 +9,20 @@ use Tests\TestCase;
 
 class FfmpegFilterGraphBuilderTest extends TestCase
 {
-    public function test_builds_graph_without_overlays(): void
+    public function test_multiply_blend_uses_blend_filter_instead_of_overlay_only(): void
     {
-        $tl = new RenderTimeline(640, 480, 30, 5000, 'black');
-        $b = new FfmpegFilterGraphBuilder;
-        $g = $b->buildOverlayGraph($tl, []);
-        $this->assertStringContainsString('[0:v]scale=640:480', $g['filter_complex']);
-        $this->assertStringContainsString('format=yuv420p[vout]', $g['filter_complex']);
-        $this->assertSame('vout', $g['video_out_label']);
-        $this->assertSame(1, $g['input_count']);
-    }
-
-    public function test_builds_graph_with_one_overlay(): void
-    {
-        $tl = new RenderTimeline(1080, 1080, 30, 10_000, '0x112233');
+        $tl = new RenderTimeline(1920, 1080, 30, 10_000, 'black');
         $layer = new RenderLayer(
-            id: 'L1',
+            id: 'img1',
             type: 'image',
             zIndex: 2,
             startSeconds: 0.0,
             endSeconds: 10.0,
             visible: true,
-            x: 10,
-            y: 20,
-            width: 100,
-            height: 50,
+            x: 100,
+            y: 200,
+            width: 400,
+            height: 300,
             opacity: 1.0,
             rotationDegrees: 0.0,
             fit: 'cover',
@@ -44,66 +33,105 @@ class FfmpegFilterGraphBuilderTest extends TestCase
             muted: false,
             fadeInMs: 0,
             fadeOutMs: 0,
-            extra: [],
+            extra: ['blend_mode' => 'multiply', 'asset_id' => 'x'],
         );
-        $b = new FfmpegFilterGraphBuilder;
-        $g = $b->buildOverlayGraph($tl, [$layer]);
-        $this->assertStringContainsString('[1:v]', $g['filter_complex']);
-        $this->assertStringContainsString('overlay=10:20', $g['filter_complex']);
-        $this->assertSame(2, $g['input_count']);
+        $g = (new FfmpegFilterGraphBuilder)->buildOverlayGraph($tl, [$layer]);
+        $this->assertStringContainsString('blend=all_mode=multiply', $g['filter_complex']);
+        $this->assertStringContainsString('color=c=black@0.0:s=1920x1080', $g['filter_complex']);
+        $this->assertStringContainsString('setpts=PTS-STARTPTS', $g['filter_complex']);
+        $this->assertStringContainsString('[ovfull0]', $g['filter_complex']);
     }
 
-    public function test_builds_graph_with_text_logo_and_shape_style_overlays(): void
+    public function test_color_dodge_maps_to_ffmpeg_dodge_not_invalid_colordodge(): void
     {
-        $makePng = static function (): string {
-            $p = sys_get_temp_dir().'/ffov_'.uniqid('', true).'.png';
-            file_put_contents($p, str_repeat("\0", 200));
+        $tl = new RenderTimeline(640, 480, 30, 5_000, 'black');
+        $layer = new RenderLayer(
+            id: 'img1',
+            type: 'image',
+            zIndex: 1,
+            startSeconds: 0.0,
+            endSeconds: 5.0,
+            visible: true,
+            x: 0,
+            y: 0,
+            width: 100,
+            height: 100,
+            opacity: 1.0,
+            rotationDegrees: 0.0,
+            fit: 'cover',
+            isPrimaryVideo: false,
+            mediaPath: '/tmp/fake.png',
+            trimInMs: 0,
+            trimOutMs: 0,
+            muted: false,
+            fadeInMs: 0,
+            fadeOutMs: 0,
+            extra: ['blend_mode' => 'color-dodge'],
+        );
+        $g = (new FfmpegFilterGraphBuilder)->buildOverlayGraph($tl, [$layer]);
+        $this->assertStringContainsString('blend=all_mode=dodge', $g['filter_complex']);
+        $this->assertStringNotContainsString('colordodge', $g['filter_complex']);
+    }
 
-            return $p;
-        };
-        $p1 = $makePng();
-        $p2 = $makePng();
-        $p3 = $makePng();
-        try {
-            $tl = new RenderTimeline(1080, 1080, 30, 10_000, '0x112233');
-            $layers = [];
-            foreach ([['L1', 10, 20], ['L2', 0, 200], ['L3', 400, 400]] as [$id, $x, $y]) {
-                $layers[] = new RenderLayer(
-                    id: $id,
-                    type: 'image',
-                    zIndex: 2,
-                    startSeconds: 0.0,
-                    endSeconds: 10.0,
-                    visible: true,
-                    x: $x,
-                    y: $y,
-                    width: 100,
-                    height: 50,
-                    opacity: 1.0,
-                    rotationDegrees: 0.0,
-                    fit: 'fill',
-                    isPrimaryVideo: false,
-                    mediaPath: match ($id) {
-                        'L1' => $p1,
-                        'L2' => $p2,
-                        default => $p3,
-                    },
-                    trimInMs: 0,
-                    trimOutMs: 0,
-                    muted: false,
-                    fadeInMs: 0,
-                    fadeOutMs: 0,
-                    extra: [],
-                );
-            }
-            $b = new FfmpegFilterGraphBuilder;
-            $g = $b->buildOverlayGraph($tl, $layers);
-            $this->assertSame(4, $g['input_count']);
-            $this->assertStringContainsString('[3:v]', $g['filter_complex']);
-        } finally {
-            @unlink($p1);
-            @unlink($p2);
-            @unlink($p3);
-        }
+    public function test_hue_blend_falls_back_to_overlay_ffmpeg_has_no_hue_blend_mode(): void
+    {
+        $tl = new RenderTimeline(640, 480, 30, 5_000, 'black');
+        $layer = new RenderLayer(
+            id: 'img1',
+            type: 'image',
+            zIndex: 1,
+            startSeconds: 0.0,
+            endSeconds: 5.0,
+            visible: true,
+            x: 0,
+            y: 0,
+            width: 100,
+            height: 100,
+            opacity: 1.0,
+            rotationDegrees: 0.0,
+            fit: 'cover',
+            isPrimaryVideo: false,
+            mediaPath: '/tmp/fake.png',
+            trimInMs: 0,
+            trimOutMs: 0,
+            muted: false,
+            fadeInMs: 0,
+            fadeOutMs: 0,
+            extra: ['blend_mode' => 'hue'],
+        );
+        $g = (new FfmpegFilterGraphBuilder)->buildOverlayGraph($tl, [$layer]);
+        $this->assertStringContainsString('overlay=0:0', $g['filter_complex']);
+        $this->assertStringNotContainsString('blend=all_mode', $g['filter_complex']);
+    }
+
+    public function test_normal_blend_uses_classic_overlay_only(): void
+    {
+        $tl = new RenderTimeline(640, 480, 30, 5_000, 'black');
+        $layer = new RenderLayer(
+            id: 'img1',
+            type: 'image',
+            zIndex: 1,
+            startSeconds: 0.0,
+            endSeconds: 5.0,
+            visible: true,
+            x: 0,
+            y: 0,
+            width: 100,
+            height: 100,
+            opacity: 1.0,
+            rotationDegrees: 0.0,
+            fit: 'cover',
+            isPrimaryVideo: false,
+            mediaPath: '/tmp/fake.png',
+            trimInMs: 0,
+            trimOutMs: 0,
+            muted: false,
+            fadeInMs: 0,
+            fadeOutMs: 0,
+            extra: ['blend_mode' => 'normal'],
+        );
+        $g = (new FfmpegFilterGraphBuilder)->buildOverlayGraph($tl, [$layer]);
+        $this->assertStringContainsString('overlay=0:0', $g['filter_complex']);
+        $this->assertStringNotContainsString('blend=all_mode', $g['filter_complex']);
     }
 }

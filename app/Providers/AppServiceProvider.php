@@ -301,13 +301,7 @@ class AppServiceProvider extends ServiceProvider
      */
     private function hydrateStudioRenderingDefaultFontPath(): void
     {
-        $current = config('studio_rendering.default_font_path');
-        if ($current !== null && trim((string) $current) !== '') {
-            return;
-        }
-        $fromEnv = env('STUDIO_RENDERING_DEFAULT_FONT_PATH');
-        $resolved = trim((string) (is_string($fromEnv) && $fromEnv !== '' ? $fromEnv : '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'));
-        Config::set('studio_rendering.default_font_path', $resolved);
+        \App\Studio\Rendering\StudioRenderingFontPaths::syncDefaultFontConfig();
     }
 
     /**

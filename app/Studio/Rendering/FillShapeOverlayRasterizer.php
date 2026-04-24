@@ -32,6 +32,8 @@ final class FillShapeOverlayRasterizer
 
         if ($kind === 'fill_gradient_linear') {
             $this->drawLinearGradient($img, $w, $h, $spec);
+        } elseif ($kind === 'fill_radial_text_boost') {
+            $this->drawRadialTextBoost($img, $w, $h, $spec);
         } elseif ($kind === 'shape_ellipse') {
             $this->drawEllipse($img, $w, $h, $spec);
         } elseif ($kind === 'fill_solid' || $kind === 'shape_rect') {
@@ -62,6 +64,57 @@ final class FillShapeOverlayRasterizer
         $img->compositeImage($grad, \Imagick::COMPOSITE_OVER, 0, 0);
         $grad->clear();
         $grad->destroy();
+    }
+
+    /**
+     * Matches editor {@code textBoostFillBackgroundCss} radial: center (secondary or transparent) → edge (primary × opacity).
+     * Uses ImageMagick {@code radial-gradient:} when available; otherwise a vertical linear gradient with the same RGBA endpoints.
+     *
+     * @param  array<string, mixed>  $spec
+     */
+    private function drawRadialTextBoost(\Imagick $img, int $w, int $h, array $spec): void
+    {
+        $opacity = max(0.0, min(1.0, (float) ($spec['opacity'] ?? 0.7)));
+        $centerRaw = trim((string) ($spec['color_center_hex'] ?? 'transparent'));
+        $edgeHex = trim((string) ($spec['color_edge_hex'] ?? '#000000'));
+        if ($edgeHex === '') {
+            $edgeHex = '#000000';
+        }
+        $edgeRgb = $this->parseRgbTriplet($edgeHex);
+        $outerPseudo = $this->hexRgbToRgbaHash($edgeRgb, $opacity);
+
+        if ($centerRaw === '' || strcasecmp($centerRaw, 'transparent') === 0) {
+            $innerPseudo = '#00000000';
+        } else {
+            $innerRgb = $this->parseRgbTriplet($centerRaw);
+            $innerPseudo = $this->hexRgbToRgbaHash($innerRgb, $opacity);
+        }
+
+        $grad = new \Imagick;
+        try {
+            $grad->newPseudoImage($w, $h, 'radial-gradient:'.$innerPseudo.'-'.$outerPseudo);
+            $grad->setImageFormat('png32');
+            $img->compositeImage($grad, \Imagick::COMPOSITE_OVER, 0, 0);
+        } catch (\Throwable) {
+            $grad->clear();
+            $grad->destroy();
+            $grad = new \Imagick;
+            $grad->newPseudoImage($w, $h, 'gradient:'.$innerPseudo.'-'.$outerPseudo);
+            $grad->setImageFormat('png32');
+            $img->compositeImage($grad, \Imagick::COMPOSITE_OVER, 0, 0);
+        }
+        $grad->clear();
+        $grad->destroy();
+    }
+
+    /**
+     * @param  array{0:int,1:int,2:int}  $rgb
+     */
+    private function hexRgbToRgbaHash(array $rgb, float $opacity): string
+    {
+        $a = (int) round(max(0.0, min(1.0, $opacity)) * 255);
+
+        return sprintf('#%02x%02x%02x%02x', $rgb[0], $rgb[1], $rgb[2], $a);
     }
 
     /**

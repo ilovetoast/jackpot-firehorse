@@ -6,6 +6,7 @@ use App\Events\AssetDeleted;
 use App\Models\Asset;
 use App\Models\AssetEvent;
 use App\Models\DeletionError;
+use App\Models\StorageBucket;
 use App\Support\ThumbnailMetadata;
 use Aws\S3\Exception\S3Exception;
 use Aws\S3\S3Client;
@@ -120,13 +121,35 @@ class DeleteAssetJob implements ShouldQueue
     }
 
     /**
+     * Resolve S3 bucket for deletion: prefer {@see Asset::$storageBucket}, else upload session's bucket.
+     */
+    protected function resolveDeletionBucket(Asset $asset): ?StorageBucket
+    {
+        if ($asset->storageBucket !== null) {
+            return $asset->storageBucket;
+        }
+        $asset->loadMissing('uploadSession.storageBucket');
+
+        return $asset->uploadSession?->storageBucket;
+    }
+
+    /**
      * Verify storage before deletion.
      *
      * @throws \RuntimeException If verification fails
      */
     protected function verifyStorage(Asset $asset): void
     {
-        $bucket = $asset->storageBucket;
+        $bucket = $this->resolveDeletionBucket($asset);
+        if ($bucket === null) {
+            Log::warning('Asset hard deletion: no storage bucket resolved — skipping S3 existence check', [
+                'asset_id' => $asset->id,
+                'storage_bucket_id' => $asset->storage_bucket_id,
+                'upload_session_id' => $asset->upload_session_id,
+            ]);
+
+            return;
+        }
         $s3Client = $this->createS3Client();
 
         try {
@@ -167,7 +190,16 @@ class DeleteAssetJob implements ShouldQueue
      */
     protected function deleteStorageFiles(Asset $asset): array
     {
-        $bucket = $asset->storageBucket;
+        $bucket = $this->resolveDeletionBucket($asset);
+        if ($bucket === null) {
+            Log::warning('Asset hard deletion: no storage bucket resolved — skipping S3 object deletion', [
+                'asset_id' => $asset->id,
+                'storage_bucket_id' => $asset->storage_bucket_id,
+                'upload_session_id' => $asset->upload_session_id,
+            ]);
+
+            return [];
+        }
         $s3Client = $this->createS3Client();
         $deletedPaths = [];
 
@@ -273,7 +305,14 @@ class DeleteAssetJob implements ShouldQueue
      */
     protected function confirmRemoval(Asset $asset, array $deletedPaths): void
     {
-        $bucket = $asset->storageBucket;
+        $bucket = $this->resolveDeletionBucket($asset);
+        if ($bucket === null) {
+            Log::info('Asset hard deletion: skipping S3 removal confirmation (no bucket)', [
+                'asset_id' => $asset->id,
+            ]);
+
+            return;
+        }
         $s3Client = $this->createS3Client();
 
         try {

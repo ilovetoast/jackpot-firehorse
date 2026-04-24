@@ -1,5 +1,5 @@
 import type { Layer, StudioSyncRole, TextBoostStyle } from './documentModel'
-import { generateId } from './documentModel'
+import { generateId, tintTextBoostCssColor } from './documentModel'
 import { placementToXY, type Placement } from '../../utils/snapEngine'
 import { composeRecipe, deriveBrandAdStyle, getRecipeDescriptor, RECIPE_REGISTRY, type BrandAdStyleHint, type RecipeKey } from './recipes'
 import type { WizardDefaults } from './wizardDefaults'
@@ -653,21 +653,30 @@ function hexToRgba(hex: string, alpha: number): string {
     return `rgba(${r}, ${g}, ${b}, ${a})`
 }
 
+export type TextBoostToFillOptions = {
+    /** Second stop (hex). When omitted, linear presets use transparent on the fade side. */
+    secondaryColor?: string
+}
+
 /**
  * Map a `TextBoostStyle` + color + opacity into the concrete FillLayer fields
  * the renderer already knows how to paint (`gradientStartColor` / `gradientEndColor`
- * / `gradientAngleDeg` / `color` / `fillKind`). Keeps one renderer rather than
- * adding a second code path for text-boost layers specifically.
+ * / `gradientAngleDeg` / `color` / `fillKind`). Text-boost layers with gradients
+ * are painted by {@link fillLayerBackgroundCss} using `textBoost*` + scale; these
+ * fields stay populated for exports, thumbnails, and tooling that reads stops.
  */
 export function textBoostToFillFields(
     style: TextBoostStyle,
     color: string,
     opacity: number,
+    opts?: TextBoostToFillOptions,
 ): Pick<
     Extract<Layer, { type: 'fill' }>,
     'fillKind' | 'color' | 'gradientStartColor' | 'gradientEndColor' | 'gradientAngleDeg'
 > {
     const tinted = hexToRgba(color, opacity)
+    const secRaw = opts?.secondaryColor?.trim()
+    const secondaryTinted = secRaw ? tintTextBoostCssColor(secRaw, opacity) : undefined
     switch (style) {
         case 'solid':
             return {
@@ -690,7 +699,7 @@ export function textBoostToFillFields(
             return {
                 fillKind: 'gradient',
                 color: tinted,
-                gradientStartColor: 'transparent',
+                gradientStartColor: secondaryTinted ?? 'transparent',
                 gradientEndColor: tinted,
                 gradientAngleDeg: 180,
             }
@@ -700,19 +709,16 @@ export function textBoostToFillFields(
                 fillKind: 'gradient',
                 color: tinted,
                 gradientStartColor: tinted,
-                gradientEndColor: 'transparent',
+                gradientEndColor: secondaryTinted ?? 'transparent',
                 gradientAngleDeg: 180,
             }
         case 'radial':
-            // The fill renderer only knows linear — emulate a soft vignette by
-            // stacking two gradients (top-down + bottom-up) with a diagonal
-            // angle. Not a true radial, but reads close enough for copy.
             return {
                 fillKind: 'gradient',
                 color: tinted,
-                gradientStartColor: tinted,
-                gradientEndColor: 'transparent',
-                gradientAngleDeg: 45,
+                gradientStartColor: secondaryTinted ?? 'transparent',
+                gradientEndColor: tinted,
+                gradientAngleDeg: 0,
             }
     }
 }

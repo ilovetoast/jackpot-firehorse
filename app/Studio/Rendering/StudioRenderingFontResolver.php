@@ -12,13 +12,20 @@ use Illuminate\Support\Facades\Storage;
 /**
  * Resolves a concrete local TTF/OTF path for text rasterization (never remote URLs).
  *
- * Order: explicit readable local path → tenant font {@see Asset} (staged to {@see StudioRenderingFontFileCache})
- * → {@see config('studio_rendering.font_family_map')} → {@see config('studio_rendering.default_font_path')}.
+ * Resolution order:
+ * 1. font_key / fontKey (bundled: | google: | tenant:)
+ * 2. font_asset_id / fontAssetId / nested font.asset_id (tenant {@see Asset} staged via {@see StudioRenderingFontFileCache})
+ * 3. Explicit local paths (dev-only)
+ * 4. font.disk + font.storage_path on allow-listed disks
+ * 5. Legacy font_family → bundled catalog / font_family_map
+ * 6. Effective default font path ({@see StudioRenderingFontPaths})
+ * 7. Hard-coded DejaVuSans when readable (last resort for missing default)
  */
 final class StudioRenderingFontResolver
 {
     public function __construct(
         private StudioRenderingFontFileCache $fontFileCache,
+        private StudioGoogleFontFileCache $googleFontFileCache,
     ) {}
 
     /**
@@ -31,103 +38,230 @@ final class StudioRenderingFontResolver
         string $fontFamilyFromStyle,
         ?string $layerId = null,
     ): ResolvedStudioFont {
-        $hadExplicit = $this->computeExplicitCustomFontSelection($textLayerExtra);
+        $hadExplicit = $this->computeExplicitFontSelection($textLayerExtra);
+        $fontWeight = isset($textLayerExtra['font_weight']) ? (int) $textLayerExtra['font_weight'] : null;
         $debug = [
             'font_family' => $fontFamilyFromStyle,
-            'had_explicit_custom_font_selection' => $hadExplicit,
+            'font_weight' => $fontWeight,
+            'had_explicit_font_selection' => $hadExplicit,
         ];
 
         try {
-            $path = $this->tryExplicitLocalPath($textLayerExtra, $hadExplicit);
-            if ($path !== null) {
-                $this->assertLocalFontFile($path, 'explicit_path');
-                $this->logFontResolved($layerId, $path, 'explicit_path');
-
-                return new ResolvedStudioFont($path, 'explicit_path', $hadExplicit, array_merge($debug, [
-                    'resolved_path' => $path,
-                ]));
+            $keyRead = $this->readFontKey($textLayerExtra);
+            if ($keyRead !== null) {
+                $resolved = $this->resolveFontKey($tenant, $compositionBrandId, $keyRead, $hadExplicit, $debug, $layerId);
+                if ($resolved !== null) {
+                    return $resolved;
+                }
             }
 
             $path = $this->tryTenantFontAsset($tenant, $compositionBrandId, $textLayerExtra);
             if ($path !== null) {
                 $this->assertLocalFontFile($path, 'tenant_asset');
-                $this->logFontResolved($layerId, $path, 'tenant_asset');
+                $this->logFontResolved($layerId, $path, 'tenant_asset', $keyRead);
 
                 return new ResolvedStudioFont($path, 'tenant_asset', $hadExplicit, array_merge($debug, [
                     'resolved_path' => $path,
-                ]));
+                ]), $keyRead);
+            }
+
+            $path = $this->tryExplicitLocalPath($textLayerExtra, $hadExplicit);
+            if ($path !== null) {
+                $this->assertLocalFontFile($path, 'explicit_path');
+                $this->logFontResolved($layerId, $path, 'explicit_path', $keyRead);
+
+                return new ResolvedStudioFont($path, 'explicit_path', $hadExplicit, array_merge($debug, [
+                    'resolved_path' => $path,
+                ]), $keyRead);
             }
 
             $path = $this->tryLocalDiskFontPath($textLayerExtra, $hadExplicit);
             if ($path !== null) {
                 $this->assertLocalFontFile($path, 'local_disk_font');
-                $this->logFontResolved($layerId, $path, 'local_disk_font');
+                $this->logFontResolved($layerId, $path, 'local_disk_font', $keyRead);
 
                 return new ResolvedStudioFont($path, 'local_disk_font', $hadExplicit, array_merge($debug, [
                     'resolved_path' => $path,
-                ]));
+                ]), $keyRead);
             }
 
             if ($hadExplicit) {
                 throw new StudioFontResolutionException(
                     'font_explicit_unresolved',
-                    'A custom font was selected for this text layer but no usable font file could be resolved (missing asset id, storage path, or readable local path).',
+                    'An explicit font was selected for this text layer but no usable font file could be resolved.',
                     $debug,
                 );
+            }
+
+            $slug = StudioLegacyFontFamilyMapper::bundledSlugFor($fontFamilyFromStyle, $fontWeight);
+            if ($slug !== null) {
+                $p = StudioRenderingFontPaths::bundledPathForSlug($slug);
+                if ($p !== null) {
+                    $this->assertLocalFontFile($p, 'legacy_bundled');
+                    $fullKey = 'bundled:'.$slug;
+                    $this->logFontResolved($layerId, $p, 'legacy_bundled', $fullKey);
+
+                    return new ResolvedStudioFont($p, 'legacy_bundled', false, array_merge($debug, [
+                        'resolved_path' => $p,
+                        'resolved_font_key' => $fullKey,
+                    ]), $fullKey);
+                }
             }
 
             $path = $this->tryFamilyMap($fontFamilyFromStyle);
             if ($path !== null) {
                 $this->assertLocalFontFile($path, 'family_map');
-                $this->logFontResolved($layerId, $path, 'family_map');
+                $this->logFontResolved($layerId, $path, 'family_map', $keyRead);
 
                 return new ResolvedStudioFont($path, 'family_map', false, array_merge($debug, [
                     'resolved_path' => $path,
-                ]));
+                ]), $keyRead);
             }
 
-            $path = $this->tryDefaultFontPath();
+            $path = $this->tryDefaultFontPathChain();
             $this->assertLocalFontFile($path, 'default');
-            $this->logFontResolved($layerId, $path, 'default');
+            $this->logFontResolved($layerId, $path, 'default', $keyRead);
 
             return new ResolvedStudioFont($path, 'default', false, array_merge($debug, [
                 'resolved_path' => $path,
-            ]));
+            ]), $keyRead);
         } catch (StudioFontResolutionException $e) {
             throw $e;
         }
     }
 
-    private function logFontResolved(?string $layerId, string $fontPath, string $source): void
+    /**
+     * @param  array<string, mixed>  $textLayerExtra
+     */
+    private function resolveFontKey(
+        Tenant $tenant,
+        ?int $compositionBrandId,
+        string $fullKey,
+        bool $hadExplicit,
+        array $debug,
+        ?string $layerId,
+    ): ?ResolvedStudioFont {
+        $fullKey = trim($fullKey);
+        if ($fullKey === '') {
+            return null;
+        }
+        if (str_starts_with($fullKey, 'bundled:')) {
+            $slug = substr($fullKey, strlen('bundled:'));
+            $p = StudioRenderingFontPaths::bundledPathForSlug($slug);
+            if ($p === null) {
+                if ($hadExplicit) {
+                    throw new StudioFontResolutionException('bundled_font_missing', 'Bundled font file is missing for key "'.$fullKey.'".', [
+                        'font_key' => $fullKey,
+                    ]);
+                }
+
+                return null;
+            }
+            $this->assertLocalFontFile($p, 'font_key_bundled');
+            $this->logFontResolved($layerId, $p, 'font_key_bundled', $fullKey);
+
+            return new ResolvedStudioFont($p, 'font_key_bundled', $hadExplicit, array_merge($debug, [
+                'resolved_path' => $p,
+                'resolved_font_key' => $fullKey,
+            ]), $fullKey);
+        }
+        if (str_starts_with($fullKey, 'google:')) {
+            $slug = substr($fullKey, strlen('google:'));
+            /** @var array<string, array<string, mixed>> $google */
+            $google = is_array(config('studio_rendering.fonts.google', []))
+                ? config('studio_rendering.fonts.google', [])
+                : [];
+            if (! isset($google[$slug]['download_url'])) {
+                if ($hadExplicit) {
+                    throw new StudioFontResolutionException('google_font_unknown', 'Unknown curated Google font key "'.$fullKey.'".', [
+                        'font_key' => $fullKey,
+                    ]);
+                }
+
+                return null;
+            }
+            $url = trim((string) $google[$slug]['download_url']);
+            $p = $this->googleFontFileCache->materializeFromRegistrySlug($slug, $url);
+            $this->assertLocalFontFile($p, 'font_key_google');
+            $this->logFontResolved($layerId, $p, 'font_key_google', $fullKey);
+
+            return new ResolvedStudioFont($p, 'font_key_google', $hadExplicit, array_merge($debug, [
+                'resolved_path' => $p,
+                'resolved_font_key' => $fullKey,
+            ]), $fullKey);
+        }
+        if (str_starts_with($fullKey, 'tenant:')) {
+            $id = trim(substr($fullKey, strlen('tenant:')));
+            if ($id === '') {
+                if ($hadExplicit) {
+                    throw new StudioFontResolutionException('tenant_font_key_empty', 'tenant: font key is missing an asset id.', []);
+                }
+
+                return null;
+            }
+            $path = $this->tryTenantFontAsset($tenant, $compositionBrandId, ['font_asset_id' => $id]);
+            if ($path === null) {
+                throw new StudioFontResolutionException('tenant_font_unresolved', 'Could not resolve tenant font key "'.$fullKey.'".', [
+                    'font_key' => $fullKey,
+                ]);
+            }
+            $this->assertLocalFontFile($path, 'font_key_tenant');
+            $this->logFontResolved($layerId, $path, 'font_key_tenant', $fullKey);
+
+            return new ResolvedStudioFont($path, 'font_key_tenant', $hadExplicit, array_merge($debug, [
+                'resolved_path' => $path,
+                'resolved_font_key' => $fullKey,
+            ]), $fullKey);
+        }
+
+        if ($hadExplicit) {
+            throw new StudioFontResolutionException('font_key_unknown_prefix', 'Unsupported font_key prefix in "'.$fullKey.'".', [
+                'font_key' => $fullKey,
+            ]);
+        }
+
+        return null;
+    }
+
+    private function logFontResolved(?string $layerId, string $fontPath, string $source, ?string $fontKey): void
     {
-        Log::info('Studio font resolved', [
+        if (! config('studio_rendering.font_pipeline_verbose_log')) {
+            return;
+        }
+        Log::info('[FONT_DEBUG] Resolved font', [
             'layer_id' => $layerId,
-            'font_path' => $fontPath,
+            'font_key' => $fontKey,
+            'resolved_path' => $fontPath,
+            'exists' => file_exists($fontPath),
+            'readable' => is_readable($fontPath),
             'source' => $source,
         ]);
     }
 
     /**
-     * True when the layer payload indicates an intentional tenant/custom font (not CSS family alone).
-     *
      * @param  array<string, mixed>  $textLayerExtra
      */
     public function layerHasExplicitCustomFontSelection(array $textLayerExtra): bool
     {
-        return $this->computeExplicitCustomFontSelection($textLayerExtra);
+        return $this->computeExplicitFontSelection($textLayerExtra);
     }
 
     /**
      * @param  array<string, mixed>  $textLayerExtra
      */
-    private function computeExplicitCustomFontSelection(array $e): bool
+    private function computeExplicitFontSelection(array $e): bool
     {
+        foreach (['font_key', 'fontKey'] as $k) {
+            if (isset($e[$k]) && is_string($e[$k]) && trim($e[$k]) !== '') {
+                return true;
+            }
+        }
         foreach (['font_local_path', 'fontLocalPath', 'font_file_path', 'fontFilePath', 'resolved_font_path', 'resolvedFontPath'] as $k) {
             if (isset($e[$k]) && is_string($e[$k]) && trim($e[$k]) !== '') {
                 return true;
             }
         }
-        foreach (['font_asset_id', 'fontAssetId'] as $k) {
+        foreach (['font_asset_id', 'fontAssetId', 'brand_font_id', 'brandFontId'] as $k) {
             if (isset($e[$k]) && is_string($e[$k]) && trim($e[$k]) !== '') {
                 return true;
             }
@@ -157,6 +291,23 @@ final class StudioRenderingFontResolver
 
     /**
      * @param  array<string, mixed>  $textLayerExtra
+     */
+    private function readFontKey(array $e): ?string
+    {
+        foreach (['font_key', 'fontKey'] as $k) {
+            if (isset($e[$k]) && is_string($e[$k])) {
+                $s = trim($e[$k]);
+                if ($s !== '') {
+                    return $s;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $e
      */
     private function tryExplicitLocalPath(array $e, bool $hadExplicit): ?string
     {
@@ -195,7 +346,7 @@ final class StudioRenderingFontResolver
     }
 
     /**
-     * @param  array<string, mixed>  $textLayerExtra
+     * @param  array<string, mixed>  $e
      */
     private function tryTenantFontAsset(Tenant $tenant, ?int $compositionBrandId, array $e): ?string
     {
@@ -245,7 +396,7 @@ final class StudioRenderingFontResolver
      */
     private function readFontAssetId(array $e): ?string
     {
-        foreach (['font_asset_id', 'fontAssetId'] as $k) {
+        foreach (['font_asset_id', 'fontAssetId', 'brand_font_id', 'brandFontId'] as $k) {
             if (isset($e[$k]) && (is_string($e[$k]) || is_int($e[$k]))) {
                 $s = trim((string) $e[$k]);
                 if ($s !== '') {
@@ -267,8 +418,6 @@ final class StudioRenderingFontResolver
     }
 
     /**
-     * Optional: font.disk + font.storage_path on allowed disks (local/public only for V1).
-     *
      * @param  array<string, mixed>  $textLayerExtra
      */
     private function tryLocalDiskFontPath(array $e, bool $hadExplicit): ?string
@@ -366,40 +515,21 @@ final class StudioRenderingFontResolver
     /**
      * @throws StudioFontResolutionException
      */
-    private function tryDefaultFontPath(): string
+    private function tryDefaultFontPathChain(): string
     {
-        $raw = config('studio_rendering.default_font_path');
-        if ($raw === null) {
-            throw new StudioFontResolutionException(
-                'missing_default_font_path',
-                'config("studio_rendering.default_font_path") is null. Run `php artisan config:clear` and `php artisan config:cache` after upgrading, or set default_font_path in config/studio_rendering.php.',
-                [],
-            );
+        $path = StudioRenderingFontPaths::effectiveDefaultFontPath();
+        if (is_file($path) && is_readable($path)) {
+            return $path;
         }
-        $default = trim((string) $raw);
-        if ($default === '') {
-            throw new StudioFontResolutionException(
-                'missing_default_font_path',
-                'config("studio_rendering.default_font_path") is empty. Set STUDIO_RENDERING_DEFAULT_FONT_PATH in the environment or default_font_path in config/studio_rendering.php.',
-                [],
-            );
+        $fallback = '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf';
+        if (is_file($fallback) && is_readable($fallback)) {
+            return $fallback;
         }
-        if (! is_file($default)) {
-            throw new StudioFontResolutionException(
-                'default_font_path_not_found',
-                'Default font path is not a file: '.$default.'. Fix config("studio_rendering.default_font_path") or install the font on workers.',
-                ['path' => $default],
-            );
-        }
-        if (! is_readable($default)) {
-            throw new StudioFontResolutionException(
-                'default_font_path_not_readable',
-                'Default font file is not readable: '.$default,
-                ['path' => $default],
-            );
-        }
-
-        return $default;
+        throw new StudioFontResolutionException(
+            'missing_default_font_path',
+            'No usable default font path: bundled default, STUDIO_RENDERING_DEFAULT_FONT_PATH, and DejaVuSans.ttf are all missing or unreadable.',
+            ['attempted' => $path],
+        );
     }
 
     /**

@@ -7,6 +7,7 @@ use App\Studio\Rendering\Dto\RenderLayer;
 use App\Studio\Rendering\Dto\ResolvedStudioFont;
 use App\Studio\Rendering\Exceptions\StudioFontResolutionException;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
 /**
@@ -40,9 +41,19 @@ final class TextOverlayRasterizer
         $resolved = $this->fonts->resolveForTextLayer($tenant, $compositionBrandId, $layer->extra, $fontFamily, $layer->id);
 
         $fontPath = $resolved->absolutePath;
+        $fontSize = (int) ($layer->extra['font_size'] ?? 24);
+        if (config('studio_rendering.font_pipeline_verbose_log')) {
+            Log::info('[FONT_DEBUG] Rasterizer input', [
+                'layer_id' => $layer->id,
+                'text' => Str::limit($content, 500),
+                'font_path' => $fontPath,
+                'font_size' => $fontSize,
+                'resolved_source' => $resolved->source,
+                'resolved_font_key' => $resolved->resolvedFontKey,
+            ]);
+        }
         $this->assertRasterizerLocalFont($fontPath, $layer->id, $resolved);
 
-        $fontSize = (int) ($layer->extra['font_size'] ?? 24);
         $color = (string) ($layer->extra['color'] ?? '#ffffff');
         $lineHeight = (float) ($layer->extra['line_height'] ?? 1.25);
         $align = (string) ($layer->extra['text_align'] ?? 'left');

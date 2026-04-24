@@ -4,6 +4,7 @@
  * Studio composition export rendering (native FFmpeg vs legacy headless browser).
  *
  * @see docs/studio/FFMPEG_NATIVE_EXPORT.md
+ * @see docs/studio/FONTS_RENDERING.md
  */
 return [
 
@@ -47,15 +48,11 @@ return [
     'max_output_duration_seconds' => (float) env('STUDIO_RENDERING_MAX_OUTPUT_DURATION_SECONDS', 7200),
 
     /**
-     * Absolute path to a TTF/OTF when no tenant/font_family_map match (see StudioRenderingFontResolver).
-     * Populated from STUDIO_RENDERING_DEFAULT_FONT_PATH; when empty, falls back to Debian/Ubuntu DejaVu.
-     * If {@see config('studio_rendering.default_font_path')} is null after `config:cache` from an older build,
-     * {@see \App\Providers\AppServiceProvider} re-hydrates this key from the environment at boot.
+     * Absolute path to a TTF/OTF fallback when no match is found.
+     * When empty or unreadable, {@see \App\Studio\Rendering\StudioRenderingFontPaths::syncDefaultFontConfig()}
+     * resolves from {@see fonts.default_key} or bundled Inter, then DejaVu at boot.
      */
-    'default_font_path' => trim((string) (
-        env('STUDIO_RENDERING_DEFAULT_FONT_PATH')
-        ?: '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'
-    )),
+    'default_font_path' => trim((string) env('STUDIO_RENDERING_DEFAULT_FONT_PATH', '')),
 
     /**
      * When true, visible layers FFmpeg-native cannot render (unknown type, under-primary-video, etc.)
@@ -82,10 +79,60 @@ return [
     'font_direct_read_disks' => ['local', 'public'],
 
     /**
+     * When true, emit `[FONT_DEBUG]` resolver / rasterizer / font-cache log lines during ffmpeg_native export.
+     * Enable with {@code STUDIO_RENDERING_FONT_PIPELINE_VERBOSE_LOG=true} while tracing font issues.
+     */
+    'font_pipeline_verbose_log' => (bool) env('STUDIO_RENDERING_FONT_PIPELINE_VERBOSE_LOG', false),
+
+    /**
      * Map first token of fontFamily (e.g. "Inter" from "Inter, system-ui") to absolute font file path.
      * JSON object in env is awkward; use config override in a service provider if needed.
      */
     'font_family_map' => [],
+
+    /**
+     * Unified font registry for bundled / Google / tenant resolution.
+     */
+    'fonts' => [
+        'default_key' => env('STUDIO_RENDERING_DEFAULT_FONT_KEY', 'bundled:inter-regular'),
+        'bundled_dir' => resource_path('fonts'),
+        'cache_dir' => storage_path('app/'.trim((string) env('STUDIO_RENDERING_FONT_CACHE_DIR', 'studio/font-cache'), '/')),
+        'allowed_extensions' => ['ttf', 'otf'],
+        'bundled' => require __DIR__.'/studio_fonts_bundled.php',
+        /**
+         * Curated Google fonts (slug => metadata). Only https hosts allow-listed in {@see \App\Studio\Rendering\StudioGoogleFontFileCache}.
+         */
+        'google' => [
+            'pacifico-regular' => [
+                'label' => 'Pacifico',
+                'family' => 'Pacifico',
+                'weight' => 400,
+                'style' => 'normal',
+                'download_url' => 'https://raw.githubusercontent.com/google/fonts/main/ofl/pacifico/Pacifico-Regular.ttf',
+                'fallback_key' => 'bundled:inter-regular',
+                'supported_export' => true,
+            ],
+            'abril-fatface-regular' => [
+                'label' => 'Abril Fatface',
+                'family' => 'Abril Fatface',
+                'weight' => 400,
+                'style' => 'normal',
+                'download_url' => 'https://raw.githubusercontent.com/google/fonts/main/ofl/abrilfatface/AbrilFatface-Regular.ttf',
+                'fallback_key' => 'bundled:inter-regular',
+                'supported_export' => true,
+            ],
+            'bebas-neue-regular' => [
+                'label' => 'Bebas Neue',
+                'family' => 'Bebas Neue',
+                'weight' => 400,
+                'style' => 'normal',
+                'download_url' => 'https://raw.githubusercontent.com/google/fonts/main/ofl/bebasneue/BebasNeue-Regular.ttf',
+                'fallback_key' => 'bundled:inter-regular',
+                'supported_export' => true,
+            ],
+        ],
+        'legacy_family_token_map' => require __DIR__.'/studio_fonts_legacy_map.php',
+    ],
 
     'ffmpeg_subprocess_timeout_seconds' => (float) env('STUDIO_RENDERING_FFMPEG_TIMEOUT_SECONDS', 3600),
 

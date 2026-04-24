@@ -176,6 +176,15 @@ export type TextLayer = BaseLayer & {
     /** Undo stack for copy assist (most recent last); capped client-side. */
     previousText?: string[]
     style: {
+        /**
+         * Stable token for native export: bundled:…, google:…, tenant:{assetId}.
+         * Older documents may omit this; the server maps legacy {@link fontFamily} + weight.
+         */
+        fontKey?: string
+        /** Human label from the font picker (optional). */
+        fontLabel?: string
+        /** When {@link fontKey} is tenant:…, mirrors the DAM asset id for editor loaders. */
+        fontAssetId?: string
         fontFamily: string
         fontSize: number
         fontWeight?: number
@@ -279,6 +288,35 @@ export function labeledBrandPalette(brand: BrandContext | null | undefined): Lab
 /** Default stack when no brand primary font is set. */
 export const DEFAULT_TEXT_FONT_FAMILY = 'Inter, system-ui, sans-serif'
 
+/** Default native-export font token (matches server {@see config('studio_rendering.fonts.default_key')}). */
+export const DEFAULT_TEXT_FONT_KEY = 'bundled:inter-regular'
+
+function firstFontTokenLower(s: string): string {
+    return s
+        .split(',')[0]
+        .trim()
+        .replace(/^["']|["']$/g, '')
+        .toLowerCase()
+}
+
+/**
+ * Best-effort stable font key for new text layers (tenant face when DNA matches canvas primary).
+ */
+export function defaultTextFontKeyFromBrand(brand: BrandContext | null | undefined, fontWeight: number): string {
+    const canvas = brand?.typography?.canvas_primary_font_family?.trim()
+    const faces = brand?.typography?.font_face_sources ?? []
+    if (canvas) {
+        const want = firstFontTokenLower(canvas)
+        for (const f of faces) {
+            const fam = typeof f.family === 'string' ? firstFontTokenLower(f.family) : ''
+            if (fam && fam === want) {
+                return `tenant:${String(f.asset_id)}`
+            }
+        }
+    }
+    return fontWeight >= 600 ? 'bundled:inter-bold' : 'bundled:inter-regular'
+}
+
 export function defaultTextFontFamilyFromBrand(brand: BrandContext | null | undefined): string {
     const canvasPrimary = brand?.typography?.canvas_primary_font_family?.trim()
     if (canvasPrimary) {
@@ -353,9 +391,11 @@ export type GenerativePrompt = {
  * without having to hand-author gradient stops.
  *
  * - `solid`           → flat color wash at `textBoostOpacity`.
- * - `gradient_bottom` → fully-transparent at top, `textBoostColor` at bottom.
- * - `gradient_top`    → `textBoostColor` at top, transparent at bottom.
- * - `radial`          → vignette, centered, `textBoostColor` at edges.
+ * - `gradient_bottom` → `textBoostSecondaryColor` (or transparent) at top, `textBoostColor` at bottom.
+ * - `gradient_top`    → `textBoostColor` at top, `textBoostSecondaryColor` (or transparent) at bottom.
+ * - `radial`          → vignette: `textBoostSecondaryColor` (or transparent) at center, `textBoostColor` at edges.
+ *
+ * {@link FillLayer.textBoostGradientScale} tweaks how far the blend reaches (1 = default).
  *
  * `source='auto'` means the layer will re-infer when the brand changes (e.g. the
  * brand primary color gets updated). `source='manual'` locks the user's choice so
@@ -402,6 +442,17 @@ export type FillLayer = BaseLayer & {
     textBoostStyle?: TextBoostStyle
     /** Accent color driving the scrim (hex `#rrggbb`). Defaults to brand primary. */
     textBoostColor?: string
+    /**
+     * Second gradient stop for text-boost presets (hex `#rrggbb`). When unset,
+     * linear presets use `transparent` on the fade side; radial uses a transparent center.
+     */
+    textBoostSecondaryColor?: string
+    /**
+     * Blend reach for text-boost gradients, roughly 0.35–2.5 (1 = default). Higher
+     * values pull the transition earlier (sharper block of the primary color);
+     * lower values soften the falloff toward the transparent / secondary side.
+     */
+    textBoostGradientScale?: number
     /** Scrim opacity, 0..1. Applied to the color stop(s). */
     textBoostOpacity?: number
     /** Where this preset came from — auto-inferred from brand DNA, or user-locked. */
@@ -1455,6 +1506,7 @@ export function createHeadlineTextLayer(
         }),
         content,
         style: {
+            fontKey: defaultTextFontKeyFromBrand(brand, 700),
             fontFamily: defaultTextFontFamilyFromBrand(brand),
             fontSize: 40,
             fontWeight: 700,
@@ -1787,10 +1839,77 @@ export function computeAutoFitTextFontSize(
     return size
 }
 
+function clampTextBoostScale(raw: number | undefined): number {
+    if (raw == null || !Number.isFinite(raw)) {
+        return 1
+    }
+    return Math.min(2.5, Math.max(0.35, raw))
+}
+
+/**
+ * Hex `#rrggbb` → `rgba(..., a)` for text-boost stops. Non-hex / `transparent` pass through.
+ */
+export function tintTextBoostCssColor(cssColor: string, opacity: number): string {
+    const a = Math.max(0, Math.min(1, opacity))
+    const t = cssColor.trim().toLowerCase()
+    if (t === 'transparent' || t === '') {
+        return 'transparent'
+    }
+    const m = /^#([0-9a-fA-F]{6})$/.exec(cssColor.trim())
+    if (!m) {
+        return cssColor
+    }
+    const n = parseInt(m[1], 16)
+    const r = (n >> 16) & 0xff
+    const g = (n >> 8) & 0xff
+    const b = n & 0xff
+    return `rgba(${r}, ${g}, ${b}, ${a})`
+}
+
+/**
+ * Text-boost fills use true radial gradients for `radial` and stop positions for
+ * linear presets so opacity + two-color + scale stay visually aligned in the editor.
+ */
+export function textBoostFillBackgroundCss(layer: FillLayer): string {
+    const style = layer.textBoostStyle ?? 'gradient_bottom'
+    const opacity = typeof layer.textBoostOpacity === 'number' ? layer.textBoostOpacity : 0.7
+    const primaryHex = layer.textBoostColor ?? '#000000'
+    const primary = tintTextBoostCssColor(primaryHex, opacity)
+    const rawSec = layer.textBoostSecondaryColor
+    const secondary =
+        typeof rawSec === 'string' && rawSec.trim() !== ''
+            ? tintTextBoostCssColor(rawSec.trim(), opacity)
+            : null
+    const s = clampTextBoostScale(layer.textBoostGradientScale)
+
+    if (style === 'solid') {
+        return primary
+    }
+
+    const linearEndStop = Math.min(100, Math.max(10, Math.round(100 / Math.max(0.4, Math.min(s, 2.5)))))
+
+    if (style === 'gradient_bottom') {
+        const top = secondary ?? 'transparent'
+        return `linear-gradient(180deg, ${top} 0%, ${primary} ${linearEndStop}%)`
+    }
+    if (style === 'gradient_top') {
+        const bottom = secondary ?? 'transparent'
+        return `linear-gradient(180deg, ${primary} 0%, ${bottom} ${linearEndStop}%)`
+    }
+
+    const inner = secondary ?? 'transparent'
+    const sizePct = Math.min(200, Math.round(85 + 55 * s))
+    const outerStop = Math.min(92, Math.round(36 + 24 * s))
+    return `radial-gradient(ellipse ${sizePct}% ${Math.round(sizePct * 0.95)}% at 50% 50%, ${inner} 0%, ${primary} ${outerStop}%)`
+}
+
 /** CSS `background` for a fill layer (solid or linear gradient, including legacy one-color gradients). */
 export function fillLayerBackgroundCss(layer: FillLayer): string {
     if (layer.fillKind === 'solid') {
         return layer.color
+    }
+    if (layer.kind === 'text_boost' && layer.textBoostStyle && layer.textBoostStyle !== 'solid') {
+        return textBoostFillBackgroundCss(layer)
     }
     const angle = layer.gradientAngleDeg ?? 180
     const explicit =
@@ -1914,6 +2033,7 @@ export function createDefaultTextLayer(
         }),
         content: 'Double-click to edit',
         style: {
+            fontKey: defaultTextFontKeyFromBrand(brand, 600),
             fontFamily: defaultTextFontFamilyFromBrand(brand),
             fontSize: 28,
             fontWeight: 600,

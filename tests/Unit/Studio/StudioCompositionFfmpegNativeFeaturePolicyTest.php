@@ -47,4 +47,31 @@ class StudioCompositionFfmpegNativeFeaturePolicyTest extends TestCase
         $this->assertTrue(StudioCompositionFfmpegNativeFeaturePolicy::isSupported($c));
         $this->assertSame([], StudioCompositionFfmpegNativeFeaturePolicy::unsupportedCodes($c));
     }
+
+    public function test_non_normal_blend_on_image_is_allowed(): void
+    {
+        $c = new Composition([
+            'document_json' => [
+                'layers' => [
+                    ['id' => 'v1', 'type' => 'video', 'visible' => true, 'z' => 0, 'assetId' => 'a'],
+                    ['id' => 'i1', 'type' => 'image', 'visible' => true, 'z' => 1, 'blendMode' => 'multiply', 'assetId' => 'b'],
+                ],
+            ],
+        ]);
+        $this->assertTrue(StudioCompositionFfmpegNativeFeaturePolicy::isSupported($c));
+        $this->assertSame([], StudioCompositionFfmpegNativeFeaturePolicy::unsupportedCodes($c));
+    }
+
+    public function test_non_normal_blend_on_video_layer_is_unsupported(): void
+    {
+        $c = new Composition([
+            'document_json' => [
+                'layers' => [
+                    ['id' => 'v1', 'type' => 'video', 'visible' => true, 'z' => 0, 'assetId' => 'a', 'blendMode' => 'multiply'],
+                ],
+            ],
+        ]);
+        $this->assertFalse(StudioCompositionFfmpegNativeFeaturePolicy::isSupported($c));
+        $this->assertContains('non_normal_blend:video', StudioCompositionFfmpegNativeFeaturePolicy::unsupportedCodes($c));
+    }
 }

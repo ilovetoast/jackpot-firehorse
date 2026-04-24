@@ -81,4 +81,50 @@ class StudioNativeExportLayerPolicyTest extends TestCase
         $this->assertNotEmpty($u);
         $this->assertSame('weird', $u[0]['layer_id'] ?? null);
     }
+
+    public function test_radial_text_boost_fill_normalizes_to_preraster_spec(): void
+    {
+        $uuid = '550e8400-e29b-41d4-a716-446655440099';
+        $c = new Composition([
+            'document_json' => [
+                'width' => 1080,
+                'height' => 1920,
+                'layers' => [
+                    [
+                        'id' => 'pv',
+                        'type' => 'video',
+                        'visible' => true,
+                        'z' => 0,
+                        'assetId' => $uuid,
+                        'src' => 'https://example.invalid/v.mp4',
+                        'transform' => ['x' => 0, 'y' => 0, 'width' => 1080, 'height' => 1920],
+                    ],
+                    [
+                        'id' => 'fill_rad',
+                        'type' => 'fill',
+                        'visible' => true,
+                        'z' => 3,
+                        'textBoostStyle' => 'radial',
+                        'textBoostColor' => '#112233',
+                        'textBoostOpacity' => 0.65,
+                        'textBoostSecondaryColor' => '#ffffff',
+                        'textBoostGradientScale' => 1.2,
+                        'transform' => ['x' => 0, 'y' => 0, 'width' => 200, 'height' => 100],
+                    ],
+                ],
+            ],
+        ]);
+        $n = new CompositionRenderNormalizer;
+        $tl = new RenderTimeline(1080, 1920, 30, 10_000, '#000000');
+        $plan = $n->buildOverlayPlan($c, ['id' => 'pv', 'z' => 0], $tl);
+        $this->assertCount(1, $plan->overlayLayers);
+        $this->assertSame([], $plan->diagnostics['unsupported_visible'] ?? []);
+        $spec = $plan->overlayLayers[0]->extra['fill_shape_spec'] ?? null;
+        $this->assertIsArray($spec);
+        $this->assertSame('fill_radial_text_boost', $spec['kind']);
+        $this->assertSame(0.65, $spec['opacity']);
+        $this->assertSame('#112233', $spec['color_edge_hex']);
+        $this->assertSame('#ffffff', $spec['color_center_hex']);
+        $this->assertSame(1.2, $spec['gradient_scale']);
+    }
 }

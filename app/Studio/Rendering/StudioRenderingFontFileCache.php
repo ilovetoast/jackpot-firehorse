@@ -7,6 +7,7 @@ use App\Models\Tenant;
 use App\Studio\Rendering\Exceptions\StudioFontResolutionException;
 use App\Support\EditorAssetOriginalBytesLoader;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Log;
 
 /**
  * Copies tenant font {@see Asset} bytes from Laravel-managed storage into a deterministic local cache path.
@@ -34,6 +35,17 @@ final class StudioRenderingFontFileCache
         $fullPath = $dir.DIRECTORY_SEPARATOR.$fileName;
 
         if (is_file($fullPath) && is_readable($fullPath) && filesize($fullPath) > 32) {
+            if (config('studio_rendering.font_pipeline_verbose_log')) {
+                Log::info('[FONT_DEBUG] Tenant font staged', [
+                    'asset_id' => (string) $asset->id,
+                    'local_path' => $fullPath,
+                    'exists' => true,
+                    'readable' => true,
+                    'extension' => strtolower(pathinfo($fullPath, PATHINFO_EXTENSION)),
+                    'cache' => 'hit',
+                ]);
+            }
+
             return $fullPath;
         }
 
@@ -64,6 +76,17 @@ final class StudioRenderingFontFileCache
         if (! is_readable($fullPath)) {
             throw new StudioFontResolutionException('font_cache_not_readable', 'Cached font file is not readable.', [
                 'path' => $fullPath,
+            ]);
+        }
+
+        if (config('studio_rendering.font_pipeline_verbose_log')) {
+            Log::info('[FONT_DEBUG] Tenant font staged', [
+                'asset_id' => (string) $asset->id,
+                'local_path' => $fullPath,
+                'exists' => is_file($fullPath),
+                'readable' => is_readable($fullPath),
+                'extension' => strtolower(pathinfo($fullPath, PATHINFO_EXTENSION)),
+                'cache' => 'miss_written',
             ]);
         }
 

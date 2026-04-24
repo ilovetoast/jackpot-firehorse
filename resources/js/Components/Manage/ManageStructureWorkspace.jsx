@@ -27,6 +27,7 @@ export default function ManageStructureWorkspace({
     onSelectCategory: onSelectCategoryProp,
     managePageUrl,
     hubLayout = false,
+    onSaveNotice,
 }) {
     const brandId = brand?.id
     const [localCategories, setLocalCategories] = useState(initialCategories || [])
@@ -134,13 +135,14 @@ export default function ManageStructureWorkspace({
                     setLocalCategories((prev) =>
                         prev.map((c) => (c.id === category.id ? { ...c, name: trimmed } : c))
                     )
+                    onSaveNotice?.('Folder name saved.')
                 }
             } finally {
                 setEditingCategoryId(null)
                 setEditingCategoryName('')
             }
         },
-        [brandId]
+        [brandId, onSaveNotice]
     )
 
     const handleDeleteCategory = useCallback(() => {
@@ -152,6 +154,7 @@ export default function ManageStructureWorkspace({
         router.delete(url, {
             preserveScroll: true,
             onSuccess: () => {
+                onSaveNotice?.('Folder deleted.')
                 if (selectionControlled) onSelectCategoryProp?.(null)
                 else setInternalSelectedCategoryId(null)
                 setConfirmDeleteOpen(false)
@@ -163,23 +166,27 @@ export default function ManageStructureWorkspace({
                 setCategoryToDelete(null)
             },
         })
-    }, [brandId, categoryToDelete, refreshStructure, selectionControlled, onSelectCategoryProp])
+    }, [brandId, categoryToDelete, refreshStructure, selectionControlled, onSelectCategoryProp, onSaveNotice])
 
-    const handleAddCategorySuccess = useCallback((newCat) => {
-        if (!newCat?.id) return
-        setLocalCategories((prev) => [
-            ...prev,
-            {
-                ...newCat,
-                type_field: 'custom',
-                is_private: false,
-                access_rules: [],
-                ebi_enabled: newCat.asset_type === 'deliverable',
-                deletion_available: false,
-                upgrade_available: false,
-            },
-        ])
-    }, [])
+    const handleAddCategorySuccess = useCallback(
+        (newCat) => {
+            if (!newCat?.id) return
+            setLocalCategories((prev) => [
+                ...prev,
+                {
+                    ...newCat,
+                    type_field: 'custom',
+                    is_private: false,
+                    access_rules: [],
+                    ebi_enabled: newCat.asset_type === 'deliverable',
+                    deletion_available: false,
+                    upgrade_available: false,
+                },
+            ])
+            onSaveNotice?.('Custom folder added.')
+        },
+        [onSaveNotice]
+    )
 
     const handleAfterAddSystemCategory = useCallback(
         (category) => {
@@ -213,11 +220,15 @@ export default function ManageStructureWorkspace({
         }
     }, [categorySettingsOpen, brandId])
 
-    const handleCategorySettingsSuccess = useCallback((updatedCategory) => {
-        setLocalCategories((prev) =>
-            prev.map((c) => (c.id === updatedCategory.id ? { ...c, ...updatedCategory } : c))
-        )
-    }, [])
+    const handleCategorySettingsSuccess = useCallback(
+        (updatedCategory) => {
+            setLocalCategories((prev) =>
+                prev.map((c) => (c.id === updatedCategory.id ? { ...c, ...updatedCategory } : c))
+            )
+            onSaveNotice?.('Folder settings saved.')
+        },
+        [onSaveNotice]
+    )
 
     const handleCategorySettingsDelete = useCallback((cat) => {
         setCategoryToDelete(cat)
@@ -248,6 +259,7 @@ export default function ManageStructureWorkspace({
                 credentials: 'same-origin',
             })
             if (response.ok) {
+                onSaveNotice?.('Folder reset to system defaults.')
                 setCategoryToRevert(null)
                 setConfirmRevertOpen(false)
                 refreshStructure()
@@ -255,7 +267,7 @@ export default function ManageStructureWorkspace({
         } finally {
             setRevertLoading(false)
         }
-    }, [categoryToRevert, refreshStructure])
+    }, [categoryToRevert, refreshStructure, onSaveNotice])
 
     const handleSelectCategory = useCallback(
         (categoryId) => {
@@ -273,7 +285,7 @@ export default function ManageStructureWorkspace({
                 </h2>
                 <p className="mt-1.5 text-sm text-gray-600 leading-relaxed">
                     {hubLayout
-                        ? 'Select a folder to configure its fields. Drag to reorder; the eye hides a folder from library sidebars. Add custom folders or use the catalog below.'
+                        ? 'Select a folder to configure its fields. Drag to reorder; the eye hides a folder from library sidebars. Add custom folders or use the catalog below. Changes save immediately; a confirmation appears at the top when each save succeeds.'
                         : 'Drag the handle beside a visible folder to set sidebar order. The eye icon hides a folder from the library sidebars; hidden folders stay under the collapsed Hidden section. Add custom categories or pull in platform folders from the catalog below.'}
                 </p>
                 {brand?.name ? (
@@ -290,6 +302,7 @@ export default function ManageStructureWorkspace({
                         canManageBrandCategories={canManageBrandCategories}
                         brandId={brandId}
                         onCategoriesChange={onCategoriesChange}
+                        onSaveNotice={onSaveNotice}
                         onAfterAddSystemCategory={handleAfterAddSystemCategory}
                         onRename={(cat) => {
                             setEditingCategoryId(cat.id)

@@ -871,7 +871,14 @@ export default function CollectionsIndex({
                     assetIds={bulkSelectedAssetIds}
                     selectedAssetSummary={bulkSelectedAssetIds.map((id) => {
                         const a = safeAssetsList.find((x) => x.id === id)
-                        return a ? { id: a.id, original_filename: a.original_filename ?? '' } : { id, original_filename: '' }
+                        return a
+                            ? {
+                                  id: a.id,
+                                  original_filename: a.original_filename ?? '',
+                                  mime_type: a.mime_type ?? null,
+                                  title: a.title ?? null,
+                              }
+                            : { id, original_filename: '', mime_type: null, title: null }
                     })}
                     selectionSummary={computeSelectionSummary(safeAssetsList, bulkSelectedAssetIds)}
                     onClose={() => setShowBulkActionsModal(false)}

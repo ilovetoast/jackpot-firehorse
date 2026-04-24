@@ -113,7 +113,7 @@ final class StudioCompositionCanvasRuntimeFfmpegMerger
         ]);
         if ($wantAudio) {
             $argv = array_merge($argv, [
-                '-map', '0:a:0',
+                '-map', '0:a:0?',
                 '-c:a', 'aac',
                 '-b:a', '192k',
             ]);

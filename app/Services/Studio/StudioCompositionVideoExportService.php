@@ -225,7 +225,7 @@ final class StudioCompositionVideoExportService
                 $argv = array_merge(
                     $argv,
                     [
-                        '-map', '0:a:0', '-c:a', 'aac', '-b:a', '192k',
+                        '-map', '0:a:0?', '-c:a', 'aac', '-b:a', '192k',
                     ]
                 );
             } else {

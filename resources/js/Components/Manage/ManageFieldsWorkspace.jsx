@@ -89,6 +89,7 @@ export default function ManageFieldsWorkspace({
     customFieldsLimit = null,
     metadataFieldFamilies = {},
     selectedCategoryId = null,
+    onSaveNotice,
 }) {
     const { system_fields: systemFields = [], tenant_fields: tenantFields = [] } = registry || {}
     const allFields = useMemo(() => [...systemFields, ...tenantFields], [systemFields, tenantFields])
@@ -118,6 +119,33 @@ export default function ManageFieldsWorkspace({
     const [confirmDisableCoreOpen, setConfirmDisableCoreOpen] = useState(false)
     const [pendingDisable, setPendingDisable] = useState(null)
     const [ebiToggleLoading, setEbiToggleLoading] = useState(false)
+
+    const noticeTimerRef = useRef(null)
+    useEffect(() => {
+        return () => {
+            if (noticeTimerRef.current) {
+                clearTimeout(noticeTimerRef.current)
+                noticeTimerRef.current = null
+            }
+        }
+    }, [])
+
+    const postNotice = useCallback(
+        (text, variant = 'success', durationMs) => {
+            const dur = durationMs ?? (variant === 'error' ? 6000 : 4000)
+            if (typeof onSaveNotice === 'function') {
+                onSaveNotice(text, { variant, durationMs: dur })
+                return
+            }
+            setSuccessMessage(text)
+            if (noticeTimerRef.current) clearTimeout(noticeTimerRef.current)
+            noticeTimerRef.current = setTimeout(() => {
+                setSuccessMessage(null)
+                noticeTimerRef.current = null
+            }, dur)
+        },
+        [onSaveNotice]
+    )
 
     const fieldCategoryDataRef = useRef(fieldCategoryData)
     useEffect(() => {
@@ -155,24 +183,23 @@ export default function ManageFieldsWorkspace({
                 body: JSON.stringify({ ebi_enabled: newValue }),
             })
             if (response.ok) {
-                setSuccessMessage(`Brand Intelligence ${newValue ? 'enabled' : 'disabled'} for this folder.`)
-                setTimeout(() => setSuccessMessage(null), 3000)
+                postNotice(`Brand Intelligence ${newValue ? 'enabled' : 'disabled'} for this folder.`)
                 router.reload({ only: ['categories'] })
             } else {
                 const errorData = await response.json().catch(() => ({}))
-                setSuccessMessage(
-                    errorData.message || errorData.error || 'Failed to update Brand Intelligence setting.'
+                postNotice(
+                    errorData.message || errorData.error || 'Failed to update Brand Intelligence setting.',
+                    'error',
+                    4000
                 )
-                setTimeout(() => setSuccessMessage(null), 4000)
             }
         } catch (error) {
             console.error('Failed to toggle ebi_enabled:', error)
-            setSuccessMessage('Failed to update Brand Intelligence setting.')
-            setTimeout(() => setSuccessMessage(null), 3000)
+            postNotice('Failed to update Brand Intelligence setting.', 'error')
         } finally {
             setEbiToggleLoading(false)
         }
-    }, [brand?.id, canToggleEbi, selectedCategory])
+    }, [brand?.id, canToggleEbi, selectedCategory, postNotice])
 
     useEffect(() => {
         setExpandedDetailKey(null)
@@ -398,11 +425,10 @@ export default function ManageFieldsWorkspace({
                 })
             }
             if (succeeded && meta.fieldLabel && meta.categoryName) {
-                setSuccessMessage(`${meta.fieldLabel} ${willBeEnabled ? 'enabled' : 'disabled'} for ${meta.categoryName}.`)
-                setTimeout(() => setSuccessMessage(null), 3000)
+                postNotice(`${meta.fieldLabel} ${willBeEnabled ? 'enabled' : 'disabled'} for ${meta.categoryName}.`)
             }
         },
-        [categories]
+        [categories, postNotice]
     )
 
     const handleToggleWithConfirm = useCallback(
@@ -468,13 +494,11 @@ export default function ManageFieldsWorkspace({
             })
             const responseData = await response.json().catch(() => ({}))
             if (response.ok) {
-                setSuccessMessage(`${contextLabel} ${newValue ? 'on' : 'off'} for this category.`)
-                setTimeout(() => setSuccessMessage(null), 3000)
+                postNotice(`${contextLabel} ${newValue ? 'on' : 'off'} for this folder.`)
             } else {
                 const errorMsg =
                     responseData?.error || responseData?.message || `Failed to update visibility (${response.status})`
-                setSuccessMessage(`Error: ${errorMsg}`)
-                setTimeout(() => setSuccessMessage(null), 5000)
+                postNotice(`Error: ${errorMsg}`, 'error')
                 if (currentCategoryId) {
                     setFieldCategoryData((prev) => {
                         const fieldData = prev[fieldId] || { suppressed: [], visible: [], overrides: {} }
@@ -495,8 +519,7 @@ export default function ManageFieldsWorkspace({
                 }
             }
         } catch (error) {
-            setSuccessMessage(error.message || 'Network error')
-            setTimeout(() => setSuccessMessage(null), 5000)
+            postNotice(error.message || 'Network error', 'error')
         }
     }
 
@@ -531,9 +554,9 @@ export default function ManageFieldsWorkspace({
                 body: JSON.stringify({ is_required: newValue, category_id: categoryId }),
             })
             if (response.ok) {
-                setSuccessMessage(`Required ${newValue ? 'on' : 'off'} for this category.`)
-                setTimeout(() => setSuccessMessage(null), 3000)
+                postNotice(`Required ${newValue ? 'on' : 'off'} for this folder.`)
             } else {
+                postNotice('Could not update required setting.', 'error')
                 setFieldCategoryData((prev) => {
                     const fieldData = prev[fieldId] || { suppressed: [], visible: [], overrides: {} }
                     return {
@@ -603,9 +626,9 @@ export default function ManageFieldsWorkspace({
                         },
                     }
                 })
+                postNotice('Could not update primary filter placement.', 'error')
             } else {
-                setSuccessMessage(`Primary filter placement ${newValue ? 'on' : 'off'}.`)
-                setTimeout(() => setSuccessMessage(null), 3000)
+                postNotice(`Primary filter placement ${newValue ? 'on' : 'off'} for this folder.`)
             }
         } catch (e) {
             console.error(e)
@@ -627,12 +650,14 @@ export default function ManageFieldsWorkspace({
                 body: JSON.stringify({ ai_eligible: newValue }),
             })
             if (response.ok) {
-                setSuccessMessage(`AI suggestions ${newValue ? 'on' : 'off'}.`)
-                setTimeout(() => setSuccessMessage(null), 3000)
+                postNotice(`AI suggestions ${newValue ? 'on' : 'off'}.`)
                 refreshRegistry()
+            } else {
+                postNotice('Could not update AI suggestions.', 'error')
             }
         } catch (e) {
             console.error(e)
+            postNotice('Could not update AI suggestions.', 'error')
         }
     }
 
@@ -677,7 +702,7 @@ export default function ManageFieldsWorkspace({
 
     return (
         <div className="space-y-6">
-            {successMessage && (
+            {successMessage && !onSaveNotice && (
                 <div className="rounded-lg border border-indigo-100 bg-indigo-50 px-4 py-2 text-sm text-indigo-900">
                     {successMessage}
                 </div>
@@ -712,7 +737,7 @@ export default function ManageFieldsWorkspace({
                         Turn fields on or off for this folder. Expand a row to tune upload, quick view, filters, and
                         more.{' '}
                         <span className="text-gray-700">
-                            Each switch saves immediately—a brief message appears above when it succeeds.
+                            Each switch saves immediately—a confirmation appears at the top of the page when it succeeds.
                         </span>{' '}
                         Use <span className="font-medium text-gray-800">Field definition</span> or{' '}
                         <span className="font-medium text-gray-800">Edit</span> for label and option changes; those

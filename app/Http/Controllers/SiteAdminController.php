@@ -20,6 +20,7 @@ use App\Models\Ticket;
 use App\Models\UploadSession;
 use App\Models\User;
 use App\Services\ActivityRecorder;
+use App\Services\Admin\StudioCompositionVideoExportAdminMetrics;
 use App\Services\DocumentationService;
 use App\Services\GrantCreatorModuleToTenant;
 use App\Services\TenantAgencyService;
@@ -274,6 +275,7 @@ class SiteAdminController extends Controller
                 'ai_agent_failures_24h' => \App\Models\AIAgentRun::where('status', 'failed')
                     ->where('started_at', '>=', now()->subDay())
                     ->count(),
+                'studio_video_export_failures_24h' => StudioCompositionVideoExportAdminMetrics::failureCountLast24Hours(),
             ];
         });
 

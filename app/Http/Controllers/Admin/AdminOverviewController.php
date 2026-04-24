@@ -13,6 +13,7 @@ use App\Models\Ticket;
 use App\Models\UploadSession;
 use App\Models\User;
 use App\Enums\TicketStatus;
+use App\Services\Admin\StudioCompositionVideoExportAdminMetrics;
 use App\Enums\TicketTeam;
 use App\Enums\TicketType;
 use Illuminate\Http\JsonResponse;
@@ -123,7 +124,13 @@ class AdminOverviewController extends Controller
             'auto_recovery' => [],
             'support' => ['open_tickets' => 0, 'engineering_tickets' => 0, 'total_tickets' => 0],
             'ai' => [],
-            'failures' => [],
+            'failures' => [
+                'download_failures_24h' => 0,
+                'upload_failures_24h' => 0,
+                'derivative_total' => 0,
+                'derivative_escalated' => 0,
+                'studio_video_export_failures_24h' => 0,
+            ],
             'organization' => ['tenants' => 0, 'users' => 0],
             'health_score' => null,
             'last_deploy' => null,
@@ -272,11 +279,14 @@ class AdminOverviewController extends Controller
             $q->whereNotNull('escalation_ticket_id')->orWhere('failure_count', '>=', 3);
         })->count();
 
+        $studioVideoExportFailures24h = StudioCompositionVideoExportAdminMetrics::failureCountLast24Hours();
+
         return [
             'download_failures_24h' => $downloadFailures,
             'upload_failures_24h' => $uploadFailures,
             'derivative_total' => $derivativeTotal,
             'derivative_escalated' => $derivativeEscalated,
+            'studio_video_export_failures_24h' => $studioVideoExportFailures24h,
         ];
     }
 

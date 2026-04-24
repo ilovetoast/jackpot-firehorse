@@ -8,6 +8,7 @@ use App\Models\StudioCompositionVideoExportJob;
 use App\Models\Tenant;
 use App\Models\User;
 use App\Studio\Rendering\CompositionRenderNormalizer;
+use App\Studio\Rendering\StudioFfmpegNativeStrictLayerPolicyMessage;
 use App\Studio\Rendering\CompositionRenderValidator;
 use App\Studio\Rendering\Dto\CompositionRenderRequest;
 use App\Studio\Rendering\Dto\RenderLayer;
@@ -128,7 +129,11 @@ final class StudioCompositionFfmpegNativeVideoExportService
             $s = $layerDiagnostics['skipped_below_primary_video'] ?? [];
             if ($strictLayers) {
                 if ($u !== [] || $s !== []) {
-                    $this->fail($row, 'ffmpeg_native_strict_layer_policy', 'One or more visible composition layers cannot be represented in FFmpeg-native V1 (unknown type, below-primary-video z-order, empty text, unsupported radial scrim, etc.).', [
+                    $detail = StudioFfmpegNativeStrictLayerPolicyMessage::summarize($layerDiagnostics);
+                    $message = $detail !== ''
+                        ? 'FFmpeg-native export cannot include: '.$detail
+                        : 'One or more visible composition layers cannot be represented in FFmpeg-native V1 (unknown type, below-primary-video z-order, empty text, unsupported radial scrim, etc.).';
+                    $this->fail($row, 'ffmpeg_native_strict_layer_policy', $message, [
                         'layer_diagnostics' => $layerDiagnostics,
                     ], $workspace);
 
@@ -160,6 +165,8 @@ final class StudioCompositionFfmpegNativeVideoExportService
                         return;
                     }
                     $exportRasterDebug['shape_fill_png_paths'][] = ['layer_id' => $ly->id, 'path' => $png];
+                    $fillExtra = $ly->extra;
+                    $fillExtra['from_fill_shape'] = true;
                     $stagedLayers[] = new RenderLayer(
                         id: $ly->id,
                         type: 'image',
@@ -181,7 +188,7 @@ final class StudioCompositionFfmpegNativeVideoExportService
                         muted: $ly->muted,
                         fadeInMs: $ly->fadeInMs,
                         fadeOutMs: $ly->fadeOutMs,
-                        extra: ['from_fill_shape' => true],
+                        extra: $fillExtra,
                     );
 
                     continue;
@@ -215,6 +222,8 @@ final class StudioCompositionFfmpegNativeVideoExportService
                         $exportRasterDebug['resolved_font_paths'][] = $textMeta;
                         $exportRasterDebug['text_png_paths'][] = ['layer_id' => $ly->id, 'path' => $png];
                     }
+                    $textExtra = $ly->extra;
+                    $textExtra['from_text'] = true;
                     $stagedLayers[] = new RenderLayer(
                         id: $ly->id,
                         type: 'image',
@@ -236,7 +245,7 @@ final class StudioCompositionFfmpegNativeVideoExportService
                         muted: $ly->muted,
                         fadeInMs: $ly->fadeInMs,
                         fadeOutMs: $ly->fadeOutMs,
-                        extra: ['from_text' => true],
+                        extra: $textExtra,
                     );
 
                     continue;
@@ -398,14 +407,24 @@ final class StudioCompositionFfmpegNativeVideoExportService
         if ($workspace !== null) {
             RenderWorkspace::purge($workspace);
         }
+        $mergedDebug = array_merge($debug, [
+            'workspace_path' => $workspace,
+        ]);
+        $stderrTail = $mergedDebug['stderr_tail'] ?? null;
+        Log::warning('Studio native video export failed', [
+            'export_job_id' => $row->id,
+            'composition_id' => $row->composition_id,
+            'code' => $code,
+            'message' => $message,
+            'exit_code' => $mergedDebug['exit_code'] ?? null,
+            'stderr_tail' => is_string($stderrTail) ? mb_substr($stderrTail, -4000) : null,
+        ]);
         $row->update([
             'status' => StudioCompositionVideoExportJob::STATUS_FAILED,
             'error_json' => [
                 'code' => $code,
                 'message' => $message,
-                'debug' => array_merge($debug, [
-                    'workspace_path' => $workspace,
-                ]),
+                'debug' => $mergedDebug,
             ],
         ]);
     }

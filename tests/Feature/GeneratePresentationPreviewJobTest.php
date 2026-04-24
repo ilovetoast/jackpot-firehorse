@@ -18,6 +18,7 @@ use App\Models\UploadSession;
 use App\Models\User;
 use App\Services\AIService;
 use App\Services\EditorGenerativeImagePersistService;
+use App\Services\FreePlanImageWatermarkService;
 use App\Support\ThumbnailMode;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
@@ -155,25 +156,32 @@ class GeneratePresentationPreviewJobTest extends TestCase
         $dataUrl = 'data:image/png;base64,'.base64_encode((string) file_get_contents($tinyPng));
 
         $aiMock = Mockery::mock(AIService::class);
-        $aiMock->shouldReceive('executeEditorImageEditAgent')->once()->andReturn([
-            'image_ref' => $dataUrl,
-            'agent_run_id' => 4242,
-            'cost' => 0.01,
-            'tokens_in' => 10,
-            'tokens_out' => 20,
-            'resolved_model_key' => 'gpt-image-1',
-        ]);
+        $aiMock->shouldReceive('executeEditorImageEditAgent')
+            ->once()
+            ->withArgs(function (string $agentId, $taskType, string $prompt, array $opts): bool {
+                return str_contains($prompt, "Architect's drafting desk")
+                    && str_contains($prompt, 'Environment / placement');
+            })
+            ->andReturn([
+                'image_ref' => $dataUrl,
+                'agent_run_id' => 4242,
+                'cost' => 0.01,
+                'tokens_in' => 10,
+                'tokens_out' => 20,
+                'resolved_model_key' => 'gpt-image-1',
+            ]);
         $this->instance(AIService::class, $aiMock);
 
         $persist = app(EditorGenerativeImagePersistService::class);
 
-        $job = new GeneratePresentationPreviewJob((string) $asset->id, (string) $version->id, true);
+        $job = new GeneratePresentationPreviewJob((string) $asset->id, (string) $version->id, true, "Architect's drafting desk");
         $job->handle(
             $thumbMock,
             $aiMock,
             app(\App\Services\PresentationPreviewPromptBuilder::class),
             $persist,
             app(\App\Services\AiUsageService::class),
+            app(FreePlanImageWatermarkService::class),
         );
 
         $version->refresh();
@@ -185,7 +193,9 @@ class GeneratePresentationPreviewJobTest extends TestCase
         $this->assertSame(10, (int) ($presMeta['tokens_in'] ?? 0));
         $this->assertSame(20, (int) ($presMeta['tokens_out'] ?? 0));
         $this->assertArrayHasKey('prompt', $presMeta);
-        $this->assertStringContainsString('marketing presentation', (string) $presMeta['prompt']);
+        $this->assertStringContainsString('marketing presentations', (string) $presMeta['prompt']);
+        $this->assertStringContainsString("Architect's drafting desk", (string) $presMeta['prompt']);
+        $this->assertSame("Architect's drafting desk", (string) ($presMeta['last_scene_description'] ?? ''));
 
         $this->assertSame(
             'out/pres/thumb.webp',

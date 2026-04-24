@@ -35,7 +35,7 @@ function statusTitle(status: string, playBackAvailable: boolean): string {
     return m[status] ?? status
 }
 
-export type StudioVideoInsertMode = 'add_back' | 'add_front' | 'replace_source'
+export type StudioVideoInsertMode = 'add_back' | 'add_front'
 
 export type InsertAnimationVideoArgs = {
     assetId: string
@@ -43,7 +43,7 @@ export type InsertAnimationVideoArgs = {
     name: string
     endMs: number
     mode: StudioVideoInsertMode
-    /** Required when mode is replace_source */
+    /** When set, insert keeps this image / generative layer in the stack (hidden) so the user can return to the still. */
     replaceLayerId?: string | null
     provenance?: Record<string, string | number | undefined>
 }
@@ -59,8 +59,6 @@ type Props = {
     compositionTitleForLabel?: string
     /** When set with {@link onInsertOutputAsVideoLayer} / {@link onExportBakedVideo}, show composition actions. */
     compositionId?: string | null
-    /** When the job references a source layer and that layer still exists, allows “replace source”. */
-    sourceLayerReplaceable?: boolean
     /** Add this run’s output as a new video layer on the composition (server + local state). */
     onInsertOutputAsVideoLayer?: (args: InsertAnimationVideoArgs) => Promise<void>
     /** Queue a worker export; resolves with the new output asset id when available. */
@@ -78,7 +76,6 @@ export function StudioAnimationJobDetailDialog(props: Props) {
         compositionId = null,
         onInsertOutputAsVideoLayer,
         onExportBakedVideo,
-        sourceLayerReplaceable = false,
     } = props
     const insertGroupId = useId()
     const [insertMode, setInsertMode] = useState<StudioVideoInsertMode>('add_back')
@@ -324,28 +321,6 @@ export function StudioAnimationJobDetailDialog(props: Props) {
                                     <span className="mt-0.5 block text-[10px] text-gray-500">Max z-index — over other layers.</span>
                                 </span>
                             </label>
-                            <label
-                                className={`flex items-start gap-2 text-xs ${
-                                    sourceLayerReplaceable && job.source_layer_id ? 'cursor-pointer text-gray-200' : 'cursor-not-allowed text-gray-500'
-                                }`}
-                            >
-                                <input
-                                    type="radio"
-                                    className="mt-0.5"
-                                    name="jp-studio-insert-mode"
-                                    disabled={!sourceLayerReplaceable || !job.source_layer_id}
-                                    checked={insertMode === 'replace_source'}
-                                    onChange={() => setInsertMode('replace_source')}
-                                />
-                                <span>
-                                    <span className="font-medium">Replace source layer</span>
-                                    <span className="mt-0.5 block text-[10px] text-gray-500">
-                                        {sourceLayerReplaceable && job.source_layer_id
-                                            ? 'Swap the animated layer in place (same position & stack).'
-                                            : 'Not available — source layer missing from the canvas or this run used the full frame.'}
-                                    </span>
-                                </span>
-                            </label>
                         </div>
                         <button
                             type="button"
@@ -357,10 +332,7 @@ export function StudioAnimationJobDetailDialog(props: Props) {
                                     3_600_000,
                                     Math.max(1000, Math.round((job.output?.duration_seconds ?? 5) * 1000))
                                 )
-                                let mode: StudioVideoInsertMode = insertMode
-                                if (mode === 'replace_source' && (!sourceLayerReplaceable || !job.source_layer_id)) {
-                                    mode = 'add_back'
-                                }
+                                const mode: StudioVideoInsertMode = insertMode
                                 const prov = {
                                     sourceMode: job.source_strategy,
                                     provider: job.provider,
