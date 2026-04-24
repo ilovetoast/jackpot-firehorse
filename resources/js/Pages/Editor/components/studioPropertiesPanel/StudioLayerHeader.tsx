@@ -29,8 +29,8 @@ function layerTypeLabel(layer: Layer): string {
     return (layer as Layer).type
 }
 
-function LayerTypeIcon({ layer }: { layer: Layer }) {
-    const cls = 'h-6 w-6'
+function LayerTypeIcon({ layer, className }: { layer: Layer; className: string }) {
+    const cls = className
     if (isGenerativeImageLayer(layer)) return <SparklesIcon className={cls} aria-hidden />
     if (isImageLayer(layer)) return <PhotoIcon className={cls} aria-hidden />
     if (isTextLayer(layer)) return <DocumentTextIcon className={cls} aria-hidden />
@@ -66,12 +66,12 @@ export function StudioLayerHeader({
     const locked = layer.locked || disabled
     return (
         <div className={studioPanelSurfaces.layerAnchor}>
-            <div className="flex items-start gap-3">
+            <div className="flex items-start gap-2.5">
                 <div
-                    className="mt-0.5 flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border border-gray-700 bg-gray-800/50 text-gray-100 shadow-inner ring-1 ring-inset ring-black/20"
+                    className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-gray-700 bg-gray-800/50 text-gray-100 shadow-inner ring-1 ring-inset ring-black/20"
                     title={layerTypeLabel(layer)}
                 >
-                    <LayerTypeIcon layer={layer} />
+                    <LayerTypeIcon layer={layer} className="h-4 w-4" />
                 </div>
                 <div className="min-w-0 flex-1 pt-0.5">
                     <input
@@ -85,13 +85,8 @@ export function StudioLayerHeader({
                             }
                         }}
                         className="w-full rounded-md border border-transparent bg-transparent px-1 py-0.5 text-[15px] font-semibold leading-tight text-gray-100 placeholder:text-gray-500 hover:border-gray-700 focus:border-indigo-400/40 focus:outline-none focus:ring-1 focus:ring-indigo-400/30 disabled:opacity-50"
-                        placeholder={layerTypeLabel(layer)}
+                        placeholder="Layer name"
                     />
-                    <p className="mt-1.5">
-                        <span className="inline-flex items-center rounded-md border border-gray-700 bg-gray-800/40 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-gray-300">
-                            {layerTypeLabel(layer)}
-                        </span>
-                    </p>
                 </div>
                 <div
                     className="flex shrink-0 flex-wrap items-center justify-end gap-1.5 pt-0.5"
