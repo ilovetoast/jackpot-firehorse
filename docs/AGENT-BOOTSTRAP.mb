@@ -1,7 +1,7 @@
 IMPORTANT — READ FIRST
 
 
-- use sail for interacting with PHP
+- use sail for interacting with PHP 
 
 IMPORTANT CONSTRAINTS:
 - Phase 3 (Uploader) is LOCKED. Do NOT refactor, rename, or restructure any Phase 3 code.
