@@ -38,6 +38,7 @@ export default function GridOverlay({ docW, docH, density, hits = [], className 
 
     return (
         <svg
+            data-jp-export-capture-exclude
             aria-hidden="true"
             className={className}
             style={style}

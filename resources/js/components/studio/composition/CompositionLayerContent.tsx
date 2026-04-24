@@ -17,6 +17,11 @@ import type { CompositionSceneMode, CompositionSceneEditorHandlers } from './typ
 
 const VARIATION_MAX = 4
 
+/** Indigo scrim over layer pixels so slot-reel + status copy stay legible on light or busy imagery. */
+const LAYER_AI_BUSY_OVERLAY =
+    'flex flex-col items-center justify-center gap-2 bg-indigo-600/50 backdrop-blur-sm ring-1 ring-inset ring-indigo-950/15 dark:bg-indigo-900/55 dark:ring-white/10'
+const LAYER_AI_BUSY_LABEL = 'text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.45)]'
+
 export function CompositionLayerContent(props: {
     layer: Layer
     allLayers: Layer[]
@@ -92,12 +97,12 @@ export function CompositionLayerContent(props: {
                 )}
                 {layer.status === 'generating' && mode === 'editor' && (
                     <div
-                        className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-white/88 dark:bg-gray-950/88"
+                        className={`absolute inset-0 z-10 ${LAYER_AI_BUSY_OVERLAY}`}
                         role="status"
                         aria-busy="true"
                     >
                         {layer.variationPending ? (
-                            <EditorSlotReelLoader label="Variations…">
+                            <EditorSlotReelLoader label="Variations…" labelClassName={LAYER_AI_BUSY_LABEL}>
                                 <div className="grid w-[88px] grid-cols-2 gap-1">
                                     {Array.from({ length: layer.variationBatchSize ?? VARIATION_MAX }).map((_, i) => (
                                         <div
@@ -108,7 +113,7 @@ export function CompositionLayerContent(props: {
                                 </div>
                             </EditorSlotReelLoader>
                         ) : (
-                            <EditorSlotReelLoader label="Generating…" />
+                            <EditorSlotReelLoader label="Generating…" labelClassName={LAYER_AI_BUSY_LABEL} />
                         )}
                     </div>
                 )}
@@ -136,11 +141,11 @@ export function CompositionLayerContent(props: {
                     editorHandlers &&
                     editorHandlers.activeLayerAnimationBySourceLayerId.has(layer.id) && (
                         <div
-                            className="absolute inset-0 z-[22] flex flex-col items-center justify-center gap-2 bg-white/88 dark:bg-gray-950/88"
+                            className={`absolute inset-0 z-[22] ${LAYER_AI_BUSY_OVERLAY}`}
                             role="status"
                             aria-busy="true"
                         >
-                            <EditorSlotReelLoader label="Animating…" />
+                            <EditorSlotReelLoader label="Animating…" labelClassName={LAYER_AI_BUSY_LABEL} />
                         </div>
                     )}
             </div>
@@ -196,11 +201,11 @@ export function CompositionLayerContent(props: {
                 )}
                 {layer.aiEdit?.status === 'editing' && mode === 'editor' && (
                     <div
-                        className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-white/88 dark:bg-gray-950/88"
+                        className={`absolute inset-0 z-10 ${LAYER_AI_BUSY_OVERLAY}`}
                         role="status"
                         aria-busy="true"
                     >
-                        <EditorSlotReelLoader label="Editing…" />
+                        <EditorSlotReelLoader label="Editing…" labelClassName={LAYER_AI_BUSY_LABEL} />
                     </div>
                 )}
                 {layer.aiEdit?.status === 'error' && mode === 'editor' && editorHandlers && (
@@ -225,11 +230,11 @@ export function CompositionLayerContent(props: {
                     editorHandlers &&
                     editorHandlers.activeLayerAnimationBySourceLayerId.has(layer.id) && (
                         <div
-                            className="absolute inset-0 z-[22] flex flex-col items-center justify-center gap-2 bg-white/88 dark:bg-gray-950/88"
+                            className={`absolute inset-0 z-[22] ${LAYER_AI_BUSY_OVERLAY}`}
                             role="status"
                             aria-busy="true"
                         >
-                            <EditorSlotReelLoader label="Animating…" />
+                            <EditorSlotReelLoader label="Animating…" labelClassName={LAYER_AI_BUSY_LABEL} />
                         </div>
                     )}
             </div>

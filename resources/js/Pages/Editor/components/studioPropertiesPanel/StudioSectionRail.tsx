@@ -38,9 +38,9 @@ export function StudioSectionRailIconButton({
             aria-label={title}
             aria-expanded={expanded}
             onClick={onToggle}
-            className={`box-border inline-flex size-7 shrink-0 items-center justify-center rounded border p-0 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400/50 focus-visible:ring-offset-0 ${studioSectionRailIconButtonClasses(expanded, active)}`}
+            className={`box-border inline-flex size-9 shrink-0 items-center justify-center rounded border p-0 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400/50 focus-visible:ring-offset-0 ${studioSectionRailIconButtonClasses(expanded, active)}`}
         >
-            <span className="[&>svg]:h-3.5 [&>svg]:w-3.5">{icon}</span>
+            <span className="[&>svg]:h-4 [&>svg]:w-4">{icon}</span>
         </button>
     )
 }

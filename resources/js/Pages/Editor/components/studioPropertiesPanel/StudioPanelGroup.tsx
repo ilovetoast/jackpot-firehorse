@@ -4,8 +4,8 @@ import { studioPanelPattern, studioPanelText } from './studioPanelUi'
 import type { StudioPropertiesSectionId } from './studioSectionRailTypes'
 import { StudioSectionRailIconButton } from './StudioSectionRail'
 
-/** Gutter width — content column uses matching `pl-*` after the rail */
-const sectionRailGutterClass = 'w-8 shrink-0'
+/** Gutter width — content column uses matching `pl-*` after the rail (~40px) */
+const sectionRailGutterClass = 'w-10 shrink-0'
 /** Horizontal inset for section title / description / body text after the vertical rail */
 const railContentPl = 'pl-2.5'
 /** One rule color for section breaks (horizontal + vertical junctions) */
@@ -152,7 +152,7 @@ export function StudioPanelGroup({
             className={`flex min-w-0 items-center gap-0 ${!first ? `border-t ${sectionRule}` : ''} ${!first ? 'mt-4' : ''}`}
         >
             <div
-                className={`${sectionRailGutterClass} flex shrink-0 flex-col items-center justify-center ${railGutterChrome} py-1`}
+                className={`${sectionRailGutterClass} flex shrink-0 flex-col items-center justify-start pt-1 ${railGutterChrome} pb-1`}
             >
                 <StudioSectionRailIconButton
                     shortLabel={railShortLabel!}

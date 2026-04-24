@@ -184,7 +184,7 @@ import {
     orderAssetVersionsForStrip,
     type EditorAssetVersionRow,
 } from './editorAssetVersionBridge'
-import { captureCompositionThumbnailBase64 } from './editorCompositionThumbnail'
+import { captureCompositionThumbnailBase64, compositionHtmlToImageFilter } from './editorCompositionThumbnail'
 import {
     ensureCanvasFontLoaded,
     formatCssFontFamilyStack,
@@ -1701,10 +1701,7 @@ export default function AssetEditor() {
         if (typeof window === 'undefined') return
         window.localStorage.setItem(ASSET_EDITOR_CANVAS_SECTION_KEY, canvasSectionOpen ? '1' : '0')
     }, [canvasSectionOpen])
-    const [propertiesGuidesOpen, setPropertiesGuidesOpen] = useState(false)
-    const [propertiesPrecisionOpen, setPropertiesPrecisionOpen] = useState(false)
     const [propertiesAdvancedOpen, setPropertiesAdvancedOpen] = useState(false)
-    const [propertiesSourceMotionOpen, setPropertiesSourceMotionOpen] = useState(false)
     const [propertiesImageEditModelOpen, setPropertiesImageEditModelOpen] = useState(false)
     const [propertiesMaskDetailsOpen, setPropertiesMaskDetailsOpen] = useState(false)
     const [propertiesVideoDetailsOpen, setPropertiesVideoDetailsOpen] = useState(false)
@@ -1714,7 +1711,7 @@ export default function AssetEditor() {
         Record<StudioPropertiesSectionId, boolean>
     >(() => ({ ...INITIAL_STUDIO_PROPERTIES_SECTION_OPEN }))
     const [studioPropertiesSectionActive, setStudioPropertiesSectionActive] =
-        useState<StudioPropertiesSectionId | null>('canvas')
+        useState<StudioPropertiesSectionId | null>('layer')
     const propertiesPanelScrollRef = useRef<HTMLDivElement>(null)
     const [snapHits, setSnapHits] = useState<SnapHit[]>([])
     const snapHitsClearTimerRef = useRef<number | null>(null)
@@ -1737,15 +1734,6 @@ export default function AssetEditor() {
             setCanvasSectionOpen(false)
         }
     }, [selectedLayerId])
-    useEffect(() => {
-        const l = document.layers.find((x) => x.id === selectedLayerId) ?? null
-        if (!l) {
-            return
-        }
-        setPropertiesSourceMotionOpen(
-            isImageLayer(l) || isGenerativeImageLayer(l) || isVideoLayer(l)
-        )
-    }, [selectedLayerId, document.layers])
     const [spinPhraseIdx, setSpinPhraseIdx] = useState(0)
     propertiesPanelWidthRef.current = propertiesPanelWidth
 
@@ -2298,8 +2286,43 @@ export default function AssetEditor() {
     const visibleStudioPropertiesSectionIds = useMemo((): StudioPropertiesSectionId[] => {
         const ids: StudioPropertiesSectionId[] = ['canvas']
         if (!selectedLayer) return ids
-        ids.push('layer', 'primaryTool', 'sourceHistory', 'layout', 'style', 'advanced')
+        ids.push('layer', 'element', 'actions', 'history', 'advanced')
         return ids
+    }, [selectedLayer])
+
+    const studioElementSectionDescription = useMemo(() => {
+        if (!selectedLayer) {
+            return 'Appearance, frame, and placement'
+        }
+        if (isImageLayer(selectedLayer) || isGenerativeImageLayer(selectedLayer)) {
+            return 'Source, frame, size, and rotation'
+        }
+        if (isTextLayer(selectedLayer)) {
+            return 'Content, typography, box, and placement'
+        }
+        if (isVideoLayer(selectedLayer)) {
+            return 'Source, trim, fit, size, and rotation'
+        }
+        if (isFillLayer(selectedLayer) || isMaskLayer(selectedLayer)) {
+            return 'Shape, fill, and placement'
+        }
+        return 'Appearance and placement'
+    }, [selectedLayer])
+
+    const studioActionsSectionDescription = useMemo(() => {
+        if (!selectedLayer) {
+            return 'AI and batch tools'
+        }
+        if (isTextLayer(selectedLayer)) {
+            return 'Generate, improve, and brand tone'
+        }
+        if (isImageLayer(selectedLayer) || isGenerativeImageLayer(selectedLayer)) {
+            return 'AI edits, background, and motion'
+        }
+        if (isVideoLayer(selectedLayer)) {
+            return 'Generate previews and processing'
+        }
+        return 'AI and generative tools'
     }, [selectedLayer])
 
     const handleStudioPropertiesSectionToggle = useCallback((id: StudioPropertiesSectionId) => {
@@ -2307,7 +2330,7 @@ export default function AssetEditor() {
             const nextExpanded = !prev[id]
             if (nextExpanded) {
                 requestAnimationFrame(() => {
-                    document.getElementById(`jp-studio-section-${id}`)?.scrollIntoView({
+                    window.document.getElementById(`jp-studio-section-${id}`)?.scrollIntoView({
                         behavior: 'smooth',
                         block: 'start',
                     })
@@ -2411,6 +2434,25 @@ export default function AssetEditor() {
         }
         return 'still' as const
     }, [document.layers, selectedLayer, studioAiVideoForSelectedStill])
+
+    /** Same visibility logic as {@link studioAiStillClipCanvasMode}, when the video layer is selected (Element → Video). */
+    const studioAiStillClipCanvasModeFromVideoLayer = useMemo(() => {
+        if (!studioAiSourceStillForSelectedVideo) {
+            return null
+        }
+        const { stillLayerId, videoLayerId } = studioAiSourceStillForSelectedVideo
+        const still = document.layers.find((l) => l.id === stillLayerId)
+        const vid = document.layers.find((l) => l.id === videoLayerId)
+        if (!still || !vid || !isVideoLayer(vid)) {
+            return null
+        }
+        const stillVis = still.visible !== false
+        const vidVis = vid.visible !== false
+        if (vidVis && !stillVis) {
+            return 'clip' as const
+        }
+        return 'still' as const
+    }, [document.layers, studioAiSourceStillForSelectedVideo])
 
     useEffect(() => {
         if (selectedLayerId === prevSelectedLayerForPlaybackRef.current) {
@@ -2611,6 +2653,33 @@ export default function AssetEditor() {
             .filter((n): n is number => typeof n === 'number' && n > 0)
         return nums.length > 0 ? Math.min(...nums) : 1
     }, [selectedImageLayerVersionStrip])
+
+    useEffect(() => {
+        if (selectedLayer) {
+            setStudioPropertiesSectionOpen((s) => ({ ...s, canvas: false }))
+        } else {
+            setStudioPropertiesSectionOpen((s) => ({ ...s, canvas: true }))
+        }
+    }, [selectedLayer])
+
+    useEffect(() => {
+        if (!selectedLayerId || !selectedLayer) {
+            return
+        }
+        const hasAnimJobs = compositionAnimations.some((j) => j.source_layer_id === selectedLayerId)
+        const multiVersions =
+            isImageLayer(selectedLayer) &&
+            Boolean(selectedLayer.assetId) &&
+            selectedImageLayerVersionStrip.length > 1
+        if (multiVersions || hasAnimJobs) {
+            setStudioPropertiesSectionOpen((s) => ({ ...s, history: true }))
+        }
+    }, [
+        selectedLayerId,
+        selectedLayer,
+        compositionAnimations,
+        selectedImageLayerVersionStrip.length,
+    ])
 
     const generativePromptPreview = useMemo(() => {
         if (!selectedLayer || !isGenerativeImageLayer(selectedLayer)) {
@@ -3997,14 +4066,12 @@ export default function AssetEditor() {
             let nameToSave =
                 compositionNameRef.current.trim() || defaultCompositionName(docSnapshot)
 
-            if (!compositionId) {
-                if (urlLooksNumeric && compositionBootstrapping) {
-                    setSaveState('idle')
-                    setActivityToast('Still loading this composition…')
-                    return
-                }
-                nameToSave = UNTITLED_DRAFT_NAME
-            } else if (isUntitledDraftName(compositionNameRef.current)) {
+            if (!compositionId && urlLooksNumeric && compositionBootstrapping) {
+                setSaveState('idle')
+                setActivityToast('Still loading this composition…')
+                return
+            }
+            if (compositionId && isUntitledDraftName(compositionNameRef.current)) {
                 const suggested = defaultCompositionName(docSnapshot)
                 const entered = await promptForText({
                     title: 'Name this composition',
@@ -4652,6 +4719,7 @@ export default function AssetEditor() {
                 return toPng(node, {
                     cacheBust: true,
                     skipFonts: true,
+                    filter: compositionHtmlToImageFilter,
                     pixelRatio: 1,
                     backgroundColor: '#ffffff',
                     width: doc.width,
@@ -4735,6 +4803,7 @@ export default function AssetEditor() {
             const rasterOpts = {
                 cacheBust: true,
                 skipFonts: true,
+                filter: compositionHtmlToImageFilter,
                 pixelRatio: 1,
                 backgroundColor: '#ffffff',
                 width: doc.width,
@@ -9980,12 +10049,15 @@ export default function AssetEditor() {
                         )}
                         {uiMode === 'edit' && hasFullFrameActiveAnimation && (
                             <div
-                                className="absolute inset-0 z-[100] flex flex-col items-center justify-center gap-2 bg-white/88 dark:bg-gray-950/88"
+                                className="absolute inset-0 z-[100] flex flex-col items-center justify-center gap-2 bg-indigo-600/50 backdrop-blur-sm ring-1 ring-inset ring-indigo-950/15 dark:bg-indigo-900/55 dark:ring-white/10"
                                 role="status"
                                 aria-busy="true"
                                 aria-label="Animating composition"
                             >
-                                <EditorSlotReelLoader label="Animating…" />
+                                <EditorSlotReelLoader
+                                    label="Animating…"
+                                    labelClassName="text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.45)]"
+                                />
                             </div>
                         )}
                         <div
@@ -10603,1046 +10675,38 @@ export default function AssetEditor() {
                                 </StudioPanelGroup>
 
                                 <StudioPanelGroup
-                                    label="Primary tool"
-                                    tone="ai"
-                                    sectionId="primaryTool"
+                                    label="Element"
+                                    tone="default"
+                                    sectionId="element"
                                     collapsible
-                                    collapsed={!studioPropertiesSectionOpen.primaryTool}
-                                    onToggleCollapsed={() => handleStudioPropertiesSectionToggle('primaryTool')}
-                                    icon={<SparklesIcon className="h-3.5 w-3.5" aria-hidden />}
-                                    railIcon={<SparklesIcon className="h-4 w-4 shrink-0" aria-hidden />}
-                                    railShortLabel="Primary tool"
-                                    railActive={studioPropertiesSectionActive === 'primaryTool'}
+                                    collapsed={!studioPropertiesSectionOpen.element}
+                                    onToggleCollapsed={() => handleStudioPropertiesSectionToggle('element')}
+                                    icon={<SwatchIcon className="h-3.5 w-3.5" aria-hidden />}
+                                    description={studioElementSectionDescription}
+                                    railIcon={<SwatchIcon className="h-4 w-4 shrink-0" aria-hidden />}
+                                    railShortLabel="Element"
+                                    railActive={studioPropertiesSectionActive === 'element'}
                                 >
-                                    <div className="space-y-3">
-                                    {isTextLayer(selectedLayer) && (
-                                        <StudioSmartActionCard
-                                            title="Copy Assist"
-                                            icon={<SparklesIcon className="h-5 w-5" aria-hidden />}
-                                        >
-                                            {copyAssistLoadingId === selectedLayer.id && (
-                                                <div
-                                                    className="mb-2 flex items-center gap-2 rounded border border-violet-900/60 bg-violet-950/50 px-2 py-1.5 text-[10px] font-medium text-violet-100"
-                                                    role="status"
-                                                    aria-live="polite"
-                                                >
-                                                    <ArrowPathIcon className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
-                                                    Working on copy…
-                                                </div>
-                                            )}
-                                            <div className="grid grid-cols-1 gap-1.5 min-[300px]:grid-cols-2">
-                                                {COPY_ASSIST_PRIMARY_ACTIONS.map(({ label, op, Icon, description }) => (
-                                                    <button
-                                                        key={op}
-                                                        type="button"
-                                                        disabled={
-                                                            !aiEnabled ||
-                                                            selectedLayer.locked ||
-                                                            copyAssistLoadingId === selectedLayer.id
-                                                        }
-                                                        title={description}
-                                                        aria-label={description}
-                                                        onClick={() => void runCopyAssist(op)}
-                                                        className="flex min-h-[44px] items-center gap-2 rounded-lg border border-violet-500/30 bg-violet-950/25 px-2 py-1.5 text-left text-[10px] font-medium text-violet-100/95 shadow-sm transition-colors hover:border-violet-400/45 hover:bg-violet-900/35 disabled:cursor-not-allowed disabled:opacity-50"
-                                                    >
-                                                        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-violet-500/25 bg-violet-600/20 text-violet-200">
-                                                            <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                                                        </span>
-                                                        <span className="min-w-0 flex-1 leading-tight">{label}</span>
-                                                    </button>
-                                                ))}
-                                            </div>
-                                            {copyAssistError && (
-                                                <div className="mt-2 flex flex-wrap items-start gap-2">
-                                                    <p
-                                                        className="min-w-0 flex-1 text-[10px] font-medium text-red-400"
-                                                        role="alert"
-                                                    >
-                                                        {copyAssistError}
-                                                    </p>
-                                                    <button
-                                                        type="button"
-                                                        className="shrink-0 rounded border border-red-900 bg-gray-900 px-2 py-0.5 text-[10px] font-semibold text-red-300 transition-colors hover:bg-red-950/40"
-                                                        onClick={() => void runCopyAssist(copyAssistLastOpRef.current)}
-                                                    >
-                                                        Retry
-                                                    </button>
-                                                </div>
-                                            )}
-                                            {copyAssistSuggestions.length > 0 && (
-                                                <div className="mt-2">
-                                                    <p className="mb-0.5 text-[9px] font-medium text-gray-400">
-                                                        Alternates (hover for full text)
-                                                    </p>
-                                                    <div className="flex flex-col gap-1.5">
-                                                        {copyAssistSuggestions.map((sug, idx) => (
-                                                            <div
-                                                                key={`${idx}-${sug.label}`}
-                                                                className={`rounded border border-gray-700 bg-gray-900 p-1.5 ${
-                                                                    copyAssistHoverIdx === idx
-                                                                        ? 'ring-1 ring-indigo-500'
-                                                                        : ''
-                                                                }`}
-                                                                title={sug.text}
-                                                                onMouseEnter={() => setCopyAssistHoverIdx(idx)}
-                                                                onMouseLeave={() =>
-                                                                    setCopyAssistHoverIdx((h) =>
-                                                                        h === idx ? null : h
-                                                                    )
-                                                                }
-                                                            >
-                                                                <p className="text-[9px] font-semibold text-indigo-200">
-                                                                    {sug.label}
-                                                                </p>
-                                                                <p className="mt-0.5 line-clamp-2 text-[10px] leading-snug text-gray-100">
-                                                                    {sug.text}
-                                                                </p>
-                                                                <div className="mt-1 flex flex-wrap gap-1">
-                                                                    <button
-                                                                        type="button"
-                                                                        disabled={selectedLayer.locked}
-                                                                        onClick={() =>
-                                                                            replaceWithCopySuggestion(
-                                                                                selectedLayer.id,
-                                                                                sug.text
-                                                                            )
-                                                                        }
-                                                                        className="rounded bg-indigo-600 px-2 py-0.5 text-[9px] font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
-                                                                    >
-                                                                        Replace
-                                                                    </button>
-                                                                    <button
-                                                                        type="button"
-                                                                        disabled={selectedLayer.locked}
-                                                                        onClick={() =>
-                                                                            insertCopySuggestionBelow(
-                                                                                selectedLayer.id,
-                                                                                sug.text
-                                                                            )
-                                                                        }
-                                                                        className="rounded border border-gray-500 bg-gray-800 px-2 py-0.5 text-[9px] font-medium text-gray-100 hover:bg-gray-700 disabled:opacity-50"
-                                                                    >
-                                                                        Insert below
-                                                                    </button>
-                                                                </div>
-                                                            </div>
-                                                        ))}
-                                                    </div>
-                                                </div>
-                                            )}
-                                            {(selectedLayer.previousText?.length ?? 0) > 0 && (
-                                                <button
-                                                    type="button"
-                                                    disabled={selectedLayer.locked}
-                                                    onClick={revertLastCopy}
-                                                    className="mt-2 text-[10px] font-medium text-violet-300 underline hover:text-violet-100 disabled:opacity-50"
-                                                >
-                                                    Revert last change
-                                                </button>
-                                            )}
-                                            <div className="mt-2 border-t border-violet-800/60 pt-2">
-                                                <p className="mb-1 text-[9px] font-medium text-gray-400">
-                                                    Quick suggestions
-                                                </p>
-                                                <div className="flex flex-wrap gap-1">
-                                                    {SMART_SUGGESTIONS.map((s) => (
-                                                        <button
-                                                            key={s.action}
-                                                            type="button"
-                                                            disabled={
-                                                                selectedLayer.locked ||
-                                                                copyAssistLoadingId === selectedLayer.id
-                                                            }
-                                                            title={s.label}
-                                                            aria-label={s.label}
-                                                            onClick={() => applySuggestionAction(s.action)}
-                                                            className="rounded-md border border-white/[0.08] bg-gray-950/50 px-2 py-0.5 text-[9px] font-medium text-gray-400 transition-colors hover:border-indigo-500/25 hover:bg-white/[0.04] hover:text-gray-200 disabled:cursor-not-allowed disabled:opacity-40"
-                                                        >
-                                                            {s.label}
-                                                        </button>
-                                                    ))}
-                                                    {brandContext?.tone?.[0] && (
-                                                        <button
-                                                            type="button"
-                                                            disabled={
-                                                                selectedLayer.locked ||
-                                                                copyAssistLoadingId === selectedLayer.id
-                                                            }
-                                                            title="Align with brand tone"
-                                                            aria-label="Align with brand tone"
-                                                            onClick={() => applySuggestionAction('tone')}
-                                                            className="rounded-md border border-white/[0.08] bg-gray-950/50 px-2 py-0.5 text-[9px] font-medium text-gray-400 transition-colors hover:border-indigo-500/25 hover:bg-white/[0.04] hover:text-gray-200 disabled:cursor-not-allowed disabled:opacity-40"
-                                                        >
-                                                            Align with brand tone
-                                                        </button>
-                                                    )}
-                                                    {!!brandContext?.colors?.length && (
-                                                        <button
-                                                            type="button"
-                                                            disabled={
-                                                                selectedLayer.locked ||
-                                                                copyAssistLoadingId === selectedLayer.id
-                                                            }
-                                                            title="Use brand colors"
-                                                            aria-label="Use brand colors"
-                                                            onClick={() => applySuggestionAction('colors')}
-                                                            className="rounded-md border border-white/[0.08] bg-gray-950/50 px-2 py-0.5 text-[9px] font-medium text-gray-400 transition-colors hover:border-indigo-500/25 hover:bg-white/[0.04] hover:text-gray-200 disabled:cursor-not-allowed disabled:opacity-40"
-                                                        >
-                                                            Use brand colors
-                                                        </button>
-                                                    )}
-                                                </div>
-                                            </div>
-                                        </StudioSmartActionCard>
-                                    )}
-
+                                    <div id="jp-element-panel" className="space-y-4">
                                     {isImageLayer(selectedLayer) && (
-                                        <StudioSmartActionCard
-                                            title="AI Image Tools"
-                                            icon={<SparklesIcon className="h-5 w-5" aria-hidden />}
-                                        >
-                                            {studioAiVideoForSelectedStill ? (
-                                                <div className="mb-1 rounded-lg border border-violet-600/50 bg-violet-950/35 p-2.5">
-                                                    <p className="text-[10px] font-semibold text-violet-100">
-                                                        Original still and AI clip
-                                                    </p>
-                                                    <p className="mt-1 text-[9px] leading-snug text-gray-400">
-                                                        Choose what appears on the canvas and which layer is selected. Switch
-                                                        back to the still any time to run Modify image and other image tools.
-                                                    </p>
-                                                    <div className="mt-2 space-y-1">
-                                                        <p className="text-[9px] font-medium uppercase tracking-wide text-violet-200/70">
-                                                            Canvas &amp; selection
-                                                        </p>
-                                                        <StudioSegmentedControl
-                                                            aria-label="Original still or AI video clip"
-                                                            value={studioAiStillClipCanvasMode ?? 'still'}
-                                                            disabled={selectedLayer.locked}
-                                                            onChange={(m) => {
-                                                                if (!studioAiVideoForSelectedStill || !selectedLayer) {
-                                                                    return
-                                                                }
-                                                                switchStudioAiStillOrClip(
-                                                                    m,
-                                                                    selectedLayer.id,
-                                                                    studioAiVideoForSelectedStill.videoLayerId,
-                                                                )
-                                                            }}
-                                                            segments={[...STUDIO_AI_STILL_CLIP_SEGMENTS]}
-                                                        />
-                                                    </div>
-                                                </div>
-                                            ) : null}
-                                            {!studioAiVideoForSelectedStill ? (
-                                                <div className="space-y-2 text-gray-100">
-                                                    <p className="text-[10px] leading-snug text-indigo-200/75">
-                                                        Edits the source image, not only the visible crop. Adjust fit or frame
-                                                        first if needed.
-                                                    </p>
-                                                    <div className="space-y-1">
-                                                        <p className="text-[9px] font-semibold uppercase tracking-wider text-indigo-300/70">
-                                                            Quick
-                                                        </p>
-                                                        <div className="grid grid-cols-1 gap-1.5 min-[300px]:grid-cols-2">
-                                                            {IMAGE_LAYER_QUICK_ACTIONS.map((qa) => {
-                                                                const Ic = qa.Icon
-                                                                return (
-                                                                    <button
-                                                                        key={qa.id}
-                                                                        type="button"
-                                                                        disabled={
-                                                                            selectedLayer.locked ||
-                                                                            selectedLayer.aiEdit?.status === 'editing' ||
-                                                                            imageEditUsageBlocked
-                                                                        }
-                                                                        title={qa.instruction}
-                                                                        aria-label={`${qa.label}. ${qa.instruction.slice(0, 120)}${qa.instruction.length > 120 ? '…' : ''}`}
-                                                                        onClick={() =>
-                                                                            void runImageLayerEdit(selectedLayer.id, {
-                                                                                instructionOverride: qa.instruction,
-                                                                            })
-                                                                        }
-                                                                        className="flex min-h-[48px] items-center gap-2 rounded-lg border border-indigo-500/30 bg-indigo-950/25 px-2 py-1.5 text-left text-[10px] font-medium text-indigo-100/95 shadow-sm transition-colors hover:border-indigo-400/50 hover:bg-indigo-900/35 disabled:cursor-not-allowed disabled:opacity-45"
-                                                                    >
-                                                                        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-indigo-500/25 bg-indigo-600/20 text-indigo-200">
-                                                                            <Ic className="h-3.5 w-3.5" aria-hidden />
-                                                                        </span>
-                                                                        <span className="min-w-0 flex-1 leading-snug">
-                                                                            {qa.label}
-                                                                        </span>
-                                                                    </button>
-                                                                )
-                                                            })}
-                                                        </div>
-                                                    </div>
-                                                    <StudioDisclosureSection
-                                                        id="jp-image-edit-model"
-                                                        title="Model"
-                                                        subtitle="Quality vs speed"
-                                                        variant="muted"
-                                                        open={propertiesImageEditModelOpen}
-                                                        onOpenChange={setPropertiesImageEditModelOpen}
-                                                    >
-                                                        <div className="grid grid-cols-1 gap-1.5 min-[420px]:grid-cols-3 min-[420px]:gap-1">
-                                                            {IMAGE_EDIT_MODEL_PRESETS.map((preset) => {
-                                                                const Ic = preset.Icon
-                                                                const current = normalizeEditModelKey(
-                                                                    selectedLayer.aiEdit?.editModelKey
-                                                                )
-                                                                const active = current === preset.value
-                                                                return (
-                                                                    <button
-                                                                        key={preset.value}
-                                                                        type="button"
-                                                                        disabled={
-                                                                            selectedLayer.locked ||
-                                                                            selectedLayer.aiEdit?.status === 'editing'
-                                                                        }
-                                                                        onClick={() => {
-                                                                            updateLayer(selectedLayer.id, (l) => {
-                                                                                if (!isImageLayer(l)) {
-                                                                                    return l
-                                                                                }
-                                                                                return {
-                                                                                    ...l,
-                                                                                    aiEdit: {
-                                                                                        ...l.aiEdit,
-                                                                                        editModelKey: preset.value,
-                                                                                    },
-                                                                                }
-                                                                            })
-                                                                        }}
-                                                                        className={`flex flex-col items-stretch gap-0.5 rounded-lg border px-2 py-2 text-left transition-colors ${
-                                                                            active
-                                                                                ? 'border-indigo-500 bg-indigo-600/30 ring-2 ring-indigo-500/50 ring-offset-1 ring-offset-gray-950'
-                                                                                : 'border-indigo-500/25 bg-gray-900/50 hover:border-indigo-500/50 hover:bg-indigo-950/30'
-                                                                        } disabled:cursor-not-allowed disabled:opacity-50`}
-                                                                    >
-                                                                        <span className="flex items-center gap-1.5 text-[10px] font-semibold text-indigo-100">
-                                                                            <Ic className="h-3.5 w-3.5 shrink-0 text-indigo-300" />
-                                                                            {preset.title}
-                                                                        </span>
-                                                                        <span className="text-[8px] leading-tight text-gray-500">
-                                                                            {preset.subtitle}
-                                                                        </span>
-                                                                    </button>
-                                                                )
-                                                            })}
-                                                        </div>
-                                                    </StudioDisclosureSection>
-                                                    {genUsageError && (
-                                                        <p className="text-[9px] text-amber-300/90">{genUsageError}</p>
-                                                    )}
-                                                    <label className="mb-0.5 block text-[9px] font-bold uppercase tracking-wider text-indigo-300/80">
-                                                        Prompt
-                                                    </label>
-                                                    <textarea
-                                                        value={selectedLayer.aiEdit?.prompt ?? ''}
-                                                        onChange={(e) => {
-                                                            const v = e.target.value
-                                                            updateLayer(selectedLayer.id, (l) => {
-                                                                if (!isImageLayer(l)) {
-                                                                    return l
-                                                                }
-                                                                return {
-                                                                    ...l,
-                                                                    aiEdit: { ...l.aiEdit, prompt: v },
-                                                                }
-                                                            })
-                                                        }}
-                                                        rows={3}
-                                                        placeholder="What should change on this image?"
-                                                        disabled={selectedLayer.locked || selectedLayer.aiEdit?.status === 'editing'}
-                                                        className="w-full rounded-lg border border-indigo-500/40 bg-gray-900/80 px-2.5 py-1.5 text-xs text-gray-100 placeholder:text-gray-500 focus:border-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-500/40"
-                                                    />
-                                                    {imageEditActionError && (
-                                                        <p className="mt-1 text-[10px] text-red-400">{imageEditActionError}</p>
-                                                    )}
-                                                    {selectedLayer.aiEdit?.status === 'error' && !imageEditActionError && (
-                                                        <p className="mt-1 text-[10px] text-red-400">Couldn’t apply — try again.</p>
-                                                    )}
-                                                    <div className="mt-2 flex flex-col gap-1.5">
-                                                        <div className="flex flex-wrap gap-1.5">
-                                                            <button
-                                                                type="button"
-                                                                disabled={
-                                                                    selectedLayer.locked ||
-                                                                    selectedLayer.aiEdit?.status === 'editing' ||
-                                                                    imageEditUsageBlocked
-                                                                }
-                                                                title={
-                                                                    genUsageError
-                                                                        ? genUsageError
-                                                                        : imageEditUsageBlocked
-                                                                          ? "You've used all AI image generations for this month"
-                                                                          : 'Apply your prompt to this layer'
-                                                                }
-                                                                onClick={() => void runImageLayerEdit(selectedLayer.id)}
-                                                                className="group inline-flex min-h-[2.25rem] min-w-0 flex-1 items-center justify-center gap-1.5 rounded-lg border-2 border-indigo-500/60 bg-indigo-600 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:bg-indigo-500 disabled:cursor-not-allowed disabled:border-indigo-800/80 disabled:bg-indigo-950/80"
-                                                            >
-                                                                <ArrowPathIcon className="h-3.5 w-3.5 group-disabled:opacity-60" />
-                                                                Apply
-                                                            </button>
-                                                            {selectedLayer.aiEdit?.resultSrc ? (
-                                                                <button
-                                                                    type="button"
-                                                                    disabled={
-                                                                        selectedLayer.locked ||
-                                                                        selectedLayer.aiEdit?.status === 'editing' ||
-                                                                        imageEditUsageBlocked ||
-                                                                        !(selectedLayer.aiEdit?.prompt ?? '').trim()
-                                                                    }
-                                                                    title="Same prompt on the latest AI result"
-                                                                    onClick={() => void runImageLayerEdit(selectedLayer.id)}
-                                                                    className="inline-flex min-h-[2.25rem] min-w-0 flex-1 items-center justify-center rounded-lg border-2 border-indigo-500/30 bg-indigo-950/40 px-3 py-2 text-xs font-semibold text-indigo-100 hover:border-indigo-400/50 hover:bg-indigo-900/30 disabled:cursor-not-allowed disabled:opacity-40"
-                                                                >
-                                                                    Again
-                                                                </button>
-                                                            ) : null}
-                                                        </div>
-                                                        {(selectedLayer.aiEdit?.previousResults?.length ?? 0) > 0 && (
-                                                            <button
-                                                                type="button"
-                                                                disabled={
-                                                                    selectedLayer.locked || selectedLayer.aiEdit?.status === 'editing'
-                                                                }
-                                                                onClick={() =>
-                                                                    updateLayer(selectedLayer.id, (l) => {
-                                                                        if (!isImageLayer(l)) {
-                                                                            return l
-                                                                        }
-                                                                        const stack = [...(l.aiEdit?.previousResults ?? [])]
-                                                                        if (stack.length === 0) {
-                                                                            return l
-                                                                        }
-                                                                        const nextSrc = stack[stack.length - 1]
-                                                                        return {
-                                                                            ...l,
-                                                                            src: nextSrc,
-                                                                            aiEdit: {
-                                                                                ...l.aiEdit,
-                                                                                previousResults: stack.slice(0, -1),
-                                                                                resultSrc: nextSrc,
-                                                                                status: 'idle',
-                                                                            },
-                                                                        }
-                                                                    })
-                                                                }
-                                                                className="w-full rounded-md border border-gray-600/80 bg-gray-800/50 py-1.5 text-[10px] font-medium text-gray-300 hover:border-gray-500 hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
-                                                            >
-                                                                Step back one edit
-                                                            </button>
-                                                        )}
-                                                    </div>
-                                                </div>
-                                            ) : null}
+                                        <div>
+                                            <p className="mb-1.5 text-[9px] font-semibold uppercase tracking-wider text-gray-500">
+                                                Source
+                                            </p>
                                             <button
                                                 type="button"
-                                                disabled={selectedLayer.locked || !aiEnabled}
-                                                onClick={() => {
-                                                    setPropertiesSourceMotionOpen(true)
-                                                    requestAnimationFrame(() => {
-                                                        window.document
-                                                            .querySelector<HTMLElement>(
-                                                                '[aria-controls="jp-source-motion"]',
-                                                            )
-                                                            ?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
-                                                    })
-                                                }}
-                                                className="mt-2 w-full rounded-lg border border-violet-700/45 bg-violet-950/20 px-2 py-1.5 text-[10px] font-semibold text-violet-100 hover:bg-violet-900/35 disabled:cursor-not-allowed disabled:opacity-45"
-                                                title="Image → video (AI) lives under Source & History"
+                                                disabled={selectedLayer.locked}
+                                                onClick={() => openPickerForReplaceImage(selectedLayer.id)}
+                                                className="flex w-full items-center justify-center gap-1.5 rounded-md border border-dashed border-indigo-500/40 bg-indigo-950/20 px-2.5 py-2 text-[11px] font-semibold text-indigo-100 transition-colors hover:border-indigo-400/55 hover:bg-indigo-900/25 disabled:cursor-not-allowed disabled:opacity-45"
                                             >
-                                                Animate image → Source &amp; History
+                                                <PhotoIcon className="h-3.5 w-3.5 shrink-0 text-indigo-300" aria-hidden />
+                                                Replace image
                                             </button>
-                                        </StudioSmartActionCard>
+                                        </div>
                                     )}
-
-                                    {isGenerativeImageLayer(selectedLayer) && (
-                                        <StudioSmartActionCard
-                                            title="Generate / Refine"
-                                            icon={<SparklesIcon className="h-5 w-5" aria-hidden />}
-                                        >
-                                    <div className="space-y-2">
-                                        {studioAiVideoForSelectedStill ? (
-                                            <div className="mb-1 rounded-lg border border-violet-600/50 bg-violet-950/35 p-2.5">
-                                                <p className="text-[10px] font-semibold text-violet-100">
-                                                    Original still and AI clip
-                                                </p>
-                                                <p className="mt-1 text-[9px] leading-snug text-gray-400">
-                                                    Choose what appears on the canvas. Return to the still to refine the
-                                                    image or run generative tools; use the clip to preview trim and export.
-                                                </p>
-                                                <div className="mt-2 space-y-1">
-                                                    <p className="text-[9px] font-medium uppercase tracking-wide text-violet-200/70">
-                                                        Canvas &amp; selection
-                                                    </p>
-                                                    <StudioSegmentedControl
-                                                        aria-label="Original still or AI video clip"
-                                                        value={studioAiStillClipCanvasMode ?? 'still'}
-                                                        disabled={selectedLayer.locked}
-                                                        onChange={(m) => {
-                                                            if (!studioAiVideoForSelectedStill || !selectedLayer) {
-                                                                return
-                                                            }
-                                                            switchStudioAiStillOrClip(
-                                                                m,
-                                                                selectedLayer.id,
-                                                                studioAiVideoForSelectedStill.videoLayerId,
-                                                            )
-                                                        }}
-                                                        segments={[...STUDIO_AI_STILL_CLIP_SEGMENTS]}
-                                                    />
-                                                </div>
-                                            </div>
-                                        ) : (
-                                        <>
-                                        {!aiEnabled && (
-                                            <div className="rounded-md border border-amber-800/40 bg-amber-950/20 px-2 py-1.5">
-                                                <p className="text-[10px] font-medium text-amber-200/95">AI off for this workspace.</p>
-                                                <p className="mt-0.5 text-[9px] text-amber-300/65">Ask an admin to re-enable.</p>
-                                            </div>
-                                        )}
-                                        {genUsageError && (
-                                            <p className="text-[10px] text-amber-300">{genUsageError}</p>
-                                        )}
-                                        {aiEnabled && genUsage && (
-                                            <p className="text-[10px] text-gray-400">
-                                                {genUsage.limit < 0
-                                                    ? `Plan: ${genUsage.plan_name ?? genUsage.plan} — unlimited`
-                                                    : `${genUsage.remaining} / ${genUsage.limit} generations this month (${genUsage.plan_name ?? genUsage.plan})`}
-                                            </p>
-                                        )}
-                                        {genActionError && (
-                                            <div className="flex flex-wrap items-start gap-2">
-                                                <p className="min-w-0 flex-1 text-[10px] text-red-400">
-                                                    {genActionError}
-                                                </p>
-                                                <button
-                                                    type="button"
-                                                    className="shrink-0 rounded border border-red-900 bg-gray-900 px-2 py-0.5 text-[10px] font-semibold text-red-300 transition-colors hover:bg-red-950/40"
-                                                    onClick={() => void runGenerativeGeneration(selectedLayer.id)}
-                                                >
-                                                    Retry
-                                                </button>
-                                            </div>
-                                        )}
-                                        {suggestionToast && (
-                                            <p
-                                                className="rounded border border-emerald-800 bg-emerald-950/40 px-2 py-1.5 text-[10px] text-emerald-100"
-                                                role="status"
-                                            >
-                                                {suggestionToast}
-                                            </p>
-                                        )}
-                                        {genUsage && genUsage.limit >= 0 && genUsage.remaining <= 0 && (
-                                            <p className="text-[10px] font-medium text-amber-200">
-                                                You&apos;ve reached your monthly limit.
-                                            </p>
-                                        )}
-                                        {selectedLayer.status === 'generating' && (
-                                            <div
-                                                className="rounded-md border border-violet-600 bg-violet-950/40 px-2.5 py-2 text-[10px] font-medium text-violet-100"
-                                                role="status"
-                                                aria-live="polite"
-                                            >
-                                                {selectedLayer.variationPending ? (
-                                                    <div className="flex flex-col items-center gap-2 sm:flex-row sm:justify-center">
-                                                        <EditorSlotReelLoader label="Variations…" />
-                                                        <div className="grid w-[72px] grid-cols-2 gap-1">
-                                                            {Array.from({
-                                                                length:
-                                                                    selectedLayer.variationBatchSize ?? VARIATION_MAX,
-                                                            }).map((_, i) => (
-                                                                <div
-                                                                    key={i}
-                                                                    className="aspect-square animate-pulse rounded bg-gradient-to-br from-violet-300/40 to-indigo-400/30"
-                                                                />
-                                                            ))}
-                                                        </div>
-                                                    </div>
-                                                ) : (
-                                                    <EditorSlotReelLoader label="Generating…" />
-                                                )}
-                                            </div>
-                                        )}
-                                        <div>
-                                            <label className="mb-1 block font-medium text-gray-300">
-                                                Prompt
-                                            </label>
-                                            <textarea
-                                                rows={4}
-                                                disabled={
-                                                    selectedLayer.locked ||
-                                                    selectedLayer.status === 'generating' ||
-                                                    selectedLayer.variationPending
-                                                }
-                                                value={selectedLayer.prompt.scene ?? ''}
-                                                onChange={(e) => {
-                                                    const v = e.target.value
-                                                    updateLayer(selectedLayer.id, (l) => {
-                                                        if (!isGenerativeImageLayer(l)) {
-                                                            return l
-                                                        }
-                                                        return {
-                                                            ...l,
-                                                            prompt: { ...l.prompt, scene: v },
-                                                        }
-                                                    })
-                                                }}
-                                                placeholder="Describe the scene…"
-                                                className="w-full rounded border border-gray-700 bg-gray-800 px-2 py-1.5 text-[11px] leading-snug text-gray-200"
-                                            />
-                                            <p className="mb-1 mt-1.5 text-[9px] text-gray-400">
-                                                Quick insert
-                                            </p>
-                                            <div className="flex flex-wrap gap-1">
-                                                {PROMPT_ASSIST_CHIPS.map((chip) => (
-                                                    <button
-                                                        key={chip}
-                                                        type="button"
-                                                        disabled={
-                                                            selectedLayer.locked ||
-                                                            selectedLayer.status === 'generating' ||
-                                                            selectedLayer.variationPending
-                                                        }
-                                                        onClick={() => insertPromptChip(chip)}
-                                                        className="rounded-full border border-gray-700 bg-gray-800 px-2 py-0.5 text-[9px] text-gray-200 hover:bg-gray-700 disabled:opacity-40"
-                                                    >
-                                                        {chip}
-                                                    </button>
-                                                ))}
-                                            </div>
-                                            {generativePromptPreview && (
-                                                <p className="mt-2 rounded border border-gray-700 bg-gray-800/50 px-2 py-1.5 text-[9px] leading-snug text-gray-300">
-                                                    <span className="font-medium text-gray-400">
-                                                        Current style:{' '}
-                                                    </span>
-                                                    {generativePromptPreview}
-                                                </p>
-                                            )}
-                                        </div>
-                                        <div className="rounded-md border border-gray-700 bg-gray-800/50 p-3">
-                                            <div className="flex items-center justify-between gap-2">
-                                                <span className="flex flex-wrap items-center gap-1.5 text-[11px] font-medium text-gray-200">
-                                                    Brand influence
-                                                    {brandContext && selectedLayer.applyBrandDna !== false && (
-                                                        <span className="rounded-full bg-emerald-900/50 px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wide text-emerald-100">
-                                                            Brand alignment active
-                                                        </span>
-                                                    )}
-                                                </span>
-                                                <label className="flex cursor-pointer items-center gap-2 text-[10px] text-gray-400">
-                                                    <span>Apply Brand DNA</span>
-                                                    <input
-                                                        type="checkbox"
-                                                        className="h-3.5 w-3.5 rounded border-gray-600 bg-gray-800 text-violet-500 focus:ring-violet-500"
-                                                        checked={selectedLayer.applyBrandDna !== false}
-                                                        disabled={
-                                                            selectedLayer.locked ||
-                                                            selectedLayer.status === 'generating' ||
-                                                            selectedLayer.variationPending
-                                                        }
-                                                        onChange={(e) =>
-                                                            updateLayer(selectedLayer.id, (l) =>
-                                                                isGenerativeImageLayer(l)
-                                                                    ? { ...l, applyBrandDna: e.target.checked }
-                                                                    : l
-                                                            )
-                                                        }
-                                                    />
-                                                </label>
-                                            </div>
-                                            {brandContext && selectedLayer.applyBrandDna === false && (
-                                                <p className="mt-2 rounded border border-amber-800 bg-amber-950/30 px-2 py-1 text-[9px] leading-snug text-amber-100">
-                                                    You are generating without brand alignment.
-                                                </p>
-                                            )}
-                                            {brandContext && (
-                                                <p className="mt-1 text-[9px] leading-snug text-gray-400">
-                                                    {brandContext.visual_style && (
-                                                        <span className="mr-1">Style: {brandContext.visual_style}.</span>
-                                                    )}
-                                                    {brandContext.archetype && (
-                                                        <span className="mr-1">Archetype: {brandContext.archetype}.</span>
-                                                    )}
-                                                    {!brandContext.visual_style && !brandContext.archetype && (
-                                                        <span>Brand context loaded.</span>
-                                                    )}
-                                                </p>
-                                            )}
-                                            {!brandContext && (
-                                                <p className="mt-1 text-[9px] text-amber-300">
-                                                    No brand context — generation uses your prompt only.
-                                                </p>
-                                            )}
-                                        </div>
-                                        <div>
-                                            <div className="mb-1 flex items-center justify-between">
-                                                <label className="block font-medium text-gray-300">
-                                                    References
-                                                </label>
-                                                <span className="text-[9px] text-gray-400">
-                                                    Max {MAX_REFERENCE_ASSETS}
-                                                </span>
-                                            </div>
-                                            <button
-                                                type="button"
-                                                disabled={
-                                                    selectedLayer.locked ||
-                                                    selectedLayer.status === 'generating' ||
-                                                    selectedLayer.variationPending
-                                                }
-                                                onClick={() => openReferencePicker(selectedLayer.id)}
-                                                className="mb-2 w-full rounded-md border border-dashed border-violet-500/50 bg-violet-950/30 px-2 py-1.5 text-[11px] font-medium text-violet-100 hover:bg-violet-950/50 disabled:cursor-not-allowed disabled:opacity-50"
-                                            >
-                                                Add references from library…
-                                            </button>
-                                            {(selectedLayer.referenceAssetIds?.length ?? 0) > 0 && (
-                                                <div className="flex flex-wrap gap-1.5">
-                                                    {(selectedLayer.referenceAssetIds ?? []).map((rid) => {
-                                                        const ref = damAssetById.get(rid)
-                                                        return (
-                                                            <div
-                                                                key={rid}
-                                                                className="relative h-12 w-12 overflow-hidden rounded border border-gray-700 bg-gray-700"
-                                                            >
-                                                                {ref ? (
-                                                                    <img
-                                                                        src={ref.thumbnail_url || ref.file_url}
-                                                                        alt=""
-                                                                        className="h-full w-full object-cover"
-                                                                    />
-                                                                ) : (
-                                                                    <div className="flex h-full w-full items-center justify-center text-[8px] text-gray-500">
-                                                                        …
-                                                                    </div>
-                                                                )}
-                                                                <button
-                                                                    type="button"
-                                                                    aria-label="Remove reference"
-                                                                    disabled={
-                                                                        selectedLayer.locked ||
-                                                                        selectedLayer.status === 'generating' ||
-                                                                        selectedLayer.variationPending
-                                                                    }
-                                                                    onClick={() =>
-                                                                        removeReferenceAsset(selectedLayer.id, rid)
-                                                                    }
-                                                                    className="absolute right-0 top-0 rounded-bl bg-black/60 p-0.5 text-white hover:bg-black/80 disabled:opacity-50"
-                                                                >
-                                                                    <XMarkIcon className="h-3 w-3" />
-                                                                </button>
-                                                            </div>
-                                                        )
-                                                    })}
-                                                </div>
-                                            )}
-                                        </div>
-                                        <div>
-                                            <p className="mb-1 font-medium text-gray-300">
-                                                Suggestions
-                                            </p>
-                                            <div className="flex flex-wrap gap-1">
-                                                {SMART_SUGGESTIONS.map((s) => (
-                                                    <button
-                                                        key={s.action}
-                                                        type="button"
-                                                        disabled={
-                                                            selectedLayer.locked ||
-                                                            selectedLayer.status === 'generating' ||
-                                                            selectedLayer.variationPending
-                                                        }
-                                                        onClick={() => applySuggestionAction(s.action)}
-                                                        className="rounded border border-gray-700 bg-gray-800 px-2 py-0.5 text-[10px] text-gray-200 hover:bg-gray-700 disabled:cursor-not-allowed disabled:opacity-40"
-                                                    >
-                                                        {s.label}
-                                                    </button>
-                                                ))}
-                                                {brandContext?.tone?.[0] && (
-                                                    <button
-                                                        type="button"
-                                                        disabled={
-                                                            selectedLayer.locked ||
-                                                            selectedLayer.status === 'generating' ||
-                                                            selectedLayer.variationPending
-                                                        }
-                                                        onClick={() => applySuggestionAction('tone')}
-                                                        className="rounded border border-gray-700 bg-gray-800 px-2 py-0.5 text-[10px] text-gray-200 hover:bg-gray-700 disabled:cursor-not-allowed disabled:opacity-40"
-                                                    >
-                                                        Align with brand tone
-                                                    </button>
-                                                )}
-                                                {!!brandContext?.colors?.length && (
-                                                    <button
-                                                        type="button"
-                                                        disabled={
-                                                            selectedLayer.locked ||
-                                                            selectedLayer.status === 'generating' ||
-                                                            selectedLayer.variationPending
-                                                        }
-                                                        onClick={() => applySuggestionAction('colors')}
-                                                        className="rounded border border-gray-700 bg-gray-800 px-2 py-0.5 text-[10px] text-gray-200 hover:bg-gray-700 disabled:cursor-not-allowed disabled:opacity-40"
-                                                    >
-                                                        Use brand colors
-                                                    </button>
-                                                )}
-                                            </div>
-                                        </div>
-                                        {selectedLayer.variationResults &&
-                                            selectedLayer.variationResults.length > 0 && (
-                                                <div className="rounded-md border border-violet-800 bg-violet-950/30 p-2">
-                                                    <p className="mb-1.5 text-[10px] font-medium text-violet-100">
-                                                        Pick a variation ({selectedLayer.variationResults.length}{' '}
-                                                        {selectedLayer.variationResults.length === 1 ? 'option' : 'options'})
-                                                    </p>
-                                                    <div className="grid grid-cols-2 gap-1.5">
-                                                        {selectedLayer.variationResults.map((url, idx) => (
-                                                            <button
-                                                                key={`${url}-${idx}`}
-                                                                type="button"
-                                                                className={`group/v relative overflow-hidden rounded bg-gray-900 transition-shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-600 ${
-                                                                    variationPressedIdx === idx
-                                                                        ? 'ring-2 ring-violet-400'
-                                                                        : variationHoverIdx === idx
-                                                                          ? 'ring-2 ring-violet-500'
-                                                                          : 'ring-1 ring-violet-700'
-                                                                }`}
-                                                                onMouseEnter={() => setVariationHoverIdx(idx)}
-                                                                onMouseLeave={() =>
-                                                                    setVariationHoverIdx((h) =>
-                                                                        h === idx ? null : h
-                                                                    )
-                                                                }
-                                                                onMouseDown={() => setVariationPressedIdx(idx)}
-                                                                onClick={() =>
-                                                                    applyVariationChoice(selectedLayer.id, url)
-                                                                }
-                                                            >
-                                                                <img
-                                                                    src={url}
-                                                                    alt=""
-                                                                    className="editor-gen-fade-in aspect-square w-full object-cover"
-                                                                />
-                                                                <span className="absolute inset-x-0 bottom-0 bg-black/50 py-0.5 text-[9px] text-white opacity-0 transition-opacity group-hover/v:opacity-100">
-                                                                    Use this
-                                                                </span>
-                                                            </button>
-                                                        ))}
-                                                    </div>
-                                                    <button
-                                                        type="button"
-                                                        className="mt-2 w-full text-[10px] text-gray-400 underline hover:text-gray-100"
-                                                        onClick={() => discardVariationResults(selectedLayer.id)}
-                                                    >
-                                                        Discard variations
-                                                    </button>
-                                                </div>
-                                            )}
-                                        <div>
-                                            <label className="mb-1 block font-medium text-gray-300">
-                                                Model
-                                            </label>
-                                            <select
-                                                disabled={
-                                                    selectedLayer.locked ||
-                                                    selectedLayer.status === 'generating' ||
-                                                    selectedLayer.variationPending
-                                                }
-                                                value={selectedLayer.model ?? 'default'}
-                                                onChange={(e) =>
-                                                    updateLayer(selectedLayer.id, (l) =>
-                                                        isGenerativeImageLayer(l)
-                                                            ? { ...l, model: e.target.value }
-                                                            : l
-                                                    )
-                                                }
-                                                className="w-full rounded border border-gray-700 bg-gray-800 px-2 py-1 text-gray-200"
-                                            >
-                                                {GENERATIVE_MODEL_OPTIONS.map((opt) => (
-                                                    <option key={opt.value} value={opt.value}>
-                                                        {opt.label}
-                                                    </option>
-                                                ))}
-                                            </select>
-                                        </div>
-                                        <div className="space-y-1">
-                                            <label className="flex cursor-pointer items-center gap-2 text-xs text-gray-400">
-                                                <input
-                                                    type="checkbox"
-                                                    className="rounded border-gray-600 bg-gray-800 text-indigo-500"
-                                                    disabled={
-                                                        selectedLayer.locked ||
-                                                        selectedLayer.status === 'generating' ||
-                                                        selectedLayer.variationPending
-                                                    }
-                                                    checked={Boolean(selectedLayer.advancedModel)}
-                                                    onChange={(e) =>
-                                                        updateLayer(selectedLayer.id, (l) =>
-                                                            isGenerativeImageLayer(l)
-                                                                ? {
-                                                                      ...l,
-                                                                      advancedModel: e.target.checked,
-                                                                      modelOverride:
-                                                                          l.modelOverride ??
-                                                                          GENERATIVE_ADVANCED_MODEL_OPTIONS[0]
-                                                                              ?.value,
-                                                                  }
-                                                                : l
-                                                        )
-                                                    }
-                                                />
-                                                Advanced model (override)
-                                            </label>
-                                            {selectedLayer.advancedModel && (
-                                                <select
-                                                    disabled={
-                                                        selectedLayer.locked ||
-                                                        selectedLayer.status === 'generating' ||
-                                                        selectedLayer.variationPending
-                                                    }
-                                                    value={
-                                                        selectedLayer.modelOverride ??
-                                                        GENERATIVE_ADVANCED_MODEL_OPTIONS[0]?.value ??
-                                                        'gpt-image-1'
-                                                    }
-                                                    onChange={(e) =>
-                                                        updateLayer(selectedLayer.id, (l) =>
-                                                            isGenerativeImageLayer(l)
-                                                                ? { ...l, modelOverride: e.target.value }
-                                                                : l
-                                                        )
-                                                    }
-                                                    className="w-full rounded border border-gray-700 bg-gray-800 px-2 py-1 text-xs text-gray-200"
-                                                >
-                                                    {GENERATIVE_ADVANCED_MODEL_OPTIONS.map((opt) => (
-                                                        <option key={opt.value} value={opt.value}>
-                                                            {opt.label}
-                                                        </option>
-                                                    ))}
-                                                </select>
-                                            )}
-                                            {selectedLayer.lastResolvedModelDisplay && (
-                                                <p className="text-[10px] text-gray-400">
-                                                    Model: {selectedLayer.lastResolvedModelDisplay}
-                                                </p>
-                                            )}
-                                        </div>
-                                        <div className="flex flex-col gap-2">
-                                            <button
-                                                type="button"
-                                                disabled={
-                                                    !aiEnabled ||
-                                                    selectedLayer.locked ||
-                                                    selectedLayer.status === 'generating' ||
-                                                    selectedLayer.variationPending ||
-                                                    genUsage === null ||
-                                                    !canGenerateFromUsage(genUsage) ||
-                                                    !(selectedLayer.prompt.scene?.trim())
-                                                }
-                                                onClick={() => void runGenerativeGeneration(selectedLayer.id)}
-                                                className="inline-flex items-center justify-center gap-1.5 rounded-md bg-violet-600 px-3 py-2 text-xs font-semibold text-white shadow-sm transition-colors duration-150 hover:bg-violet-500 disabled:cursor-not-allowed disabled:opacity-50"
-                                            >
-                                                <SparklesIcon className="h-4 w-4" aria-hidden />
-                                                {aiEnabled ? 'Generate' : 'AI Disabled'}
-                                            </button>
-                                            <button
-                                                type="button"
-                                                disabled={
-                                                    !aiEnabled ||
-                                                    selectedLayer.locked ||
-                                                    selectedLayer.status === 'generating' ||
-                                                    selectedLayer.variationPending ||
-                                                    genUsage === null ||
-                                                    !canGenerateFromUsage(genUsage) ||
-                                                    !(selectedLayer.prompt.scene?.trim()) ||
-                                                    variationRequestCount(genUsage) < 1
-                                                }
-                                                onClick={() => void runGenerativeVariations(selectedLayer.id)}
-                                                className="inline-flex items-center justify-center gap-1.5 rounded-md border border-violet-500 bg-violet-950/50 px-3 py-2 text-xs font-semibold text-violet-100 shadow-sm transition-colors duration-150 hover:bg-violet-900/40 disabled:cursor-not-allowed disabled:opacity-50"
-                                            >
-                                                <Squares2X2Icon className="h-4 w-4" aria-hidden />
-                                                Generate variations
-                                            </button>
-                                            {selectedLayer.resultSrc && (
-                                                <>
-                                                    <button
-                                                        type="button"
-                                                        disabled={
-                                                            !aiEnabled ||
-                                                            selectedLayer.locked ||
-                                                            selectedLayer.status === 'generating' ||
-                                                            selectedLayer.variationPending ||
-                                                            genUsage === null ||
-                                                            !canGenerateFromUsage(genUsage) ||
-                                                            !(selectedLayer.prompt.scene?.trim())
-                                                        }
-                                                        onClick={() => void runGenerativeGeneration(selectedLayer.id)}
-                                                        className="rounded-md border border-gray-700 bg-gray-800 px-3 py-2 text-xs font-medium text-gray-100 hover:bg-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
-                                                    >
-                                                        Regenerate
-                                                    </button>
-                                                    <button
-                                                        type="button"
-                                                        disabled={selectedLayer.locked}
-                                                        onClick={convertGenerativeToImageLayer}
-                                                        className="rounded-md border border-emerald-500 bg-emerald-950/40 px-3 py-2 text-xs font-semibold text-emerald-100 hover:bg-emerald-900/60 disabled:opacity-50"
-                                                    >
-                                                        Convert to image layer
-                                                    </button>
-                                                </>
-                                            )}
-                                        </div>
-                                        {selectedLayer.resultSrc && (
-                                            <div>
-                                                <p className="mb-1.5 text-[9px] font-semibold uppercase tracking-wider text-gray-500">
-                                                    How it fits the layer box
-                                                </p>
-                                                <div
-                                                    className="grid grid-cols-3 gap-px overflow-hidden rounded-lg bg-gray-800/50 p-px ring-1 ring-inset ring-gray-700/40"
-                                                    role="group"
-                                                    aria-label="Object fit within layer bounds"
-                                                >
-                                                    {OBJECT_FIT_CHOICES.map((opt) => {
-                                                        const Ic = opt.Icon
-                                                        const active = (selectedLayer.fit ?? 'cover') === opt.value
-                                                        const dis =
-                                                            selectedLayer.status === 'generating' ||
-                                                            selectedLayer.variationPending
-                                                        return (
-                                                            <button
-                                                                key={opt.value}
-                                                                type="button"
-                                                                title={opt.title}
-                                                                disabled={dis}
-                                                                onClick={() =>
-                                                                    updateLayer(selectedLayer.id, (l) => {
-                                                                        if (!isGenerativeImageLayer(l)) return l
-                                                                        return { ...l, fit: opt.value }
-                                                                    })
-                                                                }
-                                                                className={`flex flex-col items-center justify-center gap-0.5 bg-gray-900/90 py-2 text-[9px] font-medium transition-colors sm:text-[10px] ${
-                                                                    active
-                                                                        ? 'text-indigo-100 ring-1 ring-inset ring-indigo-500/60'
-                                                                        : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200'
-                                                                } disabled:cursor-not-allowed disabled:opacity-40`}
-                                                            >
-                                                                <Ic className="h-4 w-4" aria-hidden />
-                                                                <span>{opt.short}</span>
-                                                            </button>
-                                                        )
-                                                    })}
-                                                </div>
-                                            </div>
-                                        )}
-                                        </>
-                                        )}
-                                    </div>
-                                        </StudioSmartActionCard>
-                                    )}
-
                                     {isVideoLayer(selectedLayer) && (
                                         <StudioSmartActionCard
-                                            title="Video Tools"
+                                            title="Video"
                                             tone="neutral"
                                             icon={<FilmIcon className="h-5 w-5" aria-hidden />}
                                         >
@@ -11662,7 +10726,7 @@ export default function AssetEditor() {
                                                             </p>
                                                             <StudioSegmentedControl
                                                                 aria-label="Original still or AI video clip"
-                                                                value="clip"
+                                                                value={studioAiStillClipCanvasModeFromVideoLayer ?? 'clip'}
                                                                 disabled={selectedLayer.locked}
                                                                 onChange={(m) => {
                                                                     const pair = studioAiSourceStillForSelectedVideo
@@ -11858,10 +10922,9 @@ export default function AssetEditor() {
                                             </div>
                                         </StudioSmartActionCard>
                                     )}
-
                                     {isFillLayer(selectedLayer) &&
                                         selectedLayer.kind !== 'text_boost' && (
-                                            <StudioSmartActionCard title="Fill Style" tone="neutral">
+                                            <StudioSmartActionCard title="Fill" tone="neutral">
                                                 <div className="space-y-2">
                                                     <StudioSegmentedControl
                                                         aria-label="Fill kind"
@@ -11921,15 +10984,73 @@ export default function AssetEditor() {
                                                             }
                                                         />
                                                     )}
+                                                    {selectedLayer.fillKind === 'solid' &&
+                                                        !isCtaButtonFillLayer(selectedLayer) &&
+                                                        (() => {
+                                                            const brandFirst = labeledBrandPalette(brandContext)[0]?.color
+                                                            const nativeHexFallback =
+                                                                /^#[0-9a-fA-F]{6}$/.test(selectedLayer.color)
+                                                                    ? selectedLayer.color
+                                                                    : brandFirst
+                                                                      ? brandFirst
+                                                                      : '#6366f1'
+                                                            return (
+                                                                <div className="space-y-2">
+                                                                    {brandContext ? (
+                                                                        <BrandColorSwatchStrip
+                                                                            brandContext={brandContext}
+                                                                            value={selectedLayer.color}
+                                                                            disabled={selectedLayer.locked}
+                                                                            onPick={(hex) =>
+                                                                                updateLayer(selectedLayer.id, (l) =>
+                                                                                    isFillLayer(l) ? { ...l, color: hex } : l
+                                                                                )
+                                                                            }
+                                                                        />
+                                                                    ) : null}
+                                                                    <label className="mb-1 block text-[10px] text-gray-400">
+                                                                        Color
+                                                                    </label>
+                                                                    <div className="flex gap-2">
+                                                                        <input
+                                                                            type="color"
+                                                                            value={nativeHexFallback}
+                                                                            disabled={selectedLayer.locked}
+                                                                            onChange={(e) =>
+                                                                                updateLayer(selectedLayer.id, (l) =>
+                                                                                    isFillLayer(l)
+                                                                                        ? { ...l, color: e.target.value }
+                                                                                        : l
+                                                                                )
+                                                                            }
+                                                                            className="h-9 w-12 cursor-pointer rounded border border-gray-700 bg-gray-800"
+                                                                        />
+                                                                        <input
+                                                                            type="text"
+                                                                            value={selectedLayer.color}
+                                                                            disabled={selectedLayer.locked}
+                                                                            onChange={(e) =>
+                                                                                updateLayer(selectedLayer.id, (l) =>
+                                                                                    isFillLayer(l)
+                                                                                        ? { ...l, color: e.target.value }
+                                                                                        : l
+                                                                                )
+                                                                            }
+                                                                            className="min-w-0 flex-1 rounded border border-gray-700 bg-gray-800 px-2 py-1 font-mono text-[11px] text-gray-200"
+                                                                            placeholder="#RRGGBB"
+                                                                        />
+                                                                    </div>
+                                                                </div>
+                                                            )
+                                                        })()}
                                                     <p className="text-[9px] text-gray-500">
-                                                        Border, gradient stops, and angle are in Style below.
+                                                        Border, radius, gradient stops, and angle are under Appearance below.
                                                     </p>
                                                 </div>
                                             </StudioSmartActionCard>
                                         )}
-
                                     {isMaskLayer(selectedLayer) && (
-                                        <StudioSmartActionCard title="Mask Style" tone="neutral">
+                                        <StudioSmartActionCard title="Mask" tone="neutral">
                                             <div className="space-y-2">
                                                 <div>
                                                     <label className="mb-1 block text-[10px] text-gray-400">Shape</label>
@@ -11986,443 +11107,65 @@ export default function AssetEditor() {
                                                     />
                                                 </label>
                                                 <p className="text-[9px] text-gray-500">
-                                                    Target &amp; gradient stops — open <span className="font-medium text-gray-400">Target &amp; gradient</span> under Style.
+                                                    Target &amp; gradient stops — open{' '}
+                                                    <span className="font-medium text-gray-400">Target &amp; gradient</span> under
+                                                    Appearance below.
                                                 </p>
                                             </div>
                                         </StudioSmartActionCard>
                                     )}
-                                    </div>
-                                </StudioPanelGroup>
-
-                                <StudioPanelGroup
-                                    label="Source & history"
-                                    tone="muted"
-                                    sectionId="sourceHistory"
-                                    collapsible
-                                    collapsed={!studioPropertiesSectionOpen.sourceHistory}
-                                    onToggleCollapsed={() => handleStudioPropertiesSectionToggle('sourceHistory')}
-                                    icon={<FolderOpenIcon className="h-3.5 w-3.5" aria-hidden />}
-                                    description="Layer history, not composition versions."
-                                    railIcon={<FolderOpenIcon className="h-4 w-4 shrink-0" aria-hidden />}
-                                    railShortLabel="Source & history"
-                                    railActive={studioPropertiesSectionActive === 'sourceHistory'}
-                                >
-                                    <StudioDisclosureSection
-                                        id="jp-source-motion"
-                                        title="Source & History"
-                                        subtitle="Thumbnails, replace, motion"
-                                        variant="utility"
-                                        open={propertiesSourceMotionOpen}
-                                        onOpenChange={setPropertiesSourceMotionOpen}
-                                    >
-                                            {isImageLayer(selectedLayer) && (
-                                                <div>
-                                                    <p className="mb-1.5 text-[9px] font-semibold uppercase tracking-wider text-gray-500">
-                                                        Image source
-                                                    </p>
-                                                    <button
-                                                        type="button"
-                                                        disabled={selectedLayer.locked}
-                                                        onClick={() => openPickerForReplaceImage(selectedLayer.id)}
-                                                        className="flex w-full items-center justify-center gap-1.5 rounded-md border border-dashed border-indigo-500/40 bg-indigo-950/20 px-2.5 py-2 text-[11px] font-semibold text-indigo-100 transition-colors hover:border-indigo-400/55 hover:bg-indigo-900/25 disabled:cursor-not-allowed disabled:opacity-45"
-                                                    >
-                                                        <PhotoIcon className="h-3.5 w-3.5 shrink-0 text-indigo-300" aria-hidden />
-                                                        Replace image
-                                                    </button>
-                                                    {selectedLayer.assetId && (
-                                                        <div className="mt-3">
-                                                            <div className="mb-1 flex items-start justify-between gap-2">
-                                                                <div className="text-xs font-semibold text-gray-400">
-                                                                    Version timeline
-                                                                </div>
-                                                                {selectedImageLayerVersionStrip.length > 1 && (
-                                                                    <span className="text-[9px] font-medium uppercase tracking-wide text-gray-500">
-                                                                        Scroll →
-                                                                    </span>
-                                                                )}
-                                                            </div>
-                                                            <p className="mb-2 text-[10px] leading-snug text-gray-500">
-                                                                Original left → newest right · click to load
-                                                            </p>
-                                                            <div
-                                                                className="flex max-w-full items-stretch gap-0 overflow-x-auto overflow-y-visible rounded-lg border border-gray-700/80 bg-gray-950/40 px-2 py-2 scroll-smooth"
-                                                                style={{ scrollbarWidth: 'thin' }}
-                                                            >
-                                                                {selectedImageLayerVersionStrip.map((v, vi) => {
-                                                                    const active = isAssetVersionThumbnailActive(
-                                                                        selectedLayer,
-                                                                        v,
-                                                                        selectedImageLayerVersionStrip
-                                                                    )
-                                                                    const label = assetVersionStripLabel(
-                                                                        v,
-                                                                        selectedImageLayerVersionStripMin
-                                                                    )
-                                                                    return (
-                                                                        <div key={v.id} className="flex flex-shrink-0 items-center">
-                                                                            {vi > 0 && (
-                                                                                <span
-                                                                                    className="mx-1 select-none self-center text-[10px] font-medium text-gray-600"
-                                                                                    aria-hidden
-                                                                                >
-                                                                                    →
-                                                                                </span>
-                                                                            )}
-                                                                            <button
-                                                                                type="button"
-                                                                                disabled={selectedLayer.locked}
-                                                                                onClick={() =>
-                                                                                    handleSwitchAssetVersion(selectedLayer.id, v)
-                                                                                }
-                                                                                title={
-                                                                                    v.created_at
-                                                                                        ? `${label} — ${new Date(v.created_at).toLocaleString()}`
-                                                                                        : label
-                                                                                }
-                                                                                className={`flex flex-col items-center gap-1 rounded-lg p-0.5 transition-shadow disabled:cursor-not-allowed disabled:opacity-50 ${
-                                                                                    active
-                                                                                        ? 'ring-2 ring-indigo-500 ring-offset-2 ring-offset-gray-950'
-                                                                                        : 'hover:ring-2 hover:ring-indigo-400/60 hover:ring-offset-1 hover:ring-offset-gray-950'
-                                                                                }`}
-                                                                            >
-                                                                                <div className="h-14 w-14 overflow-hidden rounded-md border border-gray-700 bg-gray-800">
-                                                                                    <img
-                                                                                        src={v.url}
-                                                                                        alt=""
-                                                                                        className="h-full w-full object-cover"
-                                                                                    />
-                                                                                </div>
-                                                                                <span className="max-w-[4.5rem] truncate text-center text-[10px] font-semibold tabular-nums text-gray-300">
-                                                                                    {label}
-                                                                                </span>
-                                                                            </button>
-                                                                        </div>
-                                                                    )
-                                                                })}
-                                                            </div>
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            )}
-                                            {(isImageLayer(selectedLayer) || isGenerativeImageLayer(selectedLayer)) && (
-                                                <div className="mt-2">
-                                                    <p className="mb-1.5 text-[9px] font-semibold uppercase tracking-wider text-gray-500">
-                                                        Motion
-                                                    </p>
-                                                    <button
-                                                        type="button"
-                                                        disabled={selectedLayer.locked || !aiEnabled}
-                                                        onClick={() =>
-                                                            openStudioAnimateModal({
-                                                                sourceKind: 'layer_isolated',
-                                                                layerId: selectedLayer.id,
-                                                            })
-                                                        }
-                                                        className="flex w-full items-center justify-center gap-2 rounded-lg border border-violet-700/50 bg-violet-950/30 px-3 py-2.5 text-xs font-semibold text-violet-100 shadow-sm transition-colors hover:border-violet-500/70 hover:bg-violet-900/40 disabled:cursor-not-allowed disabled:opacity-45"
-                                                        title={
-                                                            !aiEnabled
-                                                                ? 'AI is disabled for this workspace'
-                                                                : 'Queue image-to-video; other layers stay on top for playback and export'
-                                                        }
-                                                    >
-                                                        <span className="flex items-center gap-0.5" aria-hidden>
-                                                            <FilmIcon className="h-4 w-4" />
-                                                            <SparklesIcon className="h-3.5 w-3.5" />
-                                                        </span>
-                                                        Image → video (AI)
-                                                    </button>
-                                                    <p className={studioPanelText.microHint}>
-                                                        Renders add a video layer; your still stays in the stack (hidden)
-                                                        so you can switch back in Properties.
-                                                    </p>
-                                                    {(() => {
-                                                        const jobs = compositionAnimations.filter(
-                                                            (j) => j.source_layer_id === selectedLayer.id,
-                                                        )
-                                                        if (jobs.length === 0) {
-                                                            return null
-                                                        }
-                                                        return (
-                                                            <div className="mt-2 space-y-1.5 rounded-md border border-violet-900/30 bg-violet-950/20 px-2 py-2">
-                                                                <p className="text-[9px] font-semibold uppercase tracking-wider text-violet-200/80">
-                                                                    AI video for this still
-                                                                </p>
-                                                                <p className="text-[9px] leading-snug text-gray-500">
-                                                                    Finished clips appear in the layer stack automatically.
-                                                                    Click a run to select its video layer, or add it if the
-                                                                    file is ready but not on the canvas yet.
-                                                                </p>
-                                                                <ul className="mt-1.5 space-y-1.5">
-                                                                    {jobs.map((j) => {
-                                                                        const active = isStudioAnimationStatusActive(j.status)
-                                                                        const out = j.output
-                                                                        const canUseOutput =
-                                                                            j.status === 'complete' &&
-                                                                            Boolean(out?.asset_view_url) &&
-                                                                            Boolean(
-                                                                                out?.asset_id &&
-                                                                                    String(out.asset_id) !== '',
-                                                                            )
-                                                                        const videoLayerIdInDesign =
-                                                                            findVideoLayerIdForStudioAnimationJob(
-                                                                                document,
-                                                                                j.id,
-                                                                            )
-                                                                        const isVideoLayerSelected =
-                                                                            Boolean(
-                                                                                videoLayerIdInDesign &&
-                                                                                    selectedLayerId === videoLayerIdInDesign,
-                                                                            )
-                                                                        const isFullscreenPreview =
-                                                                            studioAnimationCanvasPreviewJobId === j.id
-                                                                        const rowHighlighted =
-                                                                            isVideoLayerSelected || isFullscreenPreview
-                                                                        return (
-                                                                            <li
-                                                                                key={j.id}
-                                                                                className={`rounded border bg-gray-900/50 p-1.5 ${
-                                                                                    rowHighlighted
-                                                                                        ? 'border-violet-500/80 ring-1 ring-violet-500/40'
-                                                                                        : 'border-gray-800/80'
-                                                                                }`}
-                                                                            >
-                                                                                {canUseOutput ? (
-                                                                                    <button
-                                                                                        type="button"
-                                                                                        onClick={() => {
-                                                                                            const existing =
-                                                                                                findVideoLayerIdForStudioAnimationJob(
-                                                                                                    document,
-                                                                                                    j.id,
-                                                                                                )
-                                                                                            if (existing) {
-                                                                                                setStudioAnimationCanvasPreviewJobId(
-                                                                                                    null,
-                                                                                                )
-                                                                                                selectLayerOrGroup(existing)
-                                                                                                return
-                                                                                            }
-                                                                                            const ins =
-                                                                                                buildInsertArgsForStudioAnimationJob(
-                                                                                                    j,
-                                                                                                    document,
-                                                                                                )
-                                                                                            if (!ins) {
-                                                                                                setActivityToast(
-                                                                                                    'Video file is not ready to add yet.',
-                                                                                                )
-                                                                                                return
-                                                                                            }
-                                                                                            setStudioAnimationCanvasPreviewJobId(
-                                                                                                null,
-                                                                                            )
-                                                                                            void handleInsertStudioAnimationAsVideoLayer(
-                                                                                                ins,
-                                                                                            )
-                                                                                                .then((docAfter) => {
-                                                                                                    if (!docAfter) {
-                                                                                                        return
-                                                                                                    }
-                                                                                                    const vid =
-                                                                                                        docAfter.layers.find(
-                                                                                                            (l) =>
-                                                                                                                isVideoLayer(
-                                                                                                                    l,
-                                                                                                                ) &&
-                                                                                                                l.studioProvenance
-                                                                                                                    ?.jobId ===
-                                                                                                                    j.id,
-                                                                                                        )
-                                                                                                    if (vid) {
-                                                                                                        selectLayerOrGroup(
-                                                                                                            vid.id,
-                                                                                                        )
-                                                                                                    }
-                                                                                                })
-                                                                                                .catch((e) => {
-                                                                                                    setActivityToast(
-                                                                                                        e instanceof Error
-                                                                                                            ? e.message
-                                                                                                            : 'Could not add the video',
-                                                                                                    )
-                                                                                                })
-                                                                                        }}
-                                                                                        className="w-full text-left"
-                                                                                    >
-                                                                                        <div className="flex items-start gap-2">
-                                                                                            <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded border border-gray-700/80 bg-black">
-                                                                                                <video
-                                                                                                    src={out?.asset_view_url ?? undefined}
-                                                                                                    className="pointer-events-none h-full w-full object-cover"
-                                                                                                    muted
-                                                                                                    playsInline
-                                                                                                    preload="metadata"
-                                                                                                    aria-hidden
-                                                                                                />
-                                                                                            </div>
-                                                                                            <div className="min-w-0 flex-1">
-                                                                                                <p
-                                                                                                    className={`text-[10px] font-medium ${active ? 'text-amber-200' : 'text-gray-200'}`}
-                                                                                                >
-                                                                                                    {j.motion_preset?.replace(
-                                                                                                        /_/g,
-                                                                                                        ' '
-                                                                                                    ) ?? 'AI clip'}{' '}
-                                                                                                    <span className="text-gray-500">
-                                                                                                        · {j.duration_seconds}s
-                                                                                                    </span>
-                                                                                                </p>
-                                                                                                <p className="mt-0.5 text-[9px] text-violet-300/90">
-                                                                                                    {videoLayerIdInDesign
-                                                                                                        ? isVideoLayerSelected
-                                                                                                            ? 'Selected on canvas'
-                                                                                                            : 'In design — click to select layer'
-                                                                                                        : 'Click to add to design'}
-                                                                                                </p>
-                                                                                            </div>
-                                                                                        </div>
-                                                                                    </button>
-                                                                                ) : (
-                                                                                    <div className="flex items-start justify-between gap-1">
-                                                                                        <span
-                                                                                            className={`text-[10px] font-medium ${active ? 'text-amber-200' : 'text-gray-300'}`}
-                                                                                        >
-                                                                                            {active
-                                                                                                ? 'Rendering…'
-                                                                                                : j.status === 'complete'
-                                                                                                  ? 'Ready'
-                                                                                                  : j.status === 'failed'
-                                                                                                    ? 'Failed'
-                                                                                                    : j.status}
-                                                                                        </span>
-                                                                                    </div>
-                                                                                )}
-                                                                                <div className="mt-1.5 flex flex-wrap items-center justify-end gap-2">
-                                                                                    {out?.asset_view_url ? (
-                                                                                        <a
-                                                                                            href={out.asset_view_url}
-                                                                                            target="_blank"
-                                                                                            rel="noreferrer"
-                                                                                            className="text-[9px] font-medium text-violet-300/90 hover:text-violet-200"
-                                                                                        >
-                                                                                            Open in new tab
-                                                                                        </a>
-                                                                                    ) : null}
-                                                                                    {out?.asset_view_url &&
-                                                                                    j.status === 'complete' ? (
-                                                                                        <button
-                                                                                            type="button"
-                                                                                            onClick={() =>
-                                                                                                setStudioAnimationCanvasPreviewJobId(
-                                                                                                    studioAnimationCanvasPreviewJobId ===
-                                                                                                        j.id
-                                                                                                        ? null
-                                                                                                        : j.id,
-                                                                                                )
-                                                                                            }
-                                                                                            className="text-[9px] font-medium text-violet-300/90 hover:text-violet-200"
-                                                                                        >
-                                                                                            {studioAnimationCanvasPreviewJobId === j.id
-                                                                                                ? 'Close fullscreen'
-                                                                                                : 'Fullscreen preview'}
-                                                                                        </button>
-                                                                                    ) : null}
-                                                                                    <button
-                                                                                        type="button"
-                                                                                        onClick={() => setStudioAnimationDetailJobId(j.id)}
-                                                                                        className="text-[9px] font-semibold text-violet-300 hover:text-violet-200"
-                                                                                    >
-                                                                                        Details
-                                                                                    </button>
-                                                                                </div>
-                                                                                {j.status === 'failed' && j.user_facing_error ? (
-                                                                                    <p className="mt-1 text-[9px] leading-snug text-red-300/90">
-                                                                                        {j.user_facing_error}
-                                                                                    </p>
-                                                                                ) : null}
-                                                                            </li>
-                                                                        )
-                                                                    })}
-                                                                </ul>
-                                                            </div>
-                                                        )
-                                                    })()}
-                                                </div>
-                                            )}
-                                            {isVideoLayer(selectedLayer) ? (
-                                                <p className={studioPanelText.microHint}>
-                                                    Trim and export in <span className="text-gray-500">Video Tools</span>{' '}
-                                                    above.
-                                                </p>
-                                            ) : null}
-                                    </StudioDisclosureSection>
-                                </StudioPanelGroup>
-
-                                <StudioPanelGroup
-                                    label="Layout"
-                                    tone="default"
-                                    sectionId="layout"
-                                    collapsible
-                                    collapsed={!studioPropertiesSectionOpen.layout}
-                                    onToggleCollapsed={() => handleStudioPropertiesSectionToggle('layout')}
-                                    icon={<RectangleGroupIcon className="h-3.5 w-3.5" aria-hidden />}
-                                    description="Position and rotation"
-                                    railIcon={<RectangleGroupIcon className="h-4 w-4 shrink-0" aria-hidden />}
-                                    railShortLabel="Layout"
-                                    railActive={studioPropertiesSectionActive === 'layout'}
-                                >
-                                    <div className={studioPanelSurfaces.technicalInset}>
-                                    <StudioDisclosureSection
-                                        id="jp-guides-placement"
-                                        title="Guides & quick position"
-                                        subtitle="9-cell placement — optional"
-                                        variant="muted"
-                                        open={propertiesGuidesOpen}
-                                        onOpenChange={setPropertiesGuidesOpen}
-                                    >
-                                        {(() => {
-                                            const t = selectedLayer.transform
-                                            const isFullBleed =
-                                                t.width >= document.width * 0.999 && t.height >= document.height * 0.999
-                                            if (isFullBleed) {
-                                                return (
-                                                    <p className="text-[10px] leading-snug text-gray-500">
-                                                        Full-bleed layer — quadrant picker hidden.
-                                                    </p>
+                                    <div className="space-y-3 border-t border-gray-800/60 pt-3">
+                                        <p className="mb-1.5 text-[9px] font-semibold uppercase tracking-wider text-gray-500">
+                                            Transform
+                                        </p>
+                                    <div className="space-y-3">
+                                        <div>
+                                            <p className="mb-1.5 text-[9px] font-semibold uppercase tracking-wider text-gray-500">
+                                                Placement
+                                            </p>
+                                            {(() => {
+                                                const t = selectedLayer.transform
+                                                const isFullBleed =
+                                                    t.width >= document.width * 0.999 && t.height >= document.height * 0.999
+                                                if (isFullBleed) {
+                                                    return (
+                                                        <p className="text-[10px] leading-snug text-gray-500">
+                                                            Full-bleed layer — quadrant picker hidden.
+                                                        </p>
+                                                    )
+                                                }
+                                                const currentPlacement = xyToPlacement(
+                                                    t.x,
+                                                    t.y,
+                                                    t.width,
+                                                    t.height,
+                                                    document.width,
+                                                    document.height
                                                 )
-                                            }
-                                            const currentPlacement = xyToPlacement(
-                                                t.x,
-                                                t.y,
-                                                t.width,
-                                                t.height,
-                                                document.width,
-                                                document.height
-                                            )
-                                            const applyPlacement = (p: Placement) => {
-                                                const { x, y } = placementToXY(p, t.width, t.height, document.width, document.height)
-                                                updateLayer(selectedLayer.id, (l) => ({
-                                                    ...l,
-                                                    transform: { ...l.transform, x, y },
-                                                }))
-                                            }
-                                            return (
-                                                <div className="flex items-start gap-3">
-                                                    <PlacementPicker
-                                                        value={currentPlacement}
-                                                        onChange={applyPlacement}
-                                                        size="sm"
-                                                        label="Quadrant"
-                                                    />
-                                                    <div className="flex-1 pt-1 text-[10px] leading-snug text-gray-500">
-                                                        {snapEnabled
-                                                            ? `${gridDensity}×${gridDensity} snap grid · Alt to ignore while dragging`
-                                                            : 'Snap off — enable in Canvas'}
+                                                const applyPlacement = (p: Placement) => {
+                                                    const { x, y } = placementToXY(p, t.width, t.height, document.width, document.height)
+                                                    updateLayer(selectedLayer.id, (l) => ({
+                                                        ...l,
+                                                        transform: { ...l.transform, x, y },
+                                                    }))
+                                                }
+                                                return (
+                                                    <div className="flex items-start gap-3">
+                                                        <PlacementPicker
+                                                            value={currentPlacement}
+                                                            onChange={applyPlacement}
+                                                            size="sm"
+                                                            label="Quadrant"
+                                                        />
+                                                        <div className="flex-1 pt-1 text-[10px] leading-snug text-gray-500">
+                                                            {snapEnabled
+                                                                ? `${gridDensity}×${gridDensity} snap grid · Alt to ignore while dragging`
+                                                                : 'Snap off — enable in Canvas'}
+                                                        </div>
                                                     </div>
-                                                </div>
-                                            )
-                                        })()}
-                                    </StudioDisclosureSection>
+                                                )
+                                            })()}
+                                        </div>
                                     <div>
                                         <button
                                             type="button"
@@ -12473,41 +11216,27 @@ export default function AssetEditor() {
                                             />
                                         )
                                     })()}
-                                    <StudioDisclosureSection
-                                        id="jp-precision-transform"
-                                        title="Precision"
-                                        subtitle="X, Y, width, height"
-                                        variant="muted"
-                                        open={propertiesPrecisionOpen}
-                                        onOpenChange={setPropertiesPrecisionOpen}
-                                    >
-                                        <StudioPrecisionTransformControls
-                                            layer={selectedLayer}
-                                            disabled={selectedLayer.locked}
-                                            onChangeXYWH={(patch) =>
-                                                updateLayer(selectedLayer.id, (l) => ({
-                                                    ...l,
-                                                    transform: { ...l.transform, ...patch },
-                                                }))
-                                            }
-                                        />
-                                    </StudioDisclosureSection>
+                                        <div>
+                                            <p className="mb-1.5 text-[9px] font-semibold uppercase tracking-wider text-gray-500">
+                                                Size &amp; position
+                                            </p>
+                                            <StudioPrecisionTransformControls
+                                                layer={selectedLayer}
+                                                disabled={selectedLayer.locked}
+                                                onChangeXYWH={(patch) =>
+                                                    updateLayer(selectedLayer.id, (l) => ({
+                                                        ...l,
+                                                        transform: { ...l.transform, ...patch },
+                                                    }))
+                                                }
+                                            />
+                                        </div>
                                     </div>
-                                </StudioPanelGroup>
-
-                                <StudioPanelGroup
-                                    label="Style"
-                                    tone="default"
-                                    sectionId="style"
-                                    collapsible
-                                    collapsed={!studioPropertiesSectionOpen.style}
-                                    onToggleCollapsed={() => handleStudioPropertiesSectionToggle('style')}
-                                    icon={<PaintBrushIcon className="h-3.5 w-3.5" aria-hidden />}
-                                    description="Typography, fill, mask, and image"
-                                    railIcon={<PaintBrushIcon className="h-4 w-4 shrink-0" aria-hidden />}
-                                    railShortLabel="Style"
-                                    railActive={studioPropertiesSectionActive === 'style'}
-                                >
+                                    </div>
+                                    <div className="space-y-3 border-t border-gray-800/60 pt-3">
+                                        <p className="mb-1.5 text-[9px] font-semibold uppercase tracking-wider text-gray-500">
+                                            Appearance
+                                        </p>
                                     <div className={studioPanelSurfaces.technicalInset}>
                                 {isFillLayer(selectedLayer) && selectedLayer.kind === 'text_boost' && (() => {
                                     // Local working values — default to inferred if a field
@@ -13020,19 +11749,19 @@ export default function AssetEditor() {
                                             )}
                                         </div>
 
-                                        {selectedLayer.fillKind === 'solid' && (() => {
-                                            const ctaBtnFill = isCtaButtonFillLayer(selectedLayer)
-                                            const brandFirst = labeledBrandPalette(brandContext)[0]?.color
-                                            const nativeHexFallback =
-                                                /^#[0-9a-fA-F]{6}$/.test(selectedLayer.color)
-                                                    ? selectedLayer.color
-                                                    : ctaBtnFill && brandFirst
-                                                      ? brandFirst
-                                                      : '#6366f1'
+                                        {selectedLayer.fillKind === 'solid' &&
+                                            isCtaButtonFillLayer(selectedLayer) &&
+                                            (() => {
+                                                const brandFirst = labeledBrandPalette(brandContext)[0]?.color
+                                                const nativeHexFallback =
+                                                    /^#[0-9a-fA-F]{6}$/.test(selectedLayer.color)
+                                                        ? selectedLayer.color
+                                                        : brandFirst
+                                                          ? brandFirst
+                                                          : '#6366f1'
 
-                                            return (
-                                                <div>
-                                                    {ctaBtnFill && (
+                                                return (
+                                                    <div>
                                                         <BrandColorSwatchStrip
                                                             brandContext={brandContext}
                                                             value={selectedLayer.color}
@@ -13043,42 +11772,41 @@ export default function AssetEditor() {
                                                                 )
                                                             }
                                                         />
-                                                    )}
-                                                    <label className="mb-1 block text-gray-400">
-                                                        Color
-                                                    </label>
-                                                    <div className="flex gap-2">
-                                                        <input
-                                                            type="color"
-                                                            value={nativeHexFallback}
-                                                            disabled={selectedLayer.locked}
-                                                            onChange={(e) =>
-                                                                updateLayer(selectedLayer.id, (l) =>
-                                                                    isFillLayer(l)
-                                                                        ? { ...l, color: e.target.value }
-                                                                        : l
-                                                                )
-                                                            }
-                                                            className="h-9 w-12 cursor-pointer rounded border border-gray-700 bg-gray-800"
-                                                        />
-                                                        <input
-                                                            type="text"
-                                                            value={selectedLayer.color}
-                                                            disabled={selectedLayer.locked}
-                                                            onChange={(e) =>
-                                                                updateLayer(selectedLayer.id, (l) =>
-                                                                    isFillLayer(l)
-                                                                        ? { ...l, color: e.target.value }
-                                                                        : l
-                                                                )
-                                                            }
-                                                            className="min-w-0 flex-1 rounded border border-gray-700 bg-gray-800 px-2 py-1 font-mono text-[11px] text-gray-200"
-                                                            placeholder="#RRGGBB"
-                                                        />
+                                                        <label className="mb-1 block text-gray-400">
+                                                            Color
+                                                        </label>
+                                                        <div className="flex gap-2">
+                                                            <input
+                                                                type="color"
+                                                                value={nativeHexFallback}
+                                                                disabled={selectedLayer.locked}
+                                                                onChange={(e) =>
+                                                                    updateLayer(selectedLayer.id, (l) =>
+                                                                        isFillLayer(l)
+                                                                            ? { ...l, color: e.target.value }
+                                                                            : l
+                                                                    )
+                                                                }
+                                                                className="h-9 w-12 cursor-pointer rounded border border-gray-700 bg-gray-800"
+                                                            />
+                                                            <input
+                                                                type="text"
+                                                                value={selectedLayer.color}
+                                                                disabled={selectedLayer.locked}
+                                                                onChange={(e) =>
+                                                                    updateLayer(selectedLayer.id, (l) =>
+                                                                        isFillLayer(l)
+                                                                            ? { ...l, color: e.target.value }
+                                                                            : l
+                                                                    )
+                                                                }
+                                                                className="min-w-0 flex-1 rounded border border-gray-700 bg-gray-800 px-2 py-1 font-mono text-[11px] text-gray-200"
+                                                                placeholder="#RRGGBB"
+                                                            />
+                                                        </div>
                                                     </div>
-                                                </div>
-                                            )
-                                        })()}
+                                                )
+                                            })()}
                                         {selectedLayer.fillKind === 'gradient' && (
                                             <>
                                                 <FillGradientStopField
@@ -13909,7 +12637,1395 @@ export default function AssetEditor() {
                                 )}
 
                                     </div>
+                                    </div>
+                                    </div>
                                 </StudioPanelGroup>
+
+                                <StudioPanelGroup
+                                    label="Actions"
+                                    tone="ai"
+                                    sectionId="actions"
+                                    collapsible
+                                    collapsed={!studioPropertiesSectionOpen.actions}
+                                    onToggleCollapsed={() => handleStudioPropertiesSectionToggle('actions')}
+                                    icon={<SparklesIcon className="h-3.5 w-3.5" aria-hidden />}
+                                    description={studioActionsSectionDescription}
+                                    railIcon={<SparklesIcon className="h-4 w-4 shrink-0" aria-hidden />}
+                                    railShortLabel="Actions"
+                                    railActive={studioPropertiesSectionActive === 'actions'}
+                                >
+                                    <div className="space-y-3">
+                                    {isTextLayer(selectedLayer) && (
+                                        <StudioSmartActionCard
+                                            title="Copy Assist"
+                                            icon={<SparklesIcon className="h-5 w-5" aria-hidden />}
+                                        >
+                                            {copyAssistLoadingId === selectedLayer.id && (
+                                                <div
+                                                    className="mb-2 flex items-center gap-2 rounded border border-violet-900/60 bg-violet-950/50 px-2 py-1.5 text-[10px] font-medium text-violet-100"
+                                                    role="status"
+                                                    aria-live="polite"
+                                                >
+                                                    <ArrowPathIcon className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
+                                                    Working on copy…
+                                                </div>
+                                            )}
+                                            <div className="grid grid-cols-1 gap-1.5 min-[300px]:grid-cols-2">
+                                                {COPY_ASSIST_PRIMARY_ACTIONS.map(({ label, op, Icon, description }) => (
+                                                    <button
+                                                        key={op}
+                                                        type="button"
+                                                        disabled={
+                                                            !aiEnabled ||
+                                                            selectedLayer.locked ||
+                                                            copyAssistLoadingId === selectedLayer.id
+                                                        }
+                                                        title={description}
+                                                        aria-label={description}
+                                                        onClick={() => void runCopyAssist(op)}
+                                                        className="flex min-h-[44px] items-center gap-2 rounded-lg border border-violet-500/30 bg-violet-950/25 px-2 py-1.5 text-left text-[10px] font-medium text-violet-100/95 shadow-sm transition-colors hover:border-violet-400/45 hover:bg-violet-900/35 disabled:cursor-not-allowed disabled:opacity-50"
+                                                    >
+                                                        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-violet-500/25 bg-violet-600/20 text-violet-200">
+                                                            <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                                                        </span>
+                                                        <span className="min-w-0 flex-1 leading-tight">{label}</span>
+                                                    </button>
+                                                ))}
+                                            </div>
+                                            {copyAssistError && (
+                                                <div className="mt-2 flex flex-wrap items-start gap-2">
+                                                    <p
+                                                        className="min-w-0 flex-1 text-[10px] font-medium text-red-400"
+                                                        role="alert"
+                                                    >
+                                                        {copyAssistError}
+                                                    </p>
+                                                    <button
+                                                        type="button"
+                                                        className="shrink-0 rounded border border-red-900 bg-gray-900 px-2 py-0.5 text-[10px] font-semibold text-red-300 transition-colors hover:bg-red-950/40"
+                                                        onClick={() => void runCopyAssist(copyAssistLastOpRef.current)}
+                                                    >
+                                                        Retry
+                                                    </button>
+                                                </div>
+                                            )}
+                                            {copyAssistSuggestions.length > 0 && (
+                                                <div className="mt-2">
+                                                    <p className="mb-0.5 text-[9px] font-medium text-gray-400">
+                                                        Alternates (hover for full text)
+                                                    </p>
+                                                    <div className="flex flex-col gap-1.5">
+                                                        {copyAssistSuggestions.map((sug, idx) => (
+                                                            <div
+                                                                key={`${idx}-${sug.label}`}
+                                                                className={`rounded border border-gray-700 bg-gray-900 p-1.5 ${
+                                                                    copyAssistHoverIdx === idx
+                                                                        ? 'ring-1 ring-indigo-500'
+                                                                        : ''
+                                                                }`}
+                                                                title={sug.text}
+                                                                onMouseEnter={() => setCopyAssistHoverIdx(idx)}
+                                                                onMouseLeave={() =>
+                                                                    setCopyAssistHoverIdx((h) =>
+                                                                        h === idx ? null : h
+                                                                    )
+                                                                }
+                                                            >
+                                                                <p className="text-[9px] font-semibold text-indigo-200">
+                                                                    {sug.label}
+                                                                </p>
+                                                                <p className="mt-0.5 line-clamp-2 text-[10px] leading-snug text-gray-100">
+                                                                    {sug.text}
+                                                                </p>
+                                                                <div className="mt-1 flex flex-wrap gap-1">
+                                                                    <button
+                                                                        type="button"
+                                                                        disabled={selectedLayer.locked}
+                                                                        onClick={() =>
+                                                                            replaceWithCopySuggestion(
+                                                                                selectedLayer.id,
+                                                                                sug.text
+                                                                            )
+                                                                        }
+                                                                        className="rounded bg-indigo-600 px-2 py-0.5 text-[9px] font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
+                                                                    >
+                                                                        Replace
+                                                                    </button>
+                                                                    <button
+                                                                        type="button"
+                                                                        disabled={selectedLayer.locked}
+                                                                        onClick={() =>
+                                                                            insertCopySuggestionBelow(
+                                                                                selectedLayer.id,
+                                                                                sug.text
+                                                                            )
+                                                                        }
+                                                                        className="rounded border border-gray-500 bg-gray-800 px-2 py-0.5 text-[9px] font-medium text-gray-100 hover:bg-gray-700 disabled:opacity-50"
+                                                                    >
+                                                                        Insert below
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            )}
+                                            {(selectedLayer.previousText?.length ?? 0) > 0 && (
+                                                <button
+                                                    type="button"
+                                                    disabled={selectedLayer.locked}
+                                                    onClick={revertLastCopy}
+                                                    className="mt-2 text-[10px] font-medium text-violet-300 underline hover:text-violet-100 disabled:opacity-50"
+                                                >
+                                                    Revert last change
+                                                </button>
+                                            )}
+                                            <div className="mt-2 border-t border-violet-800/60 pt-2">
+                                                <p className="mb-1 text-[9px] font-medium text-gray-400">
+                                                    Quick suggestions
+                                                </p>
+                                                <div className="flex flex-wrap gap-1">
+                                                    {SMART_SUGGESTIONS.map((s) => (
+                                                        <button
+                                                            key={s.action}
+                                                            type="button"
+                                                            disabled={
+                                                                selectedLayer.locked ||
+                                                                copyAssistLoadingId === selectedLayer.id
+                                                            }
+                                                            title={s.label}
+                                                            aria-label={s.label}
+                                                            onClick={() => applySuggestionAction(s.action)}
+                                                            className="rounded-md border border-white/[0.08] bg-gray-950/50 px-2 py-0.5 text-[9px] font-medium text-gray-400 transition-colors hover:border-indigo-500/25 hover:bg-white/[0.04] hover:text-gray-200 disabled:cursor-not-allowed disabled:opacity-40"
+                                                        >
+                                                            {s.label}
+                                                        </button>
+                                                    ))}
+                                                    {brandContext?.tone?.[0] && (
+                                                        <button
+                                                            type="button"
+                                                            disabled={
+                                                                selectedLayer.locked ||
+                                                                copyAssistLoadingId === selectedLayer.id
+                                                            }
+                                                            title="Align with brand tone"
+                                                            aria-label="Align with brand tone"
+                                                            onClick={() => applySuggestionAction('tone')}
+                                                            className="rounded-md border border-white/[0.08] bg-gray-950/50 px-2 py-0.5 text-[9px] font-medium text-gray-400 transition-colors hover:border-indigo-500/25 hover:bg-white/[0.04] hover:text-gray-200 disabled:cursor-not-allowed disabled:opacity-40"
+                                                        >
+                                                            Align with brand tone
+                                                        </button>
+                                                    )}
+                                                    {!!brandContext?.colors?.length && (
+                                                        <button
+                                                            type="button"
+                                                            disabled={
+                                                                selectedLayer.locked ||
+                                                                copyAssistLoadingId === selectedLayer.id
+                                                            }
+                                                            title="Use brand colors"
+                                                            aria-label="Use brand colors"
+                                                            onClick={() => applySuggestionAction('colors')}
+                                                            className="rounded-md border border-white/[0.08] bg-gray-950/50 px-2 py-0.5 text-[9px] font-medium text-gray-400 transition-colors hover:border-indigo-500/25 hover:bg-white/[0.04] hover:text-gray-200 disabled:cursor-not-allowed disabled:opacity-40"
+                                                        >
+                                                            Use brand colors
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        </StudioSmartActionCard>
+                                    )}
+
+                                    {isImageLayer(selectedLayer) && (
+                                        <StudioSmartActionCard
+                                            title="AI Image Tools"
+                                            icon={<SparklesIcon className="h-5 w-5" aria-hidden />}
+                                        >
+                                            {studioAiVideoForSelectedStill ? (
+                                                <div className="mb-1 rounded-lg border border-violet-600/50 bg-violet-950/35 p-2.5">
+                                                    <p className="text-[10px] font-semibold text-violet-100">
+                                                        Original still and AI clip
+                                                    </p>
+                                                    <p className="mt-1 text-[9px] leading-snug text-gray-400">
+                                                        Choose what appears on the canvas and which layer is selected. Switch
+                                                        back to the still any time to run Modify image and other image tools.
+                                                    </p>
+                                                    <div className="mt-2 space-y-1">
+                                                        <p className="text-[9px] font-medium uppercase tracking-wide text-violet-200/70">
+                                                            Canvas &amp; selection
+                                                        </p>
+                                                        <StudioSegmentedControl
+                                                            aria-label="Original still or AI video clip"
+                                                            value={studioAiStillClipCanvasMode ?? 'still'}
+                                                            disabled={selectedLayer.locked}
+                                                            onChange={(m) => {
+                                                                if (!studioAiVideoForSelectedStill || !selectedLayer) {
+                                                                    return
+                                                                }
+                                                                switchStudioAiStillOrClip(
+                                                                    m,
+                                                                    selectedLayer.id,
+                                                                    studioAiVideoForSelectedStill.videoLayerId,
+                                                                )
+                                                            }}
+                                                            segments={[...STUDIO_AI_STILL_CLIP_SEGMENTS]}
+                                                        />
+                                                    </div>
+                                                </div>
+                                            ) : null}
+                                            {!studioAiVideoForSelectedStill ? (
+                                                <div className="space-y-2 text-gray-100">
+                                                    <p className="text-[10px] leading-snug text-indigo-200/75">
+                                                        Edits the source image, not only the visible crop. Adjust fit or frame
+                                                        first if needed.
+                                                    </p>
+                                                    <div className="space-y-1">
+                                                        <p className="text-[9px] font-semibold uppercase tracking-wider text-indigo-300/70">
+                                                            Quick
+                                                        </p>
+                                                        <div className="grid grid-cols-1 gap-1.5 min-[300px]:grid-cols-2">
+                                                            {IMAGE_LAYER_QUICK_ACTIONS.map((qa) => {
+                                                                const Ic = qa.Icon
+                                                                return (
+                                                                    <button
+                                                                        key={qa.id}
+                                                                        type="button"
+                                                                        disabled={
+                                                                            selectedLayer.locked ||
+                                                                            selectedLayer.aiEdit?.status === 'editing' ||
+                                                                            imageEditUsageBlocked
+                                                                        }
+                                                                        title={qa.instruction}
+                                                                        aria-label={`${qa.label}. ${qa.instruction.slice(0, 120)}${qa.instruction.length > 120 ? '…' : ''}`}
+                                                                        onClick={() =>
+                                                                            void runImageLayerEdit(selectedLayer.id, {
+                                                                                instructionOverride: qa.instruction,
+                                                                            })
+                                                                        }
+                                                                        className="flex min-h-[48px] items-center gap-2 rounded-lg border border-indigo-500/30 bg-indigo-950/25 px-2 py-1.5 text-left text-[10px] font-medium text-indigo-100/95 shadow-sm transition-colors hover:border-indigo-400/50 hover:bg-indigo-900/35 disabled:cursor-not-allowed disabled:opacity-45"
+                                                                    >
+                                                                        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-indigo-500/25 bg-indigo-600/20 text-indigo-200">
+                                                                            <Ic className="h-3.5 w-3.5" aria-hidden />
+                                                                        </span>
+                                                                        <span className="min-w-0 flex-1 leading-snug">
+                                                                            {qa.label}
+                                                                        </span>
+                                                                    </button>
+                                                                )
+                                                            })}
+                                                        </div>
+                                                    </div>
+                                                    <StudioDisclosureSection
+                                                        id="jp-image-edit-model"
+                                                        title="Model"
+                                                        subtitle="Quality vs speed"
+                                                        variant="muted"
+                                                        open={propertiesImageEditModelOpen}
+                                                        onOpenChange={setPropertiesImageEditModelOpen}
+                                                    >
+                                                        <div className="grid grid-cols-1 gap-1.5 min-[420px]:grid-cols-3 min-[420px]:gap-1">
+                                                            {IMAGE_EDIT_MODEL_PRESETS.map((preset) => {
+                                                                const Ic = preset.Icon
+                                                                const current = normalizeEditModelKey(
+                                                                    selectedLayer.aiEdit?.editModelKey
+                                                                )
+                                                                const active = current === preset.value
+                                                                return (
+                                                                    <button
+                                                                        key={preset.value}
+                                                                        type="button"
+                                                                        disabled={
+                                                                            selectedLayer.locked ||
+                                                                            selectedLayer.aiEdit?.status === 'editing'
+                                                                        }
+                                                                        onClick={() => {
+                                                                            updateLayer(selectedLayer.id, (l) => {
+                                                                                if (!isImageLayer(l)) {
+                                                                                    return l
+                                                                                }
+                                                                                return {
+                                                                                    ...l,
+                                                                                    aiEdit: {
+                                                                                        ...l.aiEdit,
+                                                                                        editModelKey: preset.value,
+                                                                                    },
+                                                                                }
+                                                                            })
+                                                                        }}
+                                                                        className={`flex flex-col items-stretch gap-0.5 rounded-lg border px-2 py-2 text-left transition-colors ${
+                                                                            active
+                                                                                ? 'border-indigo-500 bg-indigo-600/30 ring-2 ring-indigo-500/50 ring-offset-1 ring-offset-gray-950'
+                                                                                : 'border-indigo-500/25 bg-gray-900/50 hover:border-indigo-500/50 hover:bg-indigo-950/30'
+                                                                        } disabled:cursor-not-allowed disabled:opacity-50`}
+                                                                    >
+                                                                        <span className="flex items-center gap-1.5 text-[10px] font-semibold text-indigo-100">
+                                                                            <Ic className="h-3.5 w-3.5 shrink-0 text-indigo-300" />
+                                                                            {preset.title}
+                                                                        </span>
+                                                                        <span className="text-[8px] leading-tight text-gray-500">
+                                                                            {preset.subtitle}
+                                                                        </span>
+                                                                    </button>
+                                                                )
+                                                            })}
+                                                        </div>
+                                                    </StudioDisclosureSection>
+                                                    {genUsageError && (
+                                                        <p className="text-[9px] text-amber-300/90">{genUsageError}</p>
+                                                    )}
+                                                    <label className="mb-0.5 block text-[9px] font-bold uppercase tracking-wider text-indigo-300/80">
+                                                        Prompt
+                                                    </label>
+                                                    <textarea
+                                                        value={selectedLayer.aiEdit?.prompt ?? ''}
+                                                        onChange={(e) => {
+                                                            const v = e.target.value
+                                                            updateLayer(selectedLayer.id, (l) => {
+                                                                if (!isImageLayer(l)) {
+                                                                    return l
+                                                                }
+                                                                return {
+                                                                    ...l,
+                                                                    aiEdit: { ...l.aiEdit, prompt: v },
+                                                                }
+                                                            })
+                                                        }}
+                                                        rows={3}
+                                                        placeholder="What should change on this image?"
+                                                        disabled={selectedLayer.locked || selectedLayer.aiEdit?.status === 'editing'}
+                                                        className="w-full rounded-lg border border-indigo-500/40 bg-gray-900/80 px-2.5 py-1.5 text-xs text-gray-100 placeholder:text-gray-500 focus:border-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-500/40"
+                                                    />
+                                                    {imageEditActionError && (
+                                                        <p className="mt-1 text-[10px] text-red-400">{imageEditActionError}</p>
+                                                    )}
+                                                    {selectedLayer.aiEdit?.status === 'error' && !imageEditActionError && (
+                                                        <p className="mt-1 text-[10px] text-red-400">Couldn’t apply — try again.</p>
+                                                    )}
+                                                    <div className="mt-2 flex flex-col gap-1.5">
+                                                        <div className="flex flex-wrap gap-1.5">
+                                                            <button
+                                                                type="button"
+                                                                disabled={
+                                                                    selectedLayer.locked ||
+                                                                    selectedLayer.aiEdit?.status === 'editing' ||
+                                                                    imageEditUsageBlocked
+                                                                }
+                                                                title={
+                                                                    genUsageError
+                                                                        ? genUsageError
+                                                                        : imageEditUsageBlocked
+                                                                          ? "You've used all AI image generations for this month"
+                                                                          : 'Apply your prompt to this layer'
+                                                                }
+                                                                onClick={() => void runImageLayerEdit(selectedLayer.id)}
+                                                                className="group inline-flex min-h-[2.25rem] min-w-0 flex-1 items-center justify-center gap-1.5 rounded-lg border-2 border-indigo-500/60 bg-indigo-600 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:bg-indigo-500 disabled:cursor-not-allowed disabled:border-indigo-800/80 disabled:bg-indigo-950/80"
+                                                            >
+                                                                <ArrowPathIcon className="h-3.5 w-3.5 group-disabled:opacity-60" />
+                                                                Apply
+                                                            </button>
+                                                            {selectedLayer.aiEdit?.resultSrc ? (
+                                                                <button
+                                                                    type="button"
+                                                                    disabled={
+                                                                        selectedLayer.locked ||
+                                                                        selectedLayer.aiEdit?.status === 'editing' ||
+                                                                        imageEditUsageBlocked ||
+                                                                        !(selectedLayer.aiEdit?.prompt ?? '').trim()
+                                                                    }
+                                                                    title="Same prompt on the latest AI result"
+                                                                    onClick={() => void runImageLayerEdit(selectedLayer.id)}
+                                                                    className="inline-flex min-h-[2.25rem] min-w-0 flex-1 items-center justify-center rounded-lg border-2 border-indigo-500/30 bg-indigo-950/40 px-3 py-2 text-xs font-semibold text-indigo-100 hover:border-indigo-400/50 hover:bg-indigo-900/30 disabled:cursor-not-allowed disabled:opacity-40"
+                                                                >
+                                                                    Again
+                                                                </button>
+                                                            ) : null}
+                                                        </div>
+                                                        {(selectedLayer.aiEdit?.previousResults?.length ?? 0) > 0 && (
+                                                            <button
+                                                                type="button"
+                                                                disabled={
+                                                                    selectedLayer.locked || selectedLayer.aiEdit?.status === 'editing'
+                                                                }
+                                                                onClick={() =>
+                                                                    updateLayer(selectedLayer.id, (l) => {
+                                                                        if (!isImageLayer(l)) {
+                                                                            return l
+                                                                        }
+                                                                        const stack = [...(l.aiEdit?.previousResults ?? [])]
+                                                                        if (stack.length === 0) {
+                                                                            return l
+                                                                        }
+                                                                        const nextSrc = stack[stack.length - 1]
+                                                                        return {
+                                                                            ...l,
+                                                                            src: nextSrc,
+                                                                            aiEdit: {
+                                                                                ...l.aiEdit,
+                                                                                previousResults: stack.slice(0, -1),
+                                                                                resultSrc: nextSrc,
+                                                                                status: 'idle',
+                                                                            },
+                                                                        }
+                                                                    })
+                                                                }
+                                                                className="w-full rounded-md border border-gray-600/80 bg-gray-800/50 py-1.5 text-[10px] font-medium text-gray-300 hover:border-gray-500 hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
+                                                            >
+                                                                Step back one edit
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            ) : null}
+                                            <button
+                                                type="button"
+                                                disabled={selectedLayer.locked || !aiEnabled}
+                                                onClick={() => {
+                                                    setStudioPropertiesSectionOpen((prev) => ({
+                                                        ...prev,
+                                                        history: true,
+                                                    }))
+                                                    requestAnimationFrame(() => {
+                                                        window.document
+                                                            .getElementById('jp-history-panel')
+                                                            ?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+                                                    })
+                                                }}
+                                                className="mt-2 w-full rounded-lg border border-violet-700/45 bg-violet-950/20 px-2 py-1.5 text-[10px] font-semibold text-violet-100 hover:bg-violet-900/35 disabled:cursor-not-allowed disabled:opacity-45"
+                                                title="Image → video (AI) lives under History"
+                                            >
+                                                Animate image → History
+                                            </button>
+                                        </StudioSmartActionCard>
+                                    )}
+
+                                    {isGenerativeImageLayer(selectedLayer) && (
+                                        <StudioSmartActionCard
+                                            title="Generate / Refine"
+                                            icon={<SparklesIcon className="h-5 w-5" aria-hidden />}
+                                        >
+                                    <div className="space-y-2">
+                                        {studioAiVideoForSelectedStill ? (
+                                            <div className="mb-1 rounded-lg border border-violet-600/50 bg-violet-950/35 p-2.5">
+                                                <p className="text-[10px] font-semibold text-violet-100">
+                                                    Original still and AI clip
+                                                </p>
+                                                <p className="mt-1 text-[9px] leading-snug text-gray-400">
+                                                    Choose what appears on the canvas. Return to the still to refine the
+                                                    image or run generative tools; use the clip to preview trim and export.
+                                                </p>
+                                                <div className="mt-2 space-y-1">
+                                                    <p className="text-[9px] font-medium uppercase tracking-wide text-violet-200/70">
+                                                        Canvas &amp; selection
+                                                    </p>
+                                                    <StudioSegmentedControl
+                                                        aria-label="Original still or AI video clip"
+                                                        value={studioAiStillClipCanvasMode ?? 'still'}
+                                                        disabled={selectedLayer.locked}
+                                                        onChange={(m) => {
+                                                            if (!studioAiVideoForSelectedStill || !selectedLayer) {
+                                                                return
+                                                            }
+                                                            switchStudioAiStillOrClip(
+                                                                m,
+                                                                selectedLayer.id,
+                                                                studioAiVideoForSelectedStill.videoLayerId,
+                                                            )
+                                                        }}
+                                                        segments={[...STUDIO_AI_STILL_CLIP_SEGMENTS]}
+                                                    />
+                                                </div>
+                                            </div>
+                                        ) : (
+                                        <>
+                                        {!aiEnabled && (
+                                            <div className="rounded-md border border-amber-800/40 bg-amber-950/20 px-2 py-1.5">
+                                                <p className="text-[10px] font-medium text-amber-200/95">AI off for this workspace.</p>
+                                                <p className="mt-0.5 text-[9px] text-amber-300/65">Ask an admin to re-enable.</p>
+                                            </div>
+                                        )}
+                                        {genUsageError && (
+                                            <p className="text-[10px] text-amber-300">{genUsageError}</p>
+                                        )}
+                                        {aiEnabled && genUsage && (
+                                            <p className="text-[10px] text-gray-400">
+                                                {genUsage.limit < 0
+                                                    ? `Plan: ${genUsage.plan_name ?? genUsage.plan} — unlimited`
+                                                    : `${genUsage.remaining} / ${genUsage.limit} generations this month (${genUsage.plan_name ?? genUsage.plan})`}
+                                            </p>
+                                        )}
+                                        {genActionError && (
+                                            <div className="flex flex-wrap items-start gap-2">
+                                                <p className="min-w-0 flex-1 text-[10px] text-red-400">
+                                                    {genActionError}
+                                                </p>
+                                                <button
+                                                    type="button"
+                                                    className="shrink-0 rounded border border-red-900 bg-gray-900 px-2 py-0.5 text-[10px] font-semibold text-red-300 transition-colors hover:bg-red-950/40"
+                                                    onClick={() => void runGenerativeGeneration(selectedLayer.id)}
+                                                >
+                                                    Retry
+                                                </button>
+                                            </div>
+                                        )}
+                                        {suggestionToast && (
+                                            <p
+                                                className="rounded border border-emerald-800 bg-emerald-950/40 px-2 py-1.5 text-[10px] text-emerald-100"
+                                                role="status"
+                                            >
+                                                {suggestionToast}
+                                            </p>
+                                        )}
+                                        {genUsage && genUsage.limit >= 0 && genUsage.remaining <= 0 && (
+                                            <p className="text-[10px] font-medium text-amber-200">
+                                                You&apos;ve reached your monthly limit.
+                                            </p>
+                                        )}
+                                        {selectedLayer.status === 'generating' && (
+                                            <div
+                                                className="rounded-md border border-violet-600 bg-violet-950/40 px-2.5 py-2 text-[10px] font-medium text-violet-100"
+                                                role="status"
+                                                aria-live="polite"
+                                            >
+                                                {selectedLayer.variationPending ? (
+                                                    <div className="flex flex-col items-center gap-2 sm:flex-row sm:justify-center">
+                                                        <EditorSlotReelLoader label="Variations…" />
+                                                        <div className="grid w-[72px] grid-cols-2 gap-1">
+                                                            {Array.from({
+                                                                length:
+                                                                    selectedLayer.variationBatchSize ?? VARIATION_MAX,
+                                                            }).map((_, i) => (
+                                                                <div
+                                                                    key={i}
+                                                                    className="aspect-square animate-pulse rounded bg-gradient-to-br from-violet-300/40 to-indigo-400/30"
+                                                                />
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                ) : (
+                                                    <EditorSlotReelLoader label="Generating…" />
+                                                )}
+                                            </div>
+                                        )}
+                                        <div>
+                                            <label className="mb-1 block font-medium text-gray-300">
+                                                Prompt
+                                            </label>
+                                            <textarea
+                                                rows={4}
+                                                disabled={
+                                                    selectedLayer.locked ||
+                                                    selectedLayer.status === 'generating' ||
+                                                    selectedLayer.variationPending
+                                                }
+                                                value={selectedLayer.prompt.scene ?? ''}
+                                                onChange={(e) => {
+                                                    const v = e.target.value
+                                                    updateLayer(selectedLayer.id, (l) => {
+                                                        if (!isGenerativeImageLayer(l)) {
+                                                            return l
+                                                        }
+                                                        return {
+                                                            ...l,
+                                                            prompt: { ...l.prompt, scene: v },
+                                                        }
+                                                    })
+                                                }}
+                                                placeholder="Describe the scene…"
+                                                className="w-full rounded border border-gray-700 bg-gray-800 px-2 py-1.5 text-[11px] leading-snug text-gray-200"
+                                            />
+                                            <p className="mb-1 mt-1.5 text-[9px] text-gray-400">
+                                                Quick insert
+                                            </p>
+                                            <div className="flex flex-wrap gap-1">
+                                                {PROMPT_ASSIST_CHIPS.map((chip) => (
+                                                    <button
+                                                        key={chip}
+                                                        type="button"
+                                                        disabled={
+                                                            selectedLayer.locked ||
+                                                            selectedLayer.status === 'generating' ||
+                                                            selectedLayer.variationPending
+                                                        }
+                                                        onClick={() => insertPromptChip(chip)}
+                                                        className="rounded-full border border-gray-700 bg-gray-800 px-2 py-0.5 text-[9px] text-gray-200 hover:bg-gray-700 disabled:opacity-40"
+                                                    >
+                                                        {chip}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                            {generativePromptPreview && (
+                                                <p className="mt-2 rounded border border-gray-700 bg-gray-800/50 px-2 py-1.5 text-[9px] leading-snug text-gray-300">
+                                                    <span className="font-medium text-gray-400">
+                                                        Current style:{' '}
+                                                    </span>
+                                                    {generativePromptPreview}
+                                                </p>
+                                            )}
+                                        </div>
+                                        <div className="rounded-md border border-gray-700 bg-gray-800/50 p-3">
+                                            <div className="flex items-center justify-between gap-2">
+                                                <span className="flex flex-wrap items-center gap-1.5 text-[11px] font-medium text-gray-200">
+                                                    Brand influence
+                                                    {brandContext && selectedLayer.applyBrandDna !== false && (
+                                                        <span className="rounded-full bg-emerald-900/50 px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wide text-emerald-100">
+                                                            Brand alignment active
+                                                        </span>
+                                                    )}
+                                                </span>
+                                                <label className="flex cursor-pointer items-center gap-2 text-[10px] text-gray-400">
+                                                    <span>Apply Brand DNA</span>
+                                                    <input
+                                                        type="checkbox"
+                                                        className="h-3.5 w-3.5 rounded border-gray-600 bg-gray-800 text-violet-500 focus:ring-violet-500"
+                                                        checked={selectedLayer.applyBrandDna !== false}
+                                                        disabled={
+                                                            selectedLayer.locked ||
+                                                            selectedLayer.status === 'generating' ||
+                                                            selectedLayer.variationPending
+                                                        }
+                                                        onChange={(e) =>
+                                                            updateLayer(selectedLayer.id, (l) =>
+                                                                isGenerativeImageLayer(l)
+                                                                    ? { ...l, applyBrandDna: e.target.checked }
+                                                                    : l
+                                                            )
+                                                        }
+                                                    />
+                                                </label>
+                                            </div>
+                                            {brandContext && selectedLayer.applyBrandDna === false && (
+                                                <p className="mt-2 rounded border border-amber-800 bg-amber-950/30 px-2 py-1 text-[9px] leading-snug text-amber-100">
+                                                    You are generating without brand alignment.
+                                                </p>
+                                            )}
+                                            {brandContext && (
+                                                <p className="mt-1 text-[9px] leading-snug text-gray-400">
+                                                    {brandContext.visual_style && (
+                                                        <span className="mr-1">Style: {brandContext.visual_style}.</span>
+                                                    )}
+                                                    {brandContext.archetype && (
+                                                        <span className="mr-1">Archetype: {brandContext.archetype}.</span>
+                                                    )}
+                                                    {!brandContext.visual_style && !brandContext.archetype && (
+                                                        <span>Brand context loaded.</span>
+                                                    )}
+                                                </p>
+                                            )}
+                                            {!brandContext && (
+                                                <p className="mt-1 text-[9px] text-amber-300">
+                                                    No brand context — generation uses your prompt only.
+                                                </p>
+                                            )}
+                                        </div>
+                                        <div>
+                                            <div className="mb-1 flex items-center justify-between">
+                                                <label className="block font-medium text-gray-300">
+                                                    References
+                                                </label>
+                                                <span className="text-[9px] text-gray-400">
+                                                    Max {MAX_REFERENCE_ASSETS}
+                                                </span>
+                                            </div>
+                                            <button
+                                                type="button"
+                                                disabled={
+                                                    selectedLayer.locked ||
+                                                    selectedLayer.status === 'generating' ||
+                                                    selectedLayer.variationPending
+                                                }
+                                                onClick={() => openReferencePicker(selectedLayer.id)}
+                                                className="mb-2 w-full rounded-md border border-dashed border-violet-500/50 bg-violet-950/30 px-2 py-1.5 text-[11px] font-medium text-violet-100 hover:bg-violet-950/50 disabled:cursor-not-allowed disabled:opacity-50"
+                                            >
+                                                Add references from library…
+                                            </button>
+                                            {(selectedLayer.referenceAssetIds?.length ?? 0) > 0 && (
+                                                <div className="flex flex-wrap gap-1.5">
+                                                    {(selectedLayer.referenceAssetIds ?? []).map((rid) => {
+                                                        const ref = damAssetById.get(rid)
+                                                        return (
+                                                            <div
+                                                                key={rid}
+                                                                className="relative h-12 w-12 overflow-hidden rounded border border-gray-700 bg-gray-700"
+                                                            >
+                                                                {ref ? (
+                                                                    <img
+                                                                        src={ref.thumbnail_url || ref.file_url}
+                                                                        alt=""
+                                                                        className="h-full w-full object-cover"
+                                                                    />
+                                                                ) : (
+                                                                    <div className="flex h-full w-full items-center justify-center text-[8px] text-gray-500">
+                                                                        …
+                                                                    </div>
+                                                                )}
+                                                                <button
+                                                                    type="button"
+                                                                    aria-label="Remove reference"
+                                                                    disabled={
+                                                                        selectedLayer.locked ||
+                                                                        selectedLayer.status === 'generating' ||
+                                                                        selectedLayer.variationPending
+                                                                    }
+                                                                    onClick={() =>
+                                                                        removeReferenceAsset(selectedLayer.id, rid)
+                                                                    }
+                                                                    className="absolute right-0 top-0 rounded-bl bg-black/60 p-0.5 text-white hover:bg-black/80 disabled:opacity-50"
+                                                                >
+                                                                    <XMarkIcon className="h-3 w-3" />
+                                                                </button>
+                                                            </div>
+                                                        )
+                                                    })}
+                                                </div>
+                                            )}
+                                        </div>
+                                        <div>
+                                            <p className="mb-1 font-medium text-gray-300">
+                                                Suggestions
+                                            </p>
+                                            <div className="flex flex-wrap gap-1">
+                                                {SMART_SUGGESTIONS.map((s) => (
+                                                    <button
+                                                        key={s.action}
+                                                        type="button"
+                                                        disabled={
+                                                            selectedLayer.locked ||
+                                                            selectedLayer.status === 'generating' ||
+                                                            selectedLayer.variationPending
+                                                        }
+                                                        onClick={() => applySuggestionAction(s.action)}
+                                                        className="rounded border border-gray-700 bg-gray-800 px-2 py-0.5 text-[10px] text-gray-200 hover:bg-gray-700 disabled:cursor-not-allowed disabled:opacity-40"
+                                                    >
+                                                        {s.label}
+                                                    </button>
+                                                ))}
+                                                {brandContext?.tone?.[0] && (
+                                                    <button
+                                                        type="button"
+                                                        disabled={
+                                                            selectedLayer.locked ||
+                                                            selectedLayer.status === 'generating' ||
+                                                            selectedLayer.variationPending
+                                                        }
+                                                        onClick={() => applySuggestionAction('tone')}
+                                                        className="rounded border border-gray-700 bg-gray-800 px-2 py-0.5 text-[10px] text-gray-200 hover:bg-gray-700 disabled:cursor-not-allowed disabled:opacity-40"
+                                                    >
+                                                        Align with brand tone
+                                                    </button>
+                                                )}
+                                                {!!brandContext?.colors?.length && (
+                                                    <button
+                                                        type="button"
+                                                        disabled={
+                                                            selectedLayer.locked ||
+                                                            selectedLayer.status === 'generating' ||
+                                                            selectedLayer.variationPending
+                                                        }
+                                                        onClick={() => applySuggestionAction('colors')}
+                                                        className="rounded border border-gray-700 bg-gray-800 px-2 py-0.5 text-[10px] text-gray-200 hover:bg-gray-700 disabled:cursor-not-allowed disabled:opacity-40"
+                                                    >
+                                                        Use brand colors
+                                                    </button>
+                                                )}
+                                            </div>
+                                        </div>
+                                        {selectedLayer.variationResults &&
+                                            selectedLayer.variationResults.length > 0 && (
+                                                <div className="rounded-md border border-violet-800 bg-violet-950/30 p-2">
+                                                    <p className="mb-1.5 text-[10px] font-medium text-violet-100">
+                                                        Pick a variation ({selectedLayer.variationResults.length}{' '}
+                                                        {selectedLayer.variationResults.length === 1 ? 'option' : 'options'})
+                                                    </p>
+                                                    <div className="grid grid-cols-2 gap-1.5">
+                                                        {selectedLayer.variationResults.map((url, idx) => (
+                                                            <button
+                                                                key={`${url}-${idx}`}
+                                                                type="button"
+                                                                className={`group/v relative overflow-hidden rounded bg-gray-900 transition-shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-600 ${
+                                                                    variationPressedIdx === idx
+                                                                        ? 'ring-2 ring-violet-400'
+                                                                        : variationHoverIdx === idx
+                                                                          ? 'ring-2 ring-violet-500'
+                                                                          : 'ring-1 ring-violet-700'
+                                                                }`}
+                                                                onMouseEnter={() => setVariationHoverIdx(idx)}
+                                                                onMouseLeave={() =>
+                                                                    setVariationHoverIdx((h) =>
+                                                                        h === idx ? null : h
+                                                                    )
+                                                                }
+                                                                onMouseDown={() => setVariationPressedIdx(idx)}
+                                                                onClick={() =>
+                                                                    applyVariationChoice(selectedLayer.id, url)
+                                                                }
+                                                            >
+                                                                <img
+                                                                    src={url}
+                                                                    alt=""
+                                                                    className="editor-gen-fade-in aspect-square w-full object-cover"
+                                                                />
+                                                                <span className="absolute inset-x-0 bottom-0 bg-black/50 py-0.5 text-[9px] text-white opacity-0 transition-opacity group-hover/v:opacity-100">
+                                                                    Use this
+                                                                </span>
+                                                            </button>
+                                                        ))}
+                                                    </div>
+                                                    <button
+                                                        type="button"
+                                                        className="mt-2 w-full text-[10px] text-gray-400 underline hover:text-gray-100"
+                                                        onClick={() => discardVariationResults(selectedLayer.id)}
+                                                    >
+                                                        Discard variations
+                                                    </button>
+                                                </div>
+                                            )}
+                                        <div>
+                                            <label className="mb-1 block font-medium text-gray-300">
+                                                Model
+                                            </label>
+                                            <select
+                                                disabled={
+                                                    selectedLayer.locked ||
+                                                    selectedLayer.status === 'generating' ||
+                                                    selectedLayer.variationPending
+                                                }
+                                                value={selectedLayer.model ?? 'default'}
+                                                onChange={(e) =>
+                                                    updateLayer(selectedLayer.id, (l) =>
+                                                        isGenerativeImageLayer(l)
+                                                            ? { ...l, model: e.target.value }
+                                                            : l
+                                                    )
+                                                }
+                                                className="w-full rounded border border-gray-700 bg-gray-800 px-2 py-1 text-gray-200"
+                                            >
+                                                {GENERATIVE_MODEL_OPTIONS.map((opt) => (
+                                                    <option key={opt.value} value={opt.value}>
+                                                        {opt.label}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                        <div className="space-y-1">
+                                            <label className="flex cursor-pointer items-center gap-2 text-xs text-gray-400">
+                                                <input
+                                                    type="checkbox"
+                                                    className="rounded border-gray-600 bg-gray-800 text-indigo-500"
+                                                    disabled={
+                                                        selectedLayer.locked ||
+                                                        selectedLayer.status === 'generating' ||
+                                                        selectedLayer.variationPending
+                                                    }
+                                                    checked={Boolean(selectedLayer.advancedModel)}
+                                                    onChange={(e) =>
+                                                        updateLayer(selectedLayer.id, (l) =>
+                                                            isGenerativeImageLayer(l)
+                                                                ? {
+                                                                      ...l,
+                                                                      advancedModel: e.target.checked,
+                                                                      modelOverride:
+                                                                          l.modelOverride ??
+                                                                          GENERATIVE_ADVANCED_MODEL_OPTIONS[0]
+                                                                              ?.value,
+                                                                  }
+                                                                : l
+                                                        )
+                                                    }
+                                                />
+                                                Advanced model (override)
+                                            </label>
+                                            {selectedLayer.advancedModel && (
+                                                <select
+                                                    disabled={
+                                                        selectedLayer.locked ||
+                                                        selectedLayer.status === 'generating' ||
+                                                        selectedLayer.variationPending
+                                                    }
+                                                    value={
+                                                        selectedLayer.modelOverride ??
+                                                        GENERATIVE_ADVANCED_MODEL_OPTIONS[0]?.value ??
+                                                        'gpt-image-1'
+                                                    }
+                                                    onChange={(e) =>
+                                                        updateLayer(selectedLayer.id, (l) =>
+                                                            isGenerativeImageLayer(l)
+                                                                ? { ...l, modelOverride: e.target.value }
+                                                                : l
+                                                        )
+                                                    }
+                                                    className="w-full rounded border border-gray-700 bg-gray-800 px-2 py-1 text-xs text-gray-200"
+                                                >
+                                                    {GENERATIVE_ADVANCED_MODEL_OPTIONS.map((opt) => (
+                                                        <option key={opt.value} value={opt.value}>
+                                                            {opt.label}
+                                                        </option>
+                                                    ))}
+                                                </select>
+                                            )}
+                                            {selectedLayer.lastResolvedModelDisplay && (
+                                                <p className="text-[10px] text-gray-400">
+                                                    Model: {selectedLayer.lastResolvedModelDisplay}
+                                                </p>
+                                            )}
+                                        </div>
+                                        <div className="flex flex-col gap-2">
+                                            <button
+                                                type="button"
+                                                disabled={
+                                                    !aiEnabled ||
+                                                    selectedLayer.locked ||
+                                                    selectedLayer.status === 'generating' ||
+                                                    selectedLayer.variationPending ||
+                                                    genUsage === null ||
+                                                    !canGenerateFromUsage(genUsage) ||
+                                                    !(selectedLayer.prompt.scene?.trim())
+                                                }
+                                                onClick={() => void runGenerativeGeneration(selectedLayer.id)}
+                                                className="inline-flex items-center justify-center gap-1.5 rounded-md bg-violet-600 px-3 py-2 text-xs font-semibold text-white shadow-sm transition-colors duration-150 hover:bg-violet-500 disabled:cursor-not-allowed disabled:opacity-50"
+                                            >
+                                                <SparklesIcon className="h-4 w-4" aria-hidden />
+                                                {aiEnabled ? 'Generate' : 'AI Disabled'}
+                                            </button>
+                                            <button
+                                                type="button"
+                                                disabled={
+                                                    !aiEnabled ||
+                                                    selectedLayer.locked ||
+                                                    selectedLayer.status === 'generating' ||
+                                                    selectedLayer.variationPending ||
+                                                    genUsage === null ||
+                                                    !canGenerateFromUsage(genUsage) ||
+                                                    !(selectedLayer.prompt.scene?.trim()) ||
+                                                    variationRequestCount(genUsage) < 1
+                                                }
+                                                onClick={() => void runGenerativeVariations(selectedLayer.id)}
+                                                className="inline-flex items-center justify-center gap-1.5 rounded-md border border-violet-500 bg-violet-950/50 px-3 py-2 text-xs font-semibold text-violet-100 shadow-sm transition-colors duration-150 hover:bg-violet-900/40 disabled:cursor-not-allowed disabled:opacity-50"
+                                            >
+                                                <Squares2X2Icon className="h-4 w-4" aria-hidden />
+                                                Generate variations
+                                            </button>
+                                            {selectedLayer.resultSrc && (
+                                                <>
+                                                    <button
+                                                        type="button"
+                                                        disabled={
+                                                            !aiEnabled ||
+                                                            selectedLayer.locked ||
+                                                            selectedLayer.status === 'generating' ||
+                                                            selectedLayer.variationPending ||
+                                                            genUsage === null ||
+                                                            !canGenerateFromUsage(genUsage) ||
+                                                            !(selectedLayer.prompt.scene?.trim())
+                                                        }
+                                                        onClick={() => void runGenerativeGeneration(selectedLayer.id)}
+                                                        className="rounded-md border border-gray-700 bg-gray-800 px-3 py-2 text-xs font-medium text-gray-100 hover:bg-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
+                                                    >
+                                                        Regenerate
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        disabled={selectedLayer.locked}
+                                                        onClick={convertGenerativeToImageLayer}
+                                                        className="rounded-md border border-emerald-500 bg-emerald-950/40 px-3 py-2 text-xs font-semibold text-emerald-100 hover:bg-emerald-900/60 disabled:opacity-50"
+                                                    >
+                                                        Convert to image layer
+                                                    </button>
+                                                </>
+                                            )}
+                                        </div>
+                                        {selectedLayer.resultSrc && (
+                                            <div>
+                                                <p className="mb-1.5 text-[9px] font-semibold uppercase tracking-wider text-gray-500">
+                                                    How it fits the layer box
+                                                </p>
+                                                <div
+                                                    className="grid grid-cols-3 gap-px overflow-hidden rounded-lg bg-gray-800/50 p-px ring-1 ring-inset ring-gray-700/40"
+                                                    role="group"
+                                                    aria-label="Object fit within layer bounds"
+                                                >
+                                                    {OBJECT_FIT_CHOICES.map((opt) => {
+                                                        const Ic = opt.Icon
+                                                        const active = (selectedLayer.fit ?? 'cover') === opt.value
+                                                        const dis =
+                                                            selectedLayer.status === 'generating' ||
+                                                            selectedLayer.variationPending
+                                                        return (
+                                                            <button
+                                                                key={opt.value}
+                                                                type="button"
+                                                                title={opt.title}
+                                                                disabled={dis}
+                                                                onClick={() =>
+                                                                    updateLayer(selectedLayer.id, (l) => {
+                                                                        if (!isGenerativeImageLayer(l)) return l
+                                                                        return { ...l, fit: opt.value }
+                                                                    })
+                                                                }
+                                                                className={`flex flex-col items-center justify-center gap-0.5 bg-gray-900/90 py-2 text-[9px] font-medium transition-colors sm:text-[10px] ${
+                                                                    active
+                                                                        ? 'text-indigo-100 ring-1 ring-inset ring-indigo-500/60'
+                                                                        : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200'
+                                                                } disabled:cursor-not-allowed disabled:opacity-40`}
+                                                            >
+                                                                <Ic className="h-4 w-4" aria-hidden />
+                                                                <span>{opt.short}</span>
+                                                            </button>
+                                                        )
+                                                    })}
+                                                </div>
+                                            </div>
+                                        )}
+                                        </>
+                                        )}
+                                    </div>
+                                        </StudioSmartActionCard>
+                                    )}
+                                    </div>
+                                </StudioPanelGroup>
+
+                                <StudioPanelGroup
+                                    label="History"
+                                    tone="muted"
+                                    sectionId="history"
+                                    collapsible
+                                    collapsed={!studioPropertiesSectionOpen.history}
+                                    onToggleCollapsed={() => handleStudioPropertiesSectionToggle('history')}
+                                    icon={<FolderOpenIcon className="h-3.5 w-3.5" aria-hidden />}
+                                    description="Version timeline, image→video, and runs for this layer"
+                                    railIcon={<FolderOpenIcon className="h-4 w-4 shrink-0" aria-hidden />}
+                                    railShortLabel="History"
+                                    railActive={studioPropertiesSectionActive === 'history'}
+                                >
+                                    <div id="jp-history-panel" className="space-y-3">
+                                            {isImageLayer(selectedLayer) && selectedLayer.assetId && (
+                                                <div>
+                                                    <div className="mb-1 flex items-start justify-between gap-2">
+                                                        <div className="text-xs font-semibold text-gray-400">
+                                                            Version timeline
+                                                        </div>
+                                                        {selectedImageLayerVersionStrip.length > 1 && (
+                                                            <span className="text-[9px] font-medium uppercase tracking-wide text-gray-500">
+                                                                Scroll →
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                    <p className="mb-2 text-[10px] leading-snug text-gray-500">
+                                                        Original left → newest right · click to load. Replace the source
+                                                        from Element.
+                                                    </p>
+                                                    <div
+                                                        className="flex max-w-full items-stretch gap-0 overflow-x-auto overflow-y-visible rounded-lg border border-gray-700/80 bg-gray-950/40 px-2 py-2 scroll-smooth"
+                                                        style={{ scrollbarWidth: 'thin' }}
+                                                    >
+                                                        {selectedImageLayerVersionStrip.map((v, vi) => {
+                                                            const active = isAssetVersionThumbnailActive(
+                                                                selectedLayer,
+                                                                v,
+                                                                selectedImageLayerVersionStrip
+                                                            )
+                                                            const label = assetVersionStripLabel(
+                                                                v,
+                                                                selectedImageLayerVersionStripMin
+                                                            )
+                                                            return (
+                                                                <div key={v.id} className="flex flex-shrink-0 items-center">
+                                                                    {vi > 0 && (
+                                                                        <span
+                                                                            className="mx-1 select-none self-center text-[10px] font-medium text-gray-600"
+                                                                            aria-hidden
+                                                                        >
+                                                                            →
+                                                                        </span>
+                                                                    )}
+                                                                    <button
+                                                                        type="button"
+                                                                        disabled={selectedLayer.locked}
+                                                                        onClick={() =>
+                                                                            handleSwitchAssetVersion(selectedLayer.id, v)
+                                                                        }
+                                                                        title={
+                                                                            v.created_at
+                                                                                ? `${label} — ${new Date(v.created_at).toLocaleString()}`
+                                                                                : label
+                                                                        }
+                                                                        className={`flex flex-col items-center gap-1 rounded-lg p-0.5 transition-shadow disabled:cursor-not-allowed disabled:opacity-50 ${
+                                                                            active
+                                                                                ? 'ring-2 ring-indigo-500 ring-offset-2 ring-offset-gray-950'
+                                                                                : 'hover:ring-2 hover:ring-indigo-400/60 hover:ring-offset-1 hover:ring-offset-gray-950'
+                                                                        }`}
+                                                                    >
+                                                                        <div className="h-14 w-14 overflow-hidden rounded-md border border-gray-700 bg-gray-800">
+                                                                            <img
+                                                                                src={v.url}
+                                                                                alt=""
+                                                                                className="h-full w-full object-cover"
+                                                                            />
+                                                                        </div>
+                                                                        <span className="max-w-[4.5rem] truncate text-center text-[10px] font-semibold tabular-nums text-gray-300">
+                                                                            {label}
+                                                                        </span>
+                                                                    </button>
+                                                                </div>
+                                                            )
+                                                        })}
+                                                    </div>
+                                                </div>
+                                            )}
+                                            {(isImageLayer(selectedLayer) || isGenerativeImageLayer(selectedLayer)) && (
+                                                <div className="mt-2">
+                                                    <p className="mb-1.5 text-[9px] font-semibold uppercase tracking-wider text-gray-500">
+                                                        Motion
+                                                    </p>
+                                                    <button
+                                                        type="button"
+                                                        disabled={selectedLayer.locked || !aiEnabled}
+                                                        onClick={() =>
+                                                            openStudioAnimateModal({
+                                                                sourceKind: 'layer_isolated',
+                                                                layerId: selectedLayer.id,
+                                                            })
+                                                        }
+                                                        className="flex w-full items-center justify-center gap-2 rounded-lg border border-violet-700/50 bg-violet-950/30 px-3 py-2.5 text-xs font-semibold text-violet-100 shadow-sm transition-colors hover:border-violet-500/70 hover:bg-violet-900/40 disabled:cursor-not-allowed disabled:opacity-45"
+                                                        title={
+                                                            !aiEnabled
+                                                                ? 'AI is disabled for this workspace'
+                                                                : 'Queue image-to-video; other layers stay on top for playback and export'
+                                                        }
+                                                    >
+                                                        <span className="flex items-center gap-0.5" aria-hidden>
+                                                            <FilmIcon className="h-4 w-4" />
+                                                            <SparklesIcon className="h-3.5 w-3.5" />
+                                                        </span>
+                                                        Image → video (AI)
+                                                    </button>
+                                                    <p className={studioPanelText.microHint}>
+                                                        Renders add a video layer; your still stays in the stack (hidden)
+                                                        so you can switch back in Properties.
+                                                    </p>
+                                                    {(() => {
+                                                        const jobs = compositionAnimations.filter(
+                                                            (j) => j.source_layer_id === selectedLayer.id,
+                                                        )
+                                                        if (jobs.length === 0) {
+                                                            return null
+                                                        }
+                                                        return (
+                                                            <div className="mt-2 space-y-1.5 rounded-md border border-violet-900/30 bg-violet-950/20 px-2 py-2">
+                                                                <p className="text-[9px] font-semibold uppercase tracking-wider text-violet-200/80">
+                                                                    AI video for this still
+                                                                </p>
+                                                                <p className="text-[9px] leading-snug text-gray-500">
+                                                                    Finished clips appear in the layer stack automatically.
+                                                                    Click a run to select its video layer, or add it if the
+                                                                    file is ready but not on the canvas yet.
+                                                                </p>
+                                                                <ul className="mt-1.5 space-y-1.5">
+                                                                    {jobs.map((j) => {
+                                                                        const active = isStudioAnimationStatusActive(j.status)
+                                                                        const out = j.output
+                                                                        const canUseOutput =
+                                                                            j.status === 'complete' &&
+                                                                            Boolean(out?.asset_view_url) &&
+                                                                            Boolean(
+                                                                                out?.asset_id &&
+                                                                                    String(out.asset_id) !== '',
+                                                                            )
+                                                                        const videoLayerIdInDesign =
+                                                                            findVideoLayerIdForStudioAnimationJob(
+                                                                                document,
+                                                                                j.id,
+                                                                            )
+                                                                        const isVideoLayerSelected =
+                                                                            Boolean(
+                                                                                videoLayerIdInDesign &&
+                                                                                    selectedLayerId === videoLayerIdInDesign,
+                                                                            )
+                                                                        const isFullscreenPreview =
+                                                                            studioAnimationCanvasPreviewJobId === j.id
+                                                                        const rowHighlighted =
+                                                                            isVideoLayerSelected || isFullscreenPreview
+                                                                        return (
+                                                                            <li
+                                                                                key={j.id}
+                                                                                className={`rounded border bg-gray-900/50 p-1.5 ${
+                                                                                    rowHighlighted
+                                                                                        ? 'border-violet-500/80 ring-1 ring-violet-500/40'
+                                                                                        : 'border-gray-800/80'
+                                                                                }`}
+                                                                            >
+                                                                                {canUseOutput ? (
+                                                                                    <button
+                                                                                        type="button"
+                                                                                        onClick={() => {
+                                                                                            const existing =
+                                                                                                findVideoLayerIdForStudioAnimationJob(
+                                                                                                    document,
+                                                                                                    j.id,
+                                                                                                )
+                                                                                            if (existing) {
+                                                                                                setStudioAnimationCanvasPreviewJobId(
+                                                                                                    null,
+                                                                                                )
+                                                                                                selectLayerOrGroup(existing)
+                                                                                                return
+                                                                                            }
+                                                                                            const ins =
+                                                                                                buildInsertArgsForStudioAnimationJob(
+                                                                                                    j,
+                                                                                                    document,
+                                                                                                )
+                                                                                            if (!ins) {
+                                                                                                setActivityToast(
+                                                                                                    'Video file is not ready to add yet.',
+                                                                                                )
+                                                                                                return
+                                                                                            }
+                                                                                            setStudioAnimationCanvasPreviewJobId(
+                                                                                                null,
+                                                                                            )
+                                                                                            void handleInsertStudioAnimationAsVideoLayer(
+                                                                                                ins,
+                                                                                            )
+                                                                                                .then((docAfter) => {
+                                                                                                    if (!docAfter) {
+                                                                                                        return
+                                                                                                    }
+                                                                                                    const vid =
+                                                                                                        docAfter.layers.find(
+                                                                                                            (l) =>
+                                                                                                                isVideoLayer(
+                                                                                                                    l,
+                                                                                                                ) &&
+                                                                                                                l.studioProvenance
+                                                                                                                    ?.jobId ===
+                                                                                                                    j.id,
+                                                                                                        )
+                                                                                                    if (vid) {
+                                                                                                        selectLayerOrGroup(
+                                                                                                            vid.id,
+                                                                                                        )
+                                                                                                    }
+                                                                                                })
+                                                                                                .catch((e) => {
+                                                                                                    setActivityToast(
+                                                                                                        e instanceof Error
+                                                                                                            ? e.message
+                                                                                                            : 'Could not add the video',
+                                                                                                    )
+                                                                                                })
+                                                                                        }}
+                                                                                        className="w-full text-left"
+                                                                                    >
+                                                                                        <div className="flex items-start gap-2">
+                                                                                            <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded border border-gray-700/80 bg-black">
+                                                                                                <video
+                                                                                                    src={out?.asset_view_url ?? undefined}
+                                                                                                    className="pointer-events-none h-full w-full object-cover"
+                                                                                                    muted
+                                                                                                    playsInline
+                                                                                                    preload="metadata"
+                                                                                                    aria-hidden
+                                                                                                />
+                                                                                            </div>
+                                                                                            <div className="min-w-0 flex-1">
+                                                                                                <p
+                                                                                                    className={`text-[10px] font-medium ${active ? 'text-amber-200' : 'text-gray-200'}`}
+                                                                                                >
+                                                                                                    {j.motion_preset?.replace(
+                                                                                                        /_/g,
+                                                                                                        ' '
+                                                                                                    ) ?? 'AI clip'}{' '}
+                                                                                                    <span className="text-gray-500">
+                                                                                                        · {j.duration_seconds}s
+                                                                                                    </span>
+                                                                                                </p>
+                                                                                                <p className="mt-0.5 text-[9px] text-violet-300/90">
+                                                                                                    {videoLayerIdInDesign
+                                                                                                        ? isVideoLayerSelected
+                                                                                                            ? 'Selected on canvas'
+                                                                                                            : 'In design — click to select layer'
+                                                                                                        : 'Click to add to design'}
+                                                                                                </p>
+                                                                                            </div>
+                                                                                        </div>
+                                                                                    </button>
+                                                                                ) : (
+                                                                                    <div className="flex items-start justify-between gap-1">
+                                                                                        <span
+                                                                                            className={`text-[10px] font-medium ${active ? 'text-amber-200' : 'text-gray-300'}`}
+                                                                                        >
+                                                                                            {active
+                                                                                                ? 'Rendering…'
+                                                                                                : j.status === 'complete'
+                                                                                                  ? 'Ready'
+                                                                                                  : j.status === 'failed'
+                                                                                                    ? 'Failed'
+                                                                                                    : j.status}
+                                                                                        </span>
+                                                                                    </div>
+                                                                                )}
+                                                                                <div className="mt-1.5 flex flex-wrap items-center justify-end gap-2">
+                                                                                    {out?.asset_view_url ? (
+                                                                                        <a
+                                                                                            href={out.asset_view_url}
+                                                                                            target="_blank"
+                                                                                            rel="noreferrer"
+                                                                                            className="text-[9px] font-medium text-violet-300/90 hover:text-violet-200"
+                                                                                        >
+                                                                                            Open in new tab
+                                                                                        </a>
+                                                                                    ) : null}
+                                                                                    {out?.asset_view_url &&
+                                                                                    j.status === 'complete' ? (
+                                                                                        <button
+                                                                                            type="button"
+                                                                                            onClick={() =>
+                                                                                                setStudioAnimationCanvasPreviewJobId(
+                                                                                                    studioAnimationCanvasPreviewJobId ===
+                                                                                                        j.id
+                                                                                                        ? null
+                                                                                                        : j.id,
+                                                                                                )
+                                                                                            }
+                                                                                            className="text-[9px] font-medium text-violet-300/90 hover:text-violet-200"
+                                                                                        >
+                                                                                            {studioAnimationCanvasPreviewJobId === j.id
+                                                                                                ? 'Close fullscreen'
+                                                                                                : 'Fullscreen preview'}
+                                                                                        </button>
+                                                                                    ) : null}
+                                                                                    <button
+                                                                                        type="button"
+                                                                                        onClick={() => setStudioAnimationDetailJobId(j.id)}
+                                                                                        className="text-[9px] font-semibold text-violet-300 hover:text-violet-200"
+                                                                                    >
+                                                                                        Details
+                                                                                    </button>
+                                                                                </div>
+                                                                                {j.status === 'failed' && j.user_facing_error ? (
+                                                                                    <p className="mt-1 text-[9px] leading-snug text-red-300/90">
+                                                                                        {j.user_facing_error}
+                                                                                    </p>
+                                                                                ) : null}
+                                                                            </li>
+                                                                        )
+                                                                    })}
+                                                                </ul>
+                                                            </div>
+                                                        )
+                                                    })()}
+                                                </div>
+                                            )}
+                                            {isVideoLayer(selectedLayer) ? (
+                                                <p className={studioPanelText.microHint}>
+                                                    Trim and export under{' '}
+                                                    <span className="text-gray-500">Element → Video</span>.
+                                                </p>
+                                            ) : null}
+                                    </div>
+                                </StudioPanelGroup>
+
+
 
                                 <StudioPanelGroup
                                     label="Advanced"

@@ -18,7 +18,8 @@ const DURATIONS = [3, 4, 5, 6, 7, 8, 9, 10] as const
 const ASPECTS = ['16:9', '9:16', '1:1', '4:5', '3:4'] as const
 
 type FixedAspect = (typeof ASPECTS)[number]
-type AspectChoice = 'canvas' | FixedAspect
+/** `canvas` = full document frame; `layer` = selected raster bounds (layer-context / isolated); else a fixed provider label. */
+type AspectChoice = 'canvas' | 'layer' | FixedAspect
 
 function layerDisplayName(l: Layer): string {
     const n = (l as { name?: string }).name?.trim()
@@ -150,11 +151,29 @@ export function StudioAnimateCompositionModal(props: Props) {
         [document.width, document.height],
     )
 
+    const layerMatchedAspect = useMemo((): FixedAspect => {
+        if (!selectedRaster || (selectedRaster.type !== 'image' && selectedRaster.type !== 'generative_image')) {
+            return canvasMatchedAspect
+        }
+        const t = selectedRaster.transform
+        const tw = Math.max(2, Math.round(t.width))
+        const th = Math.max(2, Math.round(t.height))
+
+        return nearestSupportedAnimationAspect(tw, th)
+    }, [selectedRaster, canvasMatchedAspect])
+
     useEffect(() => {
         if (open) {
             setAspect('canvas')
         }
     }, [open])
+
+    const isLayerDriven = sourceKind === 'layer_context' || sourceKind === 'layer_isolated'
+    useEffect(() => {
+        if (!isLayerDriven) {
+            setAspect((a) => (a === 'layer' ? 'canvas' : a))
+        }
+    }, [isLayerDriven])
 
     useEffect(() => {
         if (animatableLayers.length > 0 && !animatableLayers.some((l) => l.id === selectedLayerId)) {
@@ -214,7 +233,12 @@ export function StudioAnimateCompositionModal(props: Props) {
                 captureCompositionStudioAnimationSnapshotBase64,
                 captureStudioAnimationLayerIsolatedBase64,
             } = await import('../editorCompositionThumbnail')
-            const resolvedAspect = aspect === 'canvas' ? canvasMatchedAspect : aspect
+            const resolvedAspect =
+                aspect === 'canvas'
+                    ? canvasMatchedAspect
+                    : aspect === 'layer'
+                      ? layerMatchedAspect
+                      : aspect
             let sourceStrategy: PostStudioAnimationPayload['source_strategy'] = 'composition_snapshot'
             let sourceLayerId: string | undefined
             let layerBounds: { x: number; y: number; width: number; height: number } | undefined
@@ -297,6 +321,7 @@ export function StudioAnimateCompositionModal(props: Props) {
         aspect,
         audio,
         canvasMatchedAspect,
+        layerMatchedAspect,
         compositionId,
         document,
         duration,
@@ -317,8 +342,6 @@ export function StudioAnimateCompositionModal(props: Props) {
         return null
     }
 
-    const isLayerDriven =
-        sourceKind === 'layer_context' || sourceKind === 'layer_isolated'
     const heading = isLayerDriven ? 'Still image → AI video' : 'Animate composition'
     const subhead = isLayerDriven
         ? 'The model turns a flat snapshot of your design into a short clip. Pick which raster drives the motion; your type and logos stay as real layers on top when you insert the result behind them.'
@@ -547,6 +570,13 @@ export function StudioAnimateCompositionModal(props: Props) {
                                 <option value="canvas">
                                     Match canvas ({document.width}×{document.height} → {canvasMatchedAspect})
                                 </option>
+                                {isLayerDriven && selectedRaster ? (
+                                    <option value="layer">
+                                        Match selected layer (
+                                        {Math.round(selectedRaster.transform.width)}×
+                                        {Math.round(selectedRaster.transform.height)} → {layerMatchedAspect})
+                                    </option>
+                                ) : null}
                                 {ASPECTS.map((a) => (
                                     <option key={a} value={a}>
                                         {a}
@@ -555,8 +585,10 @@ export function StudioAnimateCompositionModal(props: Props) {
                             </select>
                             <p className="mt-1 text-[10px] leading-snug text-gray-500">
                                 The model returns a fixed <strong className="text-gray-400">aspect ratio</strong> (above), not your exact
-                                canvas pixel size. Output resolution (e.g. 720p/1080p) is defined by the provider — resize the clip after
-                                it lands in the library if you need a different pixel size.
+                                canvas pixel size. Use <strong className="text-gray-400">Match selected layer</strong> when a photo only
+                                occupies part of the frame (e.g. portrait on a wide layout) so the clip follows that layer’s proportions.
+                                Output resolution (e.g. 720p/1080p) is defined by the provider — resize the clip after it lands in the
+                                library if you need a different pixel size.
                             </p>
                         </div>
                     </div>

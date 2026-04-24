@@ -46,7 +46,9 @@ export default function EnterTransition({ suppressAutoRedirect = false }) {
     const primary = theme?.colors?.primary || '#6366f1'
     const isJackpotDefault = theme?.mode === 'default'
     const singleBrand = Boolean(theme?.single_brand_tenant)
-    const hasLogo = Boolean(theme?.logo)
+    /** Entry screen is always a dark surface — match {@link LogoMark}: prefer dark variant, then primary. */
+    const entryLogoSrc = theme?.logo_dark || theme?.logo || null
+    const hasLogo = Boolean(entryLogoSrc)
     const compactIdentity = singleBrand && !isJackpotDefault
 
     // Instant mode: minimal fade with brand presence
@@ -68,7 +70,7 @@ export default function EnterTransition({ suppressAutoRedirect = false }) {
                         />
                     ) : compactIdentity && hasLogo ? (
                         <img
-                            src={theme.logo}
+                            src={entryLogoSrc}
                             alt={theme.name || 'Brand'}
                             className="h-10 w-auto max-w-[min(100%,16rem)] mb-3 object-contain"
                             decoding="async"
@@ -80,8 +82,8 @@ export default function EnterTransition({ suppressAutoRedirect = false }) {
                             className="h-12 w-12 rounded-xl flex items-center justify-center mb-3"
                             style={{ background: `linear-gradient(135deg, ${primary}CC, ${primary}55)` }}
                         >
-                            {theme?.logo ? (
-                                <img src={theme.logo} alt={theme.name} className="h-7 object-contain" />
+                            {entryLogoSrc ? (
+                                <img src={entryLogoSrc} alt={theme.name} className="h-7 object-contain" />
                             ) : (
                                 <span className="text-lg font-bold text-white">
                                     {theme?.name?.charAt(0) || 'J'}
@@ -132,7 +134,7 @@ export default function EnterTransition({ suppressAutoRedirect = false }) {
                         />
                     ) : compactIdentity && hasLogo ? (
                         <img
-                            src={theme.logo}
+                            src={entryLogoSrc}
                             alt={theme.name || 'Brand'}
                             className="h-24 md:h-36 lg:h-44 w-auto max-w-[min(100%,28rem)] object-contain mx-auto mb-6"
                             decoding="async"
@@ -144,9 +146,9 @@ export default function EnterTransition({ suppressAutoRedirect = false }) {
                         >
                             {theme?.name || 'JACKPOT'}
                         </h1>
-                    ) : theme?.logo ? (
+                    ) : entryLogoSrc ? (
                         <img
-                            src={theme.logo}
+                            src={entryLogoSrc}
                             alt={theme.name}
                             className="h-20 md:h-28 w-auto object-contain mx-auto mb-6"
                         />

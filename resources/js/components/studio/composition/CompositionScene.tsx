@@ -165,6 +165,7 @@ export const CompositionScene = forwardRef<HTMLDivElement, CompositionSceneProps
                         >
                             {layer.locked && (
                                 <div
+                                    data-jp-export-capture-exclude
                                     className="pointer-events-none absolute right-1 top-1 z-20 rounded bg-black/55 p-0.5 text-white"
                                     title="Layer locked"
                                 >
@@ -173,6 +174,7 @@ export const CompositionScene = forwardRef<HTMLDivElement, CompositionSceneProps
                             )}
                             {isMaskLayer(layer) && compositionUiMode === 'edit' && (
                                 <div
+                                    data-jp-export-capture-exclude
                                     className="pointer-events-none absolute inset-0 rounded border-2 border-dashed border-amber-400/80 bg-amber-400/5"
                                     aria-hidden
                                 >
@@ -211,6 +213,7 @@ export const CompositionScene = forwardRef<HTMLDivElement, CompositionSceneProps
                                     <button
                                         key={corner}
                                         type="button"
+                                        data-jp-export-capture-exclude
                                         aria-label={`Resize ${corner}`}
                                         className="absolute z-10 h-2.5 w-2.5 rounded-sm border border-white bg-indigo-500 shadow dark:bg-indigo-400"
                                         style={{
@@ -231,6 +234,7 @@ export const CompositionScene = forwardRef<HTMLDivElement, CompositionSceneProps
                 })}
                 {mode === 'editor' && compositionUiMode === 'edit' && selectedGroupRect && (
                     <div
+                        data-jp-export-capture-exclude
                         className="pointer-events-none absolute outline outline-2 outline-dashed outline-indigo-400"
                         style={{
                             left: selectedGroupRect.x - 2,
@@ -253,7 +257,10 @@ function GenerativeImageToolbarPlaceholder(props: {
 }) {
     const { layer, editorHandlers } = props
     return (
-        <div className="pointer-events-none absolute bottom-full left-1/2 z-30 mb-1 flex -translate-x-1/2 opacity-0 transition-opacity duration-200 group-hover:pointer-events-auto group-hover:opacity-100">
+        <div
+            data-jp-export-capture-exclude
+            className="pointer-events-none absolute bottom-full left-1/2 z-30 mb-1 flex -translate-x-1/2 opacity-0 transition-opacity duration-200 group-hover:pointer-events-auto group-hover:opacity-100"
+        >
             <div className="pointer-events-auto flex flex-nowrap gap-0.5 rounded-md border border-gray-200 bg-white/95 px-1 py-0.5 text-[10px] font-medium text-gray-800 shadow-md dark:border-gray-700 dark:bg-gray-900/95 dark:text-gray-100">
                 <button
                     type="button"
@@ -313,7 +320,10 @@ function ImageToolbarPlaceholder(props: {
 }) {
     const { layer, editorHandlers } = props
     return (
-        <div className="pointer-events-none absolute bottom-full left-1/2 z-30 mb-1 flex -translate-x-1/2 opacity-0 transition-opacity duration-200 group-hover:pointer-events-auto group-hover:opacity-100">
+        <div
+            data-jp-export-capture-exclude
+            className="pointer-events-none absolute bottom-full left-1/2 z-30 mb-1 flex -translate-x-1/2 opacity-0 transition-opacity duration-200 group-hover:pointer-events-auto group-hover:opacity-100"
+        >
             <div className="pointer-events-auto flex gap-0.5 rounded-md border border-gray-200 bg-white/95 px-1 py-0.5 text-[10px] font-medium text-gray-800 shadow-md dark:border-gray-700 dark:bg-gray-900/95 dark:text-gray-100">
                 <button
                     type="button"
@@ -351,7 +361,10 @@ function FillToolbarPlaceholder(props: {
 }) {
     const { layer, editorHandlers } = props
     return (
-        <div className="pointer-events-none absolute bottom-full left-1/2 z-30 mb-1 flex -translate-x-1/2 opacity-0 transition-opacity duration-200 group-hover:pointer-events-auto group-hover:opacity-100">
+        <div
+            data-jp-export-capture-exclude
+            className="pointer-events-none absolute bottom-full left-1/2 z-30 mb-1 flex -translate-x-1/2 opacity-0 transition-opacity duration-200 group-hover:pointer-events-auto group-hover:opacity-100"
+        >
             <div className="pointer-events-auto flex gap-0.5 rounded-md border border-gray-200 bg-white/95 px-1 py-0.5 text-[10px] font-medium text-gray-800 shadow-md dark:border-gray-700 dark:bg-gray-900/95 dark:text-gray-100">
                 <button
                     type="button"

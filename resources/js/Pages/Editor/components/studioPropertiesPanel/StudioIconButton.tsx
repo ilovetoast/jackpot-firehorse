@@ -14,9 +14,10 @@ export function StudioIconButton({
     danger?: boolean
     /** Destructive affordance without a loud red tile — gray until hover/focus */
     subtleDanger?: boolean
-    size?: 'sm' | 'md'
+    /** sm = compact row, md = default, lg = properties / touch-friendly */
+    size?: 'sm' | 'md' | 'lg'
 }) {
-    const dim = size === 'sm' ? 'h-7 w-7' : 'h-8 w-8'
+    const dim = size === 'sm' ? 'h-7 w-7' : size === 'lg' ? 'h-10 w-10' : 'h-8 w-8'
     const base = `inline-flex ${dim} shrink-0 items-center justify-center rounded-md border text-gray-300 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400/45 disabled:cursor-not-allowed disabled:opacity-40`
     const tone = subtleDanger
         ? 'border-gray-800/90 bg-gray-900/30 text-gray-400 hover:border-red-900/40 hover:bg-red-950/20 hover:text-red-300/95'

@@ -2,6 +2,18 @@ import { toPng } from 'html-to-image'
 import { editorHtmlToImageFetchRequestInit } from './editorHardening'
 import type { DocumentModel } from './documentModel'
 
+/**
+ * Pass as {@code filter} to html-to-image {@code toPng}/{@code toJpeg} for composition/stage captures while {@code uiMode === 'edit'}.
+ * Nodes inside elements marked {@code data-jp-export-capture-exclude} (resize handles, grid, mask gizmos, etc.) are skipped.
+ */
+export function compositionHtmlToImageFilter(node: Node): boolean {
+    const el = node.nodeType === Node.ELEMENT_NODE ? (node as Element) : node.parentElement
+    if (!el) {
+        return true
+    }
+    return el.closest('[data-jp-export-capture-exclude]') === null
+}
+
 type CaptureThumbnailOptions = {
     /**
      * html-to-image scales output dimensions by this factor. Thumbnails use 0.5 to save payload;
@@ -64,6 +76,7 @@ export async function captureStudioAnimationLayerIsolatedBase64(
         const pngDataUrl = await toPng(layerEl, {
             cacheBust: true,
             skipFonts: true,
+            filter: compositionHtmlToImageFilter,
             pixelRatio: 1,
             width,
             height,
@@ -96,6 +109,7 @@ export async function captureCompositionStudioAnimationSnapshotBase64(
         const pngDataUrl = await toPng(stageEl, {
             cacheBust: true,
             skipFonts: true,
+            filter: compositionHtmlToImageFilter,
             pixelRatio: 1,
             width: doc.width,
             height: doc.height,
@@ -129,6 +143,7 @@ export async function captureCompositionThumbnailBase64(
             cacheBust: true,
             /** Avoid SecurityError on cross-origin stylesheets (e.g. fonts.bunny.net) when reading cssRules. */
             skipFonts: true,
+            filter: compositionHtmlToImageFilter,
             /** Thumbnails: 0.5. Animation submit: 1 so decoded PNG matches snapshot_width/height. */
             pixelRatio,
             width: doc.width,

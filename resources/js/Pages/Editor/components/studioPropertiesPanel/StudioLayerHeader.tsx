@@ -30,7 +30,7 @@ function layerTypeLabel(layer: Layer): string {
 }
 
 function LayerTypeIcon({ layer }: { layer: Layer }) {
-    const cls = 'h-[1.05rem] w-[1.05rem]'
+    const cls = 'h-6 w-6'
     if (isGenerativeImageLayer(layer)) return <SparklesIcon className={cls} aria-hidden />
     if (isImageLayer(layer)) return <PhotoIcon className={cls} aria-hidden />
     if (isTextLayer(layer)) return <DocumentTextIcon className={cls} aria-hidden />
@@ -67,7 +67,10 @@ export function StudioLayerHeader({
     return (
         <div className={studioPanelSurfaces.layerAnchor}>
             <div className="flex items-start gap-3">
-                <div className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-gray-700 bg-gray-800/50 text-gray-100 shadow-inner ring-1 ring-inset ring-black/20">
+                <div
+                    className="mt-0.5 flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border border-gray-700 bg-gray-800/50 text-gray-100 shadow-inner ring-1 ring-inset ring-black/20"
+                    title={layerTypeLabel(layer)}
+                >
                     <LayerTypeIcon layer={layer} />
                 </div>
                 <div className="min-w-0 flex-1 pt-0.5">
@@ -85,48 +88,68 @@ export function StudioLayerHeader({
                         placeholder={layerTypeLabel(layer)}
                     />
                     <p className="mt-1.5">
-                        <span className="inline-flex items-center rounded-md border border-gray-700 bg-gray-800/40 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-gray-400">
+                        <span className="inline-flex items-center rounded-md border border-gray-700 bg-gray-800/40 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-gray-300">
                             {layerTypeLabel(layer)}
                         </span>
                     </p>
                 </div>
-                <div className="flex shrink-0 items-center gap-0.5 pt-0.5">
+                <div
+                    className="flex shrink-0 flex-wrap items-center justify-end gap-1.5 pt-0.5"
+                    role="toolbar"
+                    aria-label="Layer actions"
+                >
                     <StudioIconButton
-                        size="sm"
+                        size="lg"
                         title={layer.visible ? 'Hide layer' : 'Show layer'}
+                        aria-label={layer.visible ? 'Hide layer' : 'Show layer'}
                         active={layer.visible}
                         disabled={disabled}
                         onClick={onToggleVisible}
                     >
-                        {layer.visible ? <EyeIcon className="h-3.5 w-3.5" /> : <EyeSlashIcon className="h-3.5 w-3.5" />}
+                        {layer.visible ? <EyeIcon className="h-5 w-5" /> : <EyeSlashIcon className="h-5 w-5" />}
                     </StudioIconButton>
                     <StudioIconButton
-                        size="sm"
+                        size="lg"
                         title={layer.locked ? 'Unlock layer' : 'Lock layer'}
+                        aria-label={layer.locked ? 'Unlock layer' : 'Lock layer'}
                         active={layer.locked}
                         disabled={disabled}
                         onClick={onToggleLock}
                     >
                         {layer.locked ? (
-                            <LockClosedIcon className="h-3.5 w-3.5" />
+                            <LockClosedIcon className="h-5 w-5" />
                         ) : (
-                            <LockOpenIcon className="h-3.5 w-3.5" />
+                            <LockOpenIcon className="h-5 w-5" />
                         )}
                     </StudioIconButton>
-                    <StudioIconButton size="sm" title="Duplicate layer" disabled={disabled} onClick={onDuplicate}>
-                        <Square2StackIcon className="h-3.5 w-3.5" />
+                    <StudioIconButton
+                        size="lg"
+                        title="Duplicate layer"
+                        aria-label="Duplicate layer"
+                        disabled={disabled}
+                        onClick={onDuplicate}
+                    >
+                        <Square2StackIcon className="h-5 w-5" />
                     </StudioIconButton>
-                    <StudioIconButton size="sm" title="Delete layer" subtleDanger disabled={disabled} onClick={onDelete}>
-                        <TrashIcon className="h-3.5 w-3.5" />
+                    <StudioIconButton
+                        size="lg"
+                        title="Delete layer"
+                        aria-label="Delete layer"
+                        subtleDanger
+                        disabled={disabled}
+                        onClick={onDelete}
+                    >
+                        <TrashIcon className="h-5 w-5" />
                     </StudioIconButton>
                     <Menu as="div" className="relative">
                         <MenuButton
                             type="button"
                             disabled={disabled}
-                            className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-gray-700 bg-gray-800/45 text-gray-400 transition-colors hover:border-gray-600 hover:bg-gray-800/70 hover:text-gray-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400/40 disabled:opacity-40"
-                            title="More"
+                            className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-gray-800/90 bg-gray-900/35 text-gray-300 transition-colors hover:border-gray-700 hover:bg-gray-800/50 hover:text-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400/45 disabled:cursor-not-allowed disabled:opacity-40"
+                            title="More layer actions"
+                            aria-label="More layer actions"
                         >
-                            <EllipsisVerticalIcon className="h-3.5 w-3.5" aria-hidden />
+                            <EllipsisVerticalIcon className="h-5 w-5" aria-hidden />
                         </MenuButton>
                         <MenuItems
                             transition

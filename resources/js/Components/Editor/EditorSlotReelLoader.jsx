@@ -17,6 +17,8 @@ export default function EditorSlotReelLoader({
     label,
     /** Extra content below the label (e.g. variation thumbnails) */
     children,
+    /** Override label color (e.g. white on indigo scrims over the canvas). */
+    labelClassName,
 }) {
     const strip = [...REEL_KEYS, ...REEL_KEYS]
 
@@ -44,7 +46,13 @@ export default function EditorSlotReelLoader({
                 </div>
             </div>
             {label ? (
-                <span className="text-center text-xs font-semibold tracking-wide text-gray-800 dark:text-gray-100">
+                <span
+                    className={
+                        labelClassName?.trim()
+                            ? `text-center text-xs font-semibold tracking-wide ${labelClassName}`
+                            : 'text-center text-xs font-semibold tracking-wide text-gray-800 dark:text-gray-100'
+                    }
+                >
                     {label}
                 </span>
             ) : null}
