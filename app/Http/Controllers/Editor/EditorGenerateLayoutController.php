@@ -325,6 +325,10 @@ class EditorGenerateLayoutController extends Controller
      *      (a) same as pass 3 but include `ai_generated` image rows (ranked below
      *      uploads), then (b) allow null mime_type when the filename looks like a
      *      raster extension — fixes libraries where ingestion never set mime_type.
+     *   7. If the first ranked+merged list is still empty: a single **random**
+     *      deliverable still from a **Photography** DAM category (JSON category_id
+     *      match, like the asset grid) and/or the `photography` / `photo` tag
+     *      fallbacks, before any broad brand-raster+AI pass.
      *
      * Each returned row matches {@see \App\Pages\Editor\documentModel.DamPickerAsset}
      * so it drops into the existing replace-image path.
@@ -355,14 +359,11 @@ class EditorGenerateLayoutController extends Controller
                 ->values()
                 ->all();
 
-            $photographyCategories = Category::query()
-                ->where('tenant_id', $tenant->id)
-                ->where('brand_id', $brand->id)
-                ->where('asset_type', AssetType::ASSET)
-                ->whereIn('slug', ['photography', 'photographs'])
-                ->active()
-                ->visible()
-                ->get();
+            // Do not use visible() here — brands may "hide" Photography in the
+            // nav while assets are still filed there; the grid and wizard must
+            // still match those files. Slugs vary by tenant: `photo`, `photos`,
+            // `photography`, custom `photograph-*`, etc.
+            $photographyCategories = $this->resolvePhotographyDamCategories($tenant, $brand);
 
             // Real-photography-only filter shared across all three passes.
             // Generative / AI-edited output is persisted back to the DAM as
@@ -384,6 +385,8 @@ class EditorGenerateLayoutController extends Controller
                 ->where('brand_id', $brand->id)
                 ->whereNotNull('mime_type')
                 ->where('mime_type', 'like', 'image/%')
+                ->normalIntakeOnly()
+                ->excludeBuilderStaged()
                 ->tap($applyPhotoOnlyFilter)
                 ->with(['latestBrandIntelligenceScore', 'category']);
 
@@ -393,22 +396,19 @@ class EditorGenerateLayoutController extends Controller
                 }
 
                 if ($photographyCategories->isNotEmpty()) {
-                    // Any image filed under a Photography-like DAM category — some tenants
-                    // renamed the provisioned row (slug photographs, etc.).
-                    $outer->orWhere(function ($q) use ($photographyCategories) {
-                        foreach ($photographyCategories as $photographyCategory) {
-                            $cid = (int) $photographyCategory->id;
-                            $q->orWhere(function ($sub) use ($cid) {
-                                $sub->where('metadata->category_id', $cid)
-                                    ->orWhere('metadata->category_id', (string) $cid);
-                            });
-                        }
+                    // Any image filed under a Photography-like DAM category — use the
+                    // same JSON cast the asset grid uses (works on MySQL + PostgreSQL).
+                    $catIds = $photographyCategories->pluck('id')->map(fn ($id) => (int) $id)->all();
+                    $outer->orWhere(function ($q) use ($catIds) {
+                        $q->whereNotNull('metadata')
+                            ->whereIn(DB::raw(Asset::categoryIdMetadataCastExpression()), $catIds);
                     });
                 }
 
                 // When this brand has no library hits for the wizard tag set, keep the
-                // legacy metadata-based pool so untagged brands still get candidates.
-                if ($brandTagIds === []) {
+                // legacy MySQL metadata-based pool. (JSON_EXTRACT is not portable — it
+                // would throw on PostgreSQL and the whole background list would be empty.)
+                if ($brandTagIds === [] && DB::getDriverName() === 'mysql') {
                     $outer->orWhere(function ($q) {
                         $q->whereRaw("JSON_EXTRACT(metadata, '$.fields.photo_type') IN ('\"lifestyle\"', '\"editorial\"', '\"event\"', '\"hero\"')")
                             ->orWhereRaw("JSON_EXTRACT(metadata, '$.fields.subject_type') = '\"scene\"'");
@@ -492,6 +492,18 @@ class EditorGenerateLayoutController extends Controller
                 return $sorted;
             }
 
+            // Before falling back to any brand raster (including AI), try a
+            // random real library photo: Photography category + tag fallbacks
+            // (same rule as the bottom-tier pass but earlier in the pipeline).
+            $randomFromPhotography = $this->tryRandomPhotographyCategoryBackgroundCandidates(
+                $tenant,
+                $brand,
+                $applyPhotoOnlyFilter
+            );
+            if ($randomFromPhotography !== []) {
+                return $randomFromPhotography;
+            }
+
             $applyPhotoOnlyFilterWithAi = function ($q) {
                 $q->whereIn('type', [AssetType::ASSET, AssetType::DELIVERABLE, AssetType::AI_GENERATED])
                     ->excludeCompositionTagged();
@@ -520,9 +532,17 @@ class EditorGenerateLayoutController extends Controller
             );
             $fallbackPayloads = $this->buildWizardBackgroundPayloadsFromAssets($fallbackAssets);
 
-            return $this->sortBackgroundCandidatePayloadsByPreference(
+            $final = $this->sortBackgroundCandidatePayloadsByPreference(
                 $this->mergePhotographyFirstBackgroundCandidates($tenant, $brand, $applyPhotoOnlyFilterWithAi, $fallbackPayloads)
             );
+
+            if ($final !== []) {
+                return $final;
+            }
+
+            // Random photography + tag pass already ran when the first ranked
+            // list was empty; no further heuristics to try.
+            return [];
         } catch (\Throwable $e) {
             Log::warning('editor.wizard_defaults_background_failed', [
                 'tenant_id' => $tenant->id,
@@ -532,6 +552,105 @@ class EditorGenerateLayoutController extends Controller
 
             return [];
         }
+    }
+
+    /**
+     * Library folders that are "Photography" for the DAM — slug and naming vary by tenant.
+     *
+     * @return \Illuminate\Database\Eloquent\Collection<int, \App\Models\Category>
+     */
+    private function resolvePhotographyDamCategories(Tenant $tenant, Brand $brand)
+    {
+        return Category::query()
+            ->where('tenant_id', $tenant->id)
+            ->where('brand_id', $brand->id)
+            ->where('asset_type', AssetType::ASSET)
+            ->where(function ($q) {
+                $q->whereIn('slug', ['photography', 'photographs', 'photo', 'photos'])
+                    ->orWhere('slug', 'like', 'photograph%')
+                    ->orWhere('slug', 'like', 'photo%');
+            })
+            ->active()
+            ->get();
+    }
+
+    /**
+     * Bottom-tier auto-fill: pick one **random** image from Photography DAM
+     * categories (driver-safe category_id match), then tag fallbacks
+     * (`photography`, `photo`). Excludes AI rows via $applyPhotoOnlyFilter.
+     *
+     * @param  \Closure(\Illuminate\Database\Eloquent\Builder): void  $applyPhotoOnlyFilter
+     * @return list<array{id:string,name:string,file_url:?string,thumbnail_url:?string,width:?int,height:?int,tags:list<string>}>
+     */
+    private function tryRandomPhotographyCategoryBackgroundCandidates(
+        Tenant $tenant,
+        Brand $brand,
+        \Closure $applyPhotoOnlyFilter
+    ): array {
+        $catIds = $this->resolvePhotographyDamCategories($tenant, $brand)
+            ->pluck('id')
+            ->map(fn ($id) => (int) $id)
+            ->values()
+            ->all();
+
+        $baseAssetQuery = function (array $restrictToIds) use ($tenant, $brand, $applyPhotoOnlyFilter) {
+            $q = Asset::query()
+                ->where('tenant_id', $tenant->id)
+                ->where('brand_id', $brand->id)
+                ->whereNotNull('mime_type')
+                ->where('mime_type', 'like', 'image/%')
+                ->normalIntakeOnly()
+                ->excludeBuilderStaged()
+                ->tap($applyPhotoOnlyFilter)
+                ->with(['category']);
+
+            if ($restrictToIds !== []) {
+                $q->whereIn('id', $restrictToIds);
+            }
+
+            return $q;
+        };
+
+        $collectPayloads = function ($query) {
+            $assets = $query
+                ->orderByDesc('created_at')
+                ->limit(200)
+                ->get()
+                ->filter(function (Asset $a) {
+                    $slug = $a->category?->slug;
+
+                    return $slug !== 'logos';
+                });
+
+            return $this->buildWizardBackgroundPayloadsFromAssets($assets);
+        };
+
+        if ($catIds !== []) {
+            $payloads = $collectPayloads(
+                $baseAssetQuery([])->whereNotNull('metadata')
+                    ->whereIn(DB::raw(Asset::categoryIdMetadataCastExpression()), $catIds)
+            );
+            if ($payloads !== []) {
+                shuffle($payloads);
+
+                return [array_values($payloads)[0]];
+            }
+        }
+
+        $tagIds = $this->assetIdsWithTagForBrand($tenant, $brand, 'photography');
+        if ($tagIds === []) {
+            $tagIds = $this->assetIdsWithTagForBrand($tenant, $brand, 'photo');
+        }
+        if ($tagIds !== []) {
+            $payloads = $collectPayloads($baseAssetQuery($tagIds));
+            if ($payloads !== []) {
+                shuffle($payloads);
+
+                return [array_values($payloads)[0]];
+            }
+        }
+
+        return [];
     }
 
     /**
@@ -546,6 +665,8 @@ class EditorGenerateLayoutController extends Controller
             ->where('tenant_id', $tenant->id)
             ->where('brand_id', $brand->id)
             ->whereIn('type', $types)
+            ->normalIntakeOnly()
+            ->excludeBuilderStaged()
             ->excludeCompositionTagged()
             ->with(['latestBrandIntelligenceScore', 'category']);
 
@@ -587,11 +708,19 @@ class EditorGenerateLayoutController extends Controller
         $payloads = [];
         foreach ($list as $asset) {
             $fileUrl = $asset->deliveryUrl(AssetVariant::ORIGINAL, DeliveryContext::AUTHENTICATED);
+            $thumbMedium = $asset->deliveryUrl(AssetVariant::THUMB_MEDIUM, DeliveryContext::AUTHENTICATED);
+            $thumbSmall = $asset->deliveryUrl(AssetVariant::THUMB_SMALL, DeliveryContext::AUTHENTICATED);
+            // The grid can show a thumbnail when the full original is not yet
+            // deliverable (e.g. cold storage) — same asset must still be pickable
+            // for the wizard; the editor applies via /file bridge by asset id.
+            if (! $fileUrl) {
+                $fileUrl = $thumbMedium ?: $thumbSmall;
+            }
             if (! $fileUrl) {
                 continue;
             }
-            $thumbnailUrl = $asset->deliveryUrl(AssetVariant::THUMB_MEDIUM, DeliveryContext::AUTHENTICATED)
-                ?: $asset->deliveryUrl(AssetVariant::THUMB_SMALL, DeliveryContext::AUTHENTICATED)
+            $thumbnailUrl = $thumbMedium
+                ?: $thumbSmall
                 ?: $fileUrl;
             $payloads[] = [
                 'id' => (string) $asset->id,

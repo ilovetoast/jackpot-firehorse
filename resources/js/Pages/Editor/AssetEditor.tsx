@@ -2080,6 +2080,20 @@ export default function AssetEditor() {
         }
     }, [templateWizardOpen])
 
+    // Hitting the review step: background candidates are resolved server-side;
+    // re-fetch so step 3 is not stuck on an empty list from a brief race or an
+    // earlier open before the library had files.
+    useEffect(() => {
+        if (!templateWizardOpen || wizardStep !== 3) return
+        let cancelled = false
+        void fetchWizardDefaults().then((d) => {
+            if (!cancelled) setWizardDefaults(d)
+        })
+        return () => {
+            cancelled = true
+        }
+    }, [templateWizardOpen, wizardStep])
+
     const [aiLayoutPromptOpen, setAiLayoutPromptOpen] = useState(false)
     const [aiLayoutPrompt, setAiLayoutPrompt] = useState('')
     const [aiLayoutLoading, setAiLayoutLoading] = useState(false)
