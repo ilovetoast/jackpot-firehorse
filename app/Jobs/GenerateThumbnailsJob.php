@@ -182,6 +182,22 @@ class GenerateThumbnailsJob implements ShouldQueue
                         'asset_id' => $version->asset_id,
                     ]);
 
+                    // {@see ProcessAssetJob} set version.pipeline_status=processing before the chain.
+                    // The full success path below sets complete here; without that, {@see FinalizeAssetJob} exits
+                    // ("version pipeline not complete") and the asset never gets pipeline_completed_at.
+                    $asset = $version->asset;
+                    $version->update(['pipeline_status' => 'complete']);
+                    $currentAnalysis = $asset->analysis_status ?? 'uploading';
+                    if ($currentAnalysis === 'generating_thumbnails') {
+                        $asset->update(['analysis_status' => 'extracting_metadata']);
+                        \App\Services\AnalysisStatusLogger::log(
+                            $asset,
+                            'generating_thumbnails',
+                            'extracting_metadata',
+                            'GenerateThumbnailsJob'
+                        );
+                    }
+
                     return;
                 }
 

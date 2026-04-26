@@ -9,7 +9,9 @@ use App\Enums\StorageBucketStatus;
 use App\Enums\ThumbnailStatus;
 use App\Enums\UploadStatus;
 use App\Enums\UploadType;
+use App\Jobs\FinalizeAssetJob;
 use App\Jobs\ProcessAssetJob;
+use App\Jobs\PromoteAssetJob;
 use App\Models\Asset;
 use App\Models\AssetVersion;
 use App\Models\Brand;
@@ -227,6 +229,96 @@ class AssetStateReconciliationServiceTest extends TestCase
         Bus::assertDispatched(ProcessAssetJob::class, function (ProcessAssetJob $job) use ($asset): bool {
             return $job->assetId === $asset->id;
         });
+    }
+
+    public function test_rule_7b_finishes_studio_version_when_eager_chain_skipped_finalize(): void
+    {
+        Bus::fake();
+
+        $tenant = Tenant::create(['name' => 'Test', 'slug' => 'test']);
+        $brand = Brand::create([
+            'tenant_id' => $tenant->id,
+            'name' => 'Test Brand',
+            'slug' => 'test-brand',
+        ]);
+        $bucket = StorageBucket::create([
+            'tenant_id' => $tenant->id,
+            'name' => 'test-bucket',
+            'status' => StorageBucketStatus::ACTIVE,
+            'region' => 'us-east-1',
+        ]);
+        $session = UploadSession::create([
+            'tenant_id' => $tenant->id,
+            'brand_id' => $brand->id,
+            'storage_bucket_id' => $bucket->id,
+            'status' => UploadStatus::COMPLETED,
+            'type' => UploadType::DIRECT,
+            'expected_size' => 1024,
+            'uploaded_size' => 1024,
+        ]);
+
+        $thumbMeta = [
+            'thumbnails' => [
+                'original' => [
+                    'thumb' => [
+                        'path' => 'tenants/t1/assets/v1/v1/thumbnails/original/thumb/thumb.webp',
+                    ],
+                ],
+            ],
+        ];
+
+        $asset = Asset::create([
+            'tenant_id' => $tenant->id,
+            'brand_id' => $brand->id,
+            'upload_session_id' => $session->id,
+            'storage_bucket_id' => $bucket->id,
+            'storage_root_path' => 'assets/test/file.mp4',
+            'original_filename' => 'studio-animation-15.mp4',
+            'mime_type' => 'video/mp4',
+            'size_bytes' => 1024,
+            'status' => AssetStatus::VISIBLE,
+            'type' => AssetType::AI_GENERATED,
+            'analysis_status' => 'generating_thumbnails',
+            'thumbnail_status' => ThumbnailStatus::COMPLETED,
+            'source' => 'studio_animation',
+            'metadata' => array_merge($thumbMeta, [
+                'thumbnails_generated' => true,
+                'metadata_extracted' => true,
+            ]),
+        ]);
+
+        $version = AssetVersion::query()->create([
+            'id' => (string) Str::uuid(),
+            'asset_id' => $asset->id,
+            'version_number' => 1,
+            'file_path' => 'assets/test/file.mp4',
+            'file_size' => 1024,
+            'mime_type' => 'video/mp4',
+            'width' => 1280,
+            'height' => 720,
+            'checksum' => 'abc',
+            'is_current' => true,
+            'pipeline_status' => 'processing',
+            'uploaded_by' => null,
+            'metadata' => array_merge($thumbMeta, [
+                'processing_started' => true,
+                'thumbnails_generated' => true,
+            ]),
+        ]);
+
+        $service = app(AssetStateReconciliationService::class);
+        $result = $service->reconcile($asset->fresh());
+
+        $this->assertTrue($result['updated']);
+        $this->assertContains('Rule 7b: version complete; Finalize+Promote dispatched', $result['changes']);
+
+        $version->refresh();
+        $this->assertSame('complete', $version->pipeline_status);
+
+        Bus::assertChained([
+            new FinalizeAssetJob($asset->id),
+            new PromoteAssetJob($asset->id),
+        ]);
     }
 
     public function test_rule_8_sets_published_at_for_completed_studio_export_with_category(): void

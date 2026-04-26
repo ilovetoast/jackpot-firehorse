@@ -4,7 +4,9 @@ namespace App\Services\Assets;
 
 use App\Enums\AssetStatus;
 use App\Enums\ThumbnailStatus;
+use App\Jobs\FinalizeAssetJob;
 use App\Jobs\ProcessAssetJob;
+use App\Jobs\PromoteAssetJob;
 use App\Models\Asset;
 use App\Models\Brand;
 use App\Models\Tenant;
@@ -12,6 +14,8 @@ use App\Services\Reliability\ReliabilityEngine;
 use App\Services\TenantBucketService;
 use App\Services\Studio\EditorStudioVideoPublishApplier;
 use App\Support\PipelineQueueResolver;
+use App\Support\ThumbnailMetadata;
+use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -96,6 +100,11 @@ class AssetStateReconciliationService
 
         // Rule 7 — Studio export / animation: version marked complete before pipeline ran → ProcessAssetJob no-ops forever
         $promotions = $this->applyRule7($asset->fresh());
+        $changes = array_merge($changes, $promotions);
+
+        // Rule 7b — Eager thumbnails + chain GenerateThumbnailsJob idempotent skip left version stuck at
+        // pipeline_status=processing, so Finalize never ran. Heal by completing the version gate and tail chain.
+        $promotions = $this->applyRule7b($asset->fresh());
         $changes = array_merge($changes, $promotions);
 
         // Rule 8 — Studio composition video export: completed pipeline but still unpublished → default grid hides asset
@@ -312,6 +321,67 @@ class AssetStateReconciliationService
         ]);
 
         return ['Rule 7: version.pipeline_status → pending; ProcessAssetJob dispatched'];
+    }
+
+    /**
+     * Rule 7b: After {@see ProcessAssetJob} runs, the chain's {@see GenerateThumbnailsJob} may return
+     * immediately when thumbnails already exist (eager generation). That path did not set
+     * version.pipeline_status=complete, so {@see FinalizeAssetJob} skipped and the asset never finished.
+     * Repair: set complete and dispatch the tail of the normal chain.
+     *
+     * @return list<string>
+     */
+    protected function applyRule7b(Asset $asset): array
+    {
+        $allowedSources = ['studio_composition_video_export', 'studio_animation'];
+        if (! in_array((string) ($asset->source ?? ''), $allowedSources, true)) {
+            return [];
+        }
+
+        $meta = $asset->metadata ?? [];
+        if (isset($meta['pipeline_completed_at'])) {
+            return [];
+        }
+        if (($meta['thumbnails_generated'] ?? false) !== true) {
+            return [];
+        }
+        if (($meta['metadata_extracted'] ?? false) !== true) {
+            return [];
+        }
+
+        $version = $asset->currentVersion()->first();
+        if (! $version || $version->pipeline_status === 'failed') {
+            return [];
+        }
+        if ($version->pipeline_status === 'complete') {
+            return [];
+        }
+
+        $vMeta = is_array($version->metadata) ? $version->metadata : [];
+        if (($vMeta['processing_started'] ?? false) !== true) {
+            return [];
+        }
+        if (! ThumbnailMetadata::hasThumb($vMeta) && ! ThumbnailMetadata::hasThumb($meta)) {
+            return [];
+        }
+        if (($asset->analysis_status ?? '') === 'uploading') {
+            return [];
+        }
+
+        $version->update(['pipeline_status' => 'complete']);
+        $queue = PipelineQueueResolver::imagesQueueForAsset($asset);
+        Bus::chain([
+            new FinalizeAssetJob($asset->id),
+            new PromoteAssetJob($asset->id),
+        ])->onQueue($queue);
+
+        Log::info('[AssetStateReconciliationService] Rule 7b applied (studio tail chain after eager thumbnail idempotent skip)', [
+            'asset_id' => $asset->id,
+            'version_id' => $version->id,
+            'source' => $asset->source,
+        ]);
+
+        return ['Rule 7b: version complete; Finalize+Promote dispatched'];
     }
 
     /**
