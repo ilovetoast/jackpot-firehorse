@@ -83,8 +83,17 @@ function IncidentRow({ incident: i, onAction, selected, onSelect, onSourceClick 
             <td className="py-3 px-3 text-sm text-gray-500">{new Date(i.detected_at).toLocaleString()}</td>
             <td className="py-3 px-3 text-sm text-gray-500">
                 {i.repair_attempts > 0 ? (
-                    <span title={i.last_repair_attempt_at ? `Last: ${new Date(i.last_repair_attempt_at).toLocaleString()}` : ''}>
-                        {i.repair_attempts} {i.repair_attempts >= 3 ? '(→ ticket)' : ''}
+                    <span
+                        title={[
+                            i.last_repair_attempt_at ? `Last: ${new Date(i.last_repair_attempt_at).toLocaleString()}` : '',
+                            i.auto_repair_exhausted ? 'Scheduled auto-repair has stopped; fix root cause or use Attempt Repair / Resolve.' : '',
+                        ].filter(Boolean).join(' · ')}
+                    >
+                        {i.repair_attempts}
+                        {i.repair_attempts >= 3 ? ' (→ ticket)' : ''}
+                        {i.auto_repair_exhausted ? (
+                            <span className="ml-1 text-amber-700">(auto-repair off)</span>
+                        ) : null}
                     </span>
                 ) : '—'}
             </td>

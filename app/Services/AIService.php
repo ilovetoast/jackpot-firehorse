@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Enums\AITaskType;
 use App\Exceptions\AIBudgetExceededException;
+use App\Exceptions\AIQuotaExceededException;
 use App\Models\AIAgentRun;
 use App\Models\Tenant;
 use App\Models\User;
@@ -352,6 +353,17 @@ class AIService
                 'model' => $actualModelName,
                 'metadata' => $response['metadata'] ?? [],
             ];
+        } catch (AIQuotaExceededException $e) {
+            $agentRun->markAsFailed($e->getMessage());
+            Log::warning('AI agent blocked — provider quota or billing (upstream)', [
+                'agent_id' => $agentId,
+                'task_type' => $taskType,
+                'agent_run_id' => $agentRun->id,
+                'provider' => $e->provider,
+                'error' => $e->getMessage(),
+            ]);
+
+            throw $e;
         } catch (\Exception $e) {
             // Mark agent run as failed
             $agentRun->markAsFailed($e->getMessage());
@@ -591,6 +603,17 @@ class AIService
                 'model_display_name' => $displayName,
                 'metadata' => $response['metadata'] ?? [],
             ];
+        } catch (AIQuotaExceededException $e) {
+            $agentRun->markAsFailed($e->getMessage());
+            Log::warning('AI generative image agent blocked — provider quota or billing (upstream)', [
+                'agent_id' => $agentId,
+                'task_type' => $taskType,
+                'agent_run_id' => $agentRun->id,
+                'provider' => $e->provider,
+                'error' => $e->getMessage(),
+            ]);
+
+            throw $e;
         } catch (\Exception $e) {
             $agentRun->markAsFailed($e->getMessage());
 
@@ -846,6 +869,17 @@ class AIService
                 'model_display_name' => $displayName,
                 'metadata' => $response['metadata'] ?? [],
             ];
+        } catch (AIQuotaExceededException $e) {
+            $agentRun->markAsFailed($e->getMessage());
+            Log::warning('AI editor image edit blocked — provider quota or billing (upstream)', [
+                'agent_id' => $agentId,
+                'task_type' => $taskType,
+                'agent_run_id' => $agentRun->id,
+                'provider' => $e->provider,
+                'error' => $e->getMessage(),
+            ]);
+
+            throw $e;
         } catch (\Exception $e) {
             $agentRun->markAsFailed($e->getMessage());
 

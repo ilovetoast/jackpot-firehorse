@@ -121,16 +121,62 @@ class DeleteAssetJob implements ShouldQueue
     }
 
     /**
-     * Resolve S3 bucket for deletion: prefer {@see Asset::$storageBucket}, else upload session's bucket.
+     * Resolve S3 bucket for deletion: use {@see Asset::$storage_bucket_id} and the upload session’s bucket id
+     * with {@see StorageBucket::withTrashed()}. The BelongsTo relation excludes soft-deleted rows, so a set FK
+     * could previously yield “no bucket” in one call site while a related path still assumed a name — or
+     * the relation could be null while the id column still points at a trashed record we must delete from S3.
      */
     protected function resolveDeletionBucket(Asset $asset): ?StorageBucket
     {
-        if ($asset->storageBucket !== null) {
-            return $asset->storageBucket;
-        }
-        $asset->loadMissing('uploadSession.storageBucket');
+        $asset->loadMissing('uploadSession');
 
-        return $asset->uploadSession?->storageBucket;
+        foreach ($this->storageBucketIdCandidates($asset) as $id) {
+            $bucket = StorageBucket::withTrashed()->find($id);
+            if ($bucket === null) {
+                continue;
+            }
+            if (! filled((string) $bucket->name)) {
+                Log::warning('Storage bucket record has no S3 bucket name; skipping S3 calls for this id', [
+                    'asset_id' => $asset->id,
+                    'storage_bucket_id' => $bucket->id,
+                ]);
+
+                continue;
+            }
+
+            return $bucket;
+        }
+
+        return null;
+    }
+
+    /**
+     * Prefer the asset’s bucket id, then the upload session’s, when present and distinct.
+     *
+     * @return list<non-falsy-string>
+     */
+    private function storageBucketIdCandidates(Asset $asset): array
+    {
+        $ids = [];
+        if (filled($asset->storage_bucket_id)) {
+            $ids[] = (string) $asset->storage_bucket_id;
+        }
+        $sessionId = $asset->uploadSession?->storage_bucket_id;
+        if (filled($sessionId) && (string) $sessionId !== ($ids[0] ?? null)) {
+            $ids[] = (string) $sessionId;
+        }
+
+        $seen = [];
+        $out = [];
+        foreach ($ids as $id) {
+            if (isset($seen[$id])) {
+                continue;
+            }
+            $seen[$id] = true;
+            $out[] = $id;
+        }
+
+        return $out;
     }
 
     /**

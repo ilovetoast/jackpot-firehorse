@@ -72,6 +72,9 @@ class Handler
         if ($e instanceof AIProviderException) {
             $message = $e->getPublicMessage();
             $status = $e->getStatusCode();
+        } elseif ($e instanceof AIQuotaExceededException) {
+            $message = 'AI is temporarily unavailable because the service provider limit was reached. Please try again later or contact support if this continues.';
+            $status = 503;
         } elseif ($e instanceof BindingResolutionException) {
             // Container wiring — never leak class names to the browser.
             $message = 'Something went wrong.';

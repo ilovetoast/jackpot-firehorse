@@ -37,9 +37,36 @@ class SystemAutoRecoverCommand extends Command
         $ticketsCreated = 0;
         $retriesDispatched = 0;
 
+        $maxAttempts = max(1, (int) config('reliability.max_auto_repair_attempts', 30));
+
         foreach ($incidents as $incident) {
             if ($processed >= self::MAX_RECOVERIES_PER_RUN) {
                 break;
+            }
+
+            $incident->refresh();
+            $meta = $incident->metadata ?? [];
+            $currentAttempts = (int) ($meta['repair_attempts'] ?? $meta['recovery_attempt_count'] ?? 0);
+            if ($currentAttempts >= $maxAttempts) {
+                if (! ($meta['auto_repair_exhausted'] ?? false)) {
+                    $meta = array_merge($meta, [
+                        'auto_repair_exhausted' => true,
+                        'auto_repair_exhausted_at' => now()->toIso8601String(),
+                    ]);
+                    $incident->update(['metadata' => $meta]);
+                    Log::warning('[SystemAutoRecover] Auto-repair cap reached; quiescing until manual resolve', [
+                        'incident_id' => $incident->id,
+                        'source_type' => $incident->source_type,
+                        'source_id' => $incident->source_id,
+                        'max_auto_repair_attempts' => $maxAttempts,
+                    ]);
+                }
+                $ticket = $reliabilityEngine->escalate($incident->fresh());
+                if ($ticket) {
+                    $ticketsCreated++;
+                }
+                $processed++;
+                continue;
             }
 
             Log::info('[SystemAutoRecover] Auto recovery attempt', [

@@ -5,6 +5,8 @@
 require_once __DIR__.'/../app/helpers.php';
 
 use App\Exceptions\AIProviderException;
+use App\Exceptions\AIQuotaExceededException;
+use App\Services\AI\AIQuotaExceededNotifier;
 use App\Models\Asset;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Foundation\Application;
@@ -16,6 +18,7 @@ use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 use Sentry\Laravel\Integration;
 use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
+use Throwable;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -69,6 +72,17 @@ return Application::configure(basePath: dirname(__DIR__))
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         Integration::handles($exceptions);
+
+        // Provider org quota (OpenAI billing, etc.): email operators; not a product error in Sentry.
+        $exceptions->report(function (AIQuotaExceededException $e) {
+            try {
+                app(AIQuotaExceededNotifier::class)->notify($e);
+            } catch (Throwable $t) {
+                \Illuminate\Support\Facades\Log::error('AI quota report handler failed', [
+                    'message' => $t->getMessage(),
+                ]);
+            }
+        });
 
         // /d/* 404 (download not found): use shared branding resolver so error pages never silently fall back to unbranded layouts.
         // Same resolver as active/expired/revoked/403—intentional design for consistent branding across all download states.

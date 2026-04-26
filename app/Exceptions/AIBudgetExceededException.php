@@ -8,7 +8,8 @@ use Exception;
 /**
  * AI Budget Exceeded Exception
  *
- * Thrown when an AI execution is blocked by a hard budget limit.
+ * Thrown when an AI execution is blocked because projected spend would exceed the monthly cap
+ * ({@see \App\Services\AIBudgetService::checkBudget}).
  */
 class AIBudgetExceededException extends Exception
 {
@@ -20,5 +21,18 @@ class AIBudgetExceededException extends Exception
         public readonly float $estimatedCost
     ) {
         parent::__construct($message);
+    }
+
+    /**
+     * Message safe for end users and APIs (no internal budget / dollar detail).
+     */
+    public function getPublicMessage(): string
+    {
+        return 'AI service is temporarily unavailable. Please try again later.';
+    }
+
+    public function isSystemBudget(): bool
+    {
+        return $this->budget->budget_type === 'system';
     }
 }

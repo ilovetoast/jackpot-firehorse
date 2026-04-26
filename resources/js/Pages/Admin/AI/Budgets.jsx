@@ -68,7 +68,10 @@ export default function AIBudgets({ budgets, environment, canManage }) {
                             <div>
                                 <h1 className="text-3xl font-bold tracking-tight text-gray-900">AI Budgets</h1>
                                 <p className="mt-2 text-sm text-gray-700">
-                                    Manage AI budget limits and quotas
+                                    Caps and <strong>used</strong> amounts are per <strong>calendar month</strong> (resets
+                                    on the 1st, app timezone). The <strong>system-wide</strong> monthly ceiling is stored
+                                    in the <strong>database</strong> (this table); edit overrides here — not via{' '}
+                                    <code className="text-xs bg-gray-100 px-1 rounded">.env</code>.
                                 </p>
                             </div>
                             <div className="text-sm text-gray-500">
@@ -93,8 +96,8 @@ export default function AIBudgets({ budgets, environment, canManage }) {
                             <thead className="bg-gray-50">
                                 <tr>
                                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Budget</th>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Amount</th>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Used</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Amount (monthly)</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Used (this month)</th>
                                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Remaining</th>
                                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
                                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Warning</th>
@@ -116,7 +119,13 @@ export default function AIBudgets({ budgets, environment, canManage }) {
                                                 <div className="text-sm font-medium text-gray-900">{budget.name}</div>
                                                 <div className="text-xs text-gray-500">
                                                     {budget.source === 'database' ? 'Database' : 'Config'}
+                                                    {budget.period === 'monthly' ? ' · monthly' : ''}
                                                 </div>
+                                                {budget.period_description && (
+                                                    <div className="text-xs text-gray-400 max-w-sm mt-0.5" title={budget.period_description}>
+                                                        {budget.period_description}
+                                                    </div>
+                                                )}
                                             </td>
                                             <td className="px-6 py-4 whitespace-nowrap">
                                                 {isEditing ? (

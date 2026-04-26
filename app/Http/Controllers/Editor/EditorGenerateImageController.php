@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Editor;
 
 use App\Enums\AITaskType;
+use App\Exceptions\AIBudgetExceededException;
 use App\Exceptions\PlanLimitExceededException;
 use App\Http\Controllers\Controller;
 use App\Models\Composition;
@@ -155,7 +156,7 @@ class EditorGenerateImageController extends Controller
         try {
             $this->aiUsageService->checkUsage($tenant, 'generative_editor_images');
         } catch (PlanLimitExceededException $e) {
-            return response()->json(['message' => 'Monthly limit reached'], 429);
+            return response()->json($e->toApiArray(), 429);
         }
 
         $options = [
@@ -192,6 +193,13 @@ class EditorGenerateImageController extends Controller
             );
         } catch (\InvalidArgumentException $e) {
             return response()->json(['message' => $e->getMessage()], 422);
+        } catch (AIBudgetExceededException $e) {
+            Log::warning('editor.generate_image_budget', [
+                'user_id' => $user->id,
+                'tenant_id' => $tenant->id,
+            ]);
+
+            return response()->json(['message' => $e->getPublicMessage()], 503);
         } catch (\Throwable $e) {
             Log::warning('editor.generate_image_failed', [
                 'user_id' => $user->id,
@@ -219,7 +227,7 @@ class EditorGenerateImageController extends Controller
                 'error' => $e->getMessage(),
             ]);
 
-            return response()->json(['message' => 'Monthly limit reached'], 429);
+            return response()->json($e->toApiArray(), 429);
         }
 
         $refIds = [];

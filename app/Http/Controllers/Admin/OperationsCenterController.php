@@ -67,6 +67,7 @@ class OperationsCenterController extends Controller
                 'detected_at' => $i->detected_at?->toIso8601String(),
                 'repair_attempts' => $i->metadata['repair_attempts'] ?? $i->metadata['recovery_attempt_count'] ?? 0,
                 'last_repair_attempt_at' => $i->metadata['last_repair_attempt_at'] ?? $i->metadata['last_recovery_attempt_at'] ?? null,
+                'auto_repair_exhausted' => (bool) ($i->metadata['auto_repair_exhausted'] ?? false),
             ]);
 
         $failedJobs = DB::table('failed_jobs')

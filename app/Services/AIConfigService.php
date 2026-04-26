@@ -415,6 +415,8 @@ class AIConfigService
                 'budget_type' => 'system',
                 'scope_key' => null,
                 'name' => 'System-wide Monthly Budget',
+                'period' => 'monthly',
+                'period_description' => 'Calendar month (usage resets on the 1st; app timezone).',
                 'config' => $systemConfig,
                 'override' => $override ? [
                     'id' => $override->id,
@@ -442,6 +444,8 @@ class AIConfigService
                 'budget_type' => 'agent',
                 'scope_key' => $agentId,
                 'name' => "Agent: {$agentId}",
+                'period' => 'monthly',
+                'period_description' => 'Calendar month (usage resets on the 1st; app timezone).',
                 'config' => $agentConfig['monthly'] ?? null,
                 'override' => $override ? [
                     'id' => $override->id,
@@ -469,6 +473,8 @@ class AIConfigService
                 'budget_type' => 'task_type',
                 'scope_key' => $taskType,
                 'name' => "Task Type: {$taskType}",
+                'period' => 'monthly',
+                'period_description' => 'Calendar month (usage resets on the 1st; app timezone).',
                 'config' => $taskConfig['monthly'] ?? null,
                 'override' => $override ? [
                     'id' => $override->id,

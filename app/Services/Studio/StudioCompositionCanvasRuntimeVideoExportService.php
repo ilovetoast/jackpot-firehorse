@@ -63,6 +63,9 @@ final class StudioCompositionCanvasRuntimeVideoExportService
         $workDir = storage_path('app/studio-canvas-runtime/'.$row->id.'/run-'.Str::lower(Str::random(12)));
         File::ensureDirectoryExists($workDir);
 
+        $readinessMs = (int) config('studio_video.canvas_export_readiness_timeout_ms', 120_000);
+        $navigationMs = (int) config('studio_video.canvas_export_navigation_timeout_ms', 120_000);
+
         $scriptPath = $this->resolvePlaywrightScriptPath();
         $nodeBinary = (string) config('studio_video.canvas_export_node_binary', 'node');
         $command = [
@@ -84,8 +87,6 @@ final class StudioCompositionCanvasRuntimeVideoExportService
         $timeoutSeconds = max(60, (int) config('studio_video.canvas_export_capture_timeout_seconds', 7200));
         $cwd = base_path();
 
-        $readinessMs = (int) config('studio_video.canvas_export_readiness_timeout_ms', 120_000);
-        $navigationMs = (int) config('studio_video.canvas_export_navigation_timeout_ms', 120_000);
         $signedRoot = trim((string) config('studio_video.canvas_export_signed_url_root', ''));
         $preRunDiagnostics = [
             'export_mode' => StudioCompositionVideoExportRenderMode::CANVAS_RUNTIME->value,

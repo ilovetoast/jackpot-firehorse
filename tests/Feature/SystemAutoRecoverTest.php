@@ -187,4 +187,37 @@ class SystemAutoRecoverTest extends TestCase
         $this->assertNotNull($ticket, 'Ticket should still be created when severity column is missing.');
         $this->assertSame('P0', $ticket->metadata['severity'] ?? null);
     }
+
+    public function test_auto_recover_stops_increments_after_max_repair_attempts(): void
+    {
+        config(['reliability.max_auto_repair_attempts' => 5]);
+
+        $asset = $this->createAsset([
+            'analysis_status' => 'uploading',
+            'metadata' => ['processing_started' => true],
+        ]);
+
+        $incident = SystemIncident::create([
+            'id' => (string) Str::uuid(),
+            'source_type' => 'asset',
+            'source_id' => $asset->id,
+            'tenant_id' => $this->tenant->id,
+            'severity' => 'error',
+            'title' => 'Asset stuck in uploading state',
+            'message' => 'Test',
+            'retryable' => true,
+            'resolved_at' => null,
+            'detected_at' => now(),
+            'metadata' => [
+                'repair_attempts' => 5,
+                'recovery_attempt_count' => 5,
+            ],
+        ]);
+
+        $this->artisan('system:auto-recover')->assertSuccessful();
+
+        $incident->refresh();
+        $this->assertSame(5, (int) ($incident->metadata['repair_attempts'] ?? 0), 'Cap reached: counter must not grow');
+        $this->assertTrue((bool) ($incident->metadata['auto_repair_exhausted'] ?? false));
+    }
 }

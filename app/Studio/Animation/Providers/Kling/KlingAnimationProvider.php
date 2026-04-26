@@ -97,7 +97,7 @@ final class KlingAnimationProvider implements AnimationProviderInterface
                     'prompt' => $prompt,
                     'duration' => $this->nativeDurationString($request->durationSeconds),
                     'mode' => 'std',
-                    'aspect_ratio' => $this->mapNativeAspectRatio($request->aspectRatio),
+                    'aspect_ratio' => KlingNativeAspectMapper::toKlingRequestValue($request->aspectRatio),
                     'sound' => $request->generateAudio ? 'on' : 'off',
                 ];
                 if ($request->negativePrompt !== null && trim($request->negativePrompt) !== '') {
@@ -464,16 +464,6 @@ final class KlingAnimationProvider implements AnimationProviderInterface
         $s = max(3, min(15, $durationSeconds));
 
         return $s <= 7 ? '5' : '10';
-    }
-
-    private function mapNativeAspectRatio(string $aspectRatio): string
-    {
-        $a = str_replace('x', ':', $aspectRatio);
-        if (in_array($a, ['16:9', '9:16', '1:1'], true)) {
-            return $a;
-        }
-
-        return '1:1';
     }
 
     private function resolveNativeModelName(string $providerModelKey): string

@@ -747,6 +747,15 @@ PROMPT
     | Budgets can be system-wide, per-agent, or per-task type.
     | Database overrides can modify these values without code changes.
     |
+    | **Period: calendar month (only mode implemented).** Usage is the sum of
+    | `estimated_cost` on `ai_agent_runs` with `started_at` between
+    | `now()->startOfMonth()` and `endOfMonth()` in the app timezone. The cap
+    | (`amount`) is USD for that same window — not rolling 7/30 days.
+    |
+    | **Source of truth for the system-wide cap is the `ai_budgets` row** (Admin → AI → Budgets),
+    | not `.env`. The `amount` below is only a config default for merges and for the migration
+    | that first-creates the system row when missing.
+    |
     | Budget types:
     | - system: Global monthly cap (all tenants, all runs) — not a “non-tenant only” pool
     | - agents: Per-agent budgets (optional)
@@ -755,16 +764,17 @@ PROMPT
     | Per-tenant monthly caps are not implemented here yet; use plan limits / AiUsageService for tenant quotas.
     |
     | Budget characteristics:
-    | - Monthly period (resets on 1st of each month)
-    | - Soft limits by default (warn, don't block)
-    | - Hard limits optional (must be explicitly enabled)
+    | - Resets on the first day of each calendar month
+    | - Monthly cap blocks new runs once projected spend would exceed the cap
+    | - Hard limit in DB still affects log wording; cap is always enforced
     | - Warning thresholds (default 80%)
     |
     */
     'budgets' => [
         'system' => [
             'monthly' => [
-                'amount' => env('AI_BUDGET_SYSTEM_MONTHLY', 1000.00), // $1000/month default
+                /** Default USD ceiling in config only; live value = {@see AIBudget} system row + overrides. */
+                'amount' => 1000.00,
                 'warning_threshold_percent' => 80,
                 'hard_limit_enabled' => false,
             ],
@@ -791,5 +801,20 @@ PROMPT
             //     ],
             // ],
         ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Upstream provider quota (OpenAI / Anthropic / Gemini org account)
+    |--------------------------------------------------------------------------
+    |
+    | Distinct from tenant plan limits. When a provider returns insufficient_quota, billing errors,
+    | or hard 429/429-style limits, the app throws AIQuotaExceededException, emails
+    | config('mail.admin_recipients') (throttled by notify_cooldown_seconds), and excludes the
+    | exception from Sentry (see config/sentry.php).
+    |
+    */
+    'quota_exceeded' => [
+        'notify_cooldown_seconds' => 3600,
     ],
 ];

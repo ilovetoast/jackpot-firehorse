@@ -857,7 +857,7 @@ class EditorGenerateLayoutController extends Controller
         try {
             $this->aiUsageService->checkUsage($tenant, 'generative_editor_layout');
         } catch (\App\Exceptions\PlanLimitExceededException $e) {
-            return response()->json(['message' => 'Monthly AI credit limit reached.'], 429);
+            return response()->json($e->toApiArray(), 429);
         }
 
         $brandContext = $validated['brand_context'] ?? [];
@@ -929,8 +929,8 @@ class EditorGenerateLayoutController extends Controller
             ]);
 
             return response()->json([
-                'message' => 'AI budget limit reached. Try again later.',
-            ], 429);
+                'message' => $e->getPublicMessage(),
+            ], 503);
         } catch (\Throwable $e) {
             Log::warning('editor.generate_layout_failed', [
                 'user_id' => $user->id,

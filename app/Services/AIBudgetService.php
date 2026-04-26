@@ -6,6 +6,7 @@ use App\Exceptions\AIBudgetExceededException;
 use App\Models\AIBudget;
 use App\Models\AIBudgetUsage;
 use App\Services\ActivityRecorder;
+use App\Services\AI\AIBudgetSystemAdminNotifier;
 use App\Enums\EventType;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Log;
@@ -20,7 +21,8 @@ class AIBudgetService
 {
     public function __construct(
         protected AIConfigService $configService,
-        protected ActivityRecorder $activityRecorder
+        protected ActivityRecorder $activityRecorder,
+        protected AIBudgetSystemAdminNotifier $systemBudgetAdminNotifier,
     ) {
     }
 
@@ -82,43 +84,53 @@ class AIBudgetService
         $currentUsage = $budget->getCurrentUsage($environment);
         $projectedUsage = $currentUsage + $estimatedCost;
 
-        // Check hard limit
-        if ($budget->isHardLimitEnabled($environment)) {
-            if ($projectedUsage > $effectiveAmount) {
-                $reason = sprintf(
-                    'Hard budget limit exceeded: %s budget is $%.2f, current usage is $%.2f, projected usage would be $%.2f',
-                    $this->getBudgetDescription($budget),
+        $hard = $budget->isHardLimitEnabled($environment);
+        $wouldExceedCap = $projectedUsage > $effectiveAmount;
+
+        if ($wouldExceedCap) {
+            $reason = sprintf(
+                '%s budget limit exceeded: cap is $%.2f, current usage is $%.2f, projected usage would be $%.2f',
+                $hard ? 'Hard' : 'Monthly',
+                $effectiveAmount,
+                $currentUsage,
+                $projectedUsage
+            );
+
+            Log::warning('AI execution blocked by budget limit', [
+                'budget_id' => $budget->id,
+                'budget_type' => $budget->budget_type,
+                'scope_key' => $budget->scope_key,
+                'hard_limit_in_db' => $hard,
+                'effective_amount' => $effectiveAmount,
+                'current_usage' => $currentUsage,
+                'estimated_cost' => $estimatedCost,
+                'projected_usage' => $projectedUsage,
+                'environment' => $environment,
+            ]);
+
+            $this->activityRecorder->record(EventType::AI_BUDGET_BLOCKED, [
+                'budget_id' => $budget->id,
+                'budget_type' => $budget->budget_type,
+                'scope_key' => $budget->scope_key,
+                'effective_amount' => $effectiveAmount,
+                'current_usage' => $currentUsage,
+                'estimated_cost' => $estimatedCost,
+                'projected_usage' => $projectedUsage,
+                'environment' => $environment,
+            ]);
+
+            if ($budget->budget_type === 'system') {
+                $this->systemBudgetAdminNotifier->notifyCapBlocked(
+                    $budget,
+                    $environment,
                     $effectiveAmount,
                     $currentUsage,
-                    $projectedUsage
+                    $projectedUsage,
+                    $estimatedCost
                 );
-
-                // Log the block
-                Log::warning('AI execution blocked by hard budget limit', [
-                    'budget_id' => $budget->id,
-                    'budget_type' => $budget->budget_type,
-                    'scope_key' => $budget->scope_key,
-                    'effective_amount' => $effectiveAmount,
-                    'current_usage' => $currentUsage,
-                    'estimated_cost' => $estimatedCost,
-                    'projected_usage' => $projectedUsage,
-                    'environment' => $environment,
-                ]);
-
-                // Record activity event
-                $this->activityRecorder->record(EventType::AI_BUDGET_BLOCKED, [
-                    'budget_id' => $budget->id,
-                    'budget_type' => $budget->budget_type,
-                    'scope_key' => $budget->scope_key,
-                    'effective_amount' => $effectiveAmount,
-                    'current_usage' => $currentUsage,
-                    'estimated_cost' => $estimatedCost,
-                    'projected_usage' => $projectedUsage,
-                    'environment' => $environment,
-                ]);
-
-                throw new AIBudgetExceededException($reason, $budget, $effectiveAmount, $currentUsage, $estimatedCost);
             }
+
+            throw new AIBudgetExceededException($reason, $budget, $effectiveAmount, $currentUsage, $estimatedCost);
         }
 
         // Check warning threshold
@@ -146,28 +158,17 @@ class AIBudgetService
                     'warning_threshold_percent' => $warningThreshold,
                     'environment' => $environment,
                 ]);
+
+                if ($budget->budget_type === 'system') {
+                    $this->systemBudgetAdminNotifier->notifyApproaching(
+                        $budget,
+                        $environment,
+                        $currentUsage,
+                        $effectiveAmount,
+                        $warningThreshold
+                    );
+                }
             }
-        }
-
-        // Check if over soft limit (but not hard limit)
-        if ($budget->isOverBudget($environment) && !$budget->isHardLimitEnabled($environment)) {
-            Log::warning('AI budget soft limit exceeded', [
-                'budget_id' => $budget->id,
-                'budget_type' => $budget->budget_type,
-                'scope_key' => $budget->scope_key,
-                'effective_amount' => $effectiveAmount,
-                'current_usage' => $currentUsage,
-                'environment' => $environment,
-            ]);
-
-            $this->activityRecorder->record(EventType::AI_BUDGET_EXCEEDED, [
-                'budget_id' => $budget->id,
-                'budget_type' => $budget->budget_type,
-                'scope_key' => $budget->scope_key,
-                'effective_amount' => $effectiveAmount,
-                'current_usage' => $currentUsage,
-                'environment' => $environment,
-            ]);
         }
     }
 

@@ -4,8 +4,10 @@ namespace App\Services\Automation;
 
 use App\Enums\AITaskType;
 use App\Enums\TicketStatus;
+use App\Exceptions\AIQuotaExceededException;
 use App\Models\Ticket;
 use App\Models\TicketMessage;
+use App\Services\AI\AIQuotaExceededNotifier;
 use App\Services\AIService;
 use App\Services\TicketSLAService;
 use Carbon\Carbon;
@@ -58,6 +60,14 @@ class SLARiskDetectionService
             try {
                 $this->analyzeTicketRisk($ticket);
                 $scanned++;
+            } catch (AIQuotaExceededException $e) {
+                app(AIQuotaExceededNotifier::class)->notify($e);
+                Log::warning('SLA risk scan stopped — AI provider quota or billing (upstream)', [
+                    'ticket_id' => $ticket->id,
+                    'provider' => $e->provider,
+                    'error' => $e->getMessage(),
+                ]);
+                break;
             } catch (\Exception $e) {
                 Log::error('Failed to analyze SLA risk for ticket', [
                     'ticket_id' => $ticket->id,

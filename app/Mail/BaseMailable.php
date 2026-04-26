@@ -17,6 +17,7 @@ abstract class BaseMailable extends IlluminateMailable
     /**
      * {@see EmailGate::TYPE_USER} = direct user action; always allowed.
      * {@see EmailGate::TYPE_SYSTEM} = jobs/schedules/automation; gated by config.
+     * {@see EmailGate::TYPE_OPERATIONS} = site-operator alerts (e.g. AI quota); always allowed.
      */
     protected string $emailType = 'user';
 

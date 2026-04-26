@@ -353,8 +353,8 @@ PROMPT;
             ]);
 
             return response()->json([
-                'message' => 'AI budget limit reached. Try again later or contact your administrator.',
-            ], 429);
+                'message' => $e->getPublicMessage(),
+            ], 503);
         } catch (\Throwable $e) {
             Log::warning('editor.generate_copy_failed', [
                 'user_id' => $user->id,

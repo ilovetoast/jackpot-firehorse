@@ -5,26 +5,27 @@ namespace App\Exceptions;
 use Exception;
 
 /**
- * AI Quota Exceeded Exception
- *
- * Thrown when OpenAI API quota is exceeded.
- * This is different from plan limits - it's an API provider quota issue.
+ * Thrown when a provider (OpenAI, Anthropic, Gemini) reports org quota, billing, or hard rate limits
+ * that are distinct from in-app / tenant plan limits. Handled as a warning + operator email, not a Sentry error.
  */
 class AIQuotaExceededException extends Exception
 {
-    /**
-     * Create a new exception instance.
-     */
     public function __construct(
-        ?string $message = null,
-        ?string $provider = null
+        string $message = '',
+        public readonly ?string $provider = null
     ) {
-        $message = $message ?? "AI provider quota exceeded. Please check your API billing and quota limits.";
-        
-        if ($provider) {
-            $message = "{$provider} quota exceeded. Please check your API billing and quota limits.";
+        if ($message === '') {
+            $message = $this->defaultMessageForProvider();
+        }
+        parent::__construct($message);
+    }
+
+    private function defaultMessageForProvider(): string
+    {
+        if ($this->provider !== null && $this->provider !== '') {
+            return "{$this->provider} quota exceeded. Please check your API billing and quota limits.";
         }
 
-        parent::__construct($message);
+        return 'AI provider quota exceeded. Please check your API billing and quota limits.';
     }
 }

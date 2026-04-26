@@ -3,6 +3,7 @@
 namespace App\Services\Editor;
 
 use App\Enums\AITaskType;
+use App\Exceptions\AIBudgetExceededException;
 use App\Exceptions\PlanLimitExceededException;
 use App\Models\Asset;
 use App\Models\Composition;
@@ -167,7 +168,7 @@ final class EditorGenerativeImageEditService
         try {
             $this->aiUsageService->checkUsage($tenant, 'generative_editor_edits');
         } catch (PlanLimitExceededException $e) {
-            return new EditorGenerativeImageEditOutcome(429, ['message' => 'Monthly limit reached']);
+            return new EditorGenerativeImageEditOutcome(429, $e->toApiArray());
         }
 
         $fullPrompt = $this->buildEditPrompt($instruction, $validated['brand_context'] ?? null);
@@ -211,6 +212,15 @@ final class EditorGenerativeImageEditService
                 $fullPrompt,
                 $options
             );
+        } catch (AIBudgetExceededException $e) {
+            Log::warning('editor.edit_image_budget', [
+                'user_id' => $user->id,
+                'tenant_id' => $tenant->id,
+            ]);
+
+            return new EditorGenerativeImageEditOutcome(503, [
+                'message' => $e->getPublicMessage(),
+            ]);
         } catch (\Throwable $e) {
             Log::warning('editor.edit_image_failed', [
                 'user_id' => $user->id,
@@ -233,7 +243,7 @@ final class EditorGenerativeImageEditService
                 $result['resolved_model_key'] ?? 'gpt-image-1'
             );
         } catch (PlanLimitExceededException $e) {
-            return new EditorGenerativeImageEditOutcome(429, ['message' => 'Monthly limit reached']);
+            return new EditorGenerativeImageEditOutcome(429, $e->toApiArray());
         }
 
         $persistContext = array_filter([

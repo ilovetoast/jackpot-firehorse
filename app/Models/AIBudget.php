@@ -141,6 +141,7 @@ class AIBudget extends Model
     public function getCurrentUsage(?string $environment = null): float
     {
         $environment = $environment ?? app()->environment();
+        // Calendar month only (period column is `monthly`); not rolling 30 days.
         $periodStart = Carbon::now()->startOfMonth();
         $periodEnd = Carbon::now()->endOfMonth();
 

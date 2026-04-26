@@ -30,6 +30,21 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Site operator / admin inboxes
+    |--------------------------------------------------------------------------
+    |
+    | Comma-separated. Used for upstream AI quota alerts and other mailables
+    | with EmailGate TYPE_OPERATIONS (always send, independent of
+    | MAIL_AUTOMATIONS_ENABLED).
+    |
+    */
+    'admin_recipients' => array_values(array_filter(array_map(
+        'trim',
+        explode(',', (string) env('ADMIN_EMAIL', ''))
+    ))),
+
+    /*
+    |--------------------------------------------------------------------------
     | Mailer Configurations
     |--------------------------------------------------------------------------
     |
