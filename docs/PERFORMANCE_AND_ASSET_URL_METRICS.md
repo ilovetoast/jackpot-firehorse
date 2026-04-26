@@ -14,7 +14,8 @@
 
 - **Source:** `client_performance_metrics` table, filled when the frontend POSTs to `/app/performance/client-metric` (legacy `/app/admin/performance/client-metric` still works).
 - **When it runs:** `initPerformanceTracking()` in `app.jsx` runs on app load; it sends **once per session** (after the first full page load, with a 2s delay), and only if `window.__performanceMetricsEnabled` is true (from `PERFORMANCE_CLIENT_METRICS_ENABLED`).
-- **So:** If the table is empty, either no page under the main app has finished loading since enabling, or the POST is failing (check Network tab for `client-metric`). The route uses `web` middleware only (no auth); if `PERFORMANCE_CLIENT_METRICS_ENABLED` is false the API returns 403 JSON.
+- **Cookie consent (main reason for zeros):** The tracker **returns immediately** unless `allowsAnalyticsCookies()` is true (`resources/js/utils/performanceTracking.js`). That requires the user to have accepted **analytics** for the **current** cookie policy version in the banner. If analytics is off or consent is outdated, **no POST is sent** — the Client section stays empty even when config flags are green.
+- **So:** If the table is empty, check consent first, then whether a full page load completed, then Network for `client-metric` (403 = `PERFORMANCE_CLIENT_METRICS_ENABLED` false). The route uses `web` middleware only (no auth).
 
 ### Asset URL Service Metrics (ASSET_URL_METRICS)
 
@@ -22,6 +23,37 @@
 - **Where it’s collected:** `CollectAssetUrlMetrics` middleware runs only on routes under the **`app`** prefix (authenticated app).
 - **Important:** These metrics are **per request** and **not persisted**. The Performance page shows the metrics for **the request that loaded the Performance page itself**. That request usually does almost no AssetUrlService work, so you typically see zeros.
 - **To see non-zero values:** Enable `ASSET_URL_METRICS=true`, then open a page that does a lot of URL generation (e.g. Admin Assets grid) in another tab; the numbers you see on the Performance page are still only for the **Performance page request**, not for the grid. There is no aggregation across requests unless you add it (e.g. persist to a table).
+
+---
+
+## Practical recommendations
+
+### If you want to keep the Performance dashboard
+
+1. **Confirm data exists (e.g. staging DB):**
+   ```sql
+   SELECT COUNT(*) FROM performance_logs;
+   SELECT COUNT(*) FROM client_performance_metrics;
+   ```
+   Run migrations if either table is missing (`database/migrations/*performance*`).
+
+2. **Server metrics still 0 after browsing with persist-all on?**
+   - Ensure `PERFORMANCE_MONITORING_ENABLED=true` and `PERFORMANCE_PERSIST_ALL_REQUESTS=true` (or slow + `PERFORMANCE_PERSIST_SLOW_LOGS` and requests above the threshold).
+   - The dashboard aggregates the **last 24 hours** — you need rows with `created_at` in that window.
+   - Check application logs for `[PerformanceLog] Failed to persist` (DB errors, permissions).
+
+3. **Client metrics still 0?**
+   - **Accept analytics** in the cookie banner (or update consent after a policy change).
+   - **Optional product change:** treat perf beacons as **functional** (not analytics) so they send without marketing/analytics consent — small, intentional privacy review; see `allowsAnalyticsCookies()` vs `allowsFunctionalCookies()` in `resources/js/utils/cookieConsent.js` and `performanceTracking.js`.
+
+### If you want to drop the dashboard
+
+- Remove or hide **Admin → Performance** in nav only after you rely on an external APM (Sentry Performance, Datadog, etc.).
+- Then remove or disable **`ResponseTimingMiddleware`** persistence (or the middleware entirely) so you do not leave code writing to `performance_logs` without a UI. Keep or prune routes/migrations according to whether you still want historical rows.
+
+### Mental model
+
+The page is **not necessarily broken**: client metrics are easy to show as **all zeros** because of the **analytics consent gate**. Server metrics need a **working DB**, successful writes, and activity in the **rolling 24h** window.
 
 ---
 
@@ -40,7 +72,7 @@
 
 | What you want | Where it is | Why it might be empty |
 |---------------|-------------|------------------------|
-| Server avg / 95th | Performance page → Server Response | Need `PERFORMANCE_PERSIST_ALL_REQUESTS=true` (or slow requests + `PERFORMANCE_PERSIST_SLOW_LOGS=true`) |
-| Client TTFB / load | Performance page → Client | Client must POST once per session; check `PERFORMANCE_CLIENT_METRICS_ENABLED` and Network for `client-metric` |
+| Server avg / 95th | Performance page → Server Response | Need `PERFORMANCE_PERSIST_ALL_REQUESTS=true` (or slow requests + `PERFORMANCE_PERSIST_SLOW_LOGS=true`); rows in last **24h** |
+| Client TTFB / load | Performance page → Client | **`PERFORMANCE_CLIENT_METRICS_ENABLED`**, then **analytics cookie consent**; POST once per session to `client-metric` |
 | Asset URL call counts | Performance page → Asset URL Service Metrics | Request-scoped; only for the request that loaded the page. Enable `ASSET_URL_METRICS=true`. Public download routes are not included. |
 | Download counts (zip/single) | Download analytics (asset_metrics) | Separate from Performance page; recorded when file is delivered. |

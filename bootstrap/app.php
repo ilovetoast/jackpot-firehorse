@@ -18,7 +18,6 @@ use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 use Sentry\Laravel\Integration;
 use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
-use Throwable;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -77,7 +76,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $exceptions->report(function (AIQuotaExceededException $e) {
             try {
                 app(AIQuotaExceededNotifier::class)->notify($e);
-            } catch (Throwable $t) {
+            } catch (\Throwable $t) {
                 \Illuminate\Support\Facades\Log::error('AI quota report handler failed', [
                     'message' => $t->getMessage(),
                 ]);
