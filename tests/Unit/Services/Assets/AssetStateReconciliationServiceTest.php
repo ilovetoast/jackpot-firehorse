@@ -152,6 +152,83 @@ class AssetStateReconciliationServiceTest extends TestCase
         });
     }
 
+    public function test_rule_7_resets_version_when_eager_thumbnails_ran_before_main_pipeline(): void
+    {
+        Bus::fake();
+
+        $tenant = Tenant::create(['name' => 'Test', 'slug' => 'test']);
+        $brand = Brand::create([
+            'tenant_id' => $tenant->id,
+            'name' => 'Test Brand',
+            'slug' => 'test-brand',
+        ]);
+        $bucket = StorageBucket::create([
+            'tenant_id' => $tenant->id,
+            'name' => 'test-bucket',
+            'status' => StorageBucketStatus::ACTIVE,
+            'region' => 'us-east-1',
+        ]);
+        $session = UploadSession::create([
+            'tenant_id' => $tenant->id,
+            'brand_id' => $brand->id,
+            'storage_bucket_id' => $bucket->id,
+            'status' => UploadStatus::COMPLETED,
+            'type' => UploadType::DIRECT,
+            'expected_size' => 1024,
+            'uploaded_size' => 1024,
+        ]);
+
+        $asset = Asset::create([
+            'tenant_id' => $tenant->id,
+            'brand_id' => $brand->id,
+            'upload_session_id' => $session->id,
+            'storage_bucket_id' => $bucket->id,
+            'storage_root_path' => 'assets/test/file.mp4',
+            'original_filename' => 'studio-animation-1.mp4',
+            'mime_type' => 'video/mp4',
+            'size_bytes' => 1024,
+            'status' => AssetStatus::VISIBLE,
+            'type' => AssetType::AI_GENERATED,
+            'analysis_status' => 'uploading',
+            'thumbnail_status' => ThumbnailStatus::COMPLETED,
+            'source' => 'studio_animation',
+            'metadata' => [
+                'thumbnails_generated' => true,
+            ],
+        ]);
+
+        $version = AssetVersion::query()->create([
+            'id' => (string) Str::uuid(),
+            'asset_id' => $asset->id,
+            'version_number' => 1,
+            'file_path' => 'assets/test/file.mp4',
+            'file_size' => 1024,
+            'mime_type' => 'video/mp4',
+            'width' => 1280,
+            'height' => 720,
+            'checksum' => 'abc',
+            'is_current' => true,
+            'pipeline_status' => 'complete',
+            'uploaded_by' => null,
+            'metadata' => [
+                'thumbnails_generated' => true,
+            ],
+        ]);
+
+        $service = app(AssetStateReconciliationService::class);
+        $result = $service->reconcile($asset->fresh());
+
+        $this->assertTrue($result['updated']);
+        $this->assertContains('Rule 7: version.pipeline_status → pending; ProcessAssetJob dispatched', $result['changes']);
+
+        $version->refresh();
+        $this->assertSame('pending', $version->pipeline_status);
+
+        Bus::assertDispatched(ProcessAssetJob::class, function (ProcessAssetJob $job) use ($asset): bool {
+            return $job->assetId === $asset->id;
+        });
+    }
+
     public function test_rule_8_sets_published_at_for_completed_studio_export_with_category(): void
     {
         $tenant = Tenant::create(['name' => 'Test', 'slug' => 'test']);

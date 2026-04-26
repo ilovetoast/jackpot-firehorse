@@ -3,7 +3,12 @@
  * Captures TTFB, DOMContentLoaded, Load event, total load time.
  * Throttled to 1 per session. Sends to /app/performance/client-metric (not under /admin — avoids 405/WAF issues for contributors).
  */
-import { allowsAnalyticsCookies } from './cookieConsent'
+import { allowsAnalyticsCookies, allowsFunctionalCookies } from './cookieConsent'
+
+/** First-party page timing to our own API — allowed when user accepted functional and/or analytics consent. */
+function allowsClientPerformanceMetrics() {
+    return allowsAnalyticsCookies() || allowsFunctionalCookies()
+}
 
 const SESSION_KEY = 'jackpot_performance_metric_sent'
 const imageLoadTimes = []
@@ -13,7 +18,7 @@ let performanceTrackingScheduled = false
 export function initPerformanceTracking() {
     if (typeof window === 'undefined') return
     if (!window.__performanceMetricsEnabled) return
-    if (!allowsAnalyticsCookies()) return
+    if (!allowsClientPerformanceMetrics()) return
     if (sessionStorage.getItem(SESSION_KEY)) return
     if (performanceTrackingScheduled) return
     performanceTrackingScheduled = true
@@ -99,12 +104,12 @@ export function initPerformanceTracking() {
 }
 
 /**
- * After the user grants analytics consent mid-session, allow one metric send.
+ * After the user updates cookie consent mid-session, allow one metric send.
  */
 export function retryPerformanceTrackingAfterConsent() {
     if (typeof window === 'undefined') return
     if (!window.__performanceMetricsEnabled) return
-    if (!allowsAnalyticsCookies()) return
+    if (!allowsClientPerformanceMetrics()) return
     sessionStorage.removeItem(SESSION_KEY)
     performanceTrackingScheduled = false
     initPerformanceTracking()

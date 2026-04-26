@@ -220,13 +220,20 @@ class ProcessAssetJob implements ShouldQueue
         }
         $thumbnailJobId = $version ? $version->id : $asset->id;
 
-        // Phase 7: Idempotent - skip if version already complete
+        // Phase 7: Idempotent - skip if the main pipeline has already been dispatched and finished this version.
+        // Eager {@see GenerateThumbnailsJob} (e.g. studio animation) can set pipeline_status=complete before
+        // {@see ProcessAssetJob} runs; in that case version.metadata.processing_started is still false. We must
+        // not return early, or analysis_status stays "uploading" and the rest of the chain never runs.
         if ($version && $version->pipeline_status === 'complete') {
-            Log::info('[ProcessAssetJob] Skipping - version already complete', [
-                'version_id' => $version->id,
-                'asset_id' => $asset->id,
-            ]);
-            return;
+            $versionMetaEarly = is_array($version->metadata) ? $version->metadata : [];
+            if (($versionMetaEarly['processing_started'] ?? false) === true) {
+                Log::info('[ProcessAssetJob] Skipping - version already complete and main pipeline was started', [
+                    'version_id' => $version->id,
+                    'asset_id' => $asset->id,
+                ]);
+
+                return;
+            }
         }
 
         PipelineLogger::info('PROCESS ASSET: HANDLE START', [

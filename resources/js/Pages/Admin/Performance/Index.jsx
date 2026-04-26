@@ -9,6 +9,7 @@ export default function AdminPerformanceIndex({ auth, metrics, asset_url_metrics
     const client = metrics?.client ?? {}
     const period = metrics?.period_hours ?? 24
     const config = metrics?.config ?? {}
+    const diag = metrics?.diagnostics ?? {}
     const assetUrlMetrics = asset_url_metrics ?? null
     const assetUrlAvgMs = assetUrlMetrics?.calls
         ? Math.round((assetUrlMetrics.total_time_ms / assetUrlMetrics.calls) * 100) / 100
@@ -72,13 +73,33 @@ export default function AdminPerformanceIndex({ auth, metrics, asset_url_metrics
                             </div>
                         )}
                         {(!server.avg_duration_ms && !server.slowest_routes?.length) && (
-                            <p className="mt-4 text-sm text-slate-500">
-                                {config.persist_all_requests
-                                    ? 'No requests recorded yet. Persist all is enabled; data will appear after page loads.'
-                                    : config.persist_slow_logs
-                                    ? `No slow requests in the last 24h. Only requests exceeding ${config.slow_threshold_ms ?? 1000}ms are logged. Set PERFORMANCE_PERSIST_ALL_REQUESTS=true for avg metrics.`
-                                    : 'Enable PERFORMANCE_PERSIST_SLOW_LOGS to record slow requests, or PERFORMANCE_PERSIST_ALL_REQUESTS=true for all requests.'}
-                            </p>
+                            <div className="mt-4 space-y-2 text-sm text-slate-500">
+                                {diag.performance_logs_table === false ? (
+                                    <p>
+                                        <strong className="text-amber-700">No performance_logs table on this database.</strong> Run
+                                        migrations on the environment the app is using, then reload.
+                                    </p>
+                                ) : config.persist_all_requests && diag.performance_logs_rows_24h === 0 ? (
+                                    <p>
+                                        Config is on, but <strong>0 rows</strong> in <code className="text-xs">performance_logs</code> in
+                                        the last {period}h. Toggling env again won’t help: check <strong>same DB as the app</strong>, look
+                                        for <code className="text-xs">[PerformanceLog] Failed to persist</code> in logs, and restart
+                                        PHP/queue so workers aren’t using a stale <code className="text-xs">config:cache</code>.
+                                    </p>
+                                ) : config.persist_all_requests ? (
+                                    <p>No requests recorded yet. Persist all is enabled; data will appear after traffic hits this app.</p>
+                                ) : config.persist_slow_logs ? (
+                                    <p>
+                                        No slow requests in the last {period}h. Only requests exceeding {config.slow_threshold_ms ?? 1000}ms
+                                        are logged. Set PERFORMANCE_PERSIST_ALL_REQUESTS=true for avg metrics.
+                                    </p>
+                                ) : (
+                                    <p>
+                                        Enable PERFORMANCE_PERSIST_SLOW_LOGS to record slow requests, or
+                                        PERFORMANCE_PERSIST_ALL_REQUESTS=true for all requests.
+                                    </p>
+                                )}
+                            </div>
                         )}
                     </div>
 
@@ -124,11 +145,24 @@ export default function AdminPerformanceIndex({ auth, metrics, asset_url_metrics
                             </div>
                         )}
                         {(!client.avg_ttfb_ms && !client.slowest_pages?.length) && (
-                            <p className="mt-4 text-sm text-slate-500">
-                                {config.client_metrics_enabled
-                                    ? 'No client metrics received yet. Metrics are sent once per session when pages load.'
-                                    : 'Enable PERFORMANCE_CLIENT_METRICS_ENABLED to collect client metrics.'}
-                            </p>
+                            <div className="mt-4 space-y-2 text-sm text-slate-500">
+                                {diag.client_metrics_table === false ? (
+                                    <p>
+                                        <strong className="text-amber-700">No client_performance_metrics table.</strong> Run migrations.
+                                    </p>
+                                ) : config.client_metrics_enabled && diag.client_metrics_rows_24h === 0 ? (
+                                    <p>
+                                        <strong>0 client rows</strong> in the last {period}h. After deploy, open the app in a new session,
+                                        wait for a full page load, and check Network for <code className="text-xs">/app/performance/client-metric</code> (200).
+                                        Consent: functional or analytics must be accepted. Rebuild front-end if you changed
+                                        <code className="text-xs"> performanceTracking.js</code>.
+                                    </p>
+                                ) : config.client_metrics_enabled ? (
+                                    <p>No client metrics yet. They are sent once per session when pages load.</p>
+                                ) : (
+                                    <p>Enable PERFORMANCE_CLIENT_METRICS_ENABLED to collect client metrics.</p>
+                                )}
+                            </div>
                         )}
                     </div>
                 </div>
@@ -170,7 +204,29 @@ export default function AdminPerformanceIndex({ auth, metrics, asset_url_metrics
                         </div>
                     )}
 
-                    <h3 className="text-sm font-semibold text-slate-900">Configuration (runtime values)</h3>
+                    <h3 className="text-sm font-semibold text-slate-900">Database (this environment, last {period}h)</h3>
+                    <ul className="mt-2 space-y-1 text-sm text-slate-600">
+                        <li>
+                            <code className="text-xs">performance_logs</code> table —{' '}
+                            {diag.performance_logs_table ? (
+                                <span className="text-green-600 font-medium">exists</span>
+                            ) : (
+                                <span className="text-amber-600 font-medium">missing</span>
+                            )}{' '}
+                            · rows: {diag.performance_logs_rows_24h ?? '—'}
+                        </li>
+                        <li>
+                            <code className="text-xs">client_performance_metrics</code> table —{' '}
+                            {diag.client_metrics_table ? (
+                                <span className="text-green-600 font-medium">exists</span>
+                            ) : (
+                                <span className="text-amber-600 font-medium">missing</span>
+                            )}{' '}
+                            · rows: {diag.client_metrics_rows_24h ?? '—'}
+                        </li>
+                    </ul>
+
+                    <h3 className="mt-6 text-sm font-semibold text-slate-900">Configuration (runtime values)</h3>
                     <ul className="mt-2 space-y-1 text-sm text-slate-600">
                         <li>PERFORMANCE_MONITORING_ENABLED — <span className={config.enabled ? 'text-green-600 font-medium' : 'text-amber-600'}>{config.enabled ? 'enabled' : 'disabled'}</span></li>
                         <li>PERFORMANCE_PERSIST_SLOW_LOGS — <span className={config.persist_slow_logs ? 'text-green-600 font-medium' : 'text-amber-600'}>{config.persist_slow_logs ? 'enabled' : 'disabled'}</span></li>

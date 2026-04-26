@@ -236,18 +236,33 @@ export default function AdminTicketsIndex({
     }
 
     const clearFilters = () => {
-        router.get('/app/admin/support/tickets', {}, {
-            preserveState: true,
-            preserveScroll: true,
-        })
+        const base = { preserveState: true, preserveScroll: true }
+        if (engineeringQueueView) {
+            router.get('/app/admin/support/tickets', { type: 'engineering' }, base)
+        } else {
+            router.get('/app/admin/support/tickets', { status: 'open', sort: 'newest' }, base)
+        }
     }
 
-    const hasActiveFilters =
-        !!(filters?.queue && filters.queue !== '') ||
-        Object.entries(filters || {}).some(([key, v]) => {
-            if (key === 'queue') return false
-            return v !== null && v !== undefined && v !== ''
-        })
+    const isSupportDefaultView =
+        !engineeringQueueView &&
+        (filters?.status === 'open' || filters?.status == null) &&
+        (filters?.sort === 'newest' || filters?.sort == null) &&
+        !filters?.queue &&
+        !filters?.category &&
+        !filters?.assigned_team &&
+        !filters?.assigned_to_user_id &&
+        !filters?.tenant_id &&
+        !filters?.brand_ids &&
+        !filters?.sla_state
+
+    const hasActiveFilters = engineeringQueueView
+        ? !!(filters?.queue && filters.queue !== '') ||
+          Object.entries(filters || {}).some(([key, v]) => {
+              if (key === 'queue') return false
+              return v !== null && v !== undefined && v !== ''
+          })
+        : !isSupportDefaultView
 
     return (
         <div className="min-h-full bg-gray-50">
@@ -362,18 +377,13 @@ export default function AdminTicketsIndex({
                                     value={
                                         filters?.status === 'all'
                                             ? 'all'
-                                            : filters?.status || ''
+                                            : filters?.status && filters.status !== ''
+                                              ? filters.status
+                                              : 'open'
                                     }
                                     onChange={(e) => {
                                         const v = e.target.value
-                                        applyFilters({
-                                            status:
-                                                v === ''
-                                                    ? null
-                                                    : v === 'all'
-                                                      ? 'all'
-                                                      : v,
-                                        })
+                                        applyFilters({ status: v === '' ? null : v })
                                     }}
                                     className="block w-full min-w-[140px] rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm py-1.5"
                                 >
@@ -385,13 +395,18 @@ export default function AdminTicketsIndex({
                                             <option value="all">All statuses</option>
                                         </>
                                     ) : (
-                                        <option value="">All Statuses</option>
+                                        <>
+                                            <option value="open">Open</option>
+                                            <option value="all">All statuses</option>
+                                        </>
                                     )}
-                                    {filterOptions?.statuses?.map((status) => (
-                                        <option key={status.value} value={status.value}>
-                                            {status.label}
-                                        </option>
-                                    ))}
+                                    {filterOptions?.statuses
+                                        ?.filter((status) => (engineeringQueueView ? true : status.value !== 'open'))
+                                        ?.map((status) => (
+                                            <option key={status.value} value={status.value}>
+                                                {status.label}
+                                            </option>
+                                        ))}
                                 </select>
                             </div>
 
@@ -541,12 +556,13 @@ export default function AdminTicketsIndex({
                             {/* Sort */}
                             <div className="flex-shrink-0">
                                 <select
-                                    value={filters?.sort || 'oldest'}
+                                    value={filters?.sort || 'newest'}
                                     onChange={(e) => applyFilters({ sort: e.target.value })}
                                     className="block w-full min-w-[140px] rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm py-1.5"
                                 >
-                                    <option value="oldest">Oldest First</option>
-                                    <option value="sla_urgency">SLA Urgency</option>
+                                    <option value="newest">Newest first</option>
+                                    <option value="oldest">Oldest first</option>
+                                    <option value="sla_urgency">SLA urgency</option>
                                 </select>
                             </div>
 

@@ -108,8 +108,11 @@ class PerformanceController extends Controller
     {
         $period = now()->subHours(24);
 
+        $hasPerformanceTable = class_exists(PerformanceLog::class) && Schema::hasTable('performance_logs');
+        $hasClientTable = class_exists(ClientPerformanceMetric::class) && Schema::hasTable('client_performance_metrics');
+
         $serverLogs = [];
-        if (class_exists(PerformanceLog::class) && Schema::hasTable('performance_logs')) {
+        if ($hasPerformanceTable) {
             $serverLogs = [
                 'avg_duration_ms' => (int) PerformanceLog::where('created_at', '>=', $period)
                     ->avg('duration_ms'),
@@ -131,7 +134,7 @@ class PerformanceController extends Controller
         }
 
         $clientMetrics = [];
-        if (class_exists(ClientPerformanceMetric::class) && Schema::hasTable('client_performance_metrics')) {
+        if ($hasClientTable) {
             $clientMetrics = [
                 'avg_ttfb_ms' => (int) ClientPerformanceMetric::where('created_at', '>=', $period)
                     ->avg('ttfb_ms'),
@@ -155,10 +158,23 @@ class PerformanceController extends Controller
             ];
         }
 
+        $perfCount24h = $hasPerformanceTable
+            ? (int) PerformanceLog::where('created_at', '>=', $period)->count()
+            : 0;
+        $clientCount24h = $hasClientTable
+            ? (int) ClientPerformanceMetric::where('created_at', '>=', $period)->count()
+            : 0;
+
         return [
             'server' => $serverLogs,
             'client' => $clientMetrics,
             'period_hours' => 24,
+            'diagnostics' => [
+                'performance_logs_table' => $hasPerformanceTable,
+                'client_metrics_table' => $hasClientTable,
+                'performance_logs_rows_24h' => $perfCount24h,
+                'client_metrics_rows_24h' => $clientCount24h,
+            ],
             'config' => [
                 'enabled' => config('performance.enabled', false),
                 'persist_slow_logs' => config('performance.persist_slow_logs', false),

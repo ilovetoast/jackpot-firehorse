@@ -95,7 +95,8 @@ class AdminTicketController extends Controller
      * - Status, Category, Assigned Team, Assigned User, Tenant, Brand(s), SLA State
      *
      * Sorting:
-     * - Oldest first (default)
+     * - Newest first (default)
+     * - Oldest first
      * - SLA urgency (deadline ascending)
      */
     public function index(Request $request): Response
@@ -118,11 +119,21 @@ class AdminTicketController extends Controller
 
         $engineeringFilter = $request->filled('engineering_only') || $request->get('type') === 'engineering';
 
-        // Apply filters (engineering queue defaults to non-terminal statuses unless status=all)
-        if ($request->filled('status') && $request->status !== 'all') {
-            $query->where('status', $request->status);
-        } elseif ($engineeringFilter && $request->get('status') !== 'all') {
-            $query->whereNotIn('status', [TicketStatus::RESOLVED, TicketStatus::CLOSED]);
+        // Status: support queue defaults to open only; engineering defaults to "active" (excludes closed/resolved) unless status=all
+        if ($engineeringFilter) {
+            if ($request->filled('status') && $request->status !== 'all') {
+                $query->where('status', $request->status);
+            } elseif ($request->get('status') !== 'all') {
+                $query->whereNotIn('status', [TicketStatus::RESOLVED, TicketStatus::CLOSED]);
+            }
+        } else {
+            if ($request->filled('status') && $request->status === 'all') {
+                // no status constraint
+            } elseif ($request->filled('status')) {
+                $query->where('status', $request->status);
+            } else {
+                $query->where('status', TicketStatus::OPEN);
+            }
         }
 
         if ($request->filled('category')) {
@@ -203,13 +214,15 @@ class AdminTicketController extends Controller
             }
         }
 
-        // Apply sorting
+        // Apply sorting (default: newest first)
         if ($request->filled('sort') && $request->sort === 'sla_urgency') {
             $query->leftJoin('ticket_sla_states', 'tickets.id', '=', 'ticket_sla_states.ticket_id')
                 ->orderByRaw('COALESCE(ticket_sla_states.resolution_deadline, ticket_sla_states.first_response_deadline) ASC NULLS LAST')
                 ->select('tickets.*');
+        } elseif ($request->get('sort') === 'oldest') {
+            $query->orderBy('created_at', 'asc');
         } else {
-            $query->orderBy('created_at', 'asc'); // Default: oldest first
+            $query->orderBy('created_at', 'desc');
         }
 
         $tickets = $query->paginate(10)->withQueryString();
@@ -255,16 +268,26 @@ class AdminTicketController extends Controller
             'assigned_team' => TicketTeam::ENGINEERING,
         ]);
 
+        $filtersOut = array_merge(
+            $request->only(['status', 'category', 'assigned_team', 'assigned_to_user_id', 'tenant_id', 'brand_ids', 'sla_state', 'sort', 'severity', 'environment', 'component', 'engineering_only', 'queue']),
+            $request->get('type') === 'engineering' ? ['engineering_only' => '1'] : []
+        );
+        if (! $engineeringFilter) {
+            if (! $request->filled('status')) {
+                $filtersOut['status'] = TicketStatus::OPEN->value;
+            }
+        }
+        if (! $request->filled('sort')) {
+            $filtersOut['sort'] = 'newest';
+        }
+
         return Inertia::render('Admin/Support/Tickets/Index', [
             'tickets' => $formattedTickets,
             'pagination' => $tickets->toArray(),
             'filterOptions' => $filterOptions,
             'roundRobinBucket' => $roundRobinBucket,
             'can_bulk_resolve_engineering' => Gate::forUser($user)->allows('assign', $dummyEngineeringTicket),
-            'filters' => array_merge(
-                $request->only(['status', 'category', 'assigned_team', 'assigned_to_user_id', 'tenant_id', 'brand_ids', 'sla_state', 'sort', 'severity', 'environment', 'component', 'engineering_only', 'queue']),
-                $request->get('type') === 'engineering' ? ['engineering_only' => '1'] : []
-            ),
+            'filters' => $filtersOut,
         ]);
     }
 

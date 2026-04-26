@@ -48,6 +48,13 @@ class JobRetryStrategy implements RepairStrategyInterface
             return new RepairResult(true, $result['changes'] ?? []);
         }
 
+        // Align with {@see SystemIncidentRecoveryService::isIncidentResolvedAfterReconcile}:
+        // "stuck in uploading" incidents are about leaving uploading, not necessarily reaching complete yet.
+        $title = strtolower($incident->title ?? '');
+        if (str_contains($title, 'uploading') && $status !== 'uploading') {
+            return new RepairResult(true, $result['changes'] ?? []);
+        }
+
         if ($incident->retryable && !($incident->metadata['retried'] ?? false)) {
             $this->dispatchRetry($incident, $asset);
         }

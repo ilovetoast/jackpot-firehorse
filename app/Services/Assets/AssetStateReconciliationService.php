@@ -270,10 +270,12 @@ class AssetStateReconciliationService
     }
 
     /**
-     * Rule 7: Studio composition video export / studio animation created the current version with
-     * pipeline_status=complete before any pipeline work, so {@see ProcessAssetJob} exits immediately
-     * and the asset stays analysis_status=uploading with thumbnails pending. Reset the version gate
-     * and re-dispatch the pipeline job.
+     * Rule 7: Studio composition video export / studio animation can end up with
+     * version.pipeline_status=complete (e.g. eager {@see GenerateThumbnailsJob}) while
+     * version.metadata.processing_started is still false, so {@see ProcessAssetJob} used to
+     * exit at the "version already complete" guard and the asset stayed analysis_status=uploading.
+     * Reset the version gate and re-dispatch. Applies both when thumbs are still pending and when
+     * eager thumbnails already ran (thumbnails_generated=true) but the main chain never did.
      *
      * @return list<string>
      */
@@ -286,16 +288,7 @@ class AssetStateReconciliationService
         if (($asset->analysis_status ?? '') !== 'uploading') {
             return [];
         }
-        $thumbEnum = $asset->thumbnail_status instanceof ThumbnailStatus
-            ? $asset->thumbnail_status
-            : ThumbnailStatus::tryFrom((string) ($asset->thumbnail_status ?? ''));
-        if ($thumbEnum !== ThumbnailStatus::PENDING) {
-            return [];
-        }
         $metadata = $asset->metadata ?? [];
-        if (($metadata['thumbnails_generated'] ?? false) === true) {
-            return [];
-        }
         if (isset($metadata['pipeline_completed_at'])) {
             return [];
         }
@@ -303,7 +296,7 @@ class AssetStateReconciliationService
         if (! $version || $version->pipeline_status !== 'complete') {
             return [];
         }
-        $versionMeta = $version->metadata ?? [];
+        $versionMeta = is_array($version->metadata) ? $version->metadata : [];
         if (($versionMeta['processing_started'] ?? false) === true) {
             return [];
         }
