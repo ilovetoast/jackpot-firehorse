@@ -6,6 +6,7 @@ use App\Enums\ThumbnailStatus;
 use App\Models\Asset;
 use App\Models\SupportTicket;
 use App\Services\Reliability\ReliabilityEngine;
+use App\Support\ThumbnailMetadata;
 use Illuminate\Console\Command;
 
 /**
@@ -78,6 +79,13 @@ class AssetsWatchdogCommand extends Command
                 }
             } catch (\Throwable $e) {
                 // Continue to record incident
+            }
+
+            // analysis_status lags: studio/eager paths can leave "generating_thumbnails" (or "uploading")
+            // even when thumbnails already exist; the real problem is finalization, not a stalled GenerateThumbnailsJob.
+            // Do not emit "Thumbnail generation stalled" / "stuck in uploading" for that false shape.
+            if ($this->thumbnailsLookComplete($asset->fresh())) {
+                continue;
             }
 
             $metadata = $asset->metadata ?? [];
@@ -200,5 +208,29 @@ class AssetsWatchdogCommand extends Command
         }
 
         return self::SUCCESS;
+    }
+
+    /**
+     * Thumbnails are present/complete: watchdog noise would blame "stalled" generation when the
+     * issue is actually pipeline completion ({@see FinalizeAssetJob}, {@see AssetStateReconciliationService} rules).
+     */
+    protected function thumbnailsLookComplete(Asset $asset): bool
+    {
+        $meta = is_array($asset->metadata) ? $asset->metadata : [];
+        if (! empty($meta['thumbnails_generated'])) {
+            return true;
+        }
+        if (in_array($asset->thumbnail_status, [ThumbnailStatus::COMPLETED, ThumbnailStatus::SKIPPED], true)) {
+            return true;
+        }
+        if (ThumbnailMetadata::hasThumb($meta)) {
+            return true;
+        }
+        $version = $asset->currentVersion;
+        if ($version && is_array($version->metadata) && ThumbnailMetadata::hasThumb($version->metadata)) {
+            return true;
+        }
+
+        return false;
     }
 }

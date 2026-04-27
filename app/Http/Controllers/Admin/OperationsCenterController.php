@@ -4,9 +4,11 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\ApplicationErrorEvent;
+use App\Models\Asset;
 use App\Models\StudioCompositionVideoExportJob;
 use App\Models\SystemIncident;
 use App\Models\Tenant;
+use App\Services\Reliability\IncidentPlaybookService;
 use App\Services\Admin\StudioCompositionVideoExportAdminMetrics;
 use App\Services\Reliability\ReliabilityMetricsService;
 use Illuminate\Http\JsonResponse;
@@ -49,12 +51,24 @@ class OperationsCenterController extends Controller
             $tab = 'overview';
         }
 
-        $incidents = SystemIncident::whereNull('resolved_at')
+        $incidentRows = SystemIncident::whereNull('resolved_at')
             ->orderByRaw("CASE severity WHEN 'critical' THEN 1 WHEN 'error' THEN 2 WHEN 'warning' THEN 3 ELSE 4 END")
             ->orderBy('detected_at', 'desc')
             ->limit(100)
-            ->get()
-            ->map(fn ($i) => [
+            ->get();
+
+        $assetIds = $incidentRows->where('source_type', 'asset')->pluck('source_id')->filter()->unique()->values()->all();
+        $assetsById = $assetIds === []
+            ? collect()
+            : Asset::query()->with('currentVersion')->whereIn('id', $assetIds)->get()->keyBy('id');
+
+        $playbook = app(IncidentPlaybookService::class);
+
+        $incidents = $incidentRows->map(function (SystemIncident $i) use ($assetsById, $playbook) {
+            $asset = $i->source_type === 'asset' && $i->source_id ? $assetsById->get($i->source_id) : null;
+            $pb = $playbook->summarize($i, $asset);
+
+            return [
                 'id' => $i->id,
                 'source_type' => $i->source_type,
                 'source_id' => $i->source_id,
@@ -68,7 +82,10 @@ class OperationsCenterController extends Controller
                 'repair_attempts' => $i->metadata['repair_attempts'] ?? $i->metadata['recovery_attempt_count'] ?? 0,
                 'last_repair_attempt_at' => $i->metadata['last_repair_attempt_at'] ?? $i->metadata['last_recovery_attempt_at'] ?? null,
                 'auto_repair_exhausted' => (bool) ($i->metadata['auto_repair_exhausted'] ?? false),
-            ]);
+                'playbook_why' => $pb['why'],
+                'playbook_action' => $pb['action'],
+            ];
+        });
 
         $failedJobs = DB::table('failed_jobs')
             ->orderBy('failed_at', 'desc')

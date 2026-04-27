@@ -97,6 +97,24 @@ function IncidentRow({ incident: i, onAction, selected, onSelect, onSourceClick 
                     </span>
                 ) : '—'}
             </td>
+            <td className="py-3 px-3 text-xs text-gray-700 max-w-xs align-top">
+                {i.playbook_why ? (
+                    <p className="line-clamp-4" title={i.playbook_why}>
+                        {i.playbook_why}
+                    </p>
+                ) : (
+                    <span className="text-gray-400">—</span>
+                )}
+            </td>
+            <td className="py-3 px-3 text-xs text-gray-700 max-w-xs align-top">
+                {i.playbook_action ? (
+                    <p className="line-clamp-4" title={i.playbook_action}>
+                        {i.playbook_action}
+                    </p>
+                ) : (
+                    <span className="text-gray-400">—</span>
+                )}
+            </td>
             <td className="py-3 px-3 text-right">
                 <div className="flex justify-end gap-1">
                     <button
@@ -618,6 +636,8 @@ export default function OperationsCenterIndex({
                                                 <th className="py-3.5 px-3 text-left text-sm font-semibold text-gray-900">Source</th>
                                                 <th className="py-3.5 px-3 text-left text-sm font-semibold text-gray-900">Detected</th>
                                                 <th className="py-3.5 px-3 text-left text-sm font-semibold text-gray-900">Repair attempts</th>
+                                                <th className="py-3.5 px-3 text-left text-sm font-semibold text-gray-900 max-w-xs">Why still open</th>
+                                                <th className="py-3.5 px-3 text-left text-sm font-semibold text-gray-900 max-w-xs">What to do</th>
                                                 <th className="py-3.5 px-3 text-right text-sm font-semibold text-gray-900">Actions</th>
                                             </tr>
                                         </thead>
