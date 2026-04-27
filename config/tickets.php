@@ -75,6 +75,26 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Engineering (internal) round-robin default bucket
+    |--------------------------------------------------------------------------
+    |
+    | When engineering_round_robin_users is empty, these user IDs are used for
+    | assignment. Configure via comma-separated env ENGINEERING_ROUND_ROBIN_DEFAULT_USER_IDS
+    | or fall back to [1] (same idea as support).
+    |
+    */
+
+    'engineering_round_robin_default_user_ids' => (static function () {
+        $ids = array_values(array_filter(array_map(
+            'intval',
+            explode(',', (string) env('ENGINEERING_ROUND_ROBIN_DEFAULT_USER_IDS', '1'))
+        )));
+
+        return $ids === [] ? [1] : $ids;
+    })(),
+
+    /*
+    |--------------------------------------------------------------------------
     | Activity log tenant for internal tickets
     |--------------------------------------------------------------------------
     |

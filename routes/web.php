@@ -488,6 +488,8 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
     Route::post('/admin/support/tickets/suggestions/{suggestion}/create-ticket', [\App\Http\Controllers\AdminTicketController::class, 'createTicketFromSuggestion'])->name('admin.support.tickets.suggestions.create-ticket');
     Route::post('/admin/support/round-robin', [\App\Http\Controllers\AdminTicketController::class, 'addRoundRobinUser'])->name('admin.support.round-robin.add');
     Route::delete('/admin/support/round-robin/{user}', [\App\Http\Controllers\AdminTicketController::class, 'removeRoundRobinUser'])->name('admin.support.round-robin.remove');
+    Route::post('/admin/support/engineering-round-robin', [\App\Http\Controllers\AdminTicketController::class, 'addEngineeringRoundRobinUser'])->name('admin.support.engineering-round-robin.add');
+    Route::delete('/admin/support/engineering-round-robin/{user}', [\App\Http\Controllers\AdminTicketController::class, 'removeEngineeringRoundRobinUser'])->name('admin.support.engineering-round-robin.remove');
 
     // Deletion Error Management routes (admin only)
     // Phase D-2: Admin Download Failures (read-only)

@@ -14,11 +14,12 @@ use Illuminate\Support\Facades\Mail;
 class TicketNotificationService
 {
     /**
-     * Email the assigned staff member when a tenant-facing support ticket is created.
+     * Email the assigned staff member when a support or internal (engineering) ticket is created.
+     * Uses {@see \App\Mail\SupportTicketCreated}; delivery respects {@see \App\Services\EmailGate} (automation / system email).
      */
     public function notifyAssignedStaffOfNewTicket(Ticket $ticket): void
     {
-        if (! in_array($ticket->type, [TicketType::TENANT, TicketType::TENANT_INTERNAL], true)) {
+        if (! in_array($ticket->type, [TicketType::TENANT, TicketType::TENANT_INTERNAL, TicketType::INTERNAL], true)) {
             return;
         }
 

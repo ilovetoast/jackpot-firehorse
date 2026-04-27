@@ -61,6 +61,7 @@ import ProcessingActionCard, { formatProcessingLastRunLine } from './ProcessingA
 import AssetBrandIntelligenceBlock from './AssetBrandIntelligenceBlock'
 import AiTagSuggestionsInline from './AiTagSuggestionsInline'
 import MetadataCandidateReview from './MetadataCandidateReview'
+import JackpotSlotReels from './JackpotSlotReels'
 import MetadataAnalysisRunningBanner from './MetadataAnalysisRunningBanner'
 import ApprovalHistory from './ApprovalHistory'
 import PendingAssetReviewModal from './PendingAssetReviewModal'
@@ -5313,16 +5314,11 @@ export default function AssetDrawer({
                                                 className="flex flex-col items-center justify-center rounded-lg border border-gray-100 bg-gray-50/90 px-4 py-8 text-center"
                                                 role="status"
                                             >
-                                                <div
-                                                    className="mb-2.5 flex h-10 w-10 items-center justify-center rounded-full bg-white text-gray-300 ring-1 ring-gray-100"
-                                                    aria-hidden
-                                                >
-                                                    <CheckCircleIcon className="h-5 w-5" strokeWidth={1.25} />
-                                                </div>
-                                                <p className="text-sm font-medium text-gray-600">No action required</p>
-                                                <p className="mt-1 max-w-[260px] text-xs leading-relaxed text-gray-400">
-                                                    Nothing is waiting for your review here. If suggestions or tag
-                                                    ideas are added, they will show in this section.
+                                                <JackpotSlotReels className="mb-3" decorative />
+                                                <p className="text-sm font-semibold text-gray-800">No action required</p>
+                                                <p className="mt-1.5 max-w-[280px] text-xs leading-relaxed text-gray-500">
+                                                    Nothing is waiting for your review in Jackpot. When suggestions or
+                                                    tag ideas are ready, they will appear in this section.
                                                 </p>
                                             </div>
                                         )}

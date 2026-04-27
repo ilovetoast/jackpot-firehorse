@@ -120,6 +120,14 @@ export default function AssetDetailModal({ data, onClose, onAction, onRefresh, o
         setClassificationError(null)
     }, [asset?.id, asset?.asset_type?.value, asset?.category_id])
 
+    const formatDurationMs = (ms) => {
+        if (ms == null || ms === '') return '—'
+        const n = Number(ms)
+        if (!Number.isFinite(n)) return '—'
+        if (n < 1000) return `${n.toLocaleString()} ms`
+        return `${(n / 1000).toFixed(2)} s (${n.toLocaleString()} ms)`
+    }
+
     const TABS = [
         { id: 'overview', label: 'Overview' },
         ...(versions?.length ? [{ id: 'versions', label: `Versions (${versions.length})` }] : []),
@@ -642,7 +650,25 @@ export default function AssetDetailModal({ data, onClose, onAction, onRefresh, o
                         </div>
                     )}
                     {tab === 'pipeline' && (
-                        <div className="space-y-2 text-sm">
+                        <div className="space-y-4 text-sm">
+                            <div className="rounded-lg border border-slate-200 bg-slate-50/80 p-3">
+                                <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Processing timing (ops)</h3>
+                                <p className="mt-1 text-xs text-slate-500">
+                                    Admin-only. Thumbnail = time until preview thumbs ready; full pipeline = through finalize. Cleared
+                                    in bulk with{' '}
+                                    <code className="rounded bg-slate-200/80 px-1 py-0.5 text-[10px]">php artisan assets:clear-processing-metrics</code>.
+                                </p>
+                                <dl className="mt-2 grid gap-2 sm:grid-cols-2">
+                                    <div>
+                                        <dt className="text-slate-500">Thumbnail job → ready</dt>
+                                        <dd className="font-mono text-slate-800">{formatDurationMs(asset?.thumbnail_ready_duration_ms)}</dd>
+                                    </div>
+                                    <div>
+                                        <dt className="text-slate-500">Full pipeline (finalize)</dt>
+                                        <dd className="font-mono text-slate-800">{formatDurationMs(asset?.processing_duration_ms)}</dd>
+                                    </div>
+                                </dl>
+                            </div>
                             {pipeline_flags && Object.entries(pipeline_flags).map(([k, v]) => {
                                 const semantic = PIPELINE_FLAG_SEMANTICS[k]
                                 const val = Boolean(v)

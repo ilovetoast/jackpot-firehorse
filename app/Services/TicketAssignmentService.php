@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Enums\TicketTeam;
 use App\Enums\TicketType;
+use App\Models\EngineeringRoundRobinUser;
 use App\Models\SupportRoundRobinUser;
 use App\Models\Ticket;
 use App\Models\User;
@@ -20,8 +21,10 @@ use Illuminate\Support\Facades\Cache;
  * - When bucket is empty, falls back to config('tickets.round_robin_default_user_ids', [1])
  * - Round-robin cycles through bucket; last assigned user tracked in cache
  *
- * Engineering Assignment:
- * - Site Engineering → Site Admin (unchanged)
+ * Engineering Assignment (round-robin):
+ * - engineering_round_robin_users bucket (Site Engineering, Admin, or Owner — managed on Engineering queue UI)
+ * - When empty, falls back to config('tickets.engineering_round_robin_default_user_ids', [1])
+ * - Then fall back to first user with site_engineering, then site_admin
  *
  * Important:
  * - Support roles are global (not tenant-scoped)
@@ -137,20 +140,51 @@ class TicketAssignmentService
     }
 
     /**
-     * Find engineering user (Site Engineering → Site Admin).
+     * Find engineering user via round-robin from the engineering bucket, then config, then role order.
      *
      * @return User|null
      */
     protected function findEngineeringUser(): ?User
     {
-        // Try Site Engineering first
+        $userIds = EngineeringRoundRobinUser::getBucketUserIds();
+        if (empty($userIds)) {
+            $userIds = config('tickets.engineering_round_robin_default_user_ids', [1]);
+        }
+        if (empty($userIds)) {
+            return $this->findEngineeringUserByRole();
+        }
+
+        $userIds = array_map('intval', $userIds);
+        $lastUserId = Cache::get('engineering_round_robin_last_user_id');
+        $currentIndex = $lastUserId ? array_search((int) $lastUserId, $userIds, true) : false;
+        $nextIndex = ($currentIndex !== false && $currentIndex < count($userIds) - 1)
+            ? $currentIndex + 1
+            : 0;
+        $nextUserId = $userIds[$nextIndex];
+
+        Cache::put('engineering_round_robin_last_user_id', $nextUserId, now()->addYear());
+
+        $user = User::find($nextUserId);
+
+        return $user ?? $this->findEngineeringUserByRole();
+    }
+
+    /**
+     * Legacy fallback: first Site Engineering, then first Site Admin.
+     */
+    protected function findEngineeringUserByRole(): ?User
+    {
         $users = $this->getUsersWithRole('site_engineering');
         if ($users->isNotEmpty()) {
             return $users->first();
         }
 
-        // Fallback to Site Admin
         $users = $this->getUsersWithRole('site_admin');
+        if ($users->isNotEmpty()) {
+            return $users->first();
+        }
+
+        $users = $this->getUsersWithRole('site_owner');
         if ($users->isNotEmpty()) {
             return $users->first();
         }

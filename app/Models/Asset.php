@@ -321,6 +321,8 @@ class Asset extends Model
         'dominant_hue_group', // Perceptual hue cluster for filtering
         'deleted_by_user_id', // Phase B2: User who soft-deleted the asset
         'analysis_status', // Pipeline progress: uploading, generating_thumbnails, extracting_metadata, generating_embedding, scoring, complete
+        'processing_duration_ms', // Ops: ms from processing_started to pipeline completed (nullable, clearable)
+        'thumbnail_ready_duration_ms', // Ops: ms from thumbnail_started_at to thumbnails ready (nullable, clearable)
         'pdf_page_count',
         'pdf_unsupported_large',
         'pdf_rendered_pages_count',
@@ -365,6 +367,8 @@ class Asset extends Model
             'pdf_rendered_storage_bytes' => 'integer',
             'pdf_pages_rendered' => 'boolean',
             'builder_staged' => 'boolean',
+            'processing_duration_ms' => 'integer',
+            'thumbnail_ready_duration_ms' => 'integer',
         ];
     }
 

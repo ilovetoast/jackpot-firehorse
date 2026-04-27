@@ -15,6 +15,7 @@ use App\Models\ActivityEvent;
 use App\Models\AITicketSuggestion;
 use App\Models\Asset;
 use App\Models\Brand;
+use App\Models\EngineeringRoundRobinUser;
 use App\Models\SupportRoundRobinUser;
 use App\Models\Tenant;
 use App\Models\Ticket;
@@ -263,6 +264,31 @@ class AdminTicketController extends Controller
             ->values()
             ->toArray();
 
+        $engineeringRoundRobinBucket = EngineeringRoundRobinUser::query()
+            ->with('user:id,first_name,last_name,email')
+            ->orderBy('sort_order')
+            ->orderBy('id')
+            ->get()
+            ->map(fn ($r) => [
+                'id' => $r->id,
+                'user_id' => $r->user_id,
+                'user' => $r->user ? [
+                    'id' => $r->user->id,
+                    'first_name' => $r->user->first_name,
+                    'last_name' => $r->user->last_name,
+                    'email' => $r->user->email,
+                ] : null,
+            ])
+            ->values()
+            ->toArray();
+
+        $engineeringRoundRobinAllowedIds = User::query()
+            ->whereHas('roles', function ($q) {
+                $q->whereIn('name', ['site_engineering', 'site_admin', 'site_owner']);
+            })
+            ->pluck('id')
+            ->all();
+
         $dummyEngineeringTicket = new Ticket([
             'type' => TicketType::INTERNAL,
             'assigned_team' => TicketTeam::ENGINEERING,
@@ -286,6 +312,8 @@ class AdminTicketController extends Controller
             'pagination' => $tickets->toArray(),
             'filterOptions' => $filterOptions,
             'roundRobinBucket' => $roundRobinBucket,
+            'engineeringRoundRobinBucket' => $engineeringRoundRobinBucket,
+            'engineeringRoundRobinAllowedIds' => $engineeringRoundRobinAllowedIds,
             'can_bulk_resolve_engineering' => Gate::forUser($user)->allows('assign', $dummyEngineeringTicket),
             'filters' => $filtersOut,
         ]);
@@ -1389,6 +1417,52 @@ class AdminTicketController extends Controller
         SupportRoundRobinUser::where('user_id', $user->id)->delete();
 
         return back()->with('success', "{$user->first_name} {$user->last_name} removed from round-robin bucket.");
+    }
+
+    /**
+     * Add user to engineering round-robin bucket (internal / engineering tickets).
+     * User must have site_engineering, site_admin, or site_owner.
+     */
+    public function addEngineeringRoundRobinUser(Request $request)
+    {
+        $authUser = Auth::user();
+        if (! $authUser->hasRole(['site_admin', 'site_owner'])) {
+            abort(403, 'Only Site Admin or Site Owner can manage the engineering round-robin bucket.');
+        }
+
+        $request->validate(['user_id' => 'required|exists:users,id']);
+
+        $targetUser = User::findOrFail($request->user_id);
+        if (! $targetUser->hasRole(['site_engineering', 'site_admin', 'site_owner'])) {
+            return back()->withErrors(['user_id' => 'User must have Site Engineering, Site Admin, or Site Owner role.']);
+        }
+
+        if (EngineeringRoundRobinUser::where('user_id', $targetUser->id)->exists()) {
+            return back()->withErrors(['user_id' => 'User is already in the engineering round-robin bucket.']);
+        }
+
+        $maxOrder = EngineeringRoundRobinUser::max('sort_order') ?? 0;
+        EngineeringRoundRobinUser::create([
+            'user_id' => $targetUser->id,
+            'sort_order' => $maxOrder + 1,
+        ]);
+
+        return back()->with('success', "{$targetUser->first_name} {$targetUser->last_name} added to engineering round-robin bucket.");
+    }
+
+    /**
+     * Remove user from engineering round-robin bucket.
+     */
+    public function removeEngineeringRoundRobinUser(Request $request, User $user)
+    {
+        $authUser = Auth::user();
+        if (! $authUser->hasRole(['site_admin', 'site_owner'])) {
+            abort(403, 'Only Site Admin or Site Owner can manage the engineering round-robin bucket.');
+        }
+
+        EngineeringRoundRobinUser::where('user_id', $user->id)->delete();
+
+        return back()->with('success', "{$user->first_name} {$user->last_name} removed from engineering round-robin bucket.");
     }
 
     /**

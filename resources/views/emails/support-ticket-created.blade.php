@@ -1,10 +1,10 @@
-{{-- MODE: system | New Support Ticket (assignee notification) --}}
-<x-email.layout title="New support ticket {{ $ticketNumber }}" preheader="Ticket {{ $ticketNumber }} assigned to you">
+{{-- MODE: system | New Support or Engineering ticket (assignee notification) --}}
+<x-email.layout :title="($flowLabel ?? 'Support') === 'Engineering' ? 'New engineering ticket '.$ticketNumber : 'New support ticket '.$ticketNumber" preheader="Ticket {{ $ticketNumber }} assigned to you">
 
-    <x-email.eyebrow>Support</x-email.eyebrow>
+    <x-email.eyebrow>{{ $flowLabel ?? 'Support' }}</x-email.eyebrow>
     <x-email.heading>New ticket assigned to you</x-email.heading>
 
-    <x-email.text>A support ticket has been created and assigned to you.</x-email.text>
+    <x-email.text>{{ $introLine ?? 'A support ticket has been created and assigned to you.' }}</x-email.text>
 
     <x-email.details :items="[
         'Ticket' => $ticketNumber,

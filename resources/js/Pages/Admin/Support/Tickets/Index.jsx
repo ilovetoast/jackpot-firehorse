@@ -23,6 +23,8 @@ export default function AdminTicketsIndex({
     filterOptions,
     filters,
     roundRobinBucket = [],
+    engineeringRoundRobinBucket = [],
+    engineeringRoundRobinAllowedIds = [],
     can_bulk_resolve_engineering = false,
 }) {
     const { auth } = usePage().props
@@ -34,6 +36,7 @@ export default function AdminTicketsIndex({
     const canCreateEngineering = siteRoles.some(role => ['site_engineering', 'site_admin', 'site_owner'].includes(role))
     const canManageRoundRobin = siteRoles.some(role => ['site_admin', 'site_owner'].includes(role))
     const [roundRobinUserId, setRoundRobinUserId] = useState('')
+    const [engineeringRoundRobinUserId, setEngineeringRoundRobinUserId] = useState('')
     
     const { data, setData, post, processing, errors, reset } = useForm({
         subject: '',
@@ -291,10 +294,10 @@ export default function AdminTicketsIndex({
                         )}
                     </div>
 
-                    {/* Round-Robin Bucket — support / tenant ticket assignment only (not engineering) */}
+                    {/* Round-Robin — support (tenant) tickets */}
                     {canManageRoundRobin && !engineeringQueueView && (
                         <div className="mb-6 bg-white shadow-sm ring-1 ring-gray-200 rounded-lg p-4">
-                            <h3 className="text-sm font-semibold text-gray-900 mb-2">Round-Robin Assignment Bucket</h3>
+                            <h3 className="text-sm font-semibold text-gray-900 mb-2">Support round-robin bucket</h3>
                             <p className="text-xs text-gray-500 mb-3">
                                 Users in this bucket receive new support tickets in round-robin order. Add users with Site Support, Admin, or Owner role. When empty, uses config default (user 1).
                             </p>
@@ -340,6 +343,76 @@ export default function AdminTicketsIndex({
                                             }
                                         }}
                                         className="inline-flex items-center rounded-md bg-indigo-600 px-2 py-1.5 text-xs font-medium text-white hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    >
+                                        <UserPlusIcon className="h-4 w-4 mr-1" />
+                                        Add
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Round-robin — internal / engineering tickets */}
+                    {canManageRoundRobin && engineeringQueueView && (
+                        <div className="mb-6 bg-white shadow-sm ring-1 ring-gray-200 rounded-lg p-4">
+                            <h3 className="text-sm font-semibold text-gray-900 mb-2">Engineering round-robin bucket</h3>
+                            <p className="text-xs text-gray-500 mb-3">
+                                Users in this bucket receive new internal engineering tickets in round-robin order. Eligible: Site Engineering, Admin, or Owner. When empty, assignment uses
+                                {' '}
+                                <code className="text-[11px]">ENGINEERING_ROUND_ROBIN_DEFAULT_USER_IDS</code>
+                                {' '}
+                                from config, then first matching role. The assignee is notified by email when mail automations are enabled.
+                            </p>
+                            <div className="flex flex-wrap items-center gap-2">
+                                {engineeringRoundRobinBucket.map((entry) => (
+                                    <span
+                                        key={entry.id}
+                                        className="inline-flex items-center gap-1.5 rounded-full bg-violet-50 px-3 py-1.5 text-sm text-violet-800"
+                                    >
+                                        {entry.user?.first_name} {entry.user?.last_name}
+                                        <button
+                                            type="button"
+                                            onClick={() => router.delete(`/app/admin/support/engineering-round-robin/${entry.user_id}`, { preserveScroll: true })}
+                                            className="rounded-full p-0.5 hover:bg-violet-100 text-violet-600"
+                                            title="Remove from engineering bucket"
+                                        >
+                                            <UserMinusIcon className="h-4 w-4" />
+                                        </button>
+                                    </span>
+                                ))}
+                                <div className="inline-flex items-center gap-1">
+                                    <select
+                                        value={engineeringRoundRobinUserId}
+                                        onChange={(e) => setEngineeringRoundRobinUserId(e.target.value)}
+                                        className="rounded-md border-gray-300 text-sm py-1.5"
+                                    >
+                                        <option value="">Add user…</option>
+                                        {(filterOptions?.staff_users || [])
+                                            .filter(
+                                                (u) =>
+                                                    (engineeringRoundRobinAllowedIds || []).includes(u.id) &&
+                                                    !engineeringRoundRobinBucket.some((e) => e.user_id === u.id)
+                                            )
+                                            .map((user) => (
+                                                <option key={user.id} value={user.id}>
+                                                    {user.first_name} {user.last_name}
+                                                </option>
+                                            ))}
+                                    </select>
+                                    <button
+                                        type="button"
+                                        disabled={!engineeringRoundRobinUserId}
+                                        onClick={() => {
+                                            if (engineeringRoundRobinUserId) {
+                                                router.post(
+                                                    '/app/admin/support/engineering-round-robin',
+                                                    { user_id: engineeringRoundRobinUserId },
+                                                    { preserveScroll: true }
+                                                )
+                                                setEngineeringRoundRobinUserId('')
+                                            }
+                                        }}
+                                        className="inline-flex items-center rounded-md bg-violet-600 px-2 py-1.5 text-xs font-medium text-white hover:bg-violet-500 disabled:opacity-50 disabled:cursor-not-allowed"
                                     >
                                         <UserPlusIcon className="h-4 w-4 mr-1" />
                                         Add

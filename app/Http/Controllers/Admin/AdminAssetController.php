@@ -1617,6 +1617,10 @@ class AdminAssetController extends Controller
         $list['published_at'] = $asset->published_at?->toIso8601String();
         $list['status'] = $asset->status?->value ?? null;
 
+        // Ops/debug: not shown in tenant UI; admin console only. Clearable via artisan to reclaim space.
+        $list['processing_duration_ms'] = $asset->processing_duration_ms;
+        $list['thumbnail_ready_duration_ms'] = $asset->thumbnail_ready_duration_ms;
+
         return $list;
     }
 

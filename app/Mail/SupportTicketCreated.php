@@ -34,8 +34,12 @@ class SupportTicketCreated extends BaseMailable
             );
         }
 
+        $isEng = $this->ticket->type === TicketType::INTERNAL;
+
         return new Envelope(
-            subject: "New support ticket {$this->ticket->ticket_number}",
+            subject: $isEng
+                ? "New engineering ticket {$this->ticket->ticket_number}"
+                : "New support ticket {$this->ticket->ticket_number}",
         );
     }
 
@@ -62,6 +66,8 @@ class SupportTicketCreated extends BaseMailable
                 'creatorName'   => $vars['creator_name'],
                 'assigneeName'  => $vars['assignee_name'],
                 'ticketUrl'     => $vars['ticket_url'],
+                'flowLabel'     => $vars['flow_label'] ?? 'Support',
+                'introLine'     => $vars['intro_line'] ?? 'A support ticket has been created and assigned to you.',
             ],
         );
     }
@@ -83,9 +89,11 @@ class SupportTicketCreated extends BaseMailable
             $categoryLabel = $cat ? $cat->label() : $rawCategory;
         }
 
-        $tenantName = $ticket->tenant?->name ?? (
-            $ticket->type === TicketType::TENANT_INTERNAL ? 'Internal (tenant hidden)' : '—'
-        );
+        $tenantName = $ticket->tenant?->name ?? match ($ticket->type) {
+            TicketType::TENANT_INTERNAL => 'Internal (tenant hidden)',
+            TicketType::INTERNAL => '— (internal / engineering)',
+            default => '—',
+        };
 
         $creator = $ticket->createdBy;
         $creatorName = $creator ? trim("{$creator->first_name} {$creator->last_name}") : '—';
@@ -94,6 +102,8 @@ class SupportTicketCreated extends BaseMailable
         $assigneeName = $assignee ? trim("{$assignee->first_name} {$assignee->last_name}") : '—';
 
         $ticketUrl = route('admin.support.tickets.show', $ticket);
+
+        $isInternalEngineering = $ticket->type === TicketType::INTERNAL;
 
         return [
             'assignee_name' => $assigneeName,
@@ -105,6 +115,10 @@ class SupportTicketCreated extends BaseMailable
             'ticket_url' => $ticketUrl,
             'app_name' => config('app.name', 'Jackpot'),
             'app_url' => rtrim((string) config('app.url', url('/')), '/'),
+            'flow_label' => $isInternalEngineering ? 'Engineering' : 'Support',
+            'intro_line' => $isInternalEngineering
+                ? 'An internal (engineering) ticket was created and assigned to you.'
+                : 'A support ticket has been created and assigned to you.',
         ];
     }
 }

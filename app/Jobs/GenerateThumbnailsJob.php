@@ -19,6 +19,7 @@ use App\Services\ThumbnailGenerationService;
 use App\Support\AdminLogStream;
 use App\Support\Logging\PipelineLogger;
 use App\Support\PipelineQueueResolver;
+use App\Support\ProcessingMetrics;
 use App\Support\ThumbnailMetadata;
 use App\Support\ThumbnailMode;
 use Aws\S3\Exception\S3Exception;
@@ -1021,6 +1022,7 @@ class GenerateThumbnailsJob implements ShouldQueue
             $updateData = [
                 'thumbnail_status' => ThumbnailStatus::COMPLETED,
                 'thumbnail_error' => null,
+                'thumbnail_ready_duration_ms' => ProcessingMetrics::thumbnailReadyDurationMs($asset),
                 'thumbnail_started_at' => null,
             ];
             if ($isPdf && $pdfPageCount !== null) {
@@ -1240,6 +1242,9 @@ class GenerateThumbnailsJob implements ShouldQueue
                 // If it retries and fails again, at least we have a terminal state
                 $asset->thumbnail_status = $hasThumbnails ? ThumbnailStatus::COMPLETED : ThumbnailStatus::FAILED;
                 $asset->thumbnail_error = $hasThumbnails ? null : $userFriendlyError;
+                if ($hasThumbnails) {
+                    $asset->thumbnail_ready_duration_ms = ProcessingMetrics::thumbnailReadyDurationMs($asset);
+                }
                 $asset->thumbnail_started_at = null;
                 $asset->save(); // Explicit save to ensure commit before re-throw
 

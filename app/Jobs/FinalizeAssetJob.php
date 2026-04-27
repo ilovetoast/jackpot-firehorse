@@ -11,6 +11,7 @@ use App\Services\BrandIntelligence\BrandIntelligenceScheduleService;
 use App\Services\Studio\EditorStudioVideoPublishApplier;
 use App\Jobs\Concerns\QueuesOnImagesChannel;
 use App\Services\ImageEmbeddingService;
+use App\Support\ProcessingMetrics;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -117,6 +118,8 @@ class FinalizeAssetJob implements ShouldQueue
                 $updates['published_at'] = now();
             }
 
+            $updates['processing_duration_ms'] = ProcessingMetrics::pipelineDurationMs($asset, $currentVersion);
+
             $asset->update($updates);
             $mimeForEmbedding = $currentVersion->mime_type;
         } else {
@@ -137,7 +140,10 @@ class FinalizeAssetJob implements ShouldQueue
 
             $metadata = $asset->metadata ?? [];
             $metadata['pipeline_completed_at'] = now()->toIso8601String();
-            $updates = ['metadata' => $metadata];
+            $updates = [
+                'metadata' => $metadata,
+                'processing_duration_ms' => ProcessingMetrics::pipelineDurationMs($asset, null),
+            ];
             if (! ImageEmbeddingService::isImageMimeType($asset->mime_type, $asset->original_filename)) {
                 $updates['analysis_status'] = 'complete';
             }
