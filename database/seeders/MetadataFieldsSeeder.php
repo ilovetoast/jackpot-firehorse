@@ -15,7 +15,7 @@ use Illuminate\Support\Facades\DB;
  * - Sets field-level properties (AI eligible, population mode, etc.)
  * - Configures category-specific settings (enabled/disabled, primary placement, AI eligible)
  *
- * Deploy: option lists for system fields (Subject, Environment, Shot Type / photo_type) do NOT auto-update
+ * Deploy: option lists for system fields (Subject, Environment, Composition type / photo_type) do NOT auto-update
  * on git push. After deploying, run e.g. `php artisan db:seed --class=MetadataFieldsSeeder` on staging/production
  * (or your full database seeder) so `metadata_options` and field labels sync. Existing asset metadata values
  * that used removed option slugs may need a one-time data migration.
@@ -206,10 +206,10 @@ class MetadataFieldsSeeder extends Seeder
      */
     protected function seedBasicFields(): void
     {
-        // Shot Type (DB key: photo_type) — “What kind of visual is it?” Sync replaces option rows not in this list.
+        // Composition type (DB key: photo_type) — “What kind of visual is it?” Sync replaces option rows not in this list.
         $photoTypeId = $this->getOrCreateField([
             'key' => 'photo_type',
-            'system_label' => 'Shot Type',
+            'system_label' => 'Composition type',
             'type' => 'select',
             'applies_to' => 'image',
             'scope' => 'system',

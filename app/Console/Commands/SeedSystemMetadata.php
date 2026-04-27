@@ -159,7 +159,7 @@ class SeedSystemMetadata extends Command
             // 1. Creative / Descriptive
             [
                 'key' => 'photo_type',
-                'system_label' => 'Shot Type',
+                'system_label' => 'Composition type',
                 'type' => 'select',
                 'applies_to' => 'image',
                 'group_key' => 'creative',

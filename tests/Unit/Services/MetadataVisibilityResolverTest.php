@@ -80,7 +80,7 @@ class MetadataVisibilityResolverTest extends TestCase
         // Create system metadata field
         $fieldId = DB::table('metadata_fields')->insertGetId([
             'key' => 'photo_type',
-            'system_label' => 'Shot Type',
+            'system_label' => 'Composition type',
             'type' => 'select',
             'applies_to' => 'image',
             'scope' => 'system',
@@ -125,7 +125,7 @@ class MetadataVisibilityResolverTest extends TestCase
             [
                 'field_id' => $fieldId,
                 'key' => 'photo_type',
-                'display_label' => 'Shot Type',
+                'display_label' => 'Composition type',
                 'type' => 'select',
             ],
             [
@@ -186,7 +186,7 @@ class MetadataVisibilityResolverTest extends TestCase
         // Create system metadata field
         $fieldId = DB::table('metadata_fields')->insertGetId([
             'key' => 'photo_type',
-            'system_label' => 'Shot Type',
+            'system_label' => 'Composition type',
             'type' => 'select',
             'applies_to' => 'image',
             'scope' => 'system',
@@ -208,7 +208,7 @@ class MetadataVisibilityResolverTest extends TestCase
             [
                 'field_id' => $fieldId,
                 'key' => 'photo_type',
-                'display_label' => 'Shot Type',
+                'display_label' => 'Composition type',
                 'type' => 'select',
             ],
         ];
@@ -229,7 +229,7 @@ class MetadataVisibilityResolverTest extends TestCase
         // Create system metadata field
         $fieldId = DB::table('metadata_fields')->insertGetId([
             'key' => 'photo_type',
-            'system_label' => 'Shot Type',
+            'system_label' => 'Composition type',
             'type' => 'select',
             'applies_to' => 'image',
             'scope' => 'system',
@@ -251,7 +251,7 @@ class MetadataVisibilityResolverTest extends TestCase
             [
                 'field_id' => $fieldId,
                 'key' => 'photo_type',
-                'display_label' => 'Shot Type',
+                'display_label' => 'Composition type',
                 'type' => 'select',
             ],
         ];
@@ -296,7 +296,7 @@ class MetadataVisibilityResolverTest extends TestCase
         // Create system metadata field
         $fieldId = DB::table('metadata_fields')->insertGetId([
             'key' => 'photo_type',
-            'system_label' => 'Shot Type',
+            'system_label' => 'Composition type',
             'type' => 'select',
             'applies_to' => 'image',
             'scope' => 'system',
@@ -318,7 +318,7 @@ class MetadataVisibilityResolverTest extends TestCase
             [
                 'field_id' => $fieldId,
                 'key' => 'photo_type',
-                'display_label' => 'Shot Type',
+                'display_label' => 'Composition type',
                 'type' => 'select',
             ],
         ];
@@ -372,7 +372,7 @@ class MetadataVisibilityResolverTest extends TestCase
         // Create system metadata field
         $fieldId = DB::table('metadata_fields')->insertGetId([
             'key' => 'photo_type',
-            'system_label' => 'Shot Type',
+            'system_label' => 'Composition type',
             'type' => 'select',
             'applies_to' => 'image',
             'scope' => 'system',
@@ -392,7 +392,7 @@ class MetadataVisibilityResolverTest extends TestCase
         $field = [
             'field_id' => $fieldId,
             'key' => 'photo_type',
-            'display_label' => 'Shot Type',
+            'display_label' => 'Composition type',
             'type' => 'select',
         ];
 

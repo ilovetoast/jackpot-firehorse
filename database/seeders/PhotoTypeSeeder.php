@@ -9,7 +9,7 @@ use Illuminate\Support\Facades\DB;
  * Basic Metadata Fields Seeder
  *
  * Creates essential metadata fields including:
- * - photo_type: Shot type / visual composition (DB key unchanged; label “Shot Type” in MetadataFieldsSeeder).
+ * - photo_type: Composition / shot framing (DB key unchanged; label “Composition type” in MetadataFieldsSeeder).
  * - orientation: Image orientation (landscape, portrait, square)
  * - color_space: Color space (sRGB, Adobe RGB, Display P3)
  * - resolution_class: Resolution classification (low, medium, high, ultra)
@@ -44,7 +44,7 @@ class PhotoTypeSeeder extends Seeder
     {
         $fieldId = $this->getOrCreateField([
             'key' => 'photo_type',
-            'system_label' => 'Shot Type',
+            'system_label' => 'Composition type',
             'type' => 'select',
             'applies_to' => 'image',
             'scope' => 'system',
