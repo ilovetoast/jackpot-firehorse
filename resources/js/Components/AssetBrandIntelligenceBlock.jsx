@@ -9,6 +9,7 @@ import { ArrowPathIcon, SparklesIcon } from '@heroicons/react/24/outline'
 import { Link, usePage } from '@inertiajs/react'
 import BrandSignalBreakdown from './BrandSignalBreakdown'
 import BrandIntelligenceDecisionTrace from './BrandIntelligenceDecisionTrace'
+import DrawerReviewCallout from './DrawerReviewCallout'
 
 const POLL_INTERVAL_MS = 1100
 const POLL_MAX_ATTEMPTS = 45
@@ -629,30 +630,28 @@ export default function AssetBrandIntelligenceBlock({
 
     if (!hasPublishedGuidelines) {
         return wrapCard(
-            <div
-                className={`rounded-md border border-amber-200/90 bg-amber-50/95 p-3 ${!drawerInsightGroup ? 'shadow-sm' : ''}`}
+            <DrawerReviewCallout
+                variant="neutral"
+                title={!drawerInsightGroup ? 'Brand Intelligence' : undefined}
+                titleIcon={!drawerInsightGroup ? SparklesIcon : undefined}
+                titleIconClassName="text-indigo-500"
             >
-                {!drawerInsightGroup && (
-                    <div className="flex items-center gap-1.5 mb-2">
-                        <SparklesIcon className="h-3.5 w-3.5 flex-shrink-0 text-amber-800" aria-hidden />
-                        <h3 className="text-xs font-semibold text-amber-950">Brand Intelligence</h3>
-                    </div>
-                )}
-                <p className="text-sm text-amber-950/90">
-                    Scoring is available only after brand guidelines are <strong>published</strong>. We don&apos;t run
-                    Brand Intelligence until then.
+                <p className="text-sm leading-relaxed text-slate-600">
+                    Scoring is available only after brand guidelines are{' '}
+                    <strong className="font-semibold text-slate-800">published</strong>. We don&apos;t run Brand
+                    Intelligence until then.
                 </p>
-                <p className="mt-2 text-sm text-amber-900/90">
+                <p className="mt-2 text-sm leading-relaxed text-slate-600">
                     Complete your guidelines workflow (research → review → build), publish a version, then alignment
                     scoring can start for assets in categories where Brand Intelligence is enabled.
                 </p>
                 <Link
                     href="/app/brand-guidelines"
-                    className="mt-3 inline-block text-sm font-semibold text-amber-950 underline decoration-amber-700/60 underline-offset-2 hover:text-amber-900"
+                    className="mt-3 inline-block text-sm font-semibold text-indigo-600 underline decoration-indigo-300/70 underline-offset-2 hover:text-indigo-500"
                 >
                     Open Brand Guidelines
                 </Link>
-            </div>,
+            </DrawerReviewCallout>,
         )
     }
 
@@ -694,7 +693,7 @@ export default function AssetBrandIntelligenceBlock({
                             Running brand analysis…
                         </p>
                     ) : analysisGateNote ? (
-                        <p className="text-sm text-amber-800">{analysisGateNote}</p>
+                        <p className="text-sm leading-relaxed text-slate-700">{analysisGateNote}</p>
                     ) : (
                         <>
                             <p className="text-sm text-slate-600">Not analyzed yet</p>

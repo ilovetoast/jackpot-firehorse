@@ -3198,6 +3198,15 @@ export default function AssetDrawer({
         presentationPipelineStatus,
     ])
 
+    /**
+     * Executions (deliverables): Preview & Styles + Processing & Automation start collapsed so Quick View
+     * stays scannable. Library assets keep attention-based auto-expand from drawerExpandPreviewOrProcessingSections.
+     */
+    const drawerPreviewProcessingDefaultExpanded = useMemo(
+        () => (isExecutionDrawer ? false : drawerExpandPreviewOrProcessingSections),
+        [isExecutionDrawer, drawerExpandPreviewOrProcessingSections],
+    )
+
     // Handle manual thumbnail generation (for previously skipped assets)
     const handleGenerateThumbnail = async () => {
         if (!displayAsset?.id || !canGenerateThumbnail) return
@@ -5531,7 +5540,7 @@ export default function AssetDrawer({
                             <CollapsibleSection
                                 contentInset="flush"
                                 title="Preview & Styles"
-                                defaultExpanded={drawerExpandPreviewOrProcessingSections}
+                                defaultExpanded={drawerPreviewProcessingDefaultExpanded}
                             >
                                 <div className="space-y-2">
                                     {(canRegeneratePreviewInProcessingSection || showExecutionPreviewChrome) && (
@@ -5838,7 +5847,7 @@ export default function AssetDrawer({
                                 <CollapsibleSection
                                     contentInset="flush"
                                     title="Processing & Automation"
-                                    defaultExpanded={drawerExpandPreviewOrProcessingSections}
+                                    defaultExpanded={drawerPreviewProcessingDefaultExpanded}
                                 >
                                     <div className="space-y-3">
                                         <div className="text-xs leading-snug text-gray-500">

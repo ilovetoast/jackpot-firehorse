@@ -1,7 +1,12 @@
 /**
- * Amber notice when pipeline analysis / thumbnails / embeddings are still in progress,
+ * Notice when pipeline analysis / thumbnails / embeddings are still in progress,
  * or when thumbnails exist but visual metadata failed validation.
+ *
+ * Typography matches drawer callouts (slate); “in progress” uses a light sky tint.
  */
+import { CpuChipIcon, ExclamationTriangleIcon } from '@heroicons/react/24/outline'
+import DrawerReviewCallout from './DrawerReviewCallout'
+
 export default function MetadataAnalysisRunningBanner({
     metadataHealth,
     analysisStatus,
@@ -12,25 +17,26 @@ export default function MetadataAnalysisRunningBanner({
         return null
     }
 
+    const isVisualInvalid = thumbnailStatus === 'completed' && metadataHealth?.visual_metadata_ready === false
+
     return (
-        <div className={`rounded-md border border-amber-200 bg-amber-50 p-4 ${className}`.trim()}>
-            {thumbnailStatus === 'completed' && metadataHealth?.visual_metadata_ready === false ? (
-                <>
-                    <div className="font-medium text-amber-800">Visual metadata invalid</div>
-                    <div className="mt-1 text-sm text-amber-700">
-                        Thumbnail exists but dimensions or metadata are missing or invalid. Re-run analysis or contact
-                        support.
-                    </div>
-                </>
+        <DrawerReviewCallout
+            variant={isVisualInvalid ? 'neutral' : 'in_progress'}
+            title={isVisualInvalid ? 'Visual metadata invalid' : 'System analysis still running'}
+            titleIcon={isVisualInvalid ? ExclamationTriangleIcon : CpuChipIcon}
+            className={className}
+        >
+            {isVisualInvalid ? (
+                <p className="text-sm leading-relaxed text-slate-600">
+                    Thumbnail exists but dimensions or metadata are missing or invalid. Re-run analysis or contact
+                    support.
+                </p>
             ) : (
-                <>
-                    <div className="font-medium text-amber-800">System analysis still running</div>
-                    <div className="mt-1 text-sm text-amber-700">
-                        Dominant colors, embeddings, or thumbnails may not have completed. Re-run analysis will be
-                        available once the pipeline finishes.
-                    </div>
-                </>
+                <p className="text-sm leading-relaxed text-slate-600">
+                    Dominant colors, embeddings, or thumbnails may not have completed. Re-run analysis will be available
+                    once the pipeline finishes.
+                </p>
             )}
-        </div>
+        </DrawerReviewCallout>
     )
 }
