@@ -11,8 +11,9 @@
  *   - are NOT unsupported format
  *   - have no thumbnail_error
  * - Poll stops automatically when no assets qualify
- * - Uses exponential backoff: 10s → 15s → 30s → 60s → 60s → stop
- * - Max duration ~3-4 minutes
+ * - Uses exponential backoff between polls: 2s → 3s → 5s → 10s → 20s → stop
+ * - First batch request runs immediately; short early gaps so the grid catches “ready” soon after the job finishes
+ * - Max duration ~1–2 minutes of follow-up polling
  * 
  * WHY THIS EXISTS:
  * - Preview thumbnails provide immediate visual feedback during processing
@@ -30,8 +31,9 @@ import { useEffect, useRef } from 'react'
 import { getThumbnailState, supportsThumbnail } from '../utils/thumbnailUtils'
 import { mergeAsset } from '../utils/assetUtils'
 
-// Exponential backoff schedule: 10s → 15s → 30s → 60s → 60s → stop
-const POLL_SCHEDULE = [10000, 15000, 30000, 60000, 60000] // milliseconds
+// Gaps between batch polls (first poll is immediate). Previously 10s first gap — felt slow vs server times.
+// Aligned with useDrawerThumbnailPoll’s early cadence so the grid updates soon after thumbnails land in the API.
+const POLL_SCHEDULE = [2000, 3000, 5000, 10000, 20000] // milliseconds
 const MAX_POLL_ATTEMPTS = POLL_SCHEDULE.length
 
 /**

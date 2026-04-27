@@ -59,6 +59,22 @@ function cn(...parts) {
 
 const UPLOAD_DIALOG_MINIMIZED_KEY = 'uploadAssetDialogMinimized'
 
+/** Field keys in the upload metadata schema (used to drop stale global/per-file values when the category changes). */
+function getUploadSchemaFieldKeySet(schema) {
+    if (!schema?.groups?.length) {
+        return new Set()
+    }
+    const keys = new Set()
+    for (const g of schema.groups) {
+        for (const f of g.fields || []) {
+            if (f?.key) {
+                keys.add(f.key)
+            }
+        }
+    }
+    return keys
+}
+
 function MinimizedTrayFooter({
     batchStatus,
     trayCompleted,
@@ -3706,6 +3722,62 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
             })
     }, [selectedCategoryId])
 
+    // When the category’s schema changes, remove metadata keys that no longer exist (stale global + per-file).
+    // Keeps the tray “Effective metadata” and override controls in sync with the selected category.
+    useEffect(() => {
+        if (!uploadMetadataSchema?.groups) {
+            return
+        }
+        const valid = getUploadSchemaFieldKeySet(uploadMetadataSchema)
+        if (valid.size === 0) {
+            return
+        }
+        setGlobalMetadataDraft((prev) => {
+            const next = { ...prev }
+            let changed = false
+            Object.keys(next).forEach((k) => {
+                if (!valid.has(k)) {
+                    delete next[k]
+                    changed = true
+                }
+            })
+            return changed ? next : prev
+        })
+        setV2Files((prev) => {
+            let any = false
+            const mapped = prev.map((f) => {
+                const d = f.metadataDraft || {}
+                if (Object.keys(d).length === 0) {
+                    return f
+                }
+                const nextDraft = { ...d }
+                let ch = false
+                Object.keys(nextDraft).forEach((k) => {
+                    if (!valid.has(k)) {
+                        delete nextDraft[k]
+                        ch = true
+                    }
+                })
+                if (!ch) {
+                    return f
+                }
+                any = true
+                return { ...f, metadataDraft: nextDraft }
+            })
+            return any ? mapped : prev
+        })
+    }, [uploadMetadataSchema])
+
+    useEffect(() => {
+        if (!isFinalizeSuccess) {
+            return
+        }
+        const root = document.querySelector('[data-upload-dialog-root]')
+        if (root) {
+            root.scrollTop = 0
+        }
+    }, [isFinalizeSuccess])
+
     // C9: Fetch collections list when dialog opens (for upload collections field)
     useEffect(() => {
         if (!open) return
@@ -4321,6 +4393,82 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                     onClick={!hasUploadingItems && batchStatus !== 'finalizing' ? onClose : undefined}
                 />
 
+                {/* Success — viewport-fixed so the card stays centered after long forms (not the tall modal box). */}
+                {isFinalizeSuccess && (
+                    <div className="pointer-events-auto fixed inset-0 z-[100] flex items-center justify-center bg-gray-900/[0.08] p-4 backdrop-blur-[1px] sm:p-6">
+                        <style>{`
+                            @keyframes jp-upload-success-reel {
+                                0%, 100% { transform: translateY(0); }
+                                25% { transform: translateY(-5px); }
+                                55% { transform: translateY(3px); }
+                            }
+                            .jp-upload-success-reel-1 { animation: jp-upload-success-reel 0.65s ease-in-out; }
+                            .jp-upload-success-reel-2 { animation: jp-upload-success-reel 0.72s ease-in-out 0.08s; }
+                            .jp-upload-success-reel-3 { animation: jp-upload-success-reel 0.78s ease-in-out 0.16s; }
+                            @keyframes jp-upload-success-check {
+                                0% { transform: scale(0.65) rotate(-5deg); opacity: 0.4; }
+                                70% { transform: scale(1.05) rotate(0deg); opacity: 1; }
+                                100% { transform: scale(1) rotate(0deg); opacity: 1; }
+                            }
+                            .jp-upload-success-check-pop {
+                                animation: jp-upload-success-check 0.55s cubic-bezier(0.34, 1.45, 0.64, 1) 0.26s both;
+                            }
+                        `}</style>
+                        <div
+                            className="w-full max-w-sm rounded-2xl border border-gray-200/90 bg-white px-6 py-8 text-center shadow-2xl"
+                            role="status"
+                            aria-live="polite"
+                        >
+                            <div
+                                className="mb-5 flex items-center justify-center gap-2 sm:gap-3"
+                                aria-hidden="true"
+                            >
+                                <img
+                                    src="/jp-parts/cherry-slot.svg"
+                                    alt=""
+                                    className="jp-upload-success-reel-1 h-7 w-7 opacity-75"
+                                />
+                                <img
+                                    src="/jp-parts/seven-slot.svg"
+                                    alt=""
+                                    className="jp-upload-success-reel-2 h-7 w-7 opacity-75"
+                                />
+                                <img
+                                    src="/jp-parts/diamond-slot.svg"
+                                    alt=""
+                                    className="jp-upload-success-reel-3 h-7 w-7 opacity-75"
+                                />
+                                <div className="jp-upload-success-check-pop flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-green-100 ring-2 ring-green-200/80">
+                                    <CheckIcon className="h-6 w-6 text-green-600" aria-hidden />
+                                </div>
+                            </div>
+                            <h3 className="text-lg font-semibold text-gray-900">Upload complete</h3>
+                            <p className="mt-1 text-sm text-gray-500">
+                                Your assets are ready. AI enhancements will continue in the background.
+                            </p>
+                            <div className="mt-6 flex flex-wrap justify-center gap-3">
+                                <button
+                                    type="button"
+                                    onClick={handleSuccessViewAssets}
+                                    className="rounded-md px-4 py-2 text-sm font-medium text-white hover:opacity-90"
+                                    style={{ backgroundColor: brandPrimary }}
+                                >
+                                    {defaultAssetType === 'asset'
+                                        ? 'View assets'
+                                        : `View ${DELIVERABLES_PAGE_LABEL}`}
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={handleSuccessUploadMore}
+                                    className="rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                                >
+                                    Upload more
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
                 {/* Modal panel - wider for Phase 3 layout; flex parent keeps vertical + horizontal center at all breakpoints */}
                 <div className="relative z-10 w-full max-w-4xl transform overflow-hidden rounded-lg bg-white text-left shadow-xl transition-all">
                     <div className={`bg-white px-4 pt-5 pb-4 sm:p-6 relative ${isFinalizeSuccess ? 'opacity-20 pointer-events-none' : ''}`}>
@@ -4814,82 +4962,6 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                             )}
                         </div>
                     </div>
-                    
-                    {/* Success overlay — compact card (not full uploader width); slot-reel nod to homepage */}
-                    {isFinalizeSuccess && (
-                        <div className="pointer-events-auto absolute inset-0 z-50 flex items-center justify-center rounded-lg bg-gray-900/[0.08] p-4 backdrop-blur-[1px] sm:p-6">
-                            <style>{`
-                                @keyframes jp-upload-success-reel {
-                                    0%, 100% { transform: translateY(0); }
-                                    25% { transform: translateY(-5px); }
-                                    55% { transform: translateY(3px); }
-                                }
-                                .jp-upload-success-reel-1 { animation: jp-upload-success-reel 0.65s ease-in-out; }
-                                .jp-upload-success-reel-2 { animation: jp-upload-success-reel 0.72s ease-in-out 0.08s; }
-                                .jp-upload-success-reel-3 { animation: jp-upload-success-reel 0.78s ease-in-out 0.16s; }
-                                @keyframes jp-upload-success-check {
-                                    0% { transform: scale(0.65) rotate(-5deg); opacity: 0.4; }
-                                    70% { transform: scale(1.05) rotate(0deg); opacity: 1; }
-                                    100% { transform: scale(1) rotate(0deg); opacity: 1; }
-                                }
-                                .jp-upload-success-check-pop {
-                                    animation: jp-upload-success-check 0.55s cubic-bezier(0.34, 1.45, 0.64, 1) 0.26s both;
-                                }
-                            `}</style>
-                            <div
-                                className="w-full max-w-sm rounded-2xl border border-gray-200/90 bg-white px-6 py-8 text-center shadow-2xl"
-                                role="status"
-                                aria-live="polite"
-                            >
-                                <div
-                                    className="mb-5 flex items-center justify-center gap-2 sm:gap-3"
-                                    aria-hidden="true"
-                                >
-                                    <img
-                                        src="/jp-parts/cherry-slot.svg"
-                                        alt=""
-                                        className="jp-upload-success-reel-1 h-7 w-7 opacity-75"
-                                    />
-                                    <img
-                                        src="/jp-parts/seven-slot.svg"
-                                        alt=""
-                                        className="jp-upload-success-reel-2 h-7 w-7 opacity-75"
-                                    />
-                                    <img
-                                        src="/jp-parts/diamond-slot.svg"
-                                        alt=""
-                                        className="jp-upload-success-reel-3 h-7 w-7 opacity-75"
-                                    />
-                                    <div className="jp-upload-success-check-pop flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-green-100 ring-2 ring-green-200/80">
-                                        <CheckIcon className="h-6 w-6 text-green-600" aria-hidden />
-                                    </div>
-                                </div>
-                                <h3 className="text-lg font-semibold text-gray-900">Upload complete</h3>
-                                <p className="mt-1 text-sm text-gray-500">
-                                    Your assets are ready. AI enhancements will continue in the background.
-                                </p>
-                                <div className="mt-6 flex flex-wrap justify-center gap-3">
-                                    <button
-                                        type="button"
-                                        onClick={handleSuccessViewAssets}
-                                        className="rounded-md px-4 py-2 text-sm font-medium text-white hover:opacity-90"
-                                        style={{ backgroundColor: brandPrimary }}
-                                    >
-                                        {defaultAssetType === 'asset'
-                                            ? 'View assets'
-                                            : `View ${DELIVERABLES_PAGE_LABEL}`}
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={handleSuccessUploadMore}
-                                        className="rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
-                                    >
-                                        Upload more
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                    )}
                 </div>
             </div>
         </div>

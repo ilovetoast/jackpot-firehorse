@@ -62,8 +62,9 @@ export function filtersToFlatParams(filters, filterKeys = null) {
     if (Array.isArray(v)) {
       const nonEmpty = [...new Set(v.filter(x => x !== '' && x !== null && x !== undefined).map(String))]
       if (nonEmpty.length > 0) {
-        // Multi-value: dedupe and keep all for URL (tags=hero&tags=campaign or dominant_hue_group=X&dominant_hue_group=Y)
-        out[key] = MULTI_VALUE_FILTER_KEYS.has(key) ? nonEmpty : [nonEmpty[0]]
+        // Keep all values for URL when multiple are selected (e.g. multiselect product filters), not just the first.
+        // MULTI_VALUE_FILTER_KEYS (tags, collection, …) and any key with 2+ values get the full list.
+        out[key] = MULTI_VALUE_FILTER_KEYS.has(key) || nonEmpty.length > 1 ? nonEmpty : [nonEmpty[0]]
       }
     } else if (v !== '' && v !== null && v !== undefined) {
       out[key] = String(v)
@@ -111,7 +112,7 @@ export function flatParamsToFilters(params, filterKeys = [], options = {}) {
   }
   const out = {}
   for (const [baseKey, values] of Object.entries(rawByKey)) {
-    const isMulti = MULTI_VALUE_FILTER_KEYS.has(baseKey)
+    const isMulti = MULTI_VALUE_FILTER_KEYS.has(baseKey) || values.length > 1
     const normalized = isMulti ? [...new Set(values)] : values[values.length - 1]
     out[baseKey] = { operator: 'equals', value: normalized }
   }

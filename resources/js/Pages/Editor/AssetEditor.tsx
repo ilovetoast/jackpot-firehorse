@@ -1736,6 +1736,9 @@ export default function AssetEditor() {
     }, [selectedLayerId])
     const [spinPhraseIdx, setSpinPhraseIdx] = useState(0)
     propertiesPanelWidthRef.current = propertiesPanelWidth
+    /** User-resized properties column: stack primary Element controls when narrow. */
+    const studioElementPanelNarrow = propertiesPanelWidth < 360
+    const studioElementPanelTight = propertiesPanelWidth < 420
 
     const onPropertiesResizePointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
         e.preventDefault()
@@ -2297,28 +2300,25 @@ export default function AssetEditor() {
         [document.layers, selectedLayerId]
     )
 
+    const showStudioActionsSection = useMemo(
+        () =>
+            Boolean(
+                selectedLayer &&
+                    (isTextLayer(selectedLayer) || isGenerativeImageLayer(selectedLayer)),
+            ),
+        [selectedLayer]
+    )
+
     const visibleStudioPropertiesSectionIds = useMemo((): StudioPropertiesSectionId[] => {
         const ids: StudioPropertiesSectionId[] = ['canvas']
         if (!selectedLayer) return ids
-        ids.push('layer', 'element', 'actions', 'history', 'advanced')
+        ids.push('layer', 'element')
+        if (showStudioActionsSection) {
+            ids.push('actions')
+        }
+        ids.push('history', 'advanced')
         return ids
-    }, [selectedLayer])
-
-    const studioActionsSectionDescription = useMemo(() => {
-        if (!selectedLayer) {
-            return 'AI and batch tools'
-        }
-        if (isTextLayer(selectedLayer)) {
-            return 'Generate, improve, and brand tone'
-        }
-        if (isImageLayer(selectedLayer) || isGenerativeImageLayer(selectedLayer)) {
-            return 'AI edits, background, and motion'
-        }
-        if (isVideoLayer(selectedLayer)) {
-            return 'Generate previews and processing'
-        }
-        return 'AI and generative tools'
-    }, [selectedLayer])
+    }, [selectedLayer, showStudioActionsSection])
 
     const handleStudioPropertiesSectionToggle = useCallback((id: StudioPropertiesSectionId) => {
         setStudioPropertiesSectionOpen((prev) => {
@@ -2356,6 +2356,12 @@ export default function AssetEditor() {
             setStudioPropertiesSectionActive('canvas')
         }
     }, [selectedLayer])
+
+    useEffect(() => {
+        if (!showStudioActionsSection && studioPropertiesSectionActive === 'actions') {
+            setStudioPropertiesSectionActive('element')
+        }
+    }, [showStudioActionsSection, studioPropertiesSectionActive])
 
     useEffect(() => {
         const root = propertiesPanelScrollRef.current
@@ -10685,7 +10691,13 @@ export default function AssetEditor() {
                                     {isImageLayer(selectedLayer) && (
                                         <>
                                         <div className="space-y-2">
-                                            <div className="grid grid-cols-1 gap-1.5 min-[300px]:grid-cols-3">
+                                            <div
+                                                className={
+                                                    studioElementPanelNarrow
+                                                        ? 'flex flex-col gap-1.5'
+                                                        : 'grid grid-cols-3 gap-1.5'
+                                                }
+                                            >
                                             <button
                                                 type="button"
                                                 disabled={selectedLayer.locked}
@@ -10730,27 +10742,6 @@ export default function AssetEditor() {
                                             </button>
                                             </div>
                                         </div>
-                                        <div className="space-y-1.5">
-                                            <label className="text-[9px] font-semibold uppercase tracking-wider text-gray-500">
-                                                Blend mode
-                                            </label>
-                                            <select
-                                                value={selectedLayer.blendMode ?? 'normal'}
-                                                onChange={(e) =>
-                                                    updateLayer(selectedLayer.id, (l) => ({
-                                                        ...l,
-                                                        blendMode: e.target.value as LayerBlendMode,
-                                                    }))
-                                                }
-                                                className={studioPanelInputs.fieldSm}
-                                            >
-                                                {LAYER_BLEND_MODE_OPTIONS.map((opt) => (
-                                                    <option key={opt.value} value={opt.value}>
-                                                        {opt.label}
-                                                    </option>
-                                                ))}
-                                            </select>
-                                        </div>
                                         <div id="jp-element-ai-image" className="scroll-mt-1">
                                         <StudioSmartActionCard
                                             title="AI image editing"
@@ -10793,7 +10784,13 @@ export default function AssetEditor() {
                                                         <p className="text-[9px] font-semibold uppercase tracking-wider text-indigo-300/70">
                                                             Quick
                                                         </p>
-                                                        <div className="grid grid-cols-1 gap-1.5 min-[300px]:grid-cols-2">
+                                                        <div
+                                                            className={
+                                                                studioElementPanelTight
+                                                                    ? 'grid grid-cols-1 gap-1.5'
+                                                                    : 'grid grid-cols-1 gap-1.5 min-[300px]:grid-cols-2'
+                                                            }
+                                                        >
                                                             {IMAGE_LAYER_QUICK_ACTIONS.map((qa) => {
                                                                 const Ic = qa.Icon
                                                                 return (
@@ -10833,7 +10830,13 @@ export default function AssetEditor() {
                                                         open={propertiesImageEditModelOpen}
                                                         onOpenChange={setPropertiesImageEditModelOpen}
                                                     >
-                                                        <div className="grid grid-cols-1 gap-1.5 min-[420px]:grid-cols-3 min-[420px]:gap-1">
+                                                        <div
+                                                            className={
+                                                                studioElementPanelNarrow
+                                                                    ? 'grid grid-cols-1 gap-1.5'
+                                                                    : 'grid grid-cols-1 gap-1.5 min-[420px]:grid-cols-3 min-[420px]:gap-1'
+                                                            }
+                                                        >
                                                             {IMAGE_EDIT_MODEL_PRESETS.map((preset) => {
                                                                 const Ic = preset.Icon
                                                                 const current = normalizeEditModelKey(
@@ -11400,29 +11403,6 @@ export default function AssetEditor() {
                                             </div>
                                         </StudioSmartActionCard>
                                     )}
-                                    {!isImageLayer(selectedLayer) && (
-                                        <div className="space-y-1.5">
-                                            <label className="text-[9px] font-semibold uppercase tracking-wider text-gray-500">
-                                                Blend mode
-                                            </label>
-                                            <select
-                                                value={selectedLayer.blendMode ?? 'normal'}
-                                                onChange={(e) =>
-                                                    updateLayer(selectedLayer.id, (l) => ({
-                                                        ...l,
-                                                        blendMode: e.target.value as LayerBlendMode,
-                                                    }))
-                                                }
-                                                className={studioPanelInputs.fieldSm}
-                                            >
-                                                {LAYER_BLEND_MODE_OPTIONS.map((opt) => (
-                                                    <option key={opt.value} value={opt.value}>
-                                                        {opt.label}
-                                                    </option>
-                                                ))}
-                                            </select>
-                                        </div>
-                                    )}
                                     <StudioDisclosureSection
                                         id="jp-element-positioning"
                                         title="Positioning & sizing"
@@ -11636,6 +11616,27 @@ export default function AssetEditor() {
                                             Appearance
                                         </p>
                                     <div className={studioPanelSurfaces.technicalInset}>
+                                <div className="mb-3 space-y-1.5">
+                                    <label className="text-[9px] font-semibold uppercase tracking-wider text-gray-500">
+                                        Blend mode
+                                    </label>
+                                    <select
+                                        value={selectedLayer.blendMode ?? 'normal'}
+                                        onChange={(e) =>
+                                            updateLayer(selectedLayer.id, (l) => ({
+                                                ...l,
+                                                blendMode: e.target.value as LayerBlendMode,
+                                            }))
+                                        }
+                                        className={studioPanelInputs.fieldSm}
+                                    >
+                                        {LAYER_BLEND_MODE_OPTIONS.map((opt) => (
+                                            <option key={opt.value} value={opt.value}>
+                                                {opt.label}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
                                 {isFillLayer(selectedLayer) && selectedLayer.kind === 'text_boost' && (() => {
                                     // Local working values — default to inferred if a field
                                     // somehow wasn't set (older drafts loaded pre-model change).
@@ -12948,6 +12949,7 @@ export default function AssetEditor() {
                                     </div>
                                 </StudioPanelGroup>
 
+                                {showStudioActionsSection && (
                                 <StudioPanelGroup
                                     label="Actions"
                                     tone="ai"
@@ -12956,7 +12958,6 @@ export default function AssetEditor() {
                                     collapsed={!studioPropertiesSectionOpen.actions}
                                     onToggleCollapsed={() => handleStudioPropertiesSectionToggle('actions')}
                                     icon={<SparklesIcon className="h-3.5 w-3.5" aria-hidden />}
-                                    description={studioActionsSectionDescription}
                                     railIcon={<SparklesIcon className="h-4 w-4 shrink-0" aria-hidden />}
                                     railShortLabel="Actions"
                                     railActive={studioPropertiesSectionActive === 'actions'}
@@ -12977,7 +12978,13 @@ export default function AssetEditor() {
                                                     Working on copy…
                                                 </div>
                                             )}
-                                            <div className="grid grid-cols-1 gap-1.5 min-[300px]:grid-cols-2">
+                                            <div
+                                                className={
+                                                    studioElementPanelTight
+                                                        ? 'grid grid-cols-1 gap-1.5'
+                                                        : 'grid grid-cols-1 gap-1.5 min-[300px]:grid-cols-2'
+                                                }
+                                            >
                                                 {COPY_ASSIST_PRIMARY_ACTIONS.map(({ label, op, Icon, description }) => (
                                                     <button
                                                         key={op}
@@ -13727,6 +13734,7 @@ export default function AssetEditor() {
                                     )}
                                     </div>
                                 </StudioPanelGroup>
+                                )}
 
                                 <StudioPanelGroup
                                     label="History"
@@ -14057,7 +14065,7 @@ export default function AssetEditor() {
                                     railActive={studioPropertiesSectionActive === 'advanced'}
                                 >
                                     <p className="text-[10px] leading-snug text-gray-500">
-                                        Blend mode is under <span className="text-gray-400">Element</span> above.
+                                        Blend mode is under <span className="text-gray-400">Element → Appearance</span> above.
                                     </p>
                                 </StudioPanelGroup>
                             </div>

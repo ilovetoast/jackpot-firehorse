@@ -509,16 +509,16 @@ const MetadataFieldInput = forwardRef(function MetadataFieldInput(
             }
             const currentValues = Array.isArray(value) ? value : []
             const listClassName = isModalList
-                ? 'h-[min(32rem,55vh)] w-full min-h-[12rem] divide-y divide-gray-100 overflow-y-auto rounded-lg border border-gray-200 bg-gradient-to-b from-white to-slate-50/80 shadow-sm'
+                ? 'w-full max-h-[min(32rem,55vh)] divide-y divide-gray-100 overflow-y-auto rounded-lg border border-gray-200 bg-gradient-to-b from-white to-slate-50/80 shadow-sm'
                 : 'max-h-64 divide-y divide-gray-100 overflow-y-auto rounded-lg border border-gray-200 bg-gradient-to-b from-white to-slate-50/80 shadow-sm'
             if (isModalList) {
                 return (
-                    <div className="flex w-full min-w-0 min-h-0 flex-1 flex-col gap-2">
+                    <div className="flex w-full min-w-0 flex-col gap-2">
                         <label className="shrink-0 text-sm font-medium text-gray-700">
                             {field.display_label}
                             {isRequired && <span className="text-red-500 ml-0.5">*</span>}
                         </label>
-                        <div className="min-h-0 w-full min-w-0 flex-1">
+                        <div className="w-full min-w-0">
                             <ul className={listClassName} aria-label={field.display_label}>
                                 {mergedOptions.map((option) => {
                                     const isSelected = currentValues.includes(option.value)

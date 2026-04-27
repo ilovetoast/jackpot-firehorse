@@ -406,8 +406,17 @@ class MetadataFilterService
                 break;
                 
             case 'multiselect':
-                // For multiselect, check if value is in array
-                $query->orWhereRaw("JSON_CONTAINS({$jsonPath}, ?)", [json_encode($value)]);
+                // Match any selected option present in the stored JSON array (same semantics as asset_metadata).
+                $vals = is_array($value) ? array_values($value) : [$value];
+                $vals = array_filter($vals, static fn ($v) => $v !== null && $v !== '');
+                if ($vals === []) {
+                    break;
+                }
+                $query->where(function ($q) use ($jsonPath, $vals) {
+                    foreach ($vals as $val) {
+                        $q->orWhereRaw("JSON_CONTAINS({$jsonPath}, ?)", [json_encode($val)]);
+                    }
+                });
                 break;
 
             case 'boolean':
@@ -497,6 +506,19 @@ class MetadataFilterService
                     foreach ($value as $val) {
                         $query->whereRaw("JSON_CONTAINS(am.value_json, ?)", [json_encode($val)]);
                     }
+                } else {
+                    // Flat URL params use operator=equals (see filterUrlUtils.flatParamsToFilters). Without this branch,
+                    // no predicate was applied and any asset with an approved row for this field matched.
+                    $vals = is_array($value) ? array_values($value) : [$value];
+                    $vals = array_filter($vals, static fn ($v) => $v !== null && $v !== '');
+                    if ($vals === []) {
+                        break;
+                    }
+                    $query->where(function ($q) use ($vals) {
+                        foreach ($vals as $val) {
+                            $q->orWhereRaw("JSON_CONTAINS(am.value_json, ?)", [json_encode($val)]);
+                        }
+                    });
                 }
                 break;
 

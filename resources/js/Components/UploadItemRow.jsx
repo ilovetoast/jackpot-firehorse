@@ -1034,6 +1034,16 @@ export default memo(UploadItemRow, (prevProps, nextProps) => {
         prev.file === next.file
     );
     
-    // Return true = props equal (skip render), false = props different (re-render)
-    return propsEqual;
+    if (!propsEqual) {
+        return false
+    }
+    // Category / schema and global fields live on uploadManager; item shape omits metadataDraft
+    if (prevProps.uploadManager !== nextProps.uploadManager) {
+        return false
+    }
+    if (prev.metadataDraft !== next.metadataDraft) {
+        return false
+    }
+    // Return true = skip re-render
+    return true
 });

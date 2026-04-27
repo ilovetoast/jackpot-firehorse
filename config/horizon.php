@@ -380,7 +380,8 @@ return [
                 'tries' => 3,
             ],
             'supervisor-images' => [
-                'maxProcesses' => 1,
+                // Same as production: pipeline + thumbnails + AI on `images` serialize if this is 1
+                'maxProcesses' => 4,
                 'minProcesses' => 1,
             ],
             'supervisor-images-heavy' => [
@@ -410,7 +411,7 @@ return [
                 'maxProcesses' => 1,
             ],
             'supervisor-images' => [
-                'maxProcesses' => 1,
+                'maxProcesses' => 2,
             ],
             'supervisor-images-heavy' => [
                 'maxProcesses' => 1,

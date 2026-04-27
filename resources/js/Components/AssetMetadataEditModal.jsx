@@ -131,7 +131,7 @@ export default function AssetMetadataEditModal({ assetId, field, primaryColor, o
                     <div
                         className={
                             isMultiselectField
-                                ? 'min-h-0 flex flex-1 flex-col overflow-hidden px-6 py-4'
+                                ? 'min-h-0 flex flex-col overflow-hidden px-6 py-4'
                                 : 'px-6 py-6'
                         }
                     >
@@ -141,7 +141,7 @@ export default function AssetMetadataEditModal({ assetId, field, primaryColor, o
                             </div>
                         )}
 
-                        <div className={isMultiselectField ? 'flex min-h-0 flex-1 flex-col' : 'space-y-4'}>
+                        <div className={isMultiselectField ? 'flex min-h-0 flex-col' : 'space-y-4'}>
                             {/* Boolean with display_widget=toggle (or starred): toggle in modal using brand primary color */}
                             {(field.type === 'boolean' && (field.display_widget === 'toggle' || field.key === 'starred' || field.field_key === 'starred')) ? (
                                 <label className="flex items-center justify-between gap-4 cursor-pointer">
