@@ -636,11 +636,12 @@ class BulkActionService
             foreach ($chunk as $asset) {
                 try {
                     $previousState = $this->snapshotState($asset);
+                    $aiQueue = (string) config('queue.ai_queue', 'ai');
                     Bus::chain([
-                        new AiMetadataGenerationJob($asset->id, true),
-                        new AiTagAutoApplyJob($asset->id),
+                        (new AiMetadataGenerationJob($asset->id, true))->onQueue($aiQueue),
+                        (new AiTagAutoApplyJob($asset->id))->onQueue($aiQueue),
                     ])
-                        ->onQueue(config('queue.images_queue', 'images'))
+                        ->onQueue($aiQueue)
                         ->dispatch();
                     $this->emitBulkActionPerformed($asset, $user, AssetBulkAction::SITE_RERUN_AI_METADATA_TAGGING->value, $previousState, $this->snapshotState($asset));
                     $processed++;

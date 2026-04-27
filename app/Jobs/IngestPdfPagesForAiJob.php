@@ -41,9 +41,10 @@ class IngestPdfPagesForAiJob implements ShouldQueue
             'asset_id' => $asset->id,
         ]);
 
+        $aiQueue = (string) config('queue.ai_queue', 'ai');
         Bus::chain([
-            new AiMetadataGenerationJob($asset->id),
-            new AiMetadataSuggestionJob($asset->id),
-        ])->onQueue(config('queue.images_queue', 'images'))->dispatch();
+            (new AiMetadataGenerationJob($asset->id))->onQueue($aiQueue),
+            (new AiMetadataSuggestionJob($asset->id))->onQueue($aiQueue),
+        ])->onQueue($aiQueue)->dispatch();
     }
 }

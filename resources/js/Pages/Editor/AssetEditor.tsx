@@ -1601,6 +1601,8 @@ export default function AssetEditor() {
     const [pickerSearchInput, setPickerSearchInput] = useState('')
     const [pickerSearchDebounced, setPickerSearchDebounced] = useState('')
     const [pickerListRefreshKey, setPickerListRefreshKey] = useState(0)
+    /** Library + video picker: show intake queue (staged) rows only — subtle toggle, not a category pill. */
+    const [pickerStagedLibraryOnly, setPickerStagedLibraryOnly] = useState(false)
     const [pickerLibraryUploading, setPickerLibraryUploading] = useState(false)
     const [pickerLibraryUploadError, setPickerLibraryUploadError] = useState<string | null>(null)
     const [pickerDropActive, setPickerDropActive] = useState(false)
@@ -2724,6 +2726,10 @@ export default function AssetEditor() {
         () => pickerCategoriesForScope.slice(0, 12),
         [pickerCategoriesForScope]
     )
+
+    /** Sidebar + modal: staged intake is only offered for library video picks (subtle link, not a category pill). */
+    const pickerStagedVideosToggleVisible = pickerMode === 'add_video' && pickerScope === 'library'
+    const pickerCategoryFilterDisabled = pickerStagedLibraryOnly && pickerStagedVideosToggleVisible
 
     const dirty = useMemo(
         () =>
@@ -5516,6 +5522,12 @@ export default function AssetEditor() {
     }, [pickerSearchInput])
 
     useEffect(() => {
+        if (pickerMode !== 'add_video' || pickerScope !== 'library') {
+            setPickerStagedLibraryOnly(false)
+        }
+    }, [pickerMode, pickerScope])
+
+    useEffect(() => {
         if (!pickerOpen && leftPanel !== 'assets') {
             return
         }
@@ -5526,22 +5538,35 @@ export default function AssetEditor() {
             pickerCategoryFilterId === '' ? undefined : Math.floor(Number(pickerCategoryFilterId))
         const search = pickerSearchDebounced.length > 0 ? pickerSearchDebounced : undefined
         const contentType = pickerMode === 'add_video' ? 'video' : 'image'
+        const stagedOnly =
+            pickerStagedLibraryOnly && pickerScope === 'library' && assetType === 'asset'
         fetchEditorAssets(80, {
             assetType,
             contentType,
             categoryId: categoryId !== undefined && categoryId > 0 ? categoryId : undefined,
             search,
+            stagedOnly,
         })
             .then((r) => setDamAssets(r.assets))
             .catch((e) => setDamError(e instanceof Error ? e.message : 'Failed to load assets'))
             .finally(() => setDamLoading(false))
-    }, [pickerOpen, leftPanel, pickerScope, pickerMode, pickerCategoryFilterId, pickerSearchDebounced, pickerListRefreshKey])
+    }, [
+        pickerOpen,
+        leftPanel,
+        pickerScope,
+        pickerMode,
+        pickerCategoryFilterId,
+        pickerSearchDebounced,
+        pickerListRefreshKey,
+        pickerStagedLibraryOnly,
+    ])
 
     const openPickerForAddImage = useCallback(() => {
         setPickerMode('add')
         setReplaceLayerId(null)
         setReferencePickerLayerId(null)
         setReferenceSelectionIds([])
+        setPickerStagedLibraryOnly(false)
         setPickerSearchInput('')
         setPickerSearchDebounced('')
         setPickerOpen(true)
@@ -5556,6 +5581,7 @@ export default function AssetEditor() {
         setReplaceLayerId(null)
         setReferencePickerLayerId(null)
         setReferenceSelectionIds([])
+        setPickerStagedLibraryOnly(false)
         setPickerSearchInput('')
         setPickerSearchDebounced('')
         setPickerOpen(true)
@@ -5565,6 +5591,7 @@ export default function AssetEditor() {
         setPickerMode('replace')
         setReplaceLayerId(layerId)
         setReferencePickerLayerId(null)
+        setPickerStagedLibraryOnly(false)
         setPickerSearchInput('')
         setPickerSearchDebounced('')
         setPickerOpen(true)
@@ -5579,6 +5606,7 @@ export default function AssetEditor() {
         setReferenceSelectionIds([...(layer.referenceAssetIds ?? [])].slice(0, MAX_REFERENCE_ASSETS))
         setPickerMode('references')
         setReplaceLayerId(null)
+        setPickerStagedLibraryOnly(false)
         setPickerSearchInput('')
         setPickerSearchDebounced('')
         setPickerOpen(true)
@@ -5620,6 +5648,7 @@ export default function AssetEditor() {
         setReferenceSelectionIds([])
         setPickerScope('library')
         setPickerCategoryFilterId('')
+        setPickerStagedLibraryOnly(false)
         setPickerSearchInput('')
         setPickerSearchDebounced('')
         setPickerLibraryUploadError(null)
@@ -5688,6 +5717,7 @@ export default function AssetEditor() {
                     setPickerOpen(false)
                     setPickerMode(null)
                     setReplaceLayerId(null)
+                    setPickerStagedLibraryOnly(false)
                     setActivityToast('Video added to the composition')
                 } catch (e) {
                     setActivityToast(e instanceof Error ? e.message : 'Could not add video')
@@ -5759,6 +5789,7 @@ export default function AssetEditor() {
             setPickerOpen(false)
             setPickerMode(null)
             setReplaceLayerId(null)
+            setPickerStagedLibraryOnly(false)
             } finally {
                 pickerPickingRef.current = null
                 setPickerPickingAssetId(null)
@@ -9076,6 +9107,7 @@ export default function AssetEditor() {
                                                         onClick={() => {
                                                             setPickerScope('executions')
                                                             setPickerCategoryFilterId('')
+                                                            setPickerStagedLibraryOnly(false)
                                                         }}
                                                     >
                                                         Executions
@@ -9115,13 +9147,17 @@ export default function AssetEditor() {
                                                 </label>
                                                 <select
                                                     id="assets-panel-category"
-                                                    className="w-full rounded border border-gray-700 bg-gray-800 py-1 pl-1.5 pr-6 text-[10px] text-gray-100"
+                                                    className="w-full rounded border border-gray-700 bg-gray-800 py-1 pl-1.5 pr-6 text-[10px] text-gray-100 disabled:cursor-not-allowed disabled:opacity-45"
                                                     value={pickerCategoryFilterId === '' ? '' : String(pickerCategoryFilterId)}
                                                     onChange={(e) => {
                                                         const v = e.target.value
                                                         setPickerCategoryFilterId(v === '' ? '' : Number(v))
                                                     }}
-                                                    disabled={pickerCategoriesLoading || pickerCategoriesForScope.length === 0}
+                                                    disabled={
+                                                        pickerCategoriesLoading ||
+                                                        pickerCategoriesForScope.length === 0 ||
+                                                        pickerCategoryFilterDisabled
+                                                    }
                                                 >
                                                     <option value="">All categories</option>
                                                     {pickerCategoriesForScope.map((c) => (
@@ -9136,7 +9172,8 @@ export default function AssetEditor() {
                                                     <button
                                                         type="button"
                                                         onClick={() => setPickerCategoryFilterId('')}
-                                                        className={`shrink-0 rounded px-1.5 py-0.5 text-[9px] font-medium ${
+                                                        disabled={pickerCategoryFilterDisabled}
+                                                        className={`shrink-0 rounded px-1.5 py-0.5 text-[9px] font-medium disabled:cursor-not-allowed disabled:opacity-40 ${
                                                             pickerCategoryFilterId === ''
                                                                 ? 'bg-indigo-600 text-white'
                                                                 : 'border border-gray-600 bg-gray-800/80 text-gray-300'
@@ -9149,7 +9186,8 @@ export default function AssetEditor() {
                                                             key={c.id}
                                                             type="button"
                                                             onClick={() => setPickerCategoryFilterId(c.id)}
-                                                            className={`max-w-[100px] shrink-0 truncate rounded px-1.5 py-0.5 text-[9px] font-medium ${
+                                                            disabled={pickerCategoryFilterDisabled}
+                                                            className={`max-w-[100px] shrink-0 truncate rounded px-1.5 py-0.5 text-[9px] font-medium disabled:cursor-not-allowed disabled:opacity-40 ${
                                                                 pickerCategoryFilterId === c.id
                                                                     ? 'bg-indigo-600 text-white'
                                                                     : 'border border-gray-600 bg-gray-800/80 text-gray-300'
@@ -9159,6 +9197,28 @@ export default function AssetEditor() {
                                                             {c.name}
                                                         </button>
                                                     ))}
+                                                </div>
+                                            )}
+                                            {pickerStagedVideosToggleVisible && (
+                                                <div className="border-t border-gray-800/80 pt-1.5">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            setPickerStagedLibraryOnly((prev) => {
+                                                                if (!prev) setPickerCategoryFilterId('')
+                                                                return !prev
+                                                            })
+                                                        }}
+                                                        className={`text-left text-[8px] font-normal leading-snug ${
+                                                            pickerStagedLibraryOnly
+                                                                ? 'text-indigo-400/85'
+                                                                : 'text-gray-500 hover:text-gray-400'
+                                                        }`}
+                                                    >
+                                                        {pickerStagedLibraryOnly
+                                                            ? 'Showing staged videos only (awaiting category in the library).'
+                                                            : 'Staged videos — uploads not yet assigned to a category'}
+                                                    </button>
                                                 </div>
                                             )}
                                         </div>
@@ -15048,6 +15108,7 @@ export default function AssetEditor() {
                                         onClick={() => {
                                             setPickerScope('executions')
                                             setPickerCategoryFilterId('')
+                                            setPickerStagedLibraryOnly(false)
                                         }}
                                     >
                                         Executions
@@ -15056,13 +15117,17 @@ export default function AssetEditor() {
                                 <label className="ml-auto flex items-center gap-1.5 text-[10px] text-gray-400">
                                     <span className="whitespace-nowrap">Category</span>
                                     <select
-                                        className="max-w-[200px] rounded border border-gray-700 bg-gray-800 py-1 pl-1.5 pr-6 text-[11px] text-gray-100"
+                                        className="max-w-[200px] rounded border border-gray-700 bg-gray-800 py-1 pl-1.5 pr-6 text-[11px] text-gray-100 disabled:cursor-not-allowed disabled:opacity-45"
                                         value={pickerCategoryFilterId === '' ? '' : String(pickerCategoryFilterId)}
                                         onChange={(e) => {
                                             const v = e.target.value
                                             setPickerCategoryFilterId(v === '' ? '' : Number(v))
                                         }}
-                                        disabled={pickerCategoriesLoading || pickerCategoriesForScope.length === 0}
+                                        disabled={
+                                            pickerCategoriesLoading ||
+                                            pickerCategoriesForScope.length === 0 ||
+                                            pickerCategoryFilterDisabled
+                                        }
                                     >
                                         <option value="">All categories</option>
                                         {pickerCategoriesForScope.map((c) => (
@@ -15109,9 +15174,11 @@ export default function AssetEditor() {
                                         </span>
                                         <button
                                             type="button"
-                                            disabled={pickerPickingAssetId !== null}
+                                            disabled={
+                                                pickerPickingAssetId !== null || pickerCategoryFilterDisabled
+                                            }
                                             onClick={() => setPickerCategoryFilterId('')}
-                                            className={`rounded px-2 py-0.5 text-[10px] font-medium ${
+                                            className={`rounded px-2 py-0.5 text-[10px] font-medium disabled:cursor-not-allowed disabled:opacity-40 ${
                                                 pickerCategoryFilterId === ''
                                                     ? 'bg-indigo-600 text-white'
                                                     : 'border border-gray-600 bg-gray-800 text-gray-300 hover:border-gray-500'
@@ -15125,9 +15192,11 @@ export default function AssetEditor() {
                                                 <button
                                                     key={c.id}
                                                     type="button"
-                                                    disabled={pickerPickingAssetId !== null}
+                                                    disabled={
+                                                        pickerPickingAssetId !== null || pickerCategoryFilterDisabled
+                                                    }
                                                     onClick={() => setPickerCategoryFilterId(c.id)}
-                                                    className={`max-w-[140px] truncate rounded px-2 py-0.5 text-[10px] font-medium ${
+                                                    className={`max-w-[140px] truncate rounded px-2 py-0.5 text-[10px] font-medium disabled:cursor-not-allowed disabled:opacity-40 ${
                                                         active
                                                             ? 'bg-indigo-600 text-white'
                                                             : 'border border-gray-600 bg-gray-800 text-gray-300 hover:border-gray-500'
@@ -15138,6 +15207,29 @@ export default function AssetEditor() {
                                                 </button>
                                             )
                                         })}
+                                    </div>
+                                )}
+                                {pickerStagedVideosToggleVisible && (
+                                    <div className="mt-1.5 border-t border-gray-800/80 pt-1.5">
+                                        <button
+                                            type="button"
+                                            disabled={pickerPickingAssetId !== null}
+                                            onClick={() => {
+                                                setPickerStagedLibraryOnly((prev) => {
+                                                    if (!prev) setPickerCategoryFilterId('')
+                                                    return !prev
+                                                })
+                                            }}
+                                            className={`text-left text-[9px] font-normal leading-snug disabled:cursor-not-allowed disabled:opacity-40 ${
+                                                pickerStagedLibraryOnly
+                                                    ? 'text-indigo-400/85'
+                                                    : 'text-gray-500 hover:text-gray-400'
+                                            }`}
+                                        >
+                                            {pickerStagedLibraryOnly
+                                                ? 'Showing staged videos only (awaiting category in the library).'
+                                                : 'Staged videos — uploads not yet assigned to a category'}
+                                        </button>
                                     </div>
                                 )}
                             </div>

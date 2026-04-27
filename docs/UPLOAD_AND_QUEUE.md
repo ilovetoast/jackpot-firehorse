@@ -248,7 +248,50 @@ For production:
 2. **UploadCompletionService::complete()** (inside `DB::transaction`) → `event(new AssetUploaded($asset))` (after commit via `DB::afterCommit`)
 3. **ProcessAssetOnUpload** (listener, `ShouldQueue`) → queued to default connection (Redis in staging)
 4. Worker runs **ProcessAssetOnUpload::handle()** → `ProcessAssetJob::dispatch($asset->id)`
-5. **ProcessAssetJob** (chain) → ExtractMetadataJob → GenerateThumbnailsJob → … (no env conditionals)
+5. **ProcessAssetJob** dispatches **two parallel chains** (no env conditionals):
+   - **Main chain** on the images / images-heavy / images-psd queue (resolved by `PipelineQueueResolver` from byte size + MIME):
+     `GenerateThumbnailsJob → GeneratePreviewJob → [GenerateVideoPreviewJob if video] → ExtractMetadataJob → ExtractEmbeddedMetadataJob → EmbeddedUsageRightsSuggestionJob → ComputedMetadataJob → PopulateAutomaticMetadataJob → ResolveMetadataCandidatesJob → [AITaggingJob if not _skip_ai_tagging] → FinalizeAssetJob → PromoteAssetJob`
+   - **AI follow-up chain** on `config('queue.ai_queue', 'ai')` (Horizon `supervisor-ai`), only when tenant policy + upload-time skip flags allow:
+     `AiMetadataGenerationJob → [AiTagAutoApplyJob if not _skip_ai_tagging] → [AiMetadataSuggestionJob if not _skip_ai_metadata]`
+
+The two chains run on different supervisors so AI vision calls cannot starve thumbnail/preview workers. AI jobs already poll/guard on `thumbnail_status === COMPLETED` before doing real vision work, so running them in parallel with the tail of the main chain is safe.
+
+### Time-to-first-thumbnail fast path
+
+`GenerateThumbnailsJob` is the **first** job in the main chain so users see standard/original thumbnails as quickly as possible.
+
+`ProcessAssetJob` runs `FileInspectionService::inspect()` synchronously on its own job before dispatching the chain, which writes `width`, `height`, and `mime_type` directly onto the asset row and current version. That means thumbnails do **not** depend on `ExtractMetadataJob`:
+
+- Raster images: dimensions are already on the row when `GenerateThumbnailsJob` starts. EXIF orientation is handled inside `ThumbnailGenerationService` while decoding.
+- PDF / SVG / PSD / PSB / video: `GenerateThumbnailsJob` derives dimensions from the renderer / Imagick / FFprobe at decode time (`$dimensionsFromRendering` branch).
+
+Full `ExtractMetadataJob` / `ExtractEmbeddedMetadataJob` / `EmbeddedUsageRightsSuggestionJob` work runs **after** thumbnails as enrichment.
+
+### Preferred thumbnails (disabled)
+
+`GeneratePreferredThumbnailJob` is gated by `config('assets.thumbnail.preferred.enabled', false)` (env: `THUMBNAIL_PREFERRED_ENABLED`, default `false`). While disabled it is **not** dispatched anywhere — including from `GenerateThumbnailsJob`'s post-success hook. UI grid falls back to the original thumbnail in this state.
+
+### `[asset_pipeline_timing]` log key
+
+`App\Support\Logging\AssetPipelineTimingLogger` emits one `Log::info('[asset_pipeline_timing]', …)` row at each major transition. Always-on, no signed URLs / S3 keys / filenames are logged. Each row carries `event`, `asset_id`, `asset_version_id`, `ts`, optional `ms_since_processing_marked` (wall time since `processing_started_at` was written), and small non-sensitive context (queue name, status, counts).
+
+| `event` | Emitted from | When |
+|---|---|---|
+| `original_stored` | `ProcessAssetJob` | Right after `processing_started_at` is written. Baseline for ms-since markers. |
+| `thumbnail_dispatched` | `ProcessAssetJob` | Immediately after `Bus::chain(...)->dispatch()` for the main chain. |
+| `ai_chain_dispatched` | `ProcessAssetJob` | Immediately after the AI chain is dispatched (only when AI jobs survive policy + skip flags). |
+| `thumbnail_started` | `GenerateThumbnailsJob` | At the start of `handle()` after asset/version resolution. |
+| `thumbnail_completed` | `GenerateThumbnailsJob` | On the success path after thumbnails are written. |
+| `preview_completed` | `GeneratePreviewJob` | After preview marker is written. |
+| `metadata_completed` | `ExtractMetadataJob` | After metadata payload is written. |
+
+Grep helper:
+
+```bash
+./vendor/bin/sail exec laravel.test grep "\[asset_pipeline_timing\]" storage/logs/laravel.log
+```
+
+The granular per-step timer (`[pipeline_timing]`, `App\Support\Logging\PipelineStepTimer`) remains gated behind `ASSET_PIPELINE_LOG_STEP_TIMINGS=true` for diagnostic deep-dives.
 
 ## Dispatch points (upload path)
 
@@ -256,7 +299,21 @@ For production:
 |------|-------------|------------------|------------------|
 | UploadCompletionService::complete() | `event(AssetUploaded)` → queues ProcessAssetOnUpload | None | Yes (after commit) |
 | ProcessAssetOnUpload::handle() | `ProcessAssetJob::dispatch()` | None | Yes (when listener runs) |
-| ProcessAssetJob | Bus::chain(…) | None | Yes |
+| ProcessAssetJob | Main `Bus::chain(…)` on `images*` queue | None | Yes |
+| ProcessAssetJob | AI `Bus::chain(…)` on `ai` queue | Tenant AI policy + `_skip_ai_*` flags | Yes when allowed |
+
+## AI queue routing
+
+All AI vision/suggestion dispatch sites target `config('queue.ai_queue', 'ai')` so they cannot land on the images queue:
+
+- `ProcessAssetJob` — post-upload AI follow-up chain
+- `AssetController::regenerateAiMetadata` — manual AI rerun
+- `AssetMetadataController` — `AiMetadataSuggestionJob::dispatch`
+- `BulkActionService` — bulk AI rerun
+- `StagedFiledAssetAiService` — studio/staged-filed follow-up
+- `IngestPdfPagesForAiJob` — PDF AI ingestion chain
+
+Horizon already exposes `supervisor-ai` listening on `[ai, ai-low]` (see `config/horizon.php`). Scale via `HORIZON_AI_PROCESSES` if the AI queue backlogs.
 
 ## Notes
 

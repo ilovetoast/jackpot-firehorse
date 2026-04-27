@@ -24,8 +24,21 @@ The thumbnail generation pipeline is a **production-critical, locked system** th
 ## Pipeline Flow
 
 ```
-Upload → ProcessAssetJob → GenerateThumbnailsJob → FinalizeAssetJob
+Upload
+  → ProcessAssetJob (FileInspectionService writes mime/width/height inline)
+  → GenerateThumbnailsJob   ← fast path: first job in the main chain
+  → GeneratePreviewJob
+  → [GenerateVideoPreviewJob if video]
+  → ExtractMetadataJob → ExtractEmbeddedMetadataJob → EmbeddedUsageRightsSuggestionJob
+  → ComputedMetadataJob → PopulateAutomaticMetadataJob → ResolveMetadataCandidatesJob
+  → [AITaggingJob unless _skip_ai_tagging]
+  → FinalizeAssetJob → PromoteAssetJob
+
+In parallel on the dedicated `ai` queue (when tenant policy allows):
+  AiMetadataGenerationJob → [AiTagAutoApplyJob] → [AiMetadataSuggestionJob]
 ```
+
+`GenerateThumbnailsJob` runs first because thumbnail generation does not depend on `ExtractMetadataJob` — `FileInspectionService` writes width/height/mime onto the asset before the chain dispatches, and `ThumbnailGenerationService` handles EXIF orientation while decoding. Full metadata, embedded metadata, usage-rights suggestions and AI work are scheduled as follow-up enrichment to keep time-to-first-thumbnail short. See `docs/UPLOAD_AND_QUEUE.md` for the full job order, queue routing, and `[asset_pipeline_timing]` log keys.
 
 ## Supported File Types
 

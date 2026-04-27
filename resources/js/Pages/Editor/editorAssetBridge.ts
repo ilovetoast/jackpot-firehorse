@@ -94,6 +94,11 @@ export type FetchEditorAssetsOptions = {
     categoryId?: number
     /** Server-side match on title / original filename (Studio asset picker search) */
     search?: string
+    /**
+     * Library only: intake queue (intake_state=staged), same rows as /app/assets/staged.
+     * Ignored for deliverables. Category filter is skipped when true.
+     */
+    stagedOnly?: boolean
 }
 
 export async function fetchEditorAssets(
@@ -114,6 +119,9 @@ export async function fetchEditorAssets(
     const q = options?.search?.trim()
     if (q) {
         params.set('q', q)
+    }
+    if (options?.stagedOnly && options?.assetType !== 'deliverable') {
+        params.set('staged_only', '1')
     }
     const res = await fetch(`/app/api/assets?${params.toString()}`, {
         headers: { Accept: 'application/json', 'X-CSRF-TOKEN': csrf ?? '' },

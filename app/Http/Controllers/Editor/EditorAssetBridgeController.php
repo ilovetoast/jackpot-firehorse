@@ -249,11 +249,13 @@ class EditorAssetBridgeController extends Controller
     }
 
     /**
-     * GET /app/api/assets?limit=50&asset_type=asset|deliverable&category_id=&content_type=image|video
+     * GET /app/api/assets?limit=50&asset_type=asset|deliverable&category_id=&content_type=image|video&staged_only=1
      *
      * Assets for the editor picker: library (ASSET) or executions (DELIVERABLE).
      * Optional category_id filters metadata.category_id (Photography, Print, etc.).
      * `content_type` defaults to `image` (raster/SVG). Use `video` for video/* rows (add video layer).
+     * `staged_only=1` (library ASSET only): intake queue — same rows as /app/assets/staged (ASSET + AI_GENERATED);
+     * category_id is ignored. Ignored for deliverables.
      */
     public function index(Request $request): JsonResponse
     {
@@ -280,12 +282,25 @@ class EditorAssetBridgeController extends Controller
 
         $contentType = strtolower((string) $request->query('content_type', 'image'));
 
-        $query = Asset::query()
-            ->where('tenant_id', $tenant->id)
-            ->where('brand_id', $brand->id)
-            ->where('type', $assetType)
-            ->normalIntakeOnly()
-            ->excludeBuilderStaged();
+        $stagedOnly = filter_var($request->query('staged_only', false), FILTER_VALIDATE_BOOLEAN);
+
+        // Intake queue (same as /app/assets/staged): awaiting category; includes ASSET + AI_GENERATED (e.g. studio MP4).
+        // Deliverables do not use this intake path — ignore staged_only for executions picker.
+        if ($stagedOnly && $assetType === AssetType::ASSET) {
+            $query = Asset::query()
+                ->where('tenant_id', $tenant->id)
+                ->where('brand_id', $brand->id)
+                ->forAssetLibraryTypes()
+                ->stagedOnly()
+                ->excludeBuilderStaged();
+        } else {
+            $query = Asset::query()
+                ->where('tenant_id', $tenant->id)
+                ->where('brand_id', $brand->id)
+                ->where('type', $assetType)
+                ->normalIntakeOnly()
+                ->excludeBuilderStaged();
+        }
 
         if ($contentType === 'video') {
             $query->where('mime_type', 'like', 'video/%');
@@ -301,7 +316,7 @@ class EditorAssetBridgeController extends Controller
         }
 
         $categoryFilterId = $request->query('category_id');
-        if ($categoryFilterId !== null && $categoryFilterId !== '') {
+        if (! $stagedOnly && $categoryFilterId !== null && $categoryFilterId !== '') {
             $cid = (int) $categoryFilterId;
             if ($cid > 0) {
                 $filterCategory = Category::query()

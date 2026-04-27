@@ -5254,7 +5254,7 @@ class AssetMetadataController extends Controller
         }
 
         // All metadata approved and AI suggestions not yet completed - trigger AI
-        \App\Jobs\AiMetadataSuggestionJob::dispatch($asset->id)->onQueue(config('queue.images_queue', 'images'));
+        \App\Jobs\AiMetadataSuggestionJob::dispatch($asset->id)->onQueue(config('queue.ai_queue', 'ai'));
     }
 
     /**

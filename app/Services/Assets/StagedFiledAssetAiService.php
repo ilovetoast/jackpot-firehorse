@@ -10,7 +10,6 @@ use App\Models\Asset;
 use App\Services\AiTagPolicyService;
 use App\Services\AiUsageService;
 use App\Services\FileTypeService;
-use App\Support\PipelineQueueResolver;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Log;
 
@@ -71,7 +70,9 @@ final class StagedFiledAssetAiService
         }
 
         $policy = app(AiTagPolicyService::class)->shouldProceedWithAiTagging($asset);
-        $q = PipelineQueueResolver::imagesQueueForAsset($asset);
+        // Vision/metadata work runs on the dedicated ai queue so it does not
+        // contend with thumbnail/preview workers on the images queue.
+        $aiQueue = (string) config('queue.ai_queue', 'ai');
         $fileType = app(FileTypeService::class)->detectFileType(
             (string) ($asset->mime_type ?? ''),
             pathinfo((string) ($asset->original_filename ?? ''), PATHINFO_EXTENSION)
@@ -122,9 +123,9 @@ final class StagedFiledAssetAiService
         }
 
         Bus::chain([
-            new AiMetadataGenerationJob($asset->id),
-            new AiTagAutoApplyJob($asset->id),
-            new AiMetadataSuggestionJob($asset->id),
-        ])->onQueue($q)->dispatch();
+            (new AiMetadataGenerationJob($asset->id))->onQueue($aiQueue),
+            (new AiTagAutoApplyJob($asset->id))->onQueue($aiQueue),
+            (new AiMetadataSuggestionJob($asset->id))->onQueue($aiQueue),
+        ])->onQueue($aiQueue)->dispatch();
     }
 }

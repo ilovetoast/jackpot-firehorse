@@ -2440,11 +2440,13 @@ class AssetController extends Controller
 
         try {
             // Chain: vision creates tag candidates; auto-apply promotes to asset_tags when tenant enables it.
+            // Route to dedicated ai queue so vision calls do not contend with thumbnail/preview workers.
+            $aiQueue = (string) config('queue.ai_queue', 'ai');
             Bus::chain([
-                new AiMetadataGenerationJob($asset->id, true),
-                new AiTagAutoApplyJob($asset->id),
+                (new AiMetadataGenerationJob($asset->id, true))->onQueue($aiQueue),
+                (new AiTagAutoApplyJob($asset->id))->onQueue($aiQueue),
             ])
-                ->onQueue(config('queue.images_queue', 'images'))
+                ->onQueue($aiQueue)
                 ->dispatch();
 
             app(AssetProcessingGuardService::class)->markDispatched($user, $asset, AssetProcessingGuardService::ACTION_AI_METADATA);

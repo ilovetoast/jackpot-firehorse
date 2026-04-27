@@ -251,6 +251,13 @@ class GenerateThumbnailsJob implements ShouldQueue
                 'queue_attempt' => $this->attempts(),
             ]);
 
+            \App\Support\Logging\AssetPipelineTimingLogger::record(
+                \App\Support\Logging\AssetPipelineTimingLogger::EVENT_THUMBNAIL_STARTED,
+                $asset,
+                $version,
+                ['attempt' => $this->attempts()]
+            );
+
             // Log asset state at start (after asset lookup)
             PipelineLogger::warning('THUMBNAILS: ASSET LOADED', [
                 'asset_id' => $asset->id,
@@ -1190,6 +1197,16 @@ class GenerateThumbnailsJob implements ShouldQueue
             $pipelineTimer?->lap('handle_success', $asset->fresh(), $version?->fresh(), [
                 'queue_job_id' => $this->job?->getJobId() ?? 'unknown',
             ]);
+
+            \App\Support\Logging\AssetPipelineTimingLogger::record(
+                \App\Support\Logging\AssetPipelineTimingLogger::EVENT_THUMBNAIL_COMPLETED,
+                $asset->fresh(),
+                $version?->fresh(),
+                [
+                    'thumbnail_status' => $asset->thumbnail_status?->value ?? null,
+                    'attempt' => $this->attempts(),
+                ]
+            );
 
             // TASK 2: Terminal state guarantee - COMPLETED
             // Asset is already updated to COMPLETED above (line 466)

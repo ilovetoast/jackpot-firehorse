@@ -12,6 +12,7 @@ use App\Services\FileInspectionService;
 use App\Services\SystemIncidentService;
 use App\Jobs\Concerns\QueuesOnImagesChannel;
 use App\Jobs\ProcessVideoInsightsBatchJob;
+use App\Support\Logging\AssetPipelineTimingLogger;
 use App\Support\Logging\PipelineLogger;
 use App\Support\Logging\PipelineStepTimer;
 use App\Support\PipelineQueueResolver;
@@ -451,6 +452,12 @@ class ProcessAssetJob implements ShouldQueue
         $aFresh = $asset->fresh();
         $this->pipelineStepTimer?->lap('processing_marked_started', $aFresh, $vFresh);
 
+        AssetPipelineTimingLogger::record(
+            AssetPipelineTimingLogger::EVENT_ORIGINAL_STORED,
+            $aFresh,
+            $vFresh,
+        );
+
         // Emit processing started event
         AssetEvent::create([
             'tenant_id' => $asset->tenant_id,
@@ -470,24 +477,39 @@ class ProcessAssetJob implements ShouldQueue
         ]);
 
         // Dispatch processing chain using Bus::chain()
-        // Processing pipeline:
-        // 1. ExtractMetadataJob - Extract file metadata (canonical / video basics)
-        // 2. ExtractEmbeddedMetadataJob - EXIF/IPTC/PDF tags → payload + governed index (best-effort)
-        // 2b. EmbeddedUsageRightsSuggestionJob - optional usage_rights suggestion from embedded copyright (no AI quota)
-        // 3. GenerateThumbnailsJob - Generate thumbnail styles
-        // 4. GeneratePreviewJob - Generate preview images
-        // 5. GenerateVideoPreviewJob - Generate video hover previews (video assets only)
-        // 6. ComputedMetadataJob - Compute technical metadata (Phase 5)
-        // 7. PopulateAutomaticMetadataJob - Create metadata candidates (Phase B6/B8)
-        // 8. ResolveMetadataCandidatesJob - Resolve candidates to asset_metadata (Phase B8)
-        // 9. AITaggingJob - pipeline completion flag for tagging step
-        // 10. AiMetadataGenerationJob - vision: creates asset_tag_candidates + field candidates
-        // 11. AiTagAutoApplyJob - applies tags when enable_ai_tag_auto_apply (must run after step 10)
-        // 12. AiMetadataSuggestionJob - suggestions from candidates (after generation)
-        // 13. FinalizeAssetJob - Mark asset as completed
-        // 14. PromoteAssetJob - Move from temp/ to canonical assets/ location
-        //    (runs after thumbnail generation, requires COMPLETED status)
-        
+        //
+        // Time-to-first-thumbnail fast path:
+        //   GenerateThumbnailsJob runs FIRST so the asset grid can render the
+        //   original-style thumbnail as soon as possible. Width/height/MIME are
+        //   already populated on asset+version by FileInspectionService above;
+        //   ExtractMetadataJob is not a prerequisite for image thumbnails, and
+        //   GenerateThumbnailsJob handles its own EXIF orientation/dimension
+        //   discovery for PDF/SVG/PSD/video sources.
+        //
+        // Main chain (images / images-heavy / images-psd queue):
+        //   1.  GenerateThumbnailsJob          - standard/original thumbnails (fast path)
+        //   2.  GeneratePreviewJob             - lightweight preview marker (after thumbs)
+        //   3.  GenerateVideoPreviewJob        - video hover previews (video only)
+        //   4.  ExtractMetadataJob             - canonical / video basics
+        //   5.  ExtractEmbeddedMetadataJob     - EXIF/IPTC/PDF tags
+        //   6.  EmbeddedUsageRightsSuggestionJob - optional usage_rights from embedded copyright
+        //   7.  ComputedMetadataJob            - Phase 5 computed metadata
+        //   8.  PopulateAutomaticMetadataJob   - Phase B6/B8 candidates
+        //   9.  ResolveMetadataCandidatesJob   - Phase B8 resolve candidates → asset_metadata
+        //   10. AITaggingJob                   - pipeline completion flag for tagging step
+        //   11. FinalizeAssetJob               - mark asset as completed
+        //   12. PromoteAssetJob                - move temp/ → assets/
+        //
+        // AI follow-up chain (ai / ai-low queue), dispatched in parallel after
+        // the main chain. AI vision/suggestion jobs no longer compete with the
+        // images queue worker that owns thumbnail generation:
+        //   - AiMetadataGenerationJob          - vision call: tag + field candidates
+        //   - AiTagAutoApplyJob                - applies high-confidence tags
+        //   - AiMetadataSuggestionJob          - structured suggestions from candidates
+        // Each AI job already polls/guards on thumbnail completion before doing
+        // any vision work, so running them on the ai queue in parallel with the
+        // tail of the main chain is safe.
+
         // Check if asset is a video to conditionally add video preview job
         // Version path: use version->mime_type only (from FileInspectionService). Legacy: asset->mime_type.
         $fileTypeService = app(\App\Services\FileTypeService::class);
@@ -495,9 +517,7 @@ class ProcessAssetJob implements ShouldQueue
         $extForType = pathinfo($asset->original_filename ?? '', PATHINFO_EXTENSION);
         $fileType = $fileTypeService->detectFileType($mimeForType, $extForType);
         $isVideo = $fileType === 'video';
-        
-        // TASK 4: Prove job dispatch chain is intact
-        // GenerateThumbnailsJob is part of the processing chain
+
         PipelineLogger::warning('PIPELINE: Dispatching GenerateThumbnailsJob in chain', [
             'asset_id' => $asset->id,
         ]);
@@ -506,27 +526,26 @@ class ProcessAssetJob implements ShouldQueue
             'asset_id' => $asset->id,
         ]);
 
+        // Standard/original thumbnails first — fast path for time-to-first-thumbnail.
         $chainJobs = [
-            new ExtractMetadataJob($asset->id, $version?->id), // Version ID for version-aware path
-            new ExtractEmbeddedMetadataJob($asset->id, $version?->id),
-            new EmbeddedUsageRightsSuggestionJob($asset->id),
             new GenerateThumbnailsJob($thumbnailJobId), // Version ID when version-aware
             new GeneratePreviewJob($asset->id),
         ];
-        
+
         // Add video preview generation for video assets (after thumbnails)
         if ($isVideo) {
             $chainJobs[] = new GenerateVideoPreviewJob($asset->id);
         }
-        
+
         $chainJobs = array_merge($chainJobs, [
+            new ExtractMetadataJob($asset->id, $version?->id), // Version ID for version-aware path
+            new ExtractEmbeddedMetadataJob($asset->id, $version?->id),
+            new EmbeddedUsageRightsSuggestionJob($asset->id),
             new ComputedMetadataJob($asset->id), // Phase 5: Computed metadata
             new PopulateAutomaticMetadataJob($asset->id), // Phase B6/B8: Create metadata candidates
             new ResolveMetadataCandidatesJob($asset->id), // Phase B8: Resolve candidates to asset_metadata
             // C9.2: Conditionally add AITaggingJob based on upload-time skip flag
             ...($this->shouldSkipAiTagging($asset) ? [] : [new AITaggingJob($asset->id)]),
-            // Phase J.2.2: Check AI tagging policy before proceeding (also respects upload-time skip flags)
-            ...$this->getConditionalAiJobs($asset),
             new FinalizeAssetJob($asset->id),
             new PromoteAssetJob($asset->id),
         ]);
@@ -547,11 +566,53 @@ class ProcessAssetJob implements ShouldQueue
             ->onQueue($pipelineQueue)
             ->dispatch();
 
+        AssetPipelineTimingLogger::record(
+            AssetPipelineTimingLogger::EVENT_THUMBNAIL_DISPATCHED,
+            $asset->fresh(),
+            $version?->fresh(),
+            [
+                'queue' => $pipelineQueue,
+                'chain_job_count' => count($chainJobs),
+                'is_video' => $isVideo,
+            ]
+        );
+
+        // AI vision/suggestion jobs run in parallel on the dedicated ai queue so
+        // they do not compete with thumbnail/preview workers on the images queue.
+        // Phase J.2.2 + C9.2: getConditionalAiJobs() already enforces tenant
+        // policy + upload-time _skip_ai_* flags.
+        $aiJobs = $this->getConditionalAiJobs($asset);
+        if (! empty($aiJobs)) {
+            $aiQueue = (string) config('queue.ai_queue', 'ai');
+            // Belt-and-braces: chain->onQueue() sets the chain queue, but the AI
+            // job constructors call configureImagesQueue() via QueuesOnImagesChannel,
+            // so we explicitly override each instance to the ai queue too.
+            $aiJobsRouted = array_map(
+                static fn ($job) => method_exists($job, 'onQueue') ? $job->onQueue($aiQueue) : $job,
+                $aiJobs
+            );
+
+            Bus::chain($aiJobsRouted)
+                ->onQueue($aiQueue)
+                ->dispatch();
+
+            AssetPipelineTimingLogger::record(
+                AssetPipelineTimingLogger::EVENT_AI_CHAIN_DISPATCHED,
+                $asset->fresh(),
+                $version?->fresh(),
+                [
+                    'queue' => $aiQueue,
+                    'ai_job_count' => count($aiJobsRouted),
+                ]
+            );
+        }
+
         $vFresh2 = $version?->fresh();
         $aFresh2 = $asset->fresh();
         $this->pipelineStepTimer?->lap('chain_dispatched', $aFresh2, $vFresh2, [
             'chain_job_count' => count($chainJobs),
             'pipeline_queue' => $pipelineQueue,
+            'ai_job_count' => count($aiJobs),
         ]);
 
         if ($isVideo && config('assets.video_ai.enabled', true) && config('assets.video_ai.auto_run_after_upload', false)) {

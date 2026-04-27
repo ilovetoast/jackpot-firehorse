@@ -126,6 +126,13 @@ class GeneratePreviewJob implements ShouldQueue
             'has_preview' => !empty($preview),
         ]);
 
+        \App\Support\Logging\AssetPipelineTimingLogger::record(
+            \App\Support\Logging\AssetPipelineTimingLogger::EVENT_PREVIEW_COMPLETED,
+            $asset->fresh(),
+            null,
+            ['has_preview' => ! empty($preview)]
+        );
+
         // Job chaining is handled by Bus::chain() in ProcessAssetJob
         // No need to dispatch next job here
     }

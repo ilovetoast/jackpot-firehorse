@@ -130,6 +130,13 @@ class ExtractMetadataJob implements ShouldQueue
         ]);
         $timer->lap('handle_complete', $asset, $version);
 
+        \App\Support\Logging\AssetPipelineTimingLogger::record(
+            \App\Support\Logging\AssetPipelineTimingLogger::EVENT_METADATA_COMPLETED,
+            $asset->fresh(),
+            $version?->fresh(),
+            ['metadata_keys_count' => count($metadata)]
+        );
+
         // Job chaining is handled by Bus::chain() in ProcessAssetJob
         // No need to dispatch next job here
     }
