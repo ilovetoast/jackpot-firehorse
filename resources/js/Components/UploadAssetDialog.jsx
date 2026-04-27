@@ -357,6 +357,8 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
     // Minimize to tray: compact bar at bottom so user can browse while uploads run in background
     const [isMinimized, setIsMinimized] = useState(false)
     const autoFinalizeTriggeredRef = useRef(false)
+    /** Synchronous guard so two rapid Finalize clicks cannot both POST before v2Files re-renders to finalizing */
+    const finalizeV2InFlightRef = useRef(false)
 
     const handleMinimize = useCallback(() => {
         try {
@@ -3030,6 +3032,12 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
             }))
         })
 
+        if (finalizeV2InFlightRef.current) {
+            console.warn('[FINALIZE_V2] Skipped: finalize already in progress')
+            return
+        }
+        finalizeV2InFlightRef.current = true
+
         // Set status to 'finalizing' for manifest files
         // Note: batchStatus is now computed from v2Files, no manual update needed
         const uploadedClientIds = new Set(uploadedFiles.map((f) => f.clientId))
@@ -3316,8 +3324,10 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                 )
             )
             // Note: batchStatus is now computed from v2Files, no manual update needed
+        } finally {
+            finalizeV2InFlightRef.current = false
         }
-    }, [canFinalizeV2, v2Files, selectedCategoryId, selectedCollectionIds, getEffectiveMetadataV2, globalMetadataDraft, uploadMetadataSchema])
+    }, [canFinalizeV2, v2Files, selectedCategoryId, selectedCollectionIds, getEffectiveMetadataV2, globalMetadataDraft, uploadMetadataSchema, isAdminOrBrandManager, applyAiTagging, applyAiMetadata])
 
     /**
      * LEGACY — DO NOT USE: Finalize Assets

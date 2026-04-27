@@ -18,6 +18,17 @@ import { useState, useEffect } from 'react';
  * @param {Function} props.onChange - Callback when value changes
  * @param {boolean} [props.hasError] - Whether field has validation error
  */
+/** @param {unknown} v */
+function toMultiselectArray(v) {
+    if (Array.isArray(v)) {
+        return v
+    }
+    if (v != null && v !== '') {
+        return [String(v)]
+    }
+    return []
+}
+
 export default function MetadataFieldRenderer({ field, value, onChange, hasError = false, disabled = false }) {
     // Guard: Ensure field exists and has required properties
     if (!field || !field.key) {
@@ -28,17 +39,17 @@ export default function MetadataFieldRenderer({ field, value, onChange, hasError
     const [multiselectValues, setMultiselectValues] = useState(() => {
         // Initialize multiselect from value or empty array
         if (field.type === 'multiselect') {
-            return Array.isArray(value) ? value : [];
+            return toMultiselectArray(value)
         }
-        return [];
-    });
+        return []
+    })
 
     // Sync multiselect state with value prop
     useEffect(() => {
-        if (field.type === 'multiselect' && Array.isArray(value)) {
-            setMultiselectValues(value);
+        if (field.type === 'multiselect') {
+            setMultiselectValues(toMultiselectArray(value))
         }
-    }, [field.type, value]);
+    }, [field.type, value])
 
     /**
      * Handle input change based on field type

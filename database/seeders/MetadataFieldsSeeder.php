@@ -1017,7 +1017,7 @@ class MetadataFieldsSeeder extends Seeder
         $socialPlatformId = $this->getOrCreateField([
             'key' => 'social_platform',
             'system_label' => 'Social Platform',
-            'type' => 'select',
+            'type' => 'multiselect',
             'applies_to' => 'all',
             'scope' => 'system',
             'group_key' => 'creative',
@@ -1027,7 +1027,7 @@ class MetadataFieldsSeeder extends Seeder
             'is_upload_visible' => true,
             'is_internal_only' => false,
             'ai_eligible' => true,
-            'display_widget' => 'select',
+            'display_widget' => 'multiselect',
         ]);
         $this->syncOptions($socialPlatformId, [
             ['value' => 'instagram', 'system_label' => 'Instagram'],
@@ -1090,7 +1090,7 @@ class MetadataFieldsSeeder extends Seeder
         $channelPlatformId = $this->getOrCreateField([
             'key' => 'channel_platform',
             'system_label' => 'Channel / Platform',
-            'type' => 'select',
+            'type' => 'multiselect',
             'applies_to' => 'all',
             'scope' => 'system',
             'group_key' => 'creative',
@@ -1100,7 +1100,7 @@ class MetadataFieldsSeeder extends Seeder
             'is_upload_visible' => true,
             'is_internal_only' => false,
             'ai_eligible' => false,
-            'display_widget' => 'select',
+            'display_widget' => 'multiselect',
         ]);
         $this->syncOptions($channelPlatformId, [
             ['value' => 'google', 'system_label' => 'Google'],

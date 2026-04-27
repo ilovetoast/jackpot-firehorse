@@ -129,7 +129,11 @@ const MetadataFieldInput = forwardRef(function MetadataFieldInput(
             const displayLabel = data.option?.display_label ?? label
             setAppendedOptions((prev) => [...prev, { value: newValue, display_label: displayLabel }])
             if (field.type === 'multiselect') {
-                const cur = Array.isArray(value) ? value : []
+                const cur = Array.isArray(value)
+                    ? value
+                    : value != null && value !== ''
+                      ? [String(value)]
+                      : []
                 if (!isDisabled) {
                     onChange([...cur, newValue])
                 }
@@ -507,7 +511,11 @@ const MetadataFieldInput = forwardRef(function MetadataFieldInput(
                     </div>
                 )
             }
-            const currentValues = Array.isArray(value) ? value : []
+            const currentValues = Array.isArray(value)
+                ? value
+                : value != null && value !== ''
+                  ? [String(value)]
+                  : []
             const listClassName = isModalList
                 ? 'w-full max-h-[min(32rem,55vh)] divide-y divide-gray-100 overflow-y-auto rounded-lg border border-gray-200 bg-gradient-to-b from-white to-slate-50/80 shadow-sm'
                 : 'max-h-64 divide-y divide-gray-100 overflow-y-auto rounded-lg border border-gray-200 bg-gradient-to-b from-white to-slate-50/80 shadow-sm'

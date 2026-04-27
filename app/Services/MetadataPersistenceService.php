@@ -445,6 +445,9 @@ class MetadataPersistenceService
 
         // Handle multi-value fields
         if ($fieldType === 'multiselect') {
+            if (is_string($value) && $value !== '') {
+                $value = [$value];
+            }
             if (!is_array($value)) {
                 return [];
             }

@@ -40,8 +40,11 @@ export function isFieldSatisfied(field, value) {
             return typeof value === 'string' && value.length > 0
 
         case 'multiselect':
-            // At least one value selected
-            return Array.isArray(value) && value.length > 0
+            // At least one value; legacy assets may still have a single string
+            if (Array.isArray(value)) {
+                return value.length > 0
+            }
+            return typeof value === 'string' && value.length > 0
 
         default:
             // Unknown type - consider satisfied to avoid false positives
