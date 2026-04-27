@@ -69,12 +69,25 @@ class TeamController extends Controller
             ];
         });
 
-        $tenantRoles = collect(RoleRegistry::assignableTenantRoles())->map(function ($role) {
-            return [
-                'value' => $role,
-                'label' => ucfirst($role),
-            ];
-        })->values()->toArray();
+        $inviterRole = (string) $user->getRoleForTenant($tenant);
+        $assignableForInvite = RoleRegistry::assignableTenantRolesForInviter($inviterRole);
+        $order = ['member' => 0, 'admin' => 1, 'agency_partner' => 2, 'agency_admin' => 3];
+        $tenantRoles = collect($assignableForInvite)
+            ->sortBy(fn ($role) => $order[$role] ?? 99)
+            ->values()
+            ->map(function ($role) {
+                $label = match ($role) {
+                    'agency_admin' => 'Agency admin',
+                    'agency_partner' => 'Agency partner',
+                    default => ucfirst($role),
+                };
+
+                return [
+                    'value' => $role,
+                    'label' => $label,
+                ];
+            })
+            ->all();
 
         return Inertia::render('Companies/Team', [
             'tenant' => [
@@ -83,6 +96,7 @@ class TeamController extends Controller
             ],
             'brands' => $brands,
             'tenant_roles' => $tenantRoles,
+            'invite_lock_company_role' => $assignableForInvite === ['member'],
             'current_user_count' => $currentUserCount,
             'max_users' => $maxUsers,
             'user_limit_reached' => $userLimitReached,
@@ -545,6 +559,14 @@ class TeamController extends Controller
         // Ensure tenant role is valid and assignable (RoleRegistry validation already ensured this)
         if (! RoleRegistry::isAssignableTenantRole($tenantRole)) {
             $tenantRole = 'member'; // Fallback to member if somehow invalid
+        }
+
+        $inviterRole = (string) $authUser->getRoleForTenant($tenant);
+        $assignable = RoleRegistry::assignableTenantRolesForInviter($inviterRole);
+        if (! in_array(strtolower($tenantRole), $assignable, true)) {
+            return back()->withErrors([
+                'role' => 'You do not have permission to assign this company role. New invites for your role are limited to: '.implode(', ', $assignable).'.',
+            ]);
         }
 
         // Store invitation in database

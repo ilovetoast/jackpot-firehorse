@@ -24,11 +24,14 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Log;
+use App\Http\Controllers\Concerns\BuildsBulkAssignCategoryOptions;
 use Inertia\Inertia;
 use Inertia\Response;
 
 class DeliverableController extends Controller
 {
+    use BuildsBulkAssignCategoryOptions;
+
     public function __construct(
         protected SystemCategoryService $systemCategoryService,
         protected PlanService $planService,
@@ -55,6 +58,11 @@ class DeliverableController extends Controller
         if (! $tenant || ! $brand) {
             return Inertia::render('Deliverables/Index', [
                 'categories' => [],
+                'bulk_categories_by_asset_type' => [
+                    AssetType::ASSET->value => [],
+                    AssetType::DELIVERABLE->value => [],
+                    AssetType::AI_GENERATED->value => [],
+                ],
                 'total_asset_count' => 0,
                 'selected_category' => null,
                 'assets' => [],
@@ -1130,8 +1138,11 @@ class DeliverableController extends Controller
             ]);
         }
 
+        $bulkCategoriesByAssetType = $this->buildBulkAssignCategoryOptionsByAssetType($tenant, $brand, $user);
+
         return Inertia::render('Deliverables/Index', [
             'categories' => $allCategories,
+            'bulk_categories_by_asset_type' => $bulkCategoriesByAssetType,
             'total_asset_count' => $totalDeliverableCount, // Total count for "All" and sidebar parity with Assets
             'selected_category' => $categoryId ? (int) $categoryId : null, // Category ID for frontend state
             'selected_category_slug' => $categorySlug, // Category slug for URL state

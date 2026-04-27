@@ -60,7 +60,9 @@ const DELIVERABLE_CATEGORY_NAV_ONLY = [
 
 const DELIVERABLE_SIDEBAR_COUNTS_ONLY = ['categories', 'categories_by_type', 'show_all_button', 'total_asset_count']
 
-function DeliverablesIndexPage({ categories, total_asset_count = 0, selected_category, show_all_button = false, assets = [], next_page_url = null, filtered_grid_total = 0, grid_folder_total = 0, filterable_schema = [], available_values = {}, sort = 'created', sort_direction = 'desc', compliance_filter = '', show_compliance_filter = false, q: searchQuery = '', lifecycle = '', can_view_trash = false, trash_count = 0 }) {
+const DELIVERABLE_BULK_RELOAD_KEYS = [...DELIVERABLE_GRID_QUERY_KEYS, ...DELIVERABLE_SIDEBAR_COUNTS_ONLY]
+
+function DeliverablesIndexPage({ categories, bulk_categories_by_asset_type = null, total_asset_count = 0, selected_category, show_all_button = false, assets = [], next_page_url = null, filtered_grid_total = 0, grid_folder_total = 0, filterable_schema = [], available_values = {}, sort = 'created', sort_direction = 'desc', compliance_filter = '', show_compliance_filter = false, q: searchQuery = '', lifecycle = '', can_view_trash = false, trash_count = 0 }) {
     const pageProps = usePage().props
     const { auth } = pageProps
     const { thumbnailViewMode, setThumbnailViewMode } = useDeliverablesThumbnailMode()
@@ -1032,10 +1034,13 @@ function DeliverablesIndexPage({ categories, total_asset_count = 0, selected_cat
                             : { id, original_filename: '', mime_type: null, title: null }
                     })}
                     selectionSummary={computeSelectionSummary(safeAssetsList, bulkSelectedAssetIds)}
+                    categories={categories ?? []}
+                    bulkCategoriesByAssetType={bulk_categories_by_asset_type}
+                    defaultAssignAssetType="deliverable"
                     onClose={() => setShowBulkActionsModal(false)}
                     onComplete={(result) => {
-                        router.reload({ only: [...DELIVERABLE_GRID_QUERY_KEYS] })
-                        if (result?.actionId === 'SOFT_DELETE') {
+                        router.reload({ only: [...DELIVERABLE_BULK_RELOAD_KEYS] })
+                        if (result?.actionId === 'SOFT_DELETE' || result?.assignCategory) {
                             setBulkSelectedAssetIds([])
                             clearSelection()
                         }
@@ -1057,7 +1062,7 @@ function DeliverablesIndexPage({ categories, total_asset_count = 0, selected_cat
                         setBulkMetadataInitialOp(null)
                     }}
                     onComplete={() => {
-                        router.reload({ only: [...DELIVERABLE_GRID_QUERY_KEYS] })
+                        router.reload({ only: [...DELIVERABLE_BULK_RELOAD_KEYS] })
                         setBulkSelectedAssetIds([])
                         clearSelection()
                         setShowBulkMetadataModal(false)

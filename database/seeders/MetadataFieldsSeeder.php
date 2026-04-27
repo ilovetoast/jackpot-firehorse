@@ -662,7 +662,7 @@ class MetadataFieldsSeeder extends Seeder
             ['value' => 'texture', 'system_label' => 'Texture'],
         ]);
 
-        // Season (system, applies_to=all). Fonts category hides this via
+        // Season (system, applies_to=all). Fonts and logos categories hide this via
         // config/metadata_category_defaults.php → system_fields_hidden_for_category_slugs.
         $seasonId = $this->getOrCreateField([
             'key' => 'season',

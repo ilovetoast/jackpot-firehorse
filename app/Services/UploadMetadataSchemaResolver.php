@@ -152,6 +152,9 @@ class UploadMetadataSchemaResolver
             if ($category && $key !== '' && ! $this->tenantMetadataVisibilityService->isRestrictFieldEnabledForCategorySlug($key, (string) ($category->slug ?? ''))) {
                 continue;
             }
+            if ($category && $key !== '' && $this->tenantMetadataVisibilityService->isSystemFieldHiddenForCategorySlug($key, (string) ($category->slug ?? ''))) {
+                continue;
+            }
             // C9.2: Respect Quick View (show_on_edit) from Metadata Management – no special case for collection
             $showOnEdit = $field['show_on_edit'] ?? true;
             if (!$showOnEdit) {
@@ -198,6 +201,9 @@ class UploadMetadataSchemaResolver
 
             $key = (string) ($field['key'] ?? '');
             if ($category && $key !== '' && ! $this->tenantMetadataVisibilityService->isRestrictFieldEnabledForCategorySlug($key, (string) ($category->slug ?? ''))) {
+                continue;
+            }
+            if ($category && $key !== '' && $this->tenantMetadataVisibilityService->isSystemFieldHiddenForCategorySlug($key, (string) ($category->slug ?? ''))) {
                 continue;
             }
 

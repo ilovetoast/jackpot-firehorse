@@ -40,6 +40,29 @@ class RoleRegistry
     }
 
     /**
+     * Company roles a user may assign when sending a team invite, based on their own company role.
+     * Agency admins on a client company can invite day-to-day members only — not other admins
+     * or additional agency staff roles; those are reserved for the client owner/admin.
+     *
+     * @return list<string> Lowercase role names, subset of {@see assignableTenantRoles()}
+     */
+    public static function assignableTenantRolesForInviter(string $inviterRole): array
+    {
+        $r = strtolower($inviterRole);
+
+        if (in_array($r, ['owner', 'admin'], true)) {
+            return self::assignableTenantRoles();
+        }
+
+        if ($r === 'agency_admin') {
+            return ['member'];
+        }
+
+        // Defensive: any other case with team.manage should not escalate company roles
+        return ['member'];
+    }
+
+    /**
      * Get all brand roles.
      *
      * @return array<string> All brand role names

@@ -887,6 +887,9 @@ class AssetMetadataController extends Controller
             if ($fieldKey !== null && $fieldKey !== '' && ! $restrictVisibility->isRestrictFieldEnabledForCategorySlug((string) $fieldKey, (string) ($category->slug ?? ''))) {
                 continue;
             }
+            if ($fieldKey !== null && $fieldKey !== '' && $restrictVisibility->isSystemFieldHiddenForCategorySlug((string) $fieldKey, (string) ($category->slug ?? ''))) {
+                continue;
+            }
 
             $candidateFields[] = $field;
         }
@@ -2168,6 +2171,9 @@ class AssetMetadataController extends Controller
         foreach ($fields as $fieldId => $field) {
             $fieldKeyEarly = (string) ($field->key ?? '');
             if ($fieldKeyEarly !== '' && ! $restrictVisibility->isRestrictFieldEnabledForCategorySlug($fieldKeyEarly, (string) ($category->slug ?? ''))) {
+                continue;
+            }
+            if ($fieldKeyEarly !== '' && $restrictVisibility->isSystemFieldHiddenForCategorySlug($fieldKeyEarly, (string) ($category->slug ?? ''))) {
                 continue;
             }
 

@@ -18,7 +18,7 @@ function useDebounce(value, delay) {
     return debouncedValue
 }
 
-export default function Team({ tenant, brands = [], tenant_roles = [], current_user_count, max_users, user_limit_reached }) {
+export default function Team({ tenant, brands = [], tenant_roles = [], invite_lock_company_role = false, current_user_count, max_users, user_limit_reached }) {
     const { auth } = usePage().props
 
     const [users, setUsers] = useState([])
@@ -46,6 +46,7 @@ export default function Team({ tenant, brands = [], tenant_roles = [], current_u
         agencyName: '',
     })
     const [convertAgencySubmitting, setConvertAgencySubmitting] = useState(false)
+    const [inviteFormKey, setInviteFormKey] = useState(0)
 
     const debouncedSearch = useDebounce(search, 300)
 
@@ -173,6 +174,17 @@ export default function Team({ tenant, brands = [], tenant_roles = [], current_u
 
     const handleBrandAssignmentsChange = (brandAssignments) => {
         setData('brands', brandAssignments)
+    }
+
+    const openInviteModal = () => {
+        const first = brands[0]
+        setData({
+            email: '',
+            role: 'member',
+            brands: first ? [{ brand_id: first.id, role: 'viewer' }] : [],
+        })
+        setInviteFormKey((k) => k + 1)
+        setShowInviteModal(true)
     }
 
     const displayCount = meta.total ?? current_user_count ?? 0
@@ -340,7 +352,7 @@ export default function Team({ tenant, brands = [], tenant_roles = [], current_u
                 <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
                     <button
                         type="button"
-                        onClick={() => setShowInviteModal(true)}
+                        onClick={openInviteModal}
                         disabled={user_limit_reached}
                         className="inline-flex items-center rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
@@ -510,10 +522,10 @@ export default function Team({ tenant, brands = [], tenant_roles = [], current_u
                 {showInviteModal && (
                     <div className="fixed inset-0 z-50 overflow-y-auto">
                         <div className="flex min-h-full items-end justify-center p-4 text-center sm:items-center sm:p-0">
-                            <div className="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" onClick={() => setShowInviteModal(false)} />
+                            <div className="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" onClick={() => { setShowInviteModal(false); reset() }} />
                             <div className="relative transform overflow-hidden rounded-lg bg-white px-4 pb-4 pt-5 text-left shadow-xl transition-all sm:my-8 sm:w-full sm:max-w-lg sm:p-6">
                                 <div className="absolute right-0 top-0 hidden pr-4 pt-4 sm:block">
-                                    <button type="button" onClick={() => setShowInviteModal(false)} className="rounded-md bg-white text-gray-400 hover:text-gray-500">
+                                    <button type="button" onClick={() => { setShowInviteModal(false); reset() }} className="rounded-md bg-white text-gray-400 hover:text-gray-500">
                                         <span className="sr-only">Close</span>
                                         <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
                                     </button>
@@ -535,8 +547,18 @@ export default function Team({ tenant, brands = [], tenant_roles = [], current_u
                                     </div>
                                     <div className="mb-4">
                                         <label htmlFor="role" className="block text-sm font-medium text-gray-700 mb-2">Company Role</label>
-                                        <select id="role" value={data.role} onChange={(e) => setData('role', e.target.value)} className="block w-full rounded-md border-0 py-1.5 px-3 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm">
-                                            {(tenant_roles || []).map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
+                                        <select
+                                            id="role"
+                                            value={data.role}
+                                            onChange={(e) => setData('role', e.target.value)}
+                                            disabled={invite_lock_company_role}
+                                            className="block w-full rounded-md border-0 py-1.5 px-3 text-sm text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 focus:ring-2 focus:ring-inset focus:ring-indigo-600 disabled:cursor-not-allowed disabled:bg-gray-50 disabled:text-gray-600"
+                                        >
+                                            {(tenant_roles || []).map((r) => (
+                                                <option key={r.value} value={r.value}>
+                                                    {r.label}
+                                                </option>
+                                            ))}
                                             {(!tenant_roles || tenant_roles.length === 0) && (
                                                 <>
                                                     <option value="member">Member</option>
@@ -544,15 +566,37 @@ export default function Team({ tenant, brands = [], tenant_roles = [], current_u
                                                 </>
                                             )}
                                         </select>
+                                        {errors.role && <p className="mt-1 text-sm text-red-600">{errors.role}</p>}
+                                        {invite_lock_company_role && (
+                                            <p className="mt-1.5 text-xs text-gray-500">
+                                                Invites from agency staff on this company are created as <span className="font-medium">Member</span> only. Client
+                                                owners and company admins can assign Admin or agency-level roles. Brand access is set below and can be changed
+                                                later.
+                                            </p>
+                                        )}
                                     </div>
                                     <div className="mb-4">
-                                        <BrandRoleSelector brands={brands} selectedBrands={data.brands} onChange={handleBrandAssignmentsChange} errors={errors} required />
+                                        <BrandRoleSelector
+                                            key={inviteFormKey}
+                                            brands={brands}
+                                            selectedBrands={data.brands}
+                                            onChange={handleBrandAssignmentsChange}
+                                            errors={errors}
+                                            required
+                                        />
                                     </div>
                                     <div className="mt-5 sm:mt-6 sm:grid sm:grid-flow-row-dense sm:grid-cols-2 sm:gap-3">
                                         <button type="submit" disabled={processing || user_limit_reached || !data.brands?.length} className="inline-flex w-full justify-center rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-500 disabled:opacity-50 sm:col-start-2">
                                             {processing ? 'Sending...' : 'Send Invitation'}
                                         </button>
-                                        <button type="button" onClick={() => setShowInviteModal(false)} className="mt-3 inline-flex w-full justify-center rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 sm:col-start-1 sm:mt-0">
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                setShowInviteModal(false)
+                                                reset()
+                                            }}
+                                            className="mt-3 inline-flex w-full justify-center rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 sm:col-start-1 sm:mt-0"
+                                        >
                                             Cancel
                                         </button>
                                     </div>

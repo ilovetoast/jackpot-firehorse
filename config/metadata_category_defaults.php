@@ -13,7 +13,7 @@
  * enabled for every category by default so execution assets receive computed metadata
  * without manual enablement.
  *
- * system_fields_hidden_for_category_slugs: omit specific system fields (e.g. season on fonts)
+ * system_fields_hidden_for_category_slugs: omit specific system fields (e.g. season on fonts/logos)
  * from the tags+collection+system baseline for listed category slugs.
  *
  * Extension notes (not seeded as fields yet):
@@ -218,6 +218,7 @@ return [
      */
     'system_fields_hidden_for_category_slugs' => [
         'fonts' => ['season'],
+        'logos' => ['season'],
     ],
 
     'restricted_option_edit_keys' => [

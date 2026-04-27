@@ -101,6 +101,25 @@ class TenantMetadataVisibilityService
     }
 
     /**
+     * True when a system field should be omitted for this category slug (see
+     * metadata_category_defaults.system_fields_hidden_for_category_slugs). Enforced alongside
+     * {@see isRestrictFieldEnabledForCategorySlug} in upload, drawer, and filters.
+     */
+    public function isSystemFieldHiddenForCategorySlug(string $fieldKey, string $categorySlug): bool
+    {
+        if ($fieldKey === '' || $categorySlug === '') {
+            return false;
+        }
+
+        $hidden = config(
+            'metadata_category_defaults.system_fields_hidden_for_category_slugs.'.strtolower($categorySlug),
+            []
+        );
+
+        return is_array($hidden) && in_array($fieldKey, $hidden, true);
+    }
+
+    /**
      * Batch-check visibility for multiple fields. Avoids N+1 when filtering many fields.
      *
      * ⚠️ Use this instead of isVisibleForCategory() when processing multiple fields in a loop.

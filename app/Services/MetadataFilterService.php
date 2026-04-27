@@ -540,6 +540,9 @@ class MetadataFilterService
             if ($fieldKey && $category && ! $restrictVisibility->isRestrictFieldEnabledForCategorySlug((string) $fieldKey, (string) ($category->slug ?? ''))) {
                 continue;
             }
+            if ($fieldKey && $category && $restrictVisibility->isSystemFieldHiddenForCategorySlug((string) $fieldKey, (string) ($category->slug ?? ''))) {
+                continue;
+            }
             if (!($field['is_filterable'] ?? false)) {
                 continue;
             }

@@ -459,6 +459,8 @@ export default function BulkActionsModal({
     categories = [],
     /** Optional: { asset: [...], deliverable: [...], ai_generated: [...] } from Assets grid — enables Library / Execution category assignment */
     bulkCategoriesByAssetType = null,
+    /** Default tab for "Assign category" when typed categories are available ('asset' | 'deliverable' | 'ai_generated'). Executions grid should pass "deliverable". */
+    defaultAssignAssetType = 'asset',
 }) {
     const { auth } = usePage().props
     const { can } = usePermission()
@@ -475,7 +477,7 @@ export default function BulkActionsModal({
     const [selectedAction, setSelectedAction] = useState(null)
     const [fullPipelineResourceAck, setFullPipelineResourceAck] = useState(false)
     const [rejectionReason, setRejectionReason] = useState('')
-    const [assignAssetType, setAssignAssetType] = useState('asset')
+    const [assignAssetType, setAssignAssetType] = useState(defaultAssignAssetType)
     const [assignCategoryId, setAssignCategoryId] = useState('')
     const [bulkRenameBase, setBulkRenameBase] = useState('')
     const [renamePreviewExpanded, setRenamePreviewExpanded] = useState(false)
@@ -610,13 +612,13 @@ export default function BulkActionsModal({
         setError(null)
         if (actionId === ASSIGN_CATEGORY_ACTION) {
             setAssignCategoryId('')
-            setAssignAssetType('asset')
+            setAssignAssetType(defaultAssignAssetType)
         }
         if (actionId === RENAME_ASSETS_ACTION) {
             setBulkRenameBase('')
             setRenamePreviewExpanded(false)
         }
-    }, [assetIds, onOpenMetadataEdit, onClose])
+    }, [assetIds, onOpenMetadataEdit, onClose, defaultAssignAssetType])
 
     const handleBack = useCallback(() => {
         setStep('select')
@@ -634,12 +636,12 @@ export default function BulkActionsModal({
         setFullPipelineResourceAck(false)
         setRejectionReason('')
         setAssignCategoryId('')
-        setAssignAssetType('asset')
+        setAssignAssetType(defaultAssignAssetType)
         setBulkRenameBase('')
         setRenamePreviewExpanded(false)
         setError(null)
         onClose()
-    }, [onClose])
+    }, [onClose, defaultAssignAssetType])
 
     const handleSubmit = async () => {
         if (selectedAction === 'REJECT' && !rejectionReason.trim()) {

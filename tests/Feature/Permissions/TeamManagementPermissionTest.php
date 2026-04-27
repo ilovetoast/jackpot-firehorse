@@ -2,10 +2,11 @@
 
 namespace Tests\Feature\Permissions;
 
-use App\Models\Brand;
+use App\Mail\InviteMember;
 use App\Models\Tenant;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Mail;
 use PHPUnit\Framework\Attributes\Test;
 use Tests\TestCase;
 
@@ -111,5 +112,78 @@ class TeamManagementPermissionTest extends TestCase
             ->get('/app/companies/team');
 
         $response->assertStatus(200);
+    }
+
+    #[Test]
+    public function agency_admin_cannot_assign_elevated_company_role_on_invite(): void
+    {
+        Mail::fake();
+
+        $tenant = Tenant::create([
+            'name' => 'Test Company',
+            'slug' => 'test-company-agcy-inv',
+        ]);
+        $brand = $tenant->defaultBrand;
+        $this->assertNotNull($brand);
+
+        $agencyAdmin = User::create([
+            'email' => 'agcyadmin@example.com',
+            'password' => bcrypt('password'),
+            'first_name' => 'Agency',
+            'last_name' => 'Admin',
+        ]);
+        $agencyAdmin->tenants()->attach($tenant->id, ['role' => 'agency_admin']);
+        $agencyAdmin->brands()->attach($brand->id, ['role' => 'admin', 'removed_at' => null]);
+
+        $response = $this->actingAs($agencyAdmin)
+            ->withSession(['tenant_id' => $tenant->id, 'brand_id' => $brand->id])
+            ->from(route('companies.team'))
+            ->post(route('companies.team.invite', $tenant), [
+                'email' => 'newperson@example.com',
+                'role' => 'agency_admin',
+                'brands' => [
+                    ['brand_id' => $brand->id, 'role' => 'viewer'],
+                ],
+            ]);
+
+        $response->assertSessionHasErrors('role');
+        Mail::assertNothingSent();
+    }
+
+    #[Test]
+    public function tenant_admin_can_invite_with_admin_company_role(): void
+    {
+        Mail::fake();
+
+        $tenant = Tenant::create([
+            'name' => 'Test Co Invite',
+            'slug' => 'test-co-invite',
+        ]);
+        $brand = $tenant->defaultBrand;
+        $this->assertNotNull($brand);
+
+        $admin = User::create([
+            'email' => 'tadmin-inv@example.com',
+            'password' => bcrypt('password'),
+            'first_name' => 'T',
+            'last_name' => 'Admin',
+        ]);
+        $admin->tenants()->attach($tenant->id, ['role' => 'admin']);
+        $admin->brands()->attach($brand->id, ['role' => 'admin', 'removed_at' => null]);
+
+        $response = $this->actingAs($admin)
+            ->withSession(['tenant_id' => $tenant->id, 'brand_id' => $brand->id])
+            ->from(route('companies.team'))
+            ->post(route('companies.team.invite', $tenant), [
+                'email' => 'invitedadmin@example.com',
+                'role' => 'admin',
+                'brands' => [
+                    ['brand_id' => $brand->id, 'role' => 'viewer'],
+                ],
+            ]);
+
+        $response->assertSessionHasNoErrors();
+        $response->assertRedirect(route('companies.team'));
+        Mail::assertSent(InviteMember::class);
     }
 }
