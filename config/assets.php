@@ -302,6 +302,8 @@ return [
          */
         'tiff' => [
             'normalize_for_web' => env('THUMBNAIL_TIFF_NORMALIZE_FOR_WEB', true),
+            /* When [0] decodes to a flat white composite (common with PMS/spot + transparency), try merged stack + extra IFDs. */
+            'max_subimage_scan' => 6,
         ],
 
         /*

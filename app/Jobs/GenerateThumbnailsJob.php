@@ -325,13 +325,14 @@ class GenerateThumbnailsJob implements ShouldQueue
             }
 
             // Dynamic timeout and pixel guardrails (before any heavy work)
-            // Require dimensions for raster images (safety: avoid melting worker on huge unknown-size images).
-            // PDF/video/document types do not have dimensions on the asset until we render; ThumbnailGenerationService obtains dimensions from the generated output.
+            // Require dimensions for plain raster images (safety: avoid melting worker on huge unknown-size images).
+            // PDF/video/SVG/PSD/PSB: dimensions often missing on the row until we decode; ThumbnailGenerationService
+            // gets width/height from the renderer (or Imagick for PSD).
             $fileTypeService = app(\App\Services\FileTypeService::class);
             $mime = $version ? $version->mime_type : $asset->mime_type;
             $ext = strtolower(pathinfo($asset->original_filename ?? '', PATHINFO_EXTENSION));
             $fileType = $fileTypeService->detectFileType($mime, $ext);
-            $dimensionsFromRendering = in_array($fileType, ['pdf', 'video', 'svg'], true);
+            $dimensionsFromRendering = in_array($fileType, ['pdf', 'video', 'svg', 'psd', 'psb'], true);
 
             $assetWidth = $asset->width;
             $assetHeight = $asset->height;

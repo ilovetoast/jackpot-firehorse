@@ -1593,18 +1593,9 @@ class ThumbnailGenerationService
         ]);
 
         try {
-            $reader = new \Imagick;
-            // Limit resolution BEFORE reading to avoid loading 700MB+ at full res
-            $reader->setResolution(72, 72);
-            $reader->setOption('tiff:tile-geometry', '256x256');
-            // First page only — [0] avoids odd multi-subfile stacks on some prepress TIFFs
-            $reader->readImage($sourcePath.'[0]');
-            $reader->setIteratorIndex(0);
-            $imagick = $reader->getImage();
-            $reader->clear();
-            $reader->destroy();
-
-            $imagick = $this->normalizePrintTiffFrameForWebThumbnail($imagick);
+            // PMS/spot + transprency TIFFs often decode to an empty white RGB composite in ImageMagick
+            // while the visible ink lives in another IFD, extra samples, or a multi-page stack.
+            $imagick = $this->selectTiffSourceFrameForThumbnails($sourcePath);
 
             // Get source dimensions
             $sourceWidth = $imagick->getImageWidth();
@@ -1687,6 +1678,173 @@ class ThumbnailGenerationService
             ]);
             throw new \RuntimeException("TIFF thumbnail generation error: {$e->getMessage()}", 0, $e);
         }
+    }
+
+    /**
+     * Pick the best decodable frame for web thumbnails. Fast path: subfile [0] only. If the normalized
+     * result is still effectively blank (flat white), try merged multi-page stacks and other IFDs — some
+     * Photoshop "PMS" line art and embedded preview JPEGs live there; ImageMagick's default composite can be white.
+     */
+    protected function selectTiffSourceFrameForThumbnails(string $sourcePath): \Imagick
+    {
+        $maxScan = max(1, (int) config('assets.thumbnail.tiff.max_subimage_scan', 6));
+        $candidatesTried = [];
+
+        $tryOne = function (string $pathSpec, string $label) use (&$candidatesTried, $sourcePath): ?\Imagick {
+            try {
+                $r = new \Imagick;
+                $r->setOption('tiff:tile-geometry', '256x256');
+                $r->readImage($pathSpec);
+                $r->setIteratorIndex(0);
+                $im = $r->getImage();
+                $r->clear();
+                $r->destroy();
+                $nrm = $this->normalizePrintTiffFrameForWebThumbnail($im);
+                $im->clear();
+                $im->destroy();
+                if ($this->tiffNormalizedFrameLooksOnlyPaperWhite($nrm)) {
+                    $candidatesTried[] = $label.':blank';
+                    $nrm->clear();
+                    $nrm->destroy();
+
+                    return null;
+                }
+                $candidatesTried[] = $label.':ok';
+
+                return $nrm;
+            } catch (\Throwable $e) {
+                Log::debug('[ThumbnailGenerationService] TIFF sub-read failed', [
+                    'source_path' => $sourcePath,
+                    'path_spec' => $pathSpec,
+                    'label' => $label,
+                    'error' => $e->getMessage(),
+                ]);
+                $candidatesTried[] = $label.':err';
+
+                return null;
+            }
+        };
+
+        // 1) Default (fast, avoids reading entire huge multi-page spool into RAM when [0] is enough)
+        $first = $tryOne($sourcePath.'[0]', 'sub[0]');
+        if ($first instanceof \Imagick) {
+            return $first;
+        }
+
+        // 2) Full sequence + flatten (multi-IFD / layered prepress)
+        $merged = $this->tryMergeAllTiffSubimages($sourcePath);
+        if ($merged instanceof \Imagick) {
+            if (! $this->tiffNormalizedFrameLooksOnlyPaperWhite($merged)) {
+                Log::info('[ThumbnailGenerationService] TIFF using merged multi-IFD decode', [
+                    'source_path' => $sourcePath,
+                    'candidates' => $candidatesTried,
+                ]);
+
+                return $merged;
+            }
+            $merged->clear();
+            $merged->destroy();
+        }
+
+        // 3) Other IFDs (embedded RGB preview, reduced plate, non-primary page)
+        for ($i = 1; $i < $maxScan; $i++) {
+            $alt = $tryOne($sourcePath.'['.$i.']', 'sub['.$i.']');
+            if ($alt instanceof \Imagick) {
+                Log::info('[ThumbnailGenerationService] TIFF using alternate IFD for visible composite', [
+                    'source_path' => $sourcePath,
+                    'subfile_index' => $i,
+                    'candidates' => $candidatesTried,
+                ]);
+
+                return $alt;
+            }
+        }
+
+        // 4) Last resort: [0] again (may be all-white: spot-only channel art IM cannot merge — user should re-export)
+        Log::warning('[ThumbnailGenerationService] TIFF decode produced no non-white frame; using [0] best-effort', [
+            'source_path' => $sourcePath,
+            'candidates' => $candidatesTried,
+        ]);
+
+        $r = new \Imagick;
+        $r->setOption('tiff:tile-geometry', '256x256');
+        $r->readImage($sourcePath.'[0]');
+        $r->setIteratorIndex(0);
+        $im = $r->getImage();
+        $r->clear();
+        $r->destroy();
+
+        return $this->normalizePrintTiffFrameForWebThumbnail($im);
+    }
+
+    /**
+     * @return \Imagick|null Merged+normalized frame, or null on failure / single-page file
+     */
+    protected function tryMergeAllTiffSubimages(string $sourcePath): ?\Imagick
+    {
+        try {
+            $reader = new \Imagick;
+            $reader->setOption('tiff:tile-geometry', '256x256');
+            $reader->readImage($sourcePath);
+            $n = (int) $reader->getNumberImages();
+            if ($n < 2) {
+                $reader->clear();
+                $reader->destroy();
+
+                return null;
+            }
+            if (method_exists($reader, 'coalesceImages')) {
+                $c = $reader->coalesceImages();
+                $reader->clear();
+                $reader->destroy();
+                $reader = $c;
+            }
+            if (method_exists($reader, 'mergeImageLayers') && defined('Imagick::LAYERMETHOD_FLATTEN')) {
+                $flat = $reader->mergeImageLayers(\Imagick::LAYERMETHOD_FLATTEN);
+                $reader->clear();
+                $reader->destroy();
+                if (! $flat instanceof \Imagick) {
+                    return null;
+                }
+
+                return $this->normalizePrintTiffFrameForWebThumbnail($flat);
+            }
+            $reader->clear();
+            $reader->destroy();
+        } catch (\Throwable $e) {
+            Log::debug('[ThumbnailGenerationService] TIFF full merge read failed', [
+                'source_path' => $sourcePath,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        return null;
+    }
+
+    /**
+     * True when the composite is effectively a uniform sheet of white (failed spot/empty plate decode).
+     */
+    protected function tiffNormalizedFrameLooksOnlyPaperWhite(\Imagick $im): bool
+    {
+        try {
+            $ex = $im->getImageExtrema();
+            $min = (int) ($ex['min'] ?? 0);
+            $max = (int) ($ex['max'] ?? 0);
+            $range = $im->getQuantumRange();
+            $hi = (int) ($range['quantumRangeLong'] ?? 65535);
+            if ($hi < 1) {
+                $hi = 65535;
+            }
+            $minF = $min / $hi;
+            $maxF = $max / $hi;
+            $span = $maxF - $minF;
+            if ($span < 0.02 && $minF >= 0.97 && $maxF >= 0.97) {
+                return true;
+            }
+        } catch (\Throwable) {
+        }
+
+        return false;
     }
 
     /**
