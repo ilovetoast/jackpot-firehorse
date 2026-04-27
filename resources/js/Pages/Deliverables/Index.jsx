@@ -338,9 +338,8 @@ function DeliverablesIndexPage({ categories, bulk_categories_by_asset_type = nul
         const categoryId = category?.id ?? category // Support both object and ID for backward compatibility
         const categorySlug = category?.slug ?? null
         
-        // Phase 2 invariant: Explicitly reset dialog state before preserveState navigation
-        // This prevents Inertia from preserving isUploadDialogOpen=true across category changes
-        setIsUploadDialogOpen(false)
+        // Do not close the upload dialog here — that unmounts UploadAssetDialog and discards in-progress uploads.
+        // initialCategoryId updates; UploadAssetDialog syncs category and metadata schema without clearing files.
         
         setSelectedCategoryId(categoryId)
 

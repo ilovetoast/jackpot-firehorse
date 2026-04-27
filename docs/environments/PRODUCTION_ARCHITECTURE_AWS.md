@@ -153,7 +153,7 @@ Keep Jackpot’s **tenant-scoped CloudFront** model (see `config/cloudfront.php`
 | **video-light-workers** | `video-light` *(target)* | Poster frames, quick previews, common post-upload UX | **1** | 3 | Always warm |
 | **video-heavy-workers** | `video-heavy` *(target)* | Large/long video, high RAM / temp storage | **0** | 2 | Burst; cold-start acceptable |
 
-Horizon supervisors in `config/horizon.php` include: `supervisor-default`, `supervisor-images`, `supervisor-images-heavy`, `supervisor-pdf-processing`, `supervisor-ai`, **`supervisor-video-light`** (`video-light`), **`supervisor-video-heavy`** (`video-heavy`). **Route jobs** to those queue names from application code when the Studio video pipeline is implemented; until then, workers remain idle. Queue names: `config('queue.video_light_queue')` / `config('queue.video_heavy_queue')`.
+Horizon supervisors in `config/horizon.php` are **registered only when the matching `HORIZON_*_PROCESSES` env is &gt; 0** (see `config/horizon.php`). Pools include: `supervisor-default` (`default`), `supervisor-downloads` (`downloads`, when `QUEUE_DOWNLOADS_QUEUE=downloads`), `supervisor-images`, `supervisor-images-heavy`, `supervisor-images-psd` (PSD/PSB isolation), `supervisor-pdf-processing`, `supervisor-ai`, `supervisor-video-light`, `supervisor-video-heavy`. **Route jobs** to those queue names from application code when the Studio video pipeline is implemented; until then, workers for unused queues remain unregistered or idle. Queue names: `config('queue.video_light_queue')` / `config('queue.video_heavy_queue')`. Emergency: [HORIZON_EMERGENCY_RUNBOOK.md](../operations/HORIZON_EMERGENCY_RUNBOOK.md).
 
 **Scaling signal:** Prefer **queue age / wait time** over CPU alone for workers. Keep **heavy** lanes from competing for RAM with normal image work. Route oversized PSD/PSB/TIFF/raster jobs to **heavy-image** explicitly.
 
@@ -165,7 +165,8 @@ Run **Horizon inside each ECS service** and align **service boundaries** with **
 
 | Current Horizon pool (`config/horizon.php`) | Target ECS service | Action |
 |---------------------------------------------|---------------------|--------|
-| `supervisor-default` | **core-workers** | Dedicated service |
+| `supervisor-default` | **core-workers** | `default` queue; light jobs |
+| `supervisor-downloads` | **core-workers** (or same as default) | When `QUEUE_DOWNLOADS_QUEUE=downloads` |
 | `supervisor-images` | **image-workers** | Isolate from heavy + video load |
 | `supervisor-images-heavy` | **heavy-image-workers** | Optional routing rules for oversized rasters |
 | `supervisor-pdf-processing` | **pdf-workers** | Dedicated PDF service |

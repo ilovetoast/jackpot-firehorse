@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback, useRef, Fragment } from 'react'
 import { router, Link } from '@inertiajs/react'
-import { PlusIcon } from '@heroicons/react/24/outline'
+import { ArrowPathIcon, PlusIcon } from '@heroicons/react/24/outline'
 import ConfirmDialog from '../ConfirmDialog'
 import MetadataFieldModal from '../MetadataFieldModal'
 
@@ -356,6 +356,13 @@ export default function ManageFieldsWorkspace({
             availableAutomated,
             pendingAutomated,
         }
+    }, [selectedCategoryId, manageableFields, automatedFields, fieldCategoryData])
+
+    const isFieldRegistryLoading = useMemo(() => {
+        if (!selectedCategoryId) return false
+        const all = [...manageableFields, ...automatedFields]
+        if (all.length === 0) return false
+        return all.some((f) => fieldCategoryData[f.id] === undefined)
     }, [selectedCategoryId, manageableFields, automatedFields, fieldCategoryData])
 
     const tableRows = useMemo(() => {
@@ -808,7 +815,7 @@ export default function ManageFieldsWorkspace({
         }`
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-6" aria-busy={isFieldRegistryLoading || undefined}>
             {successMessage && !onSaveNotice && (
                 <div className="rounded-lg border border-indigo-100 bg-indigo-50 px-4 py-2 text-sm text-indigo-900">
                     {successMessage}
@@ -834,6 +841,17 @@ export default function ManageFieldsWorkspace({
                     </div>
                 </div>
             )}
+
+            <div className="relative">
+                {isFieldRegistryLoading ? (
+                    <div
+                        className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 rounded-lg border border-indigo-100/80 bg-white/75 px-4 py-10 backdrop-blur-[2px] sm:py-16"
+                        role="status"
+                    >
+                        <ArrowPathIcon className="h-8 w-8 animate-spin text-indigo-600" aria-hidden />
+                        <p className="text-sm font-medium text-gray-700">Loading field settings…</p>
+                    </div>
+                ) : null}
 
             <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
                 <div className="min-w-0 flex-1">
@@ -1242,6 +1260,7 @@ export default function ManageFieldsWorkspace({
                         })}
                     </tbody>
                 </table>
+            </div>
             </div>
 
             <ConfirmDialog

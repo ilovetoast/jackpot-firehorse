@@ -14,6 +14,243 @@ $horizonQueueWorkersEnabled = filter_var(env('QUEUE_WORKERS_ENABLED', true), FIL
  */
 $imagesPsdQueueName = env('QUEUE_IMAGES_PSD_QUEUE') ?: 'images-psd';
 
+/**
+ * Resolve max worker processes per pool from env. Falls back differ by APP_ENV when the env key is unset
+ * (staging = conservative; production = higher throughput; local = dev-friendly).
+ *
+ * If the resolved count is 0, that supervisor is not registered at all — no workers, no RAM, no CPU.
+ *
+ * Do not run images-psd (multi-GB RAM per worker) or video-heavy (Playwright/FFmpeg) on t3.small / t3.medium
+ * or other memory-tight instances; set HORIZON_IMAGES_PSD_PROCESSES=0 and HORIZON_VIDEO_HEAVY_PROCESSES=0
+ * unless you have dedicated capacity and have enabled those queues on purpose.
+ */
+$horizonProcessCount = static function (string $envKey, int $stagingDefault, int $productionDefault, int $localDefault): int {
+    $app = env('APP_ENV', 'production');
+    $fallback = match ($app) {
+        'staging', 'testing' => $stagingDefault,
+        'production' => $productionDefault,
+        default => $localDefault,
+    };
+
+    return max(0, (int) env($envKey, $fallback));
+};
+
+$pcDefault = $horizonProcessCount('HORIZON_DEFAULT_PROCESSES', 1, 10, 1);
+$pcDownloads = $horizonProcessCount('HORIZON_DOWNLOADS_PROCESSES', 1, 2, 1);
+$pcImages = $horizonProcessCount('HORIZON_IMAGES_PROCESSES', 1, 4, 2);
+$pcImagesHeavy = $horizonProcessCount('HORIZON_IMAGES_HEAVY_PROCESSES', 0, 2, 1);
+$pcImagesPsd = $horizonProcessCount('HORIZON_IMAGES_PSD_PROCESSES', 0, 1, 1);
+$pcPdf = $horizonProcessCount('HORIZON_PDF_PROCESSES', 0, 2, 1);
+$pcAi = $horizonProcessCount('HORIZON_AI_PROCESSES', 0, 2, 1);
+$pcVideoLight = $horizonProcessCount('HORIZON_VIDEO_LIGHT_PROCESSES', 0, 3, 1);
+$pcVideoHeavy = $horizonProcessCount('HORIZON_VIDEO_HEAVY_PROCESSES', 0, 2, 1);
+
+/** @return array<string, array<string, mixed>> */
+$horizonBuildStagingOrProduction = static function (
+    bool $enabled,
+    int $pcDefault,
+    int $pcDownloads,
+    int $pcImages,
+    int $pcImagesHeavy,
+    int $pcImagesPsd,
+    int $pcPdf,
+    int $pcAi,
+    int $pcVideoLight,
+    int $pcVideoHeavy,
+    bool $isProduction
+): array {
+    if (! $enabled) {
+        return [];
+    }
+
+    $out = [];
+
+    $minP = static fn (int $n) => $n <= 0 ? 0 : min(1, $n);
+
+    if ($pcDefault > 0) {
+        $out['supervisor-default'] = array_filter([
+            'maxProcesses' => $pcDefault,
+            'minProcesses' => $minP($pcDefault),
+            'tries' => $isProduction ? null : 3,
+            'balanceMaxShift' => $isProduction ? 1 : null,
+            'balanceCooldown' => $isProduction ? 3 : null,
+        ], static fn ($v) => $v !== null);
+    }
+
+    if ($pcDownloads > 0) {
+        $out['supervisor-downloads'] = array_filter([
+            'maxProcesses' => $pcDownloads,
+            'minProcesses' => $minP($pcDownloads),
+            'balanceMaxShift' => $isProduction ? 1 : null,
+            'balanceCooldown' => $isProduction ? 3 : null,
+        ], static fn ($v) => $v !== null);
+    }
+
+    if ($pcImages > 0) {
+        $out['supervisor-images'] = array_filter([
+            'maxProcesses' => $pcImages,
+            'minProcesses' => $minP($pcImages),
+            'balanceMaxShift' => $isProduction ? 1 : null,
+            'balanceCooldown' => $isProduction ? 3 : null,
+        ], static fn ($v) => $v !== null);
+    }
+
+    if ($pcImagesHeavy > 0) {
+        $out['supervisor-images-heavy'] = array_filter([
+            'maxProcesses' => $pcImagesHeavy,
+            'minProcesses' => $minP($pcImagesHeavy),
+            'timeout' => (int) env('HORIZON_IMAGES_HEAVY_WORKER_TIMEOUT', 1800),
+            'balanceMaxShift' => $isProduction ? 1 : null,
+            'balanceCooldown' => $isProduction ? 5 : null,
+        ], static fn ($v) => $v !== null);
+    }
+
+    if ($pcImagesPsd > 0) {
+        $out['supervisor-images-psd'] = array_filter([
+            'maxProcesses' => $pcImagesPsd,
+            'minProcesses' => $minP($pcImagesPsd),
+            'balanceMaxShift' => $isProduction ? 1 : null,
+            'balanceCooldown' => $isProduction ? 10 : null,
+        ], static fn ($v) => $v !== null);
+    }
+
+    if ($pcPdf > 0) {
+        $out['supervisor-pdf-processing'] = array_filter([
+            'maxProcesses' => $pcPdf,
+            'minProcesses' => $minP($pcPdf),
+            'balanceMaxShift' => $isProduction ? 1 : null,
+            'balanceCooldown' => $isProduction ? 3 : null,
+        ], static fn ($v) => $v !== null);
+    }
+
+    if ($pcAi > 0) {
+        $out['supervisor-ai'] = array_filter([
+            'maxProcesses' => $pcAi,
+            'minProcesses' => $minP($pcAi),
+            'balanceMaxShift' => $isProduction ? 1 : null,
+            'balanceCooldown' => $isProduction ? 3 : null,
+        ], static fn ($v) => $v !== null);
+    }
+
+    if ($pcVideoLight > 0) {
+        $out['supervisor-video-light'] = array_filter([
+            'maxProcesses' => $pcVideoLight,
+            'minProcesses' => $minP($pcVideoLight),
+            'balanceMaxShift' => $isProduction ? 1 : null,
+            'balanceCooldown' => $isProduction ? 3 : null,
+        ], static fn ($v) => $v !== null);
+    }
+
+    if ($pcVideoHeavy > 0) {
+        $out['supervisor-video-heavy'] = array_filter([
+            'maxProcesses' => $pcVideoHeavy,
+            'minProcesses' => $minP($pcVideoHeavy),
+            'balanceMaxShift' => $isProduction ? 1 : null,
+            'balanceCooldown' => $isProduction ? 5 : null,
+        ], static fn ($v) => $v !== null);
+    }
+
+    return $out;
+};
+
+$horizonEnvironmentLocal = static function (
+    int $pcDefault,
+    int $pcDownloads,
+    int $pcImages,
+    int $pcImagesHeavy,
+    int $pcImagesPsd,
+    int $pcPdf,
+    int $pcAi,
+    int $pcVideoLight,
+    int $pcVideoHeavy
+): array {
+    $out = [];
+
+    $minP = static fn (int $n) => $n <= 0 ? 0 : min(1, $n);
+
+    if ($pcDefault > 0) {
+        $out['supervisor-default'] = ['maxProcesses' => $pcDefault, 'minProcesses' => $minP($pcDefault)];
+    }
+    if ($pcDownloads > 0) {
+        $out['supervisor-downloads'] = ['maxProcesses' => $pcDownloads, 'minProcesses' => $minP($pcDownloads)];
+    }
+    if ($pcImages > 0) {
+        $out['supervisor-images'] = ['maxProcesses' => $pcImages, 'minProcesses' => $minP($pcImages)];
+    }
+    if ($pcImagesHeavy > 0) {
+        $out['supervisor-images-heavy'] = [
+            'maxProcesses' => $pcImagesHeavy,
+            'minProcesses' => $minP($pcImagesHeavy),
+        ];
+    }
+    if ($pcImagesPsd > 0) {
+        $out['supervisor-images-psd'] = [
+            'maxProcesses' => $pcImagesPsd,
+            'minProcesses' => $minP($pcImagesPsd),
+        ];
+    }
+    if ($pcPdf > 0) {
+        $out['supervisor-pdf-processing'] = ['maxProcesses' => $pcPdf, 'minProcesses' => $minP($pcPdf)];
+    }
+    if ($pcAi > 0) {
+        $out['supervisor-ai'] = ['maxProcesses' => $pcAi, 'minProcesses' => $minP($pcAi)];
+    }
+    if ($pcVideoLight > 0) {
+        $out['supervisor-video-light'] = [
+            'maxProcesses' => $pcVideoLight,
+            'minProcesses' => $minP($pcVideoLight),
+        ];
+    }
+    if ($pcVideoHeavy > 0) {
+        $out['supervisor-video-heavy'] = [
+            'maxProcesses' => $pcVideoHeavy,
+            'minProcesses' => $minP($pcVideoHeavy),
+        ];
+    }
+
+    return $out;
+};
+
+$horizonStaging = $horizonBuildStagingOrProduction(
+    $horizonQueueWorkersEnabled,
+    $pcDefault,
+    $pcDownloads,
+    $pcImages,
+    $pcImagesHeavy,
+    $pcImagesPsd,
+    $pcPdf,
+    $pcAi,
+    $pcVideoLight,
+    $pcVideoHeavy,
+    false
+);
+
+$horizonProduction = $horizonBuildStagingOrProduction(
+    $horizonQueueWorkersEnabled,
+    $pcDefault,
+    $pcDownloads,
+    $pcImages,
+    $pcImagesHeavy,
+    $pcImagesPsd,
+    $pcPdf,
+    $pcAi,
+    $pcVideoLight,
+    $pcVideoHeavy,
+    true
+);
+
+$horizonLocal = $horizonEnvironmentLocal(
+    $pcDefault,
+    $pcDownloads,
+    $pcImages,
+    $pcImagesHeavy,
+    $pcImagesPsd,
+    $pcPdf,
+    $pcAi,
+    $pcVideoLight,
+    $pcVideoHeavy
+);
+
 return [
 
     /*
@@ -49,7 +286,7 @@ return [
     |
     | This is the URI path where Horizon will be accessible from. Feel free
     | to change this path to anything you like. Note that the URI will not
-    | affect the paths of its internal API that aren't exposed to users.
+    | affect the paths of any of its internal API that aren't exposed to users.
     |
     */
 
@@ -89,7 +326,7 @@ return [
     | Horizon Route Middleware
     |--------------------------------------------------------------------------
     |
-    | These middleware will get attached onto each Horizon route, giving you
+    | These middleware will be attached to each Horizon route, giving you
     | the chance to add your own middleware to this list or change any of
     | the existing middleware. Or, you can simply stick with this list.
     |
@@ -211,23 +448,37 @@ return [
     | Queue Worker Configuration
     |--------------------------------------------------------------------------
     |
-    | Here you may define the queue worker settings used by your application
-    | in all environments. These supervisors and settings handle all your
-    | queued jobs and will be provisioned by Horizon during deployment.
+    | Per-pool process counts: see HORIZON_*_PROCESSES at the top of this file.
+    | Supervisors with a process count of 0 are omitted entirely.
     |
-    | default: light jobs (mail, webhooks, etc.) + optional downloads queue
-    | images:   asset pipeline (ProcessAssetJob, thumbnails, previews, …)
-    | pdf-processing: PDF page render / extraction (see config/queue.php)
+    | default:   mail, webhooks, app default queue (HORIZON_DEFAULT_PROCESSES)
+    | downloads: BuildDownloadZipJob when QUEUE_DOWNLOADS_QUEUE=downloads (HORIZON_DOWNLOADS_PROCESSES)
+    | images:    asset pipeline (ProcessAssetJob, thumbnails, previews, …)
+    | Not for t3.small / t3.medium without explicit tuning: images-psd, video-heavy.
     |
     */
 
     'defaults' => [
         'supervisor-default' => [
             'connection' => 'redis',
-            'queue' => ['default', 'downloads'],
+            'queue' => ['default'],
             'balance' => 'auto',
             'autoScalingStrategy' => 'time',
             'maxProcesses' => 2,
+            'minProcesses' => 1,
+            'maxTime' => 3600,
+            'maxJobs' => 500,
+            'memory' => 256,
+            'tries' => 3,
+            'timeout' => 120,
+            'nice' => 0,
+        ],
+        'supervisor-downloads' => [
+            'connection' => 'redis',
+            'queue' => ['downloads'],
+            'balance' => 'auto',
+            'autoScalingStrategy' => 'time',
+            'maxProcesses' => 1,
             'minProcesses' => 1,
             'maxTime' => 3600,
             'maxJobs' => 500,
@@ -246,19 +497,16 @@ return [
             'maxTime' => 3600,
             'maxJobs' => 200,
             'memory' => 256,
-            // Must be >= GenerateThumbnailsJob / large-asset pipeline timeouts (see assets.thumbnail.*)
-            // Job $tries bounds release() deferrals; $maxExceptions stops crash loops (see heavy jobs).
-            // tries=2 lets transient S3/rsvg/ffmpeg hiccups recover without permanently failing an asset.
             'tries' => 2,
             'timeout' => (int) env('HORIZON_IMAGES_WORKER_TIMEOUT', 300),
             'nice' => 0,
         ],
         /*
          * Large originals (see ASSET_PIPELINE_HEAVY_MIN_BYTES): same job classes as images queue,
-         * but workers need more RAM and a longer kill timeout. Keep maxProcesses low.
+         * but workers need more RAM and a longer kill timeout. Keep HORIZON_IMAGES_HEAVY_PROCESSES low.
          *
-         * supervisor-images-psd: optional — only when QUEUE_IMAGES_PSD_QUEUE is set (e.g. images-psd).
-         * Isolates huge Photoshop/PSB flatten work from other large rasters. Same job classes; tune RAM high.
+         * supervisor-images-psd: only register when HORIZON_IMAGES_PSD_PROCESSES > 0 and
+         * QUEUE_IMAGES_PSD_QUEUE is set. Multi-GB RAM; do not enable on t3.small / t3.medium.
          */
         'supervisor-images-heavy' => [
             'connection' => 'redis',
@@ -270,7 +518,6 @@ return [
             'maxTime' => 3600,
             'maxJobs' => 50,
             'memory' => (int) env('HORIZON_IMAGES_HEAVY_MEMORY', 2048),
-            // Heavy originals: one retry for transient OOM / S3 / rsvg failures.
             'tries' => 2,
             'timeout' => (int) env('HORIZON_IMAGES_HEAVY_WORKER_TIMEOUT', 1800),
             'nice' => 0,
@@ -295,10 +542,10 @@ return [
             'balance' => 'auto',
             'autoScalingStrategy' => 'time',
             'maxProcesses' => 1,
+            'minProcesses' => 1,
             'maxTime' => 3600,
             'maxJobs' => 100,
             'memory' => 256,
-            // One retry for transient Ghostscript / S3 failures; heavy jobs can still set $tries locally.
             'tries' => 2,
             'timeout' => 600,
             'nice' => 0,
@@ -313,8 +560,6 @@ return [
             'maxTime' => 3600,
             'maxJobs' => 100,
             'memory' => (int) env('HORIZON_AI_MEMORY', 1024),
-            // {@see \App\Jobs\GenerateVideoInsightsJob}: may release() many times while storage paths appear;
-            // worker max attempts must stay >= that deferral budget (job $tries is 32). Override via HORIZON_AI_SUPERVISOR_TRIES.
             'tries' => (int) env('HORIZON_AI_SUPERVISOR_TRIES', 40),
             'timeout' => (int) env('HORIZON_AI_WORKER_TIMEOUT', 960),
             'nice' => 0,
@@ -333,8 +578,7 @@ return [
             'timeout' => (int) env('HORIZON_VIDEO_LIGHT_WORKER_TIMEOUT', 600),
             'nice' => 0,
         ],
-        // Studio canvas-runtime export defaults to the same queue; set QUEUE_VIDEO_HEAVY_STUDIO_CANVAS_QUEUE + a
-        // second supervisor to isolate Playwright/Chromium workloads. See docs/studio/CANVAS_RUNTIME_EXPORT.md.
+        // video-heavy: Playwright/FFmpeg — do not run on t3.small / t3.medium; set HORIZON_VIDEO_HEAVY_PROCESSES=0
         'supervisor-video-heavy' => [
             'connection' => 'redis',
             'queue' => [env('QUEUE_VIDEO_HEAVY_QUEUE', 'video-heavy')],
@@ -345,129 +589,18 @@ return [
             'maxTime' => 3600,
             'maxJobs' => 50,
             'memory' => (int) env('HORIZON_VIDEO_HEAVY_MEMORY', 2048),
-            // tries=1 caused MaxAttemptsExceeded on the *next* reservation (timeout/OOM/redeploy) before handle()
-            // ran again — noisy Sentry + stuck studio export rows. Allow a small retry budget like images-heavy.
             'tries' => (int) env('HORIZON_VIDEO_HEAVY_SUPERVISOR_TRIES', 3),
-            // Must be >= studio_video.export_job_timeout_seconds (canvas capture + FFmpeg merge can exceed 1h).
             'timeout' => (int) env('HORIZON_VIDEO_HEAVY_WORKER_TIMEOUT', 12_600),
             'nice' => 0,
         ],
     ],
 
     'environments' => [
-        'production' => $horizonQueueWorkersEnabled ? [
-            'supervisor-default' => [
-                'maxProcesses' => 10,
-                'balanceMaxShift' => 1,
-                'balanceCooldown' => 3,
-            ],
-            'supervisor-images' => [
-                'maxProcesses' => 4,
-                'balanceMaxShift' => 1,
-                'balanceCooldown' => 3,
-            ],
-            'supervisor-images-heavy' => [
-                'maxProcesses' => 2,
-                'minProcesses' => 1,
-                'balanceMaxShift' => 1,
-                'balanceCooldown' => 5,
-            ],
-            'supervisor-images-psd' => [
-                'maxProcesses' => 1,
-                'minProcesses' => 1,
-                'balanceMaxShift' => 1,
-                'balanceCooldown' => 10,
-            ],
-            'supervisor-pdf-processing' => [
-                'maxProcesses' => 2,
-                'balanceMaxShift' => 1,
-                'balanceCooldown' => 3,
-            ],
-            'supervisor-ai' => [
-                'maxProcesses' => 2,
-                'minProcesses' => 1,
-                'balanceMaxShift' => 1,
-                'balanceCooldown' => 3,
-            ],
-            'supervisor-video-light' => [
-                'maxProcesses' => 3,
-                'minProcesses' => 1,
-                'balanceMaxShift' => 1,
-                'balanceCooldown' => 3,
-            ],
-            'supervisor-video-heavy' => [
-                'maxProcesses' => 2,
-                'minProcesses' => 1,
-                'balanceMaxShift' => 1,
-                'balanceCooldown' => 5,
-            ],
-        ] : [],
-
-        'staging' => $horizonQueueWorkersEnabled ? [
-            'supervisor-default' => [
-                'maxProcesses' => 1,
-                'minProcesses' => 1,
-                'tries' => 3,
-            ],
-            'supervisor-images' => [
-                // Same as production: pipeline + thumbnails + AI on `images` serialize if this is 1
-                'maxProcesses' => 4,
-                'minProcesses' => 1,
-            ],
-            'supervisor-images-heavy' => [
-                'maxProcesses' => 1,
-                'minProcesses' => 1,
-                'timeout' => (int) env('HORIZON_IMAGES_HEAVY_WORKER_TIMEOUT', 1800),
-            ],
-            'supervisor-images-psd' => [
-                'maxProcesses' => 1,
-                'minProcesses' => 1,
-            ],
-            'supervisor-pdf-processing' => [
-                'maxProcesses' => 1,
-            ],
-            'supervisor-ai' => [
-                'maxProcesses' => 1,
-                'minProcesses' => 1,
-            ],
-            'supervisor-video-light' => [
-                'maxProcesses' => 1,
-                'minProcesses' => 1,
-            ],
-            'supervisor-video-heavy' => [
-                'maxProcesses' => 1,
-                'minProcesses' => 1,
-            ],
-        ] : [],
-//
-        'local' => [
-            'supervisor-default' => [
-                'maxProcesses' => 1,
-            ],
-            'supervisor-images' => [
-                'maxProcesses' => 2,
-            ],
-            'supervisor-images-heavy' => [
-                'maxProcesses' => 1,
-                'minProcesses' => 1,
-            ],
-            'supervisor-images-psd' => [
-                'maxProcesses' => 1,
-                'minProcesses' => 1,
-            ],
-            'supervisor-pdf-processing' => [
-                'maxProcesses' => 1,
-            ],
-            'supervisor-ai' => [
-                'maxProcesses' => 1,
-            ],
-            'supervisor-video-light' => [
-                'maxProcesses' => 1,
-            ],
-            'supervisor-video-heavy' => [
-                'maxProcesses' => 1,
-            ],
-        ],
+        'production' => $horizonProduction,
+        'staging' => $horizonStaging,
+        // PHPUnit: same pool selection as staging (conservative); process counts use staging fallbacks in $horizonProcessCount.
+        'testing' => $horizonStaging,
+        'local' => $horizonLocal,
     ],
 
     /*

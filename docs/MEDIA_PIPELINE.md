@@ -340,6 +340,7 @@ memory_limit = 2G
 ```
 
 - **Horizon**: Horizon can also set per-worker memory via `config/horizon.php` → `defaults` → `memory`. Default is 128MB; increase if needed for thumbnail workers.
+- **Process counts / small instances:** Use `HORIZON_*_PROCESSES` in `.env` so staging and small workers do not register heavy supervisors (see `config/horizon.php`). Do not run `images-psd` or `video-heavy` pools on t3.small/t3.medium without extra RAM. Emergency steps: [HORIZON_EMERGENCY_RUNBOOK.md](operations/HORIZON_EMERGENCY_RUNBOOK.md).
 
 ---
 

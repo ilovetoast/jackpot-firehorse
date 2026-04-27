@@ -3686,6 +3686,18 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
         setSelectedCategoryId(categoryId)
     }, [])
 
+    /**
+     * When the parent grid sidebar changes category while the uploader is open (including minimized tray),
+     * stay mounted and follow the new category for metadata schema — without clearing files.
+     * (Parent must not unmount this dialog on category-only navigation; see Assets/Deliverables Index.)
+     */
+    useEffect(() => {
+        if (!open) {
+            return
+        }
+        setSelectedCategoryId(initialCategoryId ?? null)
+    }, [open, initialCategoryId])
+
     // Phase 2 – Step 2: Fetch metadata schema when category changes
     useEffect(() => {
         if (!selectedCategoryId) {

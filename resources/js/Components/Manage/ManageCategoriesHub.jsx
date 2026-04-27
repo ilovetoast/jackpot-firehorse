@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { CheckCircleIcon, ExclamationCircleIcon } from '@heroicons/react/24/outline'
-import { router } from '@inertiajs/react'
 import ManageStructureWorkspace from './ManageStructureWorkspace'
 import ManageFieldsWorkspace from './ManageFieldsWorkspace'
 
@@ -40,6 +39,18 @@ export default function ManageCategoriesHub({
 
     useEffect(() => {
         if (!categories.length) return
+        if (typeof window !== 'undefined') {
+            const urlSlug = new URLSearchParams(window.location.search).get('category')
+            if (urlSlug) {
+                const match = categories.find(
+                    (c) => (c.slug || '').toLowerCase() === urlSlug.toLowerCase()
+                )
+                if (match) {
+                    setSelectedCategoryId(match.id)
+                    return
+                }
+            }
+        }
         if (initial_category_slug) {
             const match = categories.find(
                 (c) => (c.slug || '').toLowerCase() === String(initial_category_slug).toLowerCase()
@@ -53,14 +64,44 @@ export default function ManageCategoriesHub({
         })
     }, [initial_category_slug, categories])
 
+    useEffect(() => {
+        if (typeof window === 'undefined' || !categories.length) return
+        const onPopState = () => {
+            const urlSlug = new URLSearchParams(window.location.search).get('category')
+            if (urlSlug) {
+                const match = categories.find(
+                    (c) => (c.slug || '').toLowerCase() === urlSlug.toLowerCase()
+                )
+                if (match) {
+                    setSelectedCategoryId(match.id)
+                    return
+                }
+            }
+            if (initial_category_slug) {
+                const m = categories.find(
+                    (c) => (c.slug || '').toLowerCase() === String(initial_category_slug).toLowerCase()
+                )
+                setSelectedCategoryId(m ? m.id : categories[0]?.id ?? null)
+                return
+            }
+            setSelectedCategoryId(categories[0]?.id ?? null)
+        }
+        window.addEventListener('popstate', onPopState)
+        return () => window.removeEventListener('popstate', onPopState)
+    }, [categories, initial_category_slug])
+
     const handleSelectCategory = useCallback(
         (categoryId) => {
             setSelectedCategoryId(categoryId)
-            const params = {}
+            if (typeof window === 'undefined') return
             const cat = categoryId != null ? categories.find((c) => c.id === categoryId) : null
-            if (cat?.slug) params.category = cat.slug
-            if (field_filter === 'low_coverage') params.filter = 'low_coverage'
-            router.get(MANAGE_CATEGORIES_URL, params, { preserveState: true, preserveScroll: true, replace: true })
+            const u = new URL(window.location.href)
+            if (cat?.slug) u.searchParams.set('category', cat.slug)
+            else u.searchParams.delete('category')
+            if (field_filter === 'low_coverage') u.searchParams.set('filter', 'low_coverage')
+            else u.searchParams.delete('filter')
+            const next = `${u.pathname}${u.search}${u.hash}`
+            window.history.replaceState(window.history.state, '', next)
         },
         [categories, field_filter]
     )

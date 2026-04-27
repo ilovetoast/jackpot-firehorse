@@ -269,6 +269,8 @@ class DeliverableController extends Controller
             $category = Category::where('slug', $categorySlug)
                 ->where('tenant_id', $tenant->id)
                 ->where('brand_id', $brand->id)
+                ->where('asset_type', AssetType::DELIVERABLE)
+                ->active()
                 ->first();
 
             if ($category) {

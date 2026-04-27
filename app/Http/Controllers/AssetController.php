@@ -353,9 +353,15 @@ class AssetController extends Controller
         $categoryId = null;
 
         if ($categorySlug) {
+            // Slug is unique per (tenant, brand, asset_type). The library sidebar only lists
+            // ASSET-type folders; without this scope, first() can return the deliverable row with
+            // the same slug, so the grid filters the wrong category_id and shows empty while the
+            // sidebar count still reflects the library folder.
             $category = Category::where('slug', $categorySlug)
                 ->where('tenant_id', $tenant->id)
                 ->where('brand_id', $brand->id)
+                ->where('asset_type', AssetType::ASSET)
+                ->active()
                 ->first();
 
             if ($category) {

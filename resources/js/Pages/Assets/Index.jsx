@@ -578,8 +578,8 @@ export default function AssetsIndex({
         // Signal to useEffect (filter cleanup) to skip - prevents double router.get and white flash
         categoryChangeFromClickRef.current = true
 
-        // Phase 2 invariant: Explicitly reset dialog state before preserveState navigation
-        setIsUploadDialogOpen(false)
+        // Do not close the upload dialog here — that unmounts UploadAssetDialog and discards in-progress
+        // uploads. The open dialog receives updated initialCategoryId and syncs category + schema instead.
 
         setSelectedCategoryId(categoryId)
 
@@ -617,6 +617,14 @@ export default function AssetsIndex({
     // Navigate to Reference materials view (builder-staged assets)
     const handleReferenceMaterialsClick = useCallback(() => {
         categoryChangeFromClickRef.current = true
+        if (isUploadDialogOpen) {
+            const ok = window.confirm(
+                'The uploader will close and any in-progress uploads in this window will be lost. Continue?'
+            )
+            if (!ok) {
+                return
+            }
+        }
         setIsUploadDialogOpen(false)
         setSelectedCategoryId(null)
         router.get('/app/assets', { source: 'reference_materials' }, {
@@ -633,7 +641,7 @@ export default function AssetsIndex({
                 ...ASSET_INDEX_SIDEBAR_COUNT_PROPS,
             ],
         })
-    }, [])
+    }, [isUploadDialogOpen])
 
     // Mobile category tabs (same pattern as Deliverables)
     const visibleMobileCategories = useMemo(() => filterActiveCategories(categories || []), [categories])

@@ -9,6 +9,8 @@ Operational guide: workers, upload dispatch, diagnostic logging, sequencing, and
 
 Queue workers process background jobs (thumbnail generation, metadata extraction, etc.). **Queue workers must be running for thumbnail processing to work.**
 
+**Horizon (Redis):** per-pool process counts and kill-switch are in `config/horizon.php` (env keys `HORIZON_*_PROCESSES` and `QUEUE_WORKERS_ENABLED`). Staging uses conservative defaults; set heavy pools to `0` on small instances. For overload / stuck queues, see [Horizon emergency runbook](operations/HORIZON_EMERGENCY_RUNBOOK.md).
+
 ## Quick Start
 
 ### Start Queue Worker (Docker Compose)

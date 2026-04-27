@@ -56,6 +56,7 @@ class PhotoTypeSeeder extends Seeder
             'is_internal_only' => false,
         ]);
 
+        // Align with MetadataFieldsSeeder: fewer shot types; use Environment for interior/exterior, etc.
         $options = [
             ['value' => 'product_only', 'system_label' => 'Product-only'],
             ['value' => 'product_in_use', 'system_label' => 'Product in use'],
@@ -64,11 +65,7 @@ class PhotoTypeSeeder extends Seeder
             ['value' => 'detail_closeup', 'system_label' => 'Detail/Close-up'],
             ['value' => 'flat_lay', 'system_label' => 'Flat lay'],
             ['value' => 'packaging_label', 'system_label' => 'Packaging/Label'],
-            ['value' => 'interior', 'system_label' => 'Interior'],
-            ['value' => 'exterior', 'system_label' => 'Exterior'],
             ['value' => 'event', 'system_label' => 'Event'],
-            ['value' => 'action', 'system_label' => 'Action'],
-            ['value' => 'scenic', 'system_label' => 'Scenic'],
             ['value' => 'mockup_render', 'system_label' => 'Mockup/Render'],
         ];
 

@@ -206,7 +206,8 @@ class MetadataFieldsSeeder extends Seeder
      */
     protected function seedBasicFields(): void
     {
-        // Photo type (DB key: photo_type) — “What kind of visual is it?” Sync replaces option rows not in this list.
+        // Photo type (DB key: photo_type) — shot / framing. Kept short: location = Environment field.
+        // syncOptions removes DB rows not listed (existing asset values for removed slugs may still exist until edited).
         $photoTypeId = $this->getOrCreateField([
             'key' => 'photo_type',
             'system_label' => 'Photo type',
@@ -230,11 +231,7 @@ class MetadataFieldsSeeder extends Seeder
             ['value' => 'detail_closeup', 'system_label' => 'Detail/Close-up'],
             ['value' => 'flat_lay', 'system_label' => 'Flat lay'],
             ['value' => 'packaging_label', 'system_label' => 'Packaging/Label'],
-            ['value' => 'interior', 'system_label' => 'Interior'],
-            ['value' => 'exterior', 'system_label' => 'Exterior'],
             ['value' => 'event', 'system_label' => 'Event'],
-            ['value' => 'action', 'system_label' => 'Action'],
-            ['value' => 'scenic', 'system_label' => 'Scenic'],
             ['value' => 'mockup_render', 'system_label' => 'Mockup/Render'],
         ]);
 
