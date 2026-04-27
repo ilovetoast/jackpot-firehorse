@@ -19,6 +19,39 @@ import {
     VideoCameraIcon,
 } from '@heroicons/react/24/outline'
 
+/** Shown above "Why still open" — distinguishes stale/misleading incidents from real thumb/processing failures. */
+function PlaybookResolveBadge({ kind }) {
+    const k = kind || 'neutral'
+    if (k === 'manual_ok') {
+        return (
+            <span
+                className="mb-1.5 block w-full rounded border border-emerald-200 bg-emerald-50 px-2 py-1 text-[11px] font-medium leading-snug text-emerald-900"
+                title="Heuristic: standard thumbnails/paths exist and status is not FAILED. The critical flag is often a stale analysis label or pipeline finalize — not missing preview files. Resolve (Manual) after you confirm the asset or a successful repair."
+            >
+                No missing-thumbnail issue vs. title — you can Resolve (Manual) after verifying
+            </span>
+        )
+    }
+    if (k === 'fix_first') {
+        return (
+            <span
+                className="mb-1.5 block w-full rounded border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] font-medium leading-snug text-amber-900"
+                title="Heuristic: thumbnail failed, missing paths, or similar. Fix processing or accept state before resolving, or you may hide a real problem."
+            >
+                Likely real processing gap — fix asset / jobs before Resolve
+            </span>
+        )
+    }
+    return (
+        <span
+            className="mb-1.5 block w-full rounded border border-gray-200 bg-gray-50 px-2 py-1 text-[11px] text-gray-700"
+            title="Non-asset incident or not enough context; read the narrative below."
+        >
+            See narrative — use judgment
+        </span>
+    )
+}
+
 function IncidentRow({ incident: i, onAction, selected, onSelect, onSourceClick }) {
     const [loading, setLoading] = useState(null)
     const baseUrl = '/app/admin/incidents'
@@ -98,6 +131,7 @@ function IncidentRow({ incident: i, onAction, selected, onSelect, onSourceClick 
                 ) : '—'}
             </td>
             <td className="py-3 px-3 text-xs text-gray-700 max-w-xs align-top">
+                <PlaybookResolveBadge kind={i.playbook_resolve_kind} />
                 {i.playbook_why ? (
                     <p className="line-clamp-4" title={i.playbook_why}>
                         {i.playbook_why}
@@ -636,7 +670,10 @@ export default function OperationsCenterIndex({
                                                 <th className="py-3.5 px-3 text-left text-sm font-semibold text-gray-900">Source</th>
                                                 <th className="py-3.5 px-3 text-left text-sm font-semibold text-gray-900">Detected</th>
                                                 <th className="py-3.5 px-3 text-left text-sm font-semibold text-gray-900">Repair attempts</th>
-                                                <th className="py-3.5 px-3 text-left text-sm font-semibold text-gray-900 max-w-xs">Why still open</th>
+                                                <th className="py-3.5 px-3 text-left text-sm font-semibold text-gray-900 max-w-xs">
+                                                    Why still open
+                                                    <span className="mt-0.5 block text-xs font-normal text-gray-500">(chip = manual resolve vs. fix first)</span>
+                                                </th>
                                                 <th className="py-3.5 px-3 text-left text-sm font-semibold text-gray-900 max-w-xs">What to do</th>
                                                 <th className="py-3.5 px-3 text-right text-sm font-semibold text-gray-900">Actions</th>
                                             </tr>

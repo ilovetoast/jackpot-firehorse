@@ -84,6 +84,7 @@ class OperationsCenterController extends Controller
                 'auto_repair_exhausted' => (bool) ($i->metadata['auto_repair_exhausted'] ?? false),
                 'playbook_why' => $pb['why'],
                 'playbook_action' => $pb['action'],
+                'playbook_resolve_kind' => $pb['resolve_kind'] ?? \App\Services\Reliability\IncidentPlaybookService::RESOLVE_NEUTRAL,
             ];
         });
 
