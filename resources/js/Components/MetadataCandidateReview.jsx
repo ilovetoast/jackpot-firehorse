@@ -2,7 +2,8 @@
  * Metadata Candidate Review Component
  *
  * Phase B9: Displays metadata candidates that need human review.
- * Decision-based actions only (approve/reject/defer) - no inline editing.
+ * Approve / reject / defer, plus inline pickers for select fields so approvers
+ * can choose another allowed option before approving (backed by POST body `value`).
  */
 
 import { useState, useEffect } from 'react'
@@ -28,6 +29,8 @@ export default function MetadataCandidateReview({
     const [loading, setLoading] = useState(true)
     const [processing, setProcessing] = useState(new Set())
     const [showConfirmReject, setShowConfirmReject] = useState(null)
+    /** @type {Record<string, string>} candidate id -> selected option `value` (select fields only) */
+    const [selectOverrides, setSelectOverrides] = useState({})
     
     const { auth } = usePage().props
     const brandColor = primaryColor || auth?.activeBrand?.primary_color || '#6366f1'
@@ -116,8 +119,27 @@ export default function MetadataCandidateReview({
             })
     }
 
+    const getSelectValueForCandidate = (fieldType, candidate) => {
+        if (fieldType !== 'select') return null
+        if (Object.prototype.hasOwnProperty.call(selectOverrides, candidate.id)) {
+            return selectOverrides[candidate.id]
+        }
+        return candidate.value
+    }
+
+    const selectValueDiffersFromCandidate = (fieldType, candidate) => {
+        if (fieldType !== 'select') return false
+        const v = getSelectValueForCandidate(fieldType, candidate)
+        const a = v === null || v === undefined ? '' : String(v)
+        const b =
+            candidate.value === null || candidate.value === undefined
+                ? ''
+                : String(candidate.value)
+        return a !== b
+    }
+
     // Handle approve candidate (DB row) or ephemeral Jackpot embedded suggestion (field_key)
-    const handleApprove = async (candidate) => {
+    const handleApprove = async (candidate, item) => {
         const candidateId = candidate.id
         if (processing.has(candidateId)) return
 
@@ -136,6 +158,11 @@ export default function MetadataCandidateReview({
             }
 
             if (candidate.ephemeral && candidate.field_key) {
+                const payload = { _token: csrfToken }
+                const fieldType = item?.field_type
+                if (fieldType === 'select' && selectValueDiffersFromCandidate(fieldType, candidate)) {
+                    payload.value = getSelectValueForCandidate(fieldType, candidate)
+                }
                 const response = await fetch(
                     `/app/assets/${assetId}/metadata/suggestions/${encodeURIComponent(candidate.field_key)}/accept`,
                     {
@@ -147,7 +174,7 @@ export default function MetadataCandidateReview({
                             Accept: 'application/json',
                         },
                         credentials: 'same-origin',
-                        body: JSON.stringify({ _token: csrfToken }),
+                        body: JSON.stringify(payload),
                     }
                 )
                 if (!response.ok) {
@@ -156,6 +183,12 @@ export default function MetadataCandidateReview({
                 }
                 refreshReview()
                 return
+            }
+
+            const approveBody = { _token: csrfToken }
+            const fieldType = item?.field_type
+            if (fieldType === 'select' && selectValueDiffersFromCandidate(fieldType, candidate)) {
+                approveBody.value = getSelectValueForCandidate(fieldType, candidate)
             }
 
             const response = await fetch(`/app/metadata/candidates/${candidateId}/approve`, {
@@ -167,9 +200,7 @@ export default function MetadataCandidateReview({
                     'Accept': 'application/json',
                 },
                 credentials: 'same-origin',
-                body: JSON.stringify({
-                    _token: csrfToken,
-                }),
+                body: JSON.stringify(approveBody),
             })
 
             if (!response.ok) {
@@ -410,7 +441,7 @@ export default function MetadataCandidateReview({
         )
     }
 
-    // Format confidence
+    // Format confidence (self-reported by the model in the tagging pipeline — not calibrated)
     const formatConfidence = (confidence) => {
         if (confidence === null || confidence === undefined) return null
         return `${Math.round(confidence * 100)}%`
@@ -480,14 +511,78 @@ export default function MetadataCandidateReview({
                                             className="p-2 bg-white rounded border border-gray-200"
                                         >
                                             <div className="flex items-center justify-between gap-2">
-                                                <div className="flex-1 min-w-0 flex items-center gap-2 flex-wrap">
-                                                    <span className="text-xs font-medium text-gray-900">
-                                                        {formatValue(item.field_type, candidate.value, item.options || [])}
-                                                    </span>
+                                                <div className="flex-1 min-w-0 flex flex-col gap-1.5 sm:flex-row sm:items-center sm:gap-2 sm:flex-wrap">
+                                                    {item.field_type === 'select' &&
+                                                    Array.isArray(item.options) &&
+                                                    item.options.length > 0 ? (
+                                                        <label className="flex flex-col gap-0.5 min-w-0 w-full sm:w-auto sm:max-w-[14rem]">
+                                                            <span className="text-[10px] text-gray-500">Value to approve</span>
+                                                            <select
+                                                                className="text-xs border border-gray-300 rounded-md px-1.5 py-1 text-gray-900 bg-white w-full"
+                                                                value={
+                                                                    getSelectValueForCandidate(item.field_type, candidate) ??
+                                                                    ''
+                                                                }
+                                                                onChange={(e) =>
+                                                                    setSelectOverrides((prev) => ({
+                                                                        ...prev,
+                                                                        [candidate.id]: e.target.value,
+                                                                    }))
+                                                                }
+                                                                disabled={processing.has(candidate.id)}
+                                                            >
+                                                                {(() => {
+                                                                    const optVals = new Set(
+                                                                        item.options.map((o) => String(o.value))
+                                                                    )
+                                                                    const sug = candidate.value
+                                                                    const sugStr =
+                                                                        sug === null || sug === undefined
+                                                                            ? ''
+                                                                            : String(sug)
+                                                                    const missing =
+                                                                        sugStr !== '' && !optVals.has(sugStr)
+                                                                    return (
+                                                                        <>
+                                                                            {missing && (
+                                                                                <option value={sugStr}>
+                                                                                    {formatValue(
+                                                                                        item.field_type,
+                                                                                        candidate.value,
+                                                                                        item.options || []
+                                                                                    )}{' '}
+                                                                                    (suggested)
+                                                                                </option>
+                                                                            )}
+                                                                            {item.options.map((opt) => (
+                                                                                <option
+                                                                                    key={String(opt.value)}
+                                                                                    value={String(opt.value)}
+                                                                                >
+                                                                                    {opt.display_label ??
+                                                                                        opt.label ??
+                                                                                        opt.value}
+                                                                                </option>
+                                                                            ))}
+                                                                        </>
+                                                                    )
+                                                                })()}
+                                                            </select>
+                                                        </label>
+                                                    ) : (
+                                                        <span className="text-xs font-medium text-gray-900">
+                                                            {formatValue(
+                                                                item.field_type,
+                                                                candidate.value,
+                                                                item.options || []
+                                                            )}
+                                                        </span>
+                                                    )}
                                                     {formatProducer(candidate.producer)}
-                                                    {candidate.confidence && (
-                                                        <span className="text-[10px] text-gray-500">
-                                                            {formatConfidence(candidate.confidence)} confidence
+                                                    {candidate.confidence != null && (
+                                                        <span className="text-[10px] text-gray-500 max-w-[11rem] leading-snug">
+                                                            {formatConfidence(candidate.confidence)} model estimate — not
+                                                            calibrated; pick another value above if needed.
                                                         </span>
                                                     )}
                                                     <span className="text-[10px] text-gray-400">
@@ -503,7 +598,7 @@ export default function MetadataCandidateReview({
                                                     <div className="flex items-center gap-1.5 flex-shrink-0">
                                                         <button
                                                             type="button"
-                                                            onClick={() => handleApprove(candidate)}
+                                                            onClick={() => handleApprove(candidate, item)}
                                                             disabled={processing.has(candidate.id)}
                                                             className="inline-flex items-center px-2 py-1 text-[11px] font-medium text-white bg-green-600 hover:bg-green-700 rounded focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
                                                         >

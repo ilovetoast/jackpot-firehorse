@@ -76,13 +76,6 @@ export default function AssetImage({
     const hasValidThumbnail = Boolean(thumbnailUrl)
     const showImage = hasValidThumbnail && !hasError
 
-    if (thumbnailUrl) {
-        console.log('IMAGE URL FROM API:', thumbnailUrl)
-    }
-    if (thumbnailUrlLarge) {
-        console.log('IMAGE LARGE URL FROM API:', thumbnailUrlLarge)
-    }
-
     if (!thumbnailUrl) {
         return (
             <img

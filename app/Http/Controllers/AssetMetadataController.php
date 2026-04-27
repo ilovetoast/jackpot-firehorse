@@ -3730,11 +3730,11 @@ class AssetMetadataController extends Controller
      *
      * POST /metadata/candidates/{candidateId}/approve
      *
-     * Phase B9: Accepts an AI suggestion by preserving original AI attribution.
-     * Maintains source = 'ai', original confidence, producer = 'ai'.
-     * This is NOT a manual override - it's accepting an AI recommendation.
+     * Phase B9: Accepts an AI suggestion by preserving original AI attribution when no body is sent.
+     * Optional JSON body `{ "value": ... }` approves a different option (inline correction); stored as
+     * user attribution with confidence 1.0, same as edit-approve.
      */
-    public function approveCandidate(int $candidateId): JsonResponse
+    public function approveCandidate(Request $request, int $candidateId): JsonResponse
     {
         $tenant = app('tenant');
         $brand = app('brand');
@@ -3780,28 +3780,92 @@ class AssetMetadataController extends Controller
             return response()->json(['message' => 'Permission denied'], 403);
         }
 
-        // Get field info for activity logging
+        // Get field info for activity logging and validation
         $field = DB::table('metadata_fields')->where('id', $candidate->metadata_field_id)->first();
+        if (! $field) {
+            return response()->json(['message' => 'Field not found'], 404);
+        }
         $fieldKey = $field->key ?? 'unknown';
         $fieldLabel = $field->system_label ?? $fieldKey;
 
-        DB::transaction(function () use ($asset, $candidate, $user, $candidateId, $fieldKey, $fieldLabel, $tenant, $brand) {
-            // Accept AI suggestion by preserving AI attribution
-            // This is NOT a manual override - it's accepting an AI recommendation
-            DB::table('asset_metadata')->insert([
+        $requestValue = $request->exists('value') ? $request->input('value') : null;
+        $candidateDecoded = json_decode($candidate->value_json, true);
+        $useInlineCorrection = false;
+        $valueJsonToStore = $candidate->value_json;
+        $rowSource = $candidate->source;
+        $rowConfidence = $candidate->confidence;
+        $rowProducer = $candidate->producer;
+
+        if ($request->exists('value')) {
+            if (! $this->validateValue($field, $requestValue)) {
+                return response()->json(['message' => 'Invalid value for field type'], 422);
+            }
+            if (! $this->assertMetadataValueAllowedByOptions($field, $requestValue)) {
+                return response()->json(['message' => 'Value is not allowed for this field'], 422);
+            }
+            $normalizedValues = $this->normalizeValue($field, $requestValue);
+            if (! $this->candidateValueEqualsNormalized($field, $candidateDecoded, $normalizedValues)) {
+                $useInlineCorrection = true;
+                $rowSource = 'user';
+                $rowConfidence = 1.0;
+                $rowProducer = 'user';
+                if ($field->type === 'multiselect') {
+                    $valueJsonToStore = json_encode($normalizedValues);
+                } else {
+                    $valueJsonToStore = json_encode($normalizedValues[0] ?? $normalizedValues);
+                }
+            } else {
+                $valueJsonToStore = $candidate->value_json;
+            }
+        }
+
+        $oldApprovedJson = DB::table('asset_metadata')
+            ->where('asset_id', $asset->id)
+            ->where('metadata_field_id', $candidate->metadata_field_id)
+            ->whereNotNull('approved_at')
+            ->value('value_json');
+
+        DB::transaction(function () use (
+            $asset,
+            $candidate,
+            $user,
+            $candidateId,
+            $fieldKey,
+            $fieldLabel,
+            $tenant,
+            $brand,
+            $valueJsonToStore,
+            $rowSource,
+            $rowConfidence,
+            $rowProducer,
+            $useInlineCorrection,
+            $oldApprovedJson,
+        ) {
+            $insertedId = DB::table('asset_metadata')->insertGetId([
                 'asset_id' => $asset->id,
                 'metadata_field_id' => $candidate->metadata_field_id,
-                'value_json' => $candidate->value_json,
-                'source' => $candidate->source, // Preserve original source (typically 'ai')
-                'confidence' => $candidate->confidence, // Preserve original AI confidence
-                'producer' => $candidate->producer, // Preserve original producer (typically 'ai')
+                'value_json' => $valueJsonToStore,
+                'source' => $rowSource,
+                'confidence' => $rowConfidence,
+                'producer' => $rowProducer,
                 'approved_at' => now(),
                 'approved_by' => $user->id,
-                'overridden_at' => null, // Not an override - it's an acceptance of AI suggestion
-                'overridden_by' => null, // Not an override - it's an acceptance of AI suggestion
+                'overridden_at' => null,
+                'overridden_by' => null,
                 'created_at' => now(),
                 'updated_at' => now(),
             ]);
+
+            if ($useInlineCorrection) {
+                DB::table('asset_metadata_history')->insert([
+                    'asset_metadata_id' => $insertedId,
+                    'old_value_json' => $oldApprovedJson,
+                    'new_value_json' => $valueJsonToStore,
+                    'source' => 'user',
+                    'changed_by' => $user->id,
+                    'created_at' => now(),
+                ]);
+            }
 
             // Mark candidate as resolved
             DB::table('asset_metadata_candidates')
@@ -3820,8 +3884,8 @@ class AssetMetadataController extends Controller
                         'field_key' => $fieldKey,
                         'field_label' => $fieldLabel,
                         'field_id' => $candidate->metadata_field_id,
-                        'action' => 'candidate_approved',
-                        'value' => $candidate->value_json,
+                        'action' => $useInlineCorrection ? 'candidate_approved_with_correction' : 'candidate_approved',
+                        'value' => $valueJsonToStore,
                         'candidate_id' => $candidateId,
                         'candidate_producer' => $candidate->producer,
                         'candidate_confidence' => $candidate->confidence,
@@ -3837,11 +3901,26 @@ class AssetMetadataController extends Controller
             }
         });
 
+        if ($useInlineCorrection && $fieldKey && in_array($fieldKey, ['starred', 'quality_rating'], true)) {
+            $norm = json_decode($valueJsonToStore, true);
+            if ($norm !== null) {
+                $this->syncSortFieldToAsset($asset, $fieldKey, $norm);
+            }
+        }
+        if ($useInlineCorrection && $fieldKey === 'tags' && $valueJsonToStore !== null) {
+            $decoded = json_decode($valueJsonToStore, true);
+            $flat = MetadataPersistenceService::flattenDecodedTagsForSync($decoded);
+            if ($flat !== []) {
+                app(MetadataPersistenceService::class)->syncApprovedTagBatchValues($asset, $tenant, $flat);
+            }
+        }
+
         Log::info('[AssetMetadataController] Candidate approved', [
             'asset_id' => $asset->id,
             'candidate_id' => $candidateId,
             'metadata_field_id' => $candidate->metadata_field_id,
             'user_id' => $user->id,
+            'inline_correction' => $useInlineCorrection,
         ]);
 
         // Centralized AI trigger: Check if all metadata is approved and trigger AI suggestions
@@ -3850,8 +3929,64 @@ class AssetMetadataController extends Controller
         app(\App\Services\BrandInsightLLM::class)->bustCache($brand);
 
         return response()->json([
-            'message' => 'Candidate approved and created as manual override',
+            'message' => $useInlineCorrection
+                ? 'Candidate approved with your selected value'
+                : 'Candidate approved',
         ]);
+    }
+
+    /**
+     * @param  mixed  $candidateDecoded
+     * @param  array<int, mixed>  $normalizedValues
+     */
+    protected function candidateValueEqualsNormalized(object $field, $candidateDecoded, array $normalizedValues): bool
+    {
+        $fieldType = $field->type ?? 'text';
+        if ($fieldType === 'multiselect') {
+            $a = is_array($candidateDecoded) ? $candidateDecoded : [];
+            $b = $normalizedValues;
+            $a = array_values(array_unique($a, SORT_REGULAR));
+            $b = array_values(array_unique($b, SORT_REGULAR));
+            sort($a);
+            sort($b);
+
+            return $a === $b;
+        }
+
+        $nv = $normalizedValues[0] ?? null;
+
+        return $candidateDecoded == $nv;
+    }
+
+    /**
+     * @param  mixed  $value
+     */
+    protected function assertMetadataValueAllowedByOptions(object $field, $value): bool
+    {
+        $fieldType = $field->type ?? 'text';
+        if (! in_array($fieldType, ['select', 'multiselect'], true)) {
+            return true;
+        }
+
+        $allowed = DB::table('metadata_options')
+            ->where('metadata_field_id', $field->id)
+            ->pluck('value')
+            ->all();
+
+        if ($fieldType === 'multiselect') {
+            if (! is_array($value)) {
+                return false;
+            }
+            foreach ($value as $item) {
+                if (! in_array($item, $allowed, true)) {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        return in_array($value, $allowed, true);
     }
 
     /**
@@ -4107,8 +4242,11 @@ class AssetMetadataController extends Controller
      * Accept an AI metadata suggestion (write to metadata).
      *
      * POST /assets/{asset}/metadata/suggestions/{fieldKey}/accept
+     *
+     * Optional body `{ "value": ... }` accepts a different option than the stored suggestion
+     * (inline correction); value must match field options for select/multiselect.
      */
-    public function acceptSuggestion(Asset $asset, string $fieldKey): JsonResponse
+    public function acceptSuggestion(Request $request, Asset $asset, string $fieldKey): JsonResponse
     {
         $tenant = app('tenant');
         $brand = app('brand');
@@ -4187,6 +4325,27 @@ class AssetMetadataController extends Controller
             return response()->json(['message' => 'You do not have permission to edit this field'], 403);
         }
 
+        $valueToWrite = $suggestion['value'];
+        $isInlineCorrection = false;
+        if ($request->exists('value')) {
+            $requestValue = $request->input('value');
+            if (! $this->validateValue($field, $requestValue)) {
+                return response()->json(['message' => 'Invalid value for field type'], 422);
+            }
+            if (! $this->assertMetadataValueAllowedByOptions($field, $requestValue)) {
+                return response()->json(['message' => 'Value is not allowed for this field'], 422);
+            }
+            $normalizedValues = $this->normalizeValue($field, $requestValue);
+            if (! $this->candidateValueEqualsNormalized($field, $suggestion['value'], $normalizedValues)) {
+                $isInlineCorrection = true;
+            }
+            if (($field->type ?? 'text') === 'multiselect') {
+                $valueToWrite = $normalizedValues;
+            } else {
+                $valueToWrite = $normalizedValues[0] ?? null;
+            }
+        }
+
         // Check if approval is required
         // Phase M-2: Pass brand for company + brand level gating
         // When applying AI suggestion, it becomes a user edit, so source is 'user'
@@ -4198,8 +4357,10 @@ class AssetMetadataController extends Controller
             $requiresApproval = false;
         }
 
+        $encodedValueJson = json_encode($valueToWrite);
+
         // Write to asset_metadata
-        DB::transaction(function () use ($asset, $field, $suggestion, $user, $requiresApproval) {
+        DB::transaction(function () use ($asset, $field, $suggestion, $user, $requiresApproval, $isInlineCorrection, $encodedValueJson) {
             // Get old value for history
             $oldValue = DB::table('asset_metadata')
                 ->where('asset_id', $asset->id)
@@ -4221,16 +4382,23 @@ class AssetMetadataController extends Controller
             $isAISuggestion = $suggestionSource === 'ai';
             $isJackpotEmbedded = $suggestionSource === EmbeddedUsageRightsSuggestionService::SOURCE;
 
-            $rowSource = $isAISuggestion ? 'ai' : 'user';
-            $rowProducer = $isAISuggestion ? 'ai' : ($isJackpotEmbedded ? 'jackpot_embedded' : 'user');
+            if ($isInlineCorrection) {
+                $rowSource = 'user';
+                $rowProducer = 'user';
+                $rowConfidence = 1.0;
+            } else {
+                $rowSource = $isAISuggestion ? 'ai' : 'user';
+                $rowProducer = $isAISuggestion ? 'ai' : ($isJackpotEmbedded ? 'jackpot_embedded' : 'user');
+                $rowConfidence = $suggestion['confidence'] ?? null;
+            }
 
             $assetMetadataId = DB::table('asset_metadata')->insertGetId([
                 'asset_id' => $asset->id,
                 'metadata_field_id' => $field->id,
-                'value_json' => json_encode($suggestion['value']),
+                'value_json' => $encodedValueJson,
                 'source' => $rowSource,
                 'producer' => $rowProducer,
-                'confidence' => $suggestion['confidence'] ?? null,
+                'confidence' => $rowConfidence,
                 'approved_at' => $requiresApproval ? null : now(),
                 'approved_by' => $requiresApproval ? null : $user->id,
                 'created_at' => now(),
@@ -4241,7 +4409,7 @@ class AssetMetadataController extends Controller
             DB::table('asset_metadata_history')->insert([
                 'asset_metadata_id' => $assetMetadataId,
                 'old_value_json' => $oldValueJson,
-                'new_value_json' => json_encode($suggestion['value']),
+                'new_value_json' => $encodedValueJson,
                 'source' => 'user',
                 'changed_by' => $user->id,
                 'created_at' => now(),
@@ -4249,7 +4417,7 @@ class AssetMetadataController extends Controller
         });
 
         if ($fieldKey === 'tags' && ! $requiresApproval) {
-            $flat = \App\Services\MetadataPersistenceService::flattenDecodedTagsForSync($suggestion['value'] ?? null);
+            $flat = \App\Services\MetadataPersistenceService::flattenDecodedTagsForSync($valueToWrite ?? null);
             if ($flat !== []) {
                 app(\App\Services\MetadataPersistenceService::class)->syncApprovedTagBatchValues($asset, $tenant, $flat);
             }

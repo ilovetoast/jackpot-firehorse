@@ -280,6 +280,15 @@ return [
         ],
 
         /*
+         * TIFF (print, spot/PMS, CMYK, transparency) — ImageMagick can otherwise produce flat white
+         * or “washed” WebP thumbnails while the full original opens correctly in design tools.
+         * Flatten layers, map to sRGB, and premultiply alpha onto white before resize/WebP.
+         */
+        'tiff' => [
+            'normalize_for_web' => env('THUMBNAIL_TIFF_NORMALIZE_FOR_WEB', true),
+        ],
+
+        /*
          * Async "preferred" thumbnails (smart-cropped margins) — generated after original completes.
          * See GeneratePreferredThumbnailJob and ThumbnailSmartCropService.
          */

@@ -1593,15 +1593,18 @@ class ThumbnailGenerationService
         ]);
 
         try {
-            $imagick = new \Imagick;
+            $reader = new \Imagick;
             // Limit resolution BEFORE reading to avoid loading 700MB+ at full res
-            $imagick->setResolution(72, 72);
-            $imagick->setOption('tiff:tile-geometry', '256x256');
-            $imagick->readImage($sourcePath);
+            $reader->setResolution(72, 72);
+            $reader->setOption('tiff:tile-geometry', '256x256');
+            // First page only — [0] avoids odd multi-subfile stacks on some prepress TIFFs
+            $reader->readImage($sourcePath.'[0]');
+            $reader->setIteratorIndex(0);
+            $imagick = $reader->getImage();
+            $reader->clear();
+            $reader->destroy();
 
-            // Get first image if multi-page TIFF
-            $imagick->setIteratorIndex(0);
-            $imagick = $imagick->getImage();
+            $imagick = $this->normalizePrintTiffFrameForWebThumbnail($imagick);
 
             // Get source dimensions
             $sourceWidth = $imagick->getImageWidth();
@@ -1684,6 +1687,71 @@ class ThumbnailGenerationService
             ]);
             throw new \RuntimeException("TIFF thumbnail generation error: {$e->getMessage()}", 0, $e);
         }
+    }
+
+    /**
+     * Prepress/print TIFFs (CMYK, spot colors, extra channels, soft-mask alpha) often decode in ImageMagick
+     * as an empty or nearly white RGB composite until layered into sRGB. This matches what most browsers
+     * and WebP need: a single flattened sRGB frame with no stray alpha.
+     */
+    protected function normalizePrintTiffFrameForWebThumbnail(\Imagick $frame): \Imagick
+    {
+        if (! (bool) config('assets.thumbnail.tiff.normalize_for_web', true)) {
+            return $frame;
+        }
+
+        try {
+            $frame->setImageBackgroundColor(new \ImagickPixel('#ffffff'));
+        } catch (\Throwable) {
+        }
+
+        if (method_exists($frame, 'mergeImageLayers') && defined('Imagick::LAYERMETHOD_FLATTEN')) {
+            try {
+                $flat = $frame->mergeImageLayers(\Imagick::LAYERMETHOD_FLATTEN);
+                if ($flat instanceof \Imagick) {
+                    $frame->clear();
+                    $frame->destroy();
+                    $frame = $flat;
+                }
+            } catch (\Throwable $e) {
+                Log::debug('[ThumbnailGenerationService] TIFF mergeImageLayers skipped', [
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
+        try {
+            if (defined('Imagick::COLORSPACE_SRGB')) {
+                $frame->setImageColorspace(\Imagick::COLORSPACE_SRGB);
+            }
+            if (method_exists($frame, 'transformImageColorspace') && defined('Imagick::COLORSPACE_SRGB')) {
+                $frame->transformImageColorspace(\Imagick::COLORSPACE_SRGB);
+            }
+        } catch (\Throwable $e) {
+            Log::debug('[ThumbnailGenerationService] TIFF colorspace normalize skipped', [
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        try {
+            $frame->setImageBackgroundColor(new \ImagickPixel('#ffffff'));
+            if (method_exists($frame, 'setImageAlphaChannel') && defined('Imagick::ALPHACHANNEL_FLATTEN')) {
+                $frame->setImageAlphaChannel(\Imagick::ALPHACHANNEL_FLATTEN);
+            }
+        } catch (\Throwable $e) {
+            Log::debug('[ThumbnailGenerationService] TIFF alpha flatten skipped', [
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        try {
+            if (method_exists($frame, 'stripImage')) {
+                $frame->stripImage();
+            }
+        } catch (\Throwable) {
+        }
+
+        return $frame;
     }
 
     /**
