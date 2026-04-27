@@ -6,6 +6,7 @@ use App\Jobs\Concerns\AppliesQueueSafeModeMiddleware;
 use App\Models\Asset;
 use App\Models\AssetPdfPage;
 use App\Models\AssetVersion;
+use App\Services\Assets\AssetProcessingBudgetService;
 use App\Services\AssetVariantPathResolver;
 use App\Services\PdfPageRenderingService;
 use App\Services\TenantBucketService;
@@ -54,6 +55,22 @@ class PdfPageRenderJob implements ShouldQueue
             : '';
         $isPdf = str_contains($mime, 'pdf') || $extension === 'pdf' || $pathExtension === 'pdf';
         if (!$isPdf) {
+            return;
+        }
+
+        $budgetSvc = app(AssetProcessingBudgetService::class);
+        $hints = [
+            'file_size_bytes' => max((int) ($activeVersion?->file_size ?? 0), (int) ($asset->size_bytes ?? 0)),
+            'mime_type' => $activeVersion?->mime_type ?? $asset->mime_type,
+        ];
+        $budgetDecision = $budgetSvc->classify($asset, $activeVersion, $hints);
+        if (! $budgetDecision->isAllowed()) {
+            $budgetSvc->logGuardrail($asset, $activeVersion, $budgetDecision, 'PdfPageRenderJob');
+            Log::info('[PdfPageRenderJob] Skipping PDF render — worker processing budget', [
+                'asset_id' => $asset->id,
+                'decision' => $budgetDecision->kind,
+            ]);
+
             return;
         }
 

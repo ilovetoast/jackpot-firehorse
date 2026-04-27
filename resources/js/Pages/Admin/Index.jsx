@@ -28,6 +28,7 @@ import {
     CloudArrowUpIcon,
     Squares2X2Icon,
     VideoCameraIcon,
+    AcademicCapIcon,
 } from '@heroicons/react/24/outline'
 import AppNav from '../../Components/AppNav'
 import { usePermission } from '../../hooks/usePermission'
@@ -144,6 +145,17 @@ export default function AdminIndex({ companies: initialCompanies, users: initial
     const canViewMetadataRegistry = can('metadata.registry.view')
 
     const adminToolGroups = [
+        {
+            heading: 'Onboarding & client setup',
+            tools: [
+                {
+                    name: 'Default categories & fields',
+                    icon: AcademicCapIcon,
+                    description: 'Review system category templates and field defaults for new accounts (read-only)',
+                    href: '/app/admin/onboarding/defaults',
+                },
+            ],
+        },
         {
             heading: 'Support & Billing',
             tools: [

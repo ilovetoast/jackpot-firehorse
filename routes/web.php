@@ -564,6 +564,8 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
     Route::put('/admin/system-categories/{systemCategory}/field-defaults', [\App\Http\Controllers\SystemCategoryController::class, 'updateFieldDefaults'])->name('admin.system-categories.field-defaults.update');
     Route::post('/admin/system-categories/{systemCategory}/seed-bundle-preset', [\App\Http\Controllers\SystemCategoryController::class, 'seedBundlePreset'])->name('admin.system-categories.seed-bundle-preset');
 
+    Route::get('/admin/onboarding/defaults', [\App\Http\Controllers\Admin\AdminOnboardingCatalogController::class, 'show'])->name('admin.onboarding.defaults');
+
     // Billing routes (no tenant middleware - billing is company-level)
     Route::get('/billing', [\App\Http\Controllers\BillingController::class, 'index'])->name('billing');
     Route::get('/billing/overview', [\App\Http\Controllers\BillingController::class, 'overview'])->name('billing.overview');

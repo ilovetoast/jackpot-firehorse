@@ -38,6 +38,71 @@ class FileInspectionService
             ];
         }
 
+        return $this->buildInspectResultFromLocalTemp($s3Path, $bucket, $headData, $storageClass);
+    }
+
+    /**
+     * Cheap remote metadata only (HEAD / size / Content-Type). No object body download, no Imagick.
+     * Used before worker-budget decisions so small workers never pull huge originals only to bail.
+     *
+     * @return array{mime_type: string, file_size: int, storage_class?: string|null}
+     */
+    public function peekRemoteMetadata(string $s3Path, ?StorageBucket $bucket = null): array
+    {
+        $storageClass = null;
+        $headData = null;
+        if ($bucket) {
+            $headData = app(TenantBucketService::class)->headObject($bucket, $s3Path);
+            $storageClass = $headData['StorageClass'] ?? 'STANDARD';
+        }
+
+        $archived = in_array($storageClass ?? '', ['GLACIER', 'DEEP_ARCHIVE', 'GLACIER_IR'], true);
+        if ($archived && $headData) {
+            return [
+                'mime_type' => $this->refineMimeFromPath($s3Path, (string) ($headData['ContentType'] ?? 'application/octet-stream')),
+                'file_size' => (int) ($headData['ContentLength'] ?? 0),
+                'storage_class' => $storageClass,
+            ];
+        }
+
+        if ($bucket && $headData) {
+            $mime = $this->refineMimeFromPath($s3Path, (string) ($headData['ContentType'] ?? 'application/octet-stream'));
+
+            return [
+                'mime_type' => $mime,
+                'file_size' => (int) ($headData['ContentLength'] ?? 0),
+                'storage_class' => $storageClass,
+            ];
+        }
+
+        $disk = Storage::disk('s3');
+        if (! $disk->exists($s3Path)) {
+            return [
+                'mime_type' => 'application/octet-stream',
+                'file_size' => 0,
+            ];
+        }
+        $remoteSize = (int) $disk->size($s3Path);
+        try {
+            $rawMime = $disk->mimeType($s3Path);
+        } catch (\Throwable) {
+            $rawMime = null;
+        }
+        $mime = $this->refineMimeFromPath($s3Path, (string) ($rawMime ?: 'application/octet-stream'));
+
+        return [
+            'mime_type' => $mime,
+            'file_size' => $remoteSize,
+        ];
+    }
+
+    /**
+     * Download (when under max) and run finfo + optional Imagick dimension probe.
+     *
+     * @param  array<string, mixed>|null  $headData
+     */
+    private function buildInspectResultFromLocalTemp(string $s3Path, ?StorageBucket $bucket, ?array $headData, ?string $storageClass): array
+    {
         $maxInspect = (int) config('assets.processing.inspect_max_full_download_bytes', 150 * 1024 * 1024);
 
         if ($bucket && $headData && $maxInspect > 0) {

@@ -6,6 +6,7 @@ use App\Enums\DerivativeProcessor;
 use App\Enums\DerivativeType;
 use App\Jobs\Concerns\QueuesOnImagesChannel;
 use App\Models\Asset;
+use App\Services\Assets\AssetProcessingBudgetService;
 use App\Services\AssetDerivativeFailureService;
 use App\Services\VideoPreviewGenerationService;
 use Illuminate\Bus\Queueable;
@@ -107,6 +108,20 @@ class GenerateVideoPreviewJob implements ShouldQueue
                         'error' => $e->getMessage(),
                     ]);
                 }
+
+                return;
+            }
+
+            $version = $asset->currentVersion;
+            $budgetSvc = app(AssetProcessingBudgetService::class);
+            $budgetDecision = $budgetSvc->classify($asset, $version);
+            if (! $budgetDecision->isAllowed()) {
+                $budgetSvc->logGuardrail($asset, $version, $budgetDecision, 'GenerateVideoPreviewJob');
+                Log::info('[GenerateVideoPreviewJob] Skipping - worker processing budget', [
+                    'asset_id' => $asset->id,
+                    'decision' => $budgetDecision->kind,
+                ]);
+                \App\Services\UploadDiagnosticLogger::jobSkip('GenerateVideoPreviewJob', $asset->id, 'worker_processing_guardrail');
 
                 return;
             }

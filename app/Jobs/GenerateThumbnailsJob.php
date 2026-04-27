@@ -10,6 +10,8 @@ use App\Models\Asset;
 use App\Models\AssetEvent;
 use App\Models\AssetPdfPage;
 use App\Models\AssetVersion;
+use App\Services\Assets\AssetProcessingBudgetService;
+use App\Services\Assets\ProcessingBudgetDecision;
 use App\Services\AssetDerivativeFailureService;
 use App\Services\AssetPathGenerator;
 use App\Services\PdfPageRenderingService;
@@ -335,6 +337,30 @@ class GenerateThumbnailsJob implements ShouldQueue
             $maxSourceBytes = (int) config('assets.thumbnail.max_source_bytes', 0);
             if ($maxSourceBytes > 0 && $fileSizeBytes > $maxSourceBytes) {
                 $this->applyMaxSourceBytesSkip($asset, $version, $fileSizeBytes, $maxSourceBytes);
+
+                return;
+            }
+
+            $mimeForBudget = $version ? $version->mime_type : $asset->mime_type;
+            if ($version && $fileSizeBytes <= 0 && $asset->storageBucket) {
+                try {
+                    $peekB = app(\App\Services\FileInspectionService::class)->peekRemoteMetadata($version->file_path, $asset->storageBucket);
+                    $fileSizeBytes = max($fileSizeBytes, (int) ($peekB['file_size'] ?? 0));
+                    if (! $mimeForBudget && ! empty($peekB['mime_type'])) {
+                        $mimeForBudget = $peekB['mime_type'];
+                    }
+                } catch (\Throwable) {
+                    // keep DB values
+                }
+            }
+            $budgetService = app(AssetProcessingBudgetService::class);
+            $budgetDecision = $budgetService->classify($asset, $version, [
+                'file_size_bytes' => $fileSizeBytes,
+                'mime_type' => $mimeForBudget,
+            ]);
+            if (! $budgetDecision->isAllowed()) {
+                $budgetService->logGuardrail($asset, $version, $budgetDecision, 'GenerateThumbnailsJob');
+                $this->applyWorkerBudgetThumbnailSkip($asset, $version, $budgetDecision);
 
                 return;
             }
@@ -1810,6 +1836,43 @@ class GenerateThumbnailsJob implements ShouldQueue
                     'thumbnail_skip_reason' => 'server_resource_limit',
                     'thumbnails_generated' => false,
                 ]),
+            ]);
+        }
+    }
+
+    protected function applyWorkerBudgetThumbnailSkip(Asset $asset, ?AssetVersion $version, ProcessingBudgetDecision $decision): void
+    {
+        $budgetService = app(AssetProcessingBudgetService::class);
+        $guard = $budgetService->guardrailMetadataPayload($decision);
+        $userMsg = $budgetService->humanMessage($decision);
+
+        Log::info('[GenerateThumbnailsJob] Skipping thumbnails — worker processing budget', [
+            'asset_id' => $asset->id,
+            'version_id' => $version?->id,
+            'decision' => $decision->kind,
+            'code' => $decision->failureCode(),
+        ]);
+
+        $metadata = array_merge($asset->metadata ?? [], $guard, [
+            'thumbnail_skip_reason' => 'worker_processing_guardrail',
+            'thumbnail_skip_message' => $userMsg,
+            'preview_unavailable_user_message' => $userMsg,
+            'thumbnails_generated' => false,
+        ]);
+        $asset->update([
+            'thumbnail_status' => ThumbnailStatus::SKIPPED,
+            'thumbnail_error' => null,
+            'thumbnail_started_at' => null,
+            'metadata' => $metadata,
+        ]);
+        if ($version) {
+            $version->update([
+                'metadata' => array_merge($version->metadata ?? [], $guard, [
+                    'thumbnail_skip_reason' => 'worker_processing_guardrail',
+                    'thumbnail_skip_message' => $userMsg,
+                    'thumbnails_generated' => false,
+                ]),
+                'pipeline_status' => 'complete',
             ]);
         }
     }

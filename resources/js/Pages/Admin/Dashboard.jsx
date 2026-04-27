@@ -32,6 +32,7 @@ import {
     ClipboardDocumentListIcon,
     Squares2X2Icon,
     VideoCameraIcon,
+    AcademicCapIcon,
 } from '@heroicons/react/24/outline'
 
 const STATUS_COLORS = {
@@ -204,6 +205,15 @@ export default function AdminDashboard({ auth, metrics: initialMetrics }) {
         },
     ]
 
+    const onboardingItems = [
+        {
+            name: 'Default categories & fields',
+            description: 'Review system templates + config for new accounts (read-only)',
+            href: '/app/admin/onboarding/defaults',
+            icon: AcademicCapIcon,
+        },
+    ]
+
     const configItems = [
         { name: 'Permissions', description: 'Role permissions', href: '/app/admin/permissions', icon: LockClosedIcon },
         ...(perms.canViewMetadataRegistry ? [{ name: 'Metadata Registry', description: 'System metadata fields', href: '/app/admin/metadata/registry', icon: TagIcon }] : []),
@@ -317,6 +327,12 @@ export default function AdminDashboard({ auth, metrics: initialMetrics }) {
 
                     {/* 2. Grouped Sections */}
                     <div className="space-y-6">
+                        <SectionCard
+                            title="Onboarding & client setup"
+                            description="What new tenants inherit — catalog and metadata defaults"
+                            items={onboardingItems}
+                            defaultExpanded={true}
+                        />
                         {perms.canViewOperations && (
                             <SectionCard
                                 title="Operations & Recovery"

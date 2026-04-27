@@ -8,6 +8,7 @@ use App\Models\Asset;
 use App\Models\AssetEvent;
 use App\Enums\DerivativeProcessor;
 use App\Enums\DerivativeType;
+use App\Services\Assets\AssetProcessingBudgetService;
 use App\Services\AssetDerivativeFailureService;
 use App\Jobs\Concerns\QueuesOnImagesChannel;
 use App\Services\AssetProcessingFailureService;
@@ -55,6 +56,22 @@ class GeneratePreviewJob implements ShouldQueue
         \App\Services\UploadDiagnosticLogger::jobStart('GeneratePreviewJob', $this->assetId);
 
         $asset = Asset::findOrFail($this->assetId);
+
+        $version = $asset->currentVersion;
+        $budget = app(AssetProcessingBudgetService::class);
+        $decision = $budget->classify($asset, $version);
+        if (! $decision->isAllowed()) {
+            $budget->logGuardrail($asset, $version, $decision, 'GeneratePreviewJob');
+            $meta = array_merge($asset->metadata ?? [], $budget->guardrailMetadataPayload($decision), [
+                'preview_generated' => false,
+                'preview_skipped' => true,
+                'preview_skipped_reason' => 'worker_processing_guardrail',
+            ]);
+            $asset->update(['metadata' => $meta]);
+            \App\Services\UploadDiagnosticLogger::jobSkip('GeneratePreviewJob', $asset->id, 'worker_processing_guardrail');
+
+            return;
+        }
 
         // Idempotency: Check if preview already generated
         $existingMetadata = $asset->metadata ?? [];

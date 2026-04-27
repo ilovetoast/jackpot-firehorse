@@ -260,7 +260,9 @@ The two chains run on different supervisors so AI vision calls cannot starve thu
 
 `GenerateThumbnailsJob` is the **first** job in the main chain so users see standard/original thumbnails as quickly as possible.
 
-`ProcessAssetJob` runs `FileInspectionService::inspect()` synchronously on its own job before dispatching the chain, which writes `width`, `height`, and `mime_type` directly onto the asset row and current version. That means thumbnails do **not** depend on `ExtractMetadataJob`:
+`ProcessAssetJob` first classifies the file against `AssetProcessingBudgetService` (worker profile from `config/asset_processing.php`). If the asset is too large for this worker, it short-circuits or re-dispatches to a heavy pipeline queue (see `ASSET_DEFER_HEAVY_TO_QUEUE` in `config/asset_processing.php`) **before** `FileInspectionService::inspect()` runs, so huge PSDs never hit Imagick on small profiles. Otherwise it runs `FileInspectionService::inspect()` synchronously before dispatching the chain, which writes `width`, `height`, and `mime_type` onto the asset row and current version. That means thumbnails do **not** depend on `ExtractMetadataJob`:
+
+Guardrail observability: search logs for `[asset_processing_guardrail]` (see `docs/MEDIA_PIPELINE.md` § Worker profiles).
 
 - Raster images: dimensions are already on the row when `GenerateThumbnailsJob` starts. EXIF orientation is handled inside `ThumbnailGenerationService` while decoding.
 - PDF / SVG / PSD / PSB / video: `GenerateThumbnailsJob` derives dimensions from the renderer / Imagick / FFprobe at decode time (`$dimensionsFromRendering` branch).

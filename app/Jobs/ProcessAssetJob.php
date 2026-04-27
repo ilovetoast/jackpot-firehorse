@@ -8,6 +8,8 @@ use App\Models\AssetEvent;
 use App\Models\AssetVersion;
 use App\Services\AnalysisStatusLogger;
 use App\Services\AssetProcessingFailureService;
+use App\Services\Assets\AssetProcessingBudgetService;
+use App\Services\Assets\ProcessingBudgetDecision;
 use App\Services\FileInspectionService;
 use App\Services\SystemIncidentService;
 use App\Jobs\Concerns\QueuesOnImagesChannel;
@@ -336,6 +338,54 @@ class ProcessAssetJob implements ShouldQueue
     {
         try {
         $this->pipelineStepTimer?->lap('pipeline_entry', $asset, $version);
+
+        $budgetService = app(AssetProcessingBudgetService::class);
+        $fileSizeForBudget = max((int) ($version?->file_size ?? 0), (int) ($asset->size_bytes ?? 0));
+        $mimeForBudget = $version?->mime_type ?? $asset->mime_type;
+        if ($version && $fileSizeForBudget <= 0 && $asset->storageBucket) {
+            try {
+                $peek = app(FileInspectionService::class)->peekRemoteMetadata($version->file_path, $asset->storageBucket);
+                $fileSizeForBudget = max($fileSizeForBudget, (int) ($peek['file_size'] ?? 0));
+                if (! $mimeForBudget && ! empty($peek['mime_type'])) {
+                    $mimeForBudget = $peek['mime_type'];
+                }
+            } catch (\Throwable $e) {
+                Log::warning('[ProcessAssetJob] peekRemoteMetadata failed before worker budget', [
+                    'asset_id' => $asset->id,
+                    'version_id' => $version->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
+        $budgetDecision = $budgetService->classify($asset, $version, [
+            'file_size_bytes' => $fileSizeForBudget,
+            'mime_type' => $mimeForBudget,
+        ]);
+
+        if (! $budgetDecision->isAllowed()) {
+            $budgetService->logGuardrail($asset, $version, $budgetDecision, 'ProcessAssetJob');
+            $plan = $budgetService->heavyQueueRedispatchPlan($asset, $version, $budgetDecision, $fileSizeForBudget, $mimeForBudget);
+            $currentQueueName = (string) ($this->queue ?? config('queue.images_queue', 'images'));
+            if ($plan['should_dispatch']
+                && ($plan['target_queue'] ?? '') !== ''
+                && (string) $plan['target_queue'] !== $currentQueueName) {
+                Log::info('[ProcessAssetJob] Worker budget defer — re-dispatching to heavy pipeline queue', [
+                    'asset_id' => $asset->id,
+                    'version_id' => $version?->id,
+                    'target_queue' => $plan['target_queue'],
+                    'current_queue' => $currentQueueName,
+                ]);
+                ProcessAssetJob::dispatch($this->assetId)->onQueue((string) $plan['target_queue']);
+
+                return;
+            }
+
+            $this->shortCircuitWorkerBudget($asset, $version, $budgetDecision, $fileSizeForBudget, $mimeForBudget);
+
+            return;
+        }
+
         // Version-aware: Run FileInspectionService for deterministic metadata (no S3 Content-Type, no extension guessing)
         if ($version) {
             $bucket = $asset->storageBucket; // null = use default s3 disk (legacy)
@@ -723,6 +773,95 @@ class ProcessAssetJob implements ShouldQueue
         FinalizeAssetJob::dispatch($asset->id)->onQueue($q);
 
         PipelineLogger::info('[ProcessAssetJob] Short-circuit complete — FinalizeAssetJob dispatched', [
+            'asset_id' => $asset->id,
+        ]);
+    }
+
+    /**
+     * Worker profile / file-size budget exceeded before the heavy pipeline runs.
+     * Does not dispatch thumbnail or metadata chains; completes the asset for visibility/download of original.
+     */
+    protected function shortCircuitWorkerBudget(
+        Asset $asset,
+        ?AssetVersion $version,
+        ProcessingBudgetDecision $decision,
+        int $fileSizeBytes,
+        ?string $mimeType,
+    ): void {
+        $budgetService = app(AssetProcessingBudgetService::class);
+        $guard = $budgetService->guardrailMetadataPayload($decision);
+
+        Log::info('[ProcessAssetJob] Short-circuiting worker budget — completing without heavy processing', [
+            'asset_id' => $asset->id,
+            'version_id' => $version?->id,
+            'decision' => $decision->kind,
+            'code' => $decision->failureCode(),
+        ]);
+        PipelineLogger::warning('PROCESS ASSET: SHORT_CIRCUIT_WORKER_BUDGET', [
+            'asset_id' => $asset->id,
+            'decision' => $decision->kind,
+        ]);
+
+        $userMsg = $budgetService->humanMessage($decision);
+        $assetMetadata = array_merge($asset->metadata ?? [], $guard, [
+            'thumbnail_skip_reason' => 'worker_processing_guardrail',
+            'thumbnail_skip_message' => $userMsg,
+            'thumbnails_generated' => false,
+            'metadata_extracted' => true,
+            'preview_generated' => false,
+            'preview_skipped' => true,
+            'preview_skipped_reason' => 'worker_processing_guardrail',
+            'ai_tagging_completed' => true,
+        ]);
+
+        $asset->update([
+            'thumbnail_status' => ThumbnailStatus::SKIPPED,
+            'thumbnail_error' => $userMsg,
+            'thumbnail_started_at' => null,
+            'metadata' => $assetMetadata,
+        ]);
+
+        if ($version) {
+            $peekData = null;
+            if ($asset->storageBucket) {
+                try {
+                    $peekData = app(FileInspectionService::class)->peekRemoteMetadata($version->file_path, $asset->storageBucket);
+                } catch (\Throwable $e) {
+                    Log::warning('[ProcessAssetJob] peekRemoteMetadata failed during worker budget short-circuit', [
+                        'asset_id' => $asset->id,
+                        'version_id' => $version->id,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+            }
+            $versionMeta = array_merge($version->metadata ?? [], $guard, [
+                'thumbnail_skip_reason' => 'worker_processing_guardrail',
+                'thumbnail_skip_message' => $userMsg,
+                'thumbnails_generated' => false,
+            ]);
+            $versionUpdate = [
+                'metadata' => $versionMeta,
+                'pipeline_status' => 'complete',
+            ];
+            if (is_array($peekData)) {
+                $versionUpdate['file_size'] = max((int) ($version->file_size ?? 0), (int) ($peekData['file_size'] ?? 0));
+                if ($mimeType || ! empty($peekData['mime_type'])) {
+                    $versionUpdate['mime_type'] = $mimeType ?: (string) $peekData['mime_type'];
+                }
+                if (isset($peekData['storage_class'])) {
+                    $versionUpdate['storage_class'] = $peekData['storage_class'];
+                }
+            }
+            $version->update($versionUpdate);
+        }
+
+        $q = PipelineQueueResolver::imagesQueueForAsset($asset->fresh());
+        Bus::chain([
+            new FinalizeAssetJob($asset->id),
+            new PromoteAssetJob($asset->id),
+        ])->onQueue($q)->dispatch();
+
+        PipelineLogger::info('[ProcessAssetJob] Worker budget short-circuit complete — finalize chain dispatched', [
             'asset_id' => $asset->id,
         ]);
     }

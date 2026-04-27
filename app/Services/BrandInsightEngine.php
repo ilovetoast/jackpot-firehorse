@@ -9,11 +9,14 @@ use App\Enums\EventType;
 use App\Models\ActivityEvent;
 use App\Models\Asset;
 use App\Models\Brand;
+use App\Models\Category;
 use App\Models\Tenant;
 use App\Models\User;
+use App\Services\Lifecycle\LifecycleResolver;
 use App\Support\Roles\PermissionMap;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Gate;
 
 /**
  * Brand Insight Engine — zero-management AI "What Needs Attention" signals.
@@ -25,7 +28,8 @@ class BrandInsightEngine
 {
     public function __construct(
         protected MetadataAnalyticsService $metadataAnalytics,
-        protected TenantPermissionResolver $tenantResolver
+        protected TenantPermissionResolver $tenantResolver,
+        protected LifecycleResolver $lifecycleResolver
     ) {}
 
     /**
@@ -131,17 +135,27 @@ class BrandInsightEngine
             // not on page 1 — the drawer then fails to open and users see an empty
             // state. For one or many assets, the management workflow is the same:
             // land on ?missing_metadata=1 and work through the queue from the grid.
+            //
+            // The count must match the grid's missing-metadata query exactly, otherwise
+            // users click the signal and see an empty grid (the count includes assets
+            // hidden by lifecycle/intake/category filters that the grid applies). Both
+            // count helpers below mirror AssetController::index → missing_metadata=1.
             if ($canActOnMetadataInsights) {
                 $assetsMissingMetadata = $scopeMetadataToUploader
                     ? $this->getAssetsMissingMetadataCountForUploader($brand, $user)
-                    : $this->getAssetsMissingMetadataCount($brand);
+                    : $this->getAssetsMissingMetadataCount($brand, $user);
                 if ($assetsMissingMetadata > 0) {
+                    // Contributors see only their own uploads; force the grid to the same
+                    // scope so the link can never land on an empty page for them either.
+                    $href = $scopeMetadataToUploader
+                        ? '/app/assets?missing_metadata=1&uploaded_by='.$user->id
+                        : '/app/assets?missing_metadata=1';
                     $signals[] = [
                         'type' => 'action',
                         'priority' => 'medium',
                         'icon' => 'document',
                         'label' => "{$assetsMissingMetadata} assets missing metadata",
-                        'href' => '/app/assets?missing_metadata=1',
+                        'href' => $href,
                         'context' => [
                             'count' => $assetsMissingMetadata,
                             'category' => 'metadata',
@@ -257,46 +271,104 @@ class BrandInsightEngine
         return (int) $q->count();
     }
 
-    protected function getAssetsMissingMetadataCount(Brand $brand): int
+    /**
+     * Count of brand library assets with no approved metadata that are reachable from the
+     * default `/app/assets?missing_metadata=1` grid view.
+     *
+     * Mirrors {@see \App\Http\Controllers\AssetController::index} so the signal count and
+     * the grid stay in sync (otherwise users click the signal and land on an empty page):
+     *  - normal intake only, exclude builder-staged
+     *  - asset library types only (ASSET, AI_GENERATED)
+     *  - category in user's viewable brand categories (with metadata.category_id present)
+     *  - default lifecycle (published, not archived/expired, valid approval state)
+     */
+    protected function getAssetsMissingMetadataCount(Brand $brand, User $user): int
     {
-        $analytics = $this->metadataAnalytics->getAnalytics(
-            $brand->tenant_id,
-            $brand->id,
-            null,
-            null,
-            null,
-            false
-        );
-        $overview = $analytics['overview'] ?? [];
-        $totalAssets = $overview['total_assets'] ?? 0;
-        $assetsWithMetadata = $overview['assets_with_metadata'] ?? 0;
-
-        return max(0, $totalAssets - $assetsWithMetadata);
+        return $this->countMissingMetadataAssets($brand, $user, null);
     }
 
     /**
-     * Count of the user's own visible assets with no approved metadata (contributor scope).
+     * Contributor-scoped variant: only the user's own uploads.
      */
     protected function getAssetsMissingMetadataCountForUploader(Brand $brand, User $user): int
+    {
+        return $this->countMissingMetadataAssets($brand, $user, $user->id);
+    }
+
+    /**
+     * Shared count that mirrors the grid's missing_metadata=1 query.
+     *
+     * @param  int|null  $uploaderUserId  When set, restrict to assets uploaded by this user.
+     */
+    protected function countMissingMetadataAssets(Brand $brand, User $user, ?int $uploaderUserId): int
     {
         $tenant = $brand->tenant;
         if (! $tenant) {
             return 0;
         }
 
-        return (int) DB::table('assets')
-            ->where('assets.tenant_id', $tenant->id)
-            ->where('assets.brand_id', $brand->id)
-            ->where('assets.user_id', $user->id)
-            ->whereNull('assets.deleted_at')
-            ->where('assets.status', 'visible')
-            ->whereNotExists(function ($query) {
-                $query->select(DB::raw(1))
+        $viewableCategoryIds = $this->viewableLibraryCategoryIdsForUser($tenant, $brand, $user);
+        if ($viewableCategoryIds === []) {
+            return 0;
+        }
+
+        $query = Asset::query()
+            ->normalIntakeOnly()
+            ->excludeBuilderStaged()
+            ->where('tenant_id', $tenant->id)
+            ->where('brand_id', $brand->id)
+            ->forAssetLibraryTypes()
+            ->whereNotNull('metadata')
+            ->whereIn(
+                DB::raw(Asset::categoryIdMetadataCastExpression()),
+                array_map('intval', $viewableCategoryIds)
+            )
+            ->whereNotExists(function ($q) {
+                $q->select(DB::raw(1))
                     ->from('asset_metadata')
                     ->whereColumn('asset_metadata.asset_id', 'assets.id')
                     ->whereNotNull('asset_metadata.approved_at');
-            })
-            ->count();
+            });
+
+        if ($uploaderUserId !== null) {
+            $query->where('assets.user_id', $uploaderUserId);
+        }
+
+        // Default lifecycle (published, not archived/expired, approval valid) — same as
+        // AssetController::index when no `lifecycle` query param is present.
+        $this->lifecycleResolver->apply($query, null, $user, $tenant, $brand);
+
+        return (int) $query->count();
+    }
+
+    /**
+     * Mirror AssetController::index's brand category visibility:
+     *   active ASSET categories for tenant+brand, hidden filtered for non-managers,
+     *   then filtered by CategoryPolicy::view.
+     *
+     * @return list<int>
+     */
+    protected function viewableLibraryCategoryIdsForUser(Tenant $tenant, Brand $brand, User $user): array
+    {
+        $query = Category::query()
+            ->where('tenant_id', $tenant->id)
+            ->where('brand_id', $brand->id)
+            ->where('asset_type', AssetType::ASSET)
+            ->active();
+
+        if (! $user->can('manage categories')) {
+            $query->visible();
+        }
+
+        $categories = $query->get();
+
+        return $categories
+            ->filter(fn ($category) => Gate::forUser($user)->allows('view', $category))
+            ->pluck('id')
+            ->filter()
+            ->map(fn ($id) => (int) $id)
+            ->values()
+            ->all();
     }
 
     protected function getExpiringAssetsCount(Brand $brand): int

@@ -40,6 +40,26 @@ In parallel on the dedicated `ai` queue (when tenant policy allows):
 
 `GenerateThumbnailsJob` runs first because thumbnail generation does not depend on `ExtractMetadataJob` — `FileInspectionService` writes width/height/mime onto the asset before the chain dispatches, and `ThumbnailGenerationService` handles EXIF orientation while decoding. Full metadata, embedded metadata, usage-rights suggestions and AI work are scheduled as follow-up enrichment to keep time-to-first-thumbnail short. See `docs/UPLOAD_AND_QUEUE.md` for the full job order, queue routing, and `[asset_pipeline_timing]` log keys.
 
+## Worker profiles and processing budgets
+
+Worker safety is centralized in `App\Services\Assets\AssetProcessingBudgetService` and `config/asset_processing.php` (`worker_profile` + `profiles.*`). This is **not** a global “turn off workers” switch: Horizon queues stay enabled; each job consults the same budget rules for the current profile.
+
+| Profile | Typical use | Notes |
+|--------|-------------|--------|
+| `staging_small` | Staging with limited RAM | Lower MB ceilings for images, PSD/PSB, video, PDF; stricter `max_pixels`. |
+| `normal` | Default production workers | Balanced defaults. |
+| `heavy` | Dedicated large-media workers | Higher limits; `allow_huge_psd` relaxes pixel ceiling for PSD/PSB only. |
+
+**Cheap inputs only:** classification uses stored `file_size` / `size_bytes`, MIME, extension, optional width/height, and `FileInspectionService::peekRemoteMetadata()` (HEAD / size only) when sizes are missing — **no** full download or Imagick pass for the decision.
+
+**When an asset exceeds the profile:** `ProcessAssetJob` logs `[asset_processing_guardrail]` (fields: `asset_id`, `asset_version_id`, `decision`, `code`, `worker_profile`, `file_size_mb`, `limit_mb`, `mime_type` — no signed URLs or S3 keys). Metadata is updated with `worker_processing_code`, `worker_processing_message`, `worker_profile`, `worker_processing_file_size_bytes`, and `worker_processing_limit_bytes`. Thumbnails are marked skipped and a finalize/promote chain runs so the original remains downloadable.
+
+**Optional defer:** When `ASSET_DEFER_HEAVY_TO_QUEUE=true` and the current job queue differs from the target pipeline queue (`PipelineQueueResolver::forPipeline()`), `ProcessAssetJob` re-dispatches itself onto that queue instead of short-circuiting locally — so a `staging_small` machine can hand off a 1 GB PSD to `images-heavy` / `images-psd` without opening the file locally.
+
+**Child jobs:** `GenerateThumbnailsJob`, `GeneratePreviewJob`, `GenerateVideoPreviewJob`, and `PdfPageRenderJob` each re-check the budget before decode/FFmpeg/PDF work so manual retries or mis-routed jobs do not retry heavy work forever.
+
+**Tuning:** Override MB/pixel limits per profile via env vars documented on `config/asset_processing.php` (e.g. `ASSET_MAX_PSD_MB`, `ASSET_MAX_IMAGE_MB`, `ASSET_MAX_PIXELS`). **1 GB PSD on `staging_small`:** over `max_psd_mb` (default 250) → `deferred_to_heavy_worker` (or `file_exceeds_worker_limits` if it exceeds the `heavy` profile too), user-facing message explains a heavy media worker is required, no thumbnail chain, no Imagick on that worker.
+
 ## Supported File Types
 
 The thumbnail pipeline supports the following file types:
