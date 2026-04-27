@@ -824,15 +824,7 @@ class AiReviewController extends Controller
                 ? ($category?->name ? 'Type · '.$category->name : 'Type')
                 : $c->field_label;
 
-            $displayValue = is_array($value) ? ($value['value'] ?? $value['id'] ?? json_encode($value)) : (string) $value;
-            if (isset($optionsMap[$c->metadata_field_id])) {
-                foreach ($optionsMap[$c->metadata_field_id] as $opt) {
-                    if (($opt['value'] ?? null) == $displayValue) {
-                        $displayValue = $opt['display_label'] ?? $displayValue;
-                        break;
-                    }
-                }
-            }
+            $displayValue = $this->formatMetadataCandidateDisplayForReview($value, $optionsMap[$c->metadata_field_id] ?? []);
 
             $items[] = [
                 'id' => $c->id,
@@ -859,6 +851,61 @@ class AiReviewController extends Controller
             ['items' => $items],
             $paginationMeta
         ));
+    }
+
+    /**
+     * Turn decoded asset_metadata_candidates.value_json into a single review line.
+     * Multiselect fields store JSON lists (e.g. ["small_batch_bourbon"]); without this, the UI fell through
+     * to json_encode() and showed bracketed JSON instead of option labels.
+     *
+     * @param  array<int, array{value?: mixed, display_label?: string}>  $fieldOptions
+     */
+    protected function formatMetadataCandidateDisplayForReview(mixed $decodedValue, array $fieldOptions): string
+    {
+        if (! is_array($decodedValue)) {
+            return (string) $decodedValue;
+        }
+        if ($decodedValue === []) {
+            return '';
+        }
+        if (array_is_list($decodedValue)) {
+            $labels = [];
+            foreach ($decodedValue as $v) {
+                if (is_array($v)) {
+                    $labels[] = json_encode($v);
+
+                    continue;
+                }
+                $label = $v === null ? '' : (string) $v;
+                foreach ($fieldOptions as $opt) {
+                    $ov = $opt['value'] ?? null;
+                    if ($ov == $v || (is_scalar($ov) && (string) $ov === $label)) {
+                        $label = (string) ($opt['display_label'] ?? $label);
+                        break;
+                    }
+                }
+                if ($label !== '') {
+                    $labels[] = $label;
+                }
+            }
+
+            return implode(', ', $labels);
+        }
+
+        $single = $decodedValue['value'] ?? $decodedValue['id'] ?? null;
+        if ($single !== null && ! is_array($single)) {
+            $display = (string) $single;
+            foreach ($fieldOptions as $opt) {
+                if (($opt['value'] ?? null) == $single) {
+                    $display = (string) ($opt['display_label'] ?? $display);
+                    break;
+                }
+            }
+
+            return $display;
+        }
+
+        return json_encode($decodedValue);
     }
 
     protected function getThumbnailUrls(?Asset $asset): array

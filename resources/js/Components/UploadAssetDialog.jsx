@@ -4441,27 +4441,26 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                             role="status"
                             aria-live="polite"
                         >
-                            <div
-                                className="mb-5 flex items-center justify-center gap-2 sm:gap-3"
-                                aria-hidden="true"
-                            >
-                                <img
-                                    src="/jp-parts/cherry-slot.svg"
-                                    alt=""
-                                    className="jp-upload-success-reel-1 h-7 w-7 opacity-75"
-                                />
-                                <img
-                                    src="/jp-parts/seven-slot.svg"
-                                    alt=""
-                                    className="jp-upload-success-reel-2 h-7 w-7 opacity-75"
-                                />
-                                <img
-                                    src="/jp-parts/diamond-slot.svg"
-                                    alt=""
-                                    className="jp-upload-success-reel-3 h-7 w-7 opacity-75"
-                                />
+                            <div className="mb-5 flex flex-col items-center gap-3" aria-hidden="true">
                                 <div className="jp-upload-success-check-pop flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-green-100 ring-2 ring-green-200/80">
                                     <CheckIcon className="h-6 w-6 text-green-600" aria-hidden />
+                                </div>
+                                <div className="flex items-center justify-center gap-2 sm:gap-3">
+                                    <img
+                                        src="/jp-parts/cherry-slot.svg"
+                                        alt=""
+                                        className="jp-upload-success-reel-1 h-7 w-7 opacity-75"
+                                    />
+                                    <img
+                                        src="/jp-parts/seven-slot.svg"
+                                        alt=""
+                                        className="jp-upload-success-reel-2 h-7 w-7 opacity-75"
+                                    />
+                                    <img
+                                        src="/jp-parts/diamond-slot.svg"
+                                        alt=""
+                                        className="jp-upload-success-reel-3 h-7 w-7 opacity-75"
+                                    />
                                 </div>
                             </div>
                             <h3 className="text-lg font-semibold text-gray-900">Upload complete</h3>

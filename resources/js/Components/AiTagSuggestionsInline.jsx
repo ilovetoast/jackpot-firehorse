@@ -62,35 +62,67 @@ export default function AiTagSuggestionsInline({
             ? isOwnUpload && can('metadata.edit_post_upload')
             : can('metadata.suggestions.apply') || (isOwnUpload && can('metadata.edit_post_upload'))
     const [processing, setProcessing] = useState(new Set())
+    const [acceptAllBusy, setAcceptAllBusy] = useState(false)
+
+    const runAcceptRequest = async (candidateId) => {
+        const res = await fetch(`/app/assets/${assetId}/tags/suggestions/${candidateId}/accept`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content },
+            credentials: 'same-origin',
+        })
+        if (!res.ok) {
+            const data = await res.json()
+            if (res.status === 403 && data.limit_type === 'tags_per_asset') {
+                throw new Error(`${data.message}\n\nUpgrade your plan to add more tags per asset.`)
+            }
+            throw new Error(data.message || 'Failed to accept tag')
+        }
+        setSuggestions((prev) => {
+            const updated = prev.filter((s) => s.id !== candidateId)
+            if (tagSuggestionsCache.has(assetId)) tagSuggestionsCache.set(assetId, { suggestions: updated, timestamp: Date.now() })
+            return updated
+        })
+        window.dispatchEvent(new CustomEvent('metadata-updated'))
+    }
 
     // Handle accept (create tag in asset_tags) — no confirmation modal
     const handleAccept = async (candidateId, tag) => {
-        if (processing.has(candidateId) || !canApply) return
+        if (processing.has(candidateId) || !canApply || acceptAllBusy) return
         setProcessing((prev) => new Set(prev).add(candidateId))
         try {
-            const res = await fetch(`/app/assets/${assetId}/tags/suggestions/${candidateId}/accept`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content },
-                credentials: 'same-origin',
-            })
-            if (!res.ok) {
-                const data = await res.json()
-                if (res.status === 403 && data.limit_type === 'tags_per_asset') {
-                    throw new Error(`${data.message}\n\nUpgrade your plan to add more tags per asset.`)
-                }
-                throw new Error(data.message || 'Failed to accept tag')
-            }
-            setSuggestions((prev) => {
-                const updated = prev.filter((s) => s.id !== candidateId)
-                if (tagSuggestionsCache.has(assetId)) tagSuggestionsCache.set(assetId, { suggestions: updated, timestamp: Date.now() })
-                return updated
-            })
-            window.dispatchEvent(new CustomEvent('metadata-updated'))
+            await runAcceptRequest(candidateId)
         } catch (err) {
             console.error('[AiTagSuggestionsInline] Failed to accept tag', err)
             alert(err.message || 'Failed to accept tag')
         } finally {
             setProcessing((prev) => { const next = new Set(prev); next.delete(candidateId); return next })
+        }
+    }
+
+    const handleAcceptAll = async () => {
+        const toAccept = suggestions.filter((s) => s.can_apply && canApply)
+        if (toAccept.length === 0 || acceptAllBusy || !canApply) return
+        setAcceptAllBusy(true)
+        try {
+            for (const s of toAccept) {
+                if (!canApply) break
+                setProcessing((prev) => new Set(prev).add(s.id))
+                try {
+                    await runAcceptRequest(s.id)
+                } catch (err) {
+                    console.error('[AiTagSuggestionsInline] Failed to accept tag (bulk)', err)
+                    alert(err.message || 'Failed to accept tag')
+                    break
+                } finally {
+                    setProcessing((prev) => {
+                        const next = new Set(prev)
+                        next.delete(s.id)
+                        return next
+                    })
+                }
+            }
+        } finally {
+            setAcceptAllBusy(false)
         }
     }
 
@@ -250,26 +282,43 @@ export default function AiTagSuggestionsInline({
         return null // Hide if no suggestions
     }
 
+    const showAcceptAll = canApply && suggestions.some((s) => s.can_apply)
+
     const body = (
         <>
-            <div className="flex items-center gap-1.5 mb-2">
-                {!unifiedDrawerReview && (
-                    <SparklesIcon className="h-3.5 w-3.5 flex-shrink-0" style={{ color: brandColor }} />
+            <div className="flex items-center justify-between gap-2 mb-2">
+                <div className="flex items-center gap-1.5 min-w-0">
+                    {!unifiedDrawerReview && (
+                        <SparklesIcon className="h-3.5 w-3.5 flex-shrink-0" style={{ color: brandColor }} />
+                    )}
+                    <h3
+                        className={
+                            unifiedDrawerReview
+                                ? 'text-[11px] font-medium uppercase tracking-wide text-gray-400'
+                                : 'text-xs font-semibold text-gray-900'
+                        }
+                    >
+                        AI suggested tags
+                    </h3>
+                </div>
+                {showAcceptAll && (
+                    <button
+                        type="button"
+                        onClick={() => handleAcceptAll()}
+                        disabled={acceptAllBusy}
+                        className="inline-flex items-center gap-1 flex-shrink-0 rounded-md px-2 py-1 text-[11px] font-medium text-white disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-90"
+                        style={{ backgroundColor: brandColor }}
+                        title="Accept all suggested tags"
+                    >
+                        <CheckIcon className="h-3 w-3" />
+                        Accept all
+                    </button>
                 )}
-                <h3
-                    className={
-                        unifiedDrawerReview
-                            ? 'text-[11px] font-medium uppercase tracking-wide text-gray-400'
-                            : 'text-xs font-semibold text-gray-900'
-                    }
-                >
-                    AI suggested tags
-                </h3>
             </div>
 
             <div className="flex flex-wrap gap-1.5">
                 {suggestions.map((suggestion) => {
-                    const isProcessing = processing.has(suggestion.id)
+                    const isProcessing = processing.has(suggestion.id) || acceptAllBusy
                     return (
                         <div
                             key={suggestion.id}
