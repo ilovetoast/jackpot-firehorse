@@ -64,6 +64,9 @@ export function FilterFieldInput({
 
     const filteredOptions = useFilteredOptions(field, availableValues, fieldKey)
 
+    /** Multiselect: only “match any of these values” in the grid — no separate “Contains any / all” control. */
+    const isMultiselectField = field?.type === 'multiselect' || field?.field_type === 'multiselect'
+
     const handleOperatorChange = (e) => onChange(e.target.value, value)
 
     const handleValueChange = (newValueOrOperator, maybeValue) => {
@@ -83,12 +86,18 @@ export function FilterFieldInput({
             onChange('equals', newValueOrOperator)
         } else if (isToggleBoolean) {
             onChange('equals', newValueOrOperator)
+        } else if (isMultiselectField) {
+            onChange('contains_any', newValueOrOperator)
         } else {
             onChange(operator, newValueOrOperator)
         }
     }
 
-    const effectiveOperator = isColorFilter || isCollectionFilter || isToggleBoolean ? 'equals' : operator
+    const effectiveOperator = isColorFilter || isCollectionFilter || isToggleBoolean
+        ? 'equals'
+        : isMultiselectField
+          ? 'contains_any'
+          : operator
     const effectiveValue = isColorFilter
         ? Array.isArray(value) ? value : value != null ? [value] : null
         : isCollectionFilter
@@ -126,7 +135,7 @@ export function FilterFieldInput({
             <div className="space-y-1">
                 <label className="block text-xs font-medium text-gray-700">{displayLabel}</label>
                 <div className="flex items-center gap-2">
-                    {!isColorFilter && !isCollectionFilter && !isToggleBoolean && !isExpirationDateFilter && field?.operators && field.operators.length > 1 && (
+                    {!isColorFilter && !isCollectionFilter && !isToggleBoolean && !isExpirationDateFilter && !isMultiselectField && field?.operators && field.operators.length > 1 && (
                         <select
                             value={effectiveOperator}
                             onChange={handleOperatorChange}
@@ -159,7 +168,7 @@ export function FilterFieldInput({
     return (
         <div className="flex-shrink-0">
             <div className="flex items-center gap-1.5">
-                {!isColorFilter && !isCollectionFilter && !isToggleBoolean && !isExpirationDateFilter && !isTagsFilter && field?.operators && field.operators.length > 1 && (
+                {!isColorFilter && !isCollectionFilter && !isToggleBoolean && !isExpirationDateFilter && !isTagsFilter && !isMultiselectField && field?.operators && field.operators.length > 1 && (
                     <select
                         value={effectiveOperator}
                         onChange={handleOperatorChange}
@@ -545,17 +554,22 @@ export function FilterValueInput({
                 />
             )
         }
-        case 'multiselect':
+        case 'multiselect': {
+            const emptyButtonLabel =
+                variant === 'primary'
+                    ? placeholderLabel || field?.display_label || field?.label || fieldKey || 'Any'
+                    : 'Any'
             return (
                 <OptionChipSelect
                     options={options}
                     value={Array.isArray(value) ? value : []}
                     onChange={onChange}
-                    placeholder="Any"
+                    placeholder={emptyButtonLabel}
                     multiple
                     className={inputClass}
                 />
             )
+        }
         case 'date':
             if (operator === 'range') {
                 return (

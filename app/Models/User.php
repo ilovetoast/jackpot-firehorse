@@ -6,6 +6,8 @@ namespace App\Models;
 use App\Enums\EventType;
 use App\Services\AuthPermissionService;
 use App\Services\Prostaff\ResolveProstaffPeriod;
+use App\Support\Roles\PermissionMap;
+use App\Support\Roles\RoleRegistry;
 use App\Traits\RecordsActivity;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -789,7 +791,15 @@ class User extends Authenticatable
             return false;
         }
 
-        // Check if brand role has permission
+        // Canonical brand roles (RoleRegistry) must use PermissionMap — Spatie role names collide with
+        // tenant roles (e.g. brand "admin" vs tenant "admin"), which incorrectly granted team.manage.
+        if (RoleRegistry::isValidBrandRole($brandRole)) {
+            $mapped = PermissionMap::getBrandRolePermissions($brandRole);
+
+            return in_array($permission, $mapped, true);
+        }
+
+        // Legacy / non-registry brand role strings: Spatie lookup
         $role = app(\App\Services\SpatieRoleLookup::class)->roleByName($brandRole);
         if ($role) {
             try {

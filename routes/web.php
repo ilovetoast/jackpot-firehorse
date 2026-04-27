@@ -279,6 +279,7 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
         Route::get('/api/tenant/agencies', [\App\Http\Controllers\TenantAgencyController::class, 'index'])->name('api.tenant.agencies.index');
         Route::get('/api/tenant/agencies/search', [\App\Http\Controllers\TenantAgencyController::class, 'searchAgencies'])->name('api.tenant.agencies.search');
         Route::post('/api/tenant/agencies', [\App\Http\Controllers\TenantAgencyController::class, 'store'])->name('api.tenant.agencies.store');
+        Route::patch('/api/tenant/agencies/{tenantAgency}', [\App\Http\Controllers\TenantAgencyController::class, 'update'])->name('api.tenant.agencies.update');
         Route::delete('/api/tenant/agencies/{tenantAgency}', [\App\Http\Controllers\TenantAgencyController::class, 'destroy'])->name('api.tenant.agencies.destroy');
 
         // Company team management API (paginated users, add brand access)

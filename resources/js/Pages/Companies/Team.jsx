@@ -336,15 +336,17 @@ export default function Team({ tenant, brands = [], tenant_roles = [], invite_lo
                         <p>
                             <span className="font-medium">Agency partnerships</span>
                             {' — '}
-                            Members added by an agency appear in the sections below. Brand access is controlled from{' '}
+                            Agency-managed members are controlled through the agency partnership. Use{' '}
                             <Link
                                 href="/app/companies/settings#agencies"
                                 className="font-medium text-indigo-700 underline decoration-indigo-300 underline-offset-2 hover:text-indigo-900"
                             >
                                 Company settings → Agencies
-                            </Link>
-                            . Use <span className="font-medium">Switch to agency</span> on a direct team member when they
-                            should follow the agency link instead of a direct invite.
+                            </Link>{' '}
+                            to change agency access, or the Agency Dashboard to manage agency staff. Direct invites here
+                            are for <span className="font-medium">Admin</span> or <span className="font-medium">Member</span>{' '}
+                            only. Use <span className="font-medium">Switch to agency</span> when a direct member should
+                            follow the agency link instead.
                         </p>
                     </div>
                 )}
@@ -415,7 +417,9 @@ export default function Team({ tenant, brands = [], tenant_roles = [], invite_lo
                                             <h2 className="text-base font-semibold text-gray-900">Direct team</h2>
                                             <p className="text-xs text-gray-600">
                                                 Members invited or added directly by your company ({directUsers.length}{' '}
-                                                {directUsers.length === 1 ? 'person' : 'people'})
+                                                {directUsers.length === 1 ? 'person' : 'people'}). Company role is{' '}
+                                                <span className="font-medium">Admin</span> or{' '}
+                                                <span className="font-medium">Member</span> only.
                                             </p>
                                         </div>
                                     )}
@@ -454,7 +458,15 @@ export default function Team({ tenant, brands = [], tenant_roles = [], invite_lo
                                                 </h2>
                                                 <p className="text-xs text-gray-600">
                                                     Agency-managed team ({section.users.length}{' '}
-                                                    {section.users.length === 1 ? 'person' : 'people'})
+                                                    {section.users.length === 1 ? 'person' : 'people'}). Partnership roles
+                                                    and brand scope are set in{' '}
+                                                    <Link
+                                                        href="/app/companies/settings#agencies"
+                                                        className="font-medium text-indigo-700 underline decoration-indigo-300 underline-offset-2 hover:text-indigo-900"
+                                                    >
+                                                        Company settings → Agencies
+                                                    </Link>
+                                                    .
                                                 </p>
                                             </div>
                                             {link && (
@@ -474,7 +486,6 @@ export default function Team({ tenant, brands = [], tenant_roles = [], invite_lo
                                                 brands={brands}
                                                 tenant={tenant}
                                                 authUserId={auth?.user?.id}
-                                                onCompanyRoleChange={handleCompanyRoleChange}
                                                 onBrandRoleChange={handleBrandRoleChange}
                                                 onRemoveBrand={handleRemoveBrand}
                                                 canRemoveFromCompany
@@ -569,9 +580,10 @@ export default function Team({ tenant, brands = [], tenant_roles = [], invite_lo
                                         {errors.role && <p className="mt-1 text-sm text-red-600">{errors.role}</p>}
                                         {invite_lock_company_role && (
                                             <p className="mt-1.5 text-xs text-gray-500">
-                                                Invites from agency staff on this company are created as <span className="font-medium">Member</span> only. Client
-                                                owners and company admins can assign Admin or agency-level roles. Brand access is set below and can be changed
-                                                later.
+                                                Invites from agency staff on this client company are created as{' '}
+                                                <span className="font-medium">Member</span> only. Client owners and company
+                                                admins can also invite <span className="font-medium">Admin</span>. Agency
+                                                partnership access is managed in Company settings → Agencies.
                                             </p>
                                         )}
                                     </div>

@@ -28,7 +28,7 @@ class RoleController extends Controller
         $roles = collect(RoleRegistry::assignableTenantRoles())->map(function ($role) {
             return [
                 'value' => $role,
-                'label' => ucfirst($role),
+                'label' => RoleRegistry::tenantRoleDisplayLabel($role),
             ];
         })->values();
 

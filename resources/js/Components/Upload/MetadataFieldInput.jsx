@@ -9,12 +9,25 @@
  * Handles empty options gracefully.
  */
 
-import { forwardRef } from 'react'
+import { forwardRef, useCallback, useEffect, useMemo, useState } from 'react'
 import { isFieldSatisfied } from '../../utils/metadataValidation'
 import TagInputUnified from '../TagInputUnified'
 import CollectionSelector from '../Collections/CollectionSelector'
 import StarRating from '../StarRating'
 import { usePage } from '@inertiajs/react'
+
+/** Storage value for a new custom select/multiselect option (server accepts slug-like values). */
+function slugifyMetadataOptionValue(label) {
+    const raw = String(label).trim()
+    if (!raw) {
+        return `v_${Date.now()}`
+    }
+    const s = raw
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '_')
+        .replace(/^_+|_+$/g, '')
+    return s || `v_${Date.now()}`
+}
 
 /**
  * MetadataFieldInput - Renders metadata field input
@@ -25,22 +38,181 @@ import { usePage } from '@inertiajs/react'
  * @param {Function} props.onChange - Callback when value changes
  * @param {boolean} [props.disabled] - Whether field is disabled
  * @param {boolean} [props.showError] - Whether to show validation error
+ * @param {'default' | 'modal'} [props.layout] - "modal" = stacked label, full width, tall list in quick edit modals
  */
 const MetadataFieldInput = forwardRef(function MetadataFieldInput(
-    { field, value, onChange, disabled = false, showError = false, isUploadContext = true, collectionProps = null, tagsPlaceholder = null },
+    {
+        field,
+        value,
+        onChange,
+        disabled = false,
+        showError = false,
+        isUploadContext = true,
+        collectionProps = null,
+        tagsPlaceholder = null,
+        layout = 'default',
+    },
     ref
 ) {
     const { auth, currentWorkspace } = usePage().props
+    const [appendedOptions, setAppendedOptions] = useState([])
+    const [addOptionOpen, setAddOptionOpen] = useState(false)
+    const [addOptionLabel, setAddOptionLabel] = useState('')
+    const [addOptionLoading, setAddOptionLoading] = useState(false)
+    const [addOptionError, setAddOptionError] = useState(null)
+
+    useEffect(() => {
+        setAppendedOptions([])
+        setAddOptionOpen(false)
+        setAddOptionLabel('')
+        setAddOptionError(null)
+    }, [field?.metadata_field_id])
+
+    const mergedOptions = useMemo(() => {
+        const base = field?.options || []
+        const seen = new Set(base.map((o) => o?.value).filter((v) => v != null && v !== ''))
+        return [
+            ...base,
+            ...appendedOptions.filter((o) => o && o.value != null && o.value !== '' && !seen.has(o.value)),
+        ]
+    }, [field?.options, appendedOptions])
+
     const isRequired = field.is_required || false
     // UPLOAD CONTEXT FIX: During upload, all fields are editable (approval happens after upload)
     // For non-upload contexts (e.g., asset drawer), respect can_edit permission
     const canEdit = isUploadContext ? true : (field.can_edit !== undefined ? field.can_edit : true)
     const isDisabled = disabled || !canEdit
     const hasError = showError && isRequired && !isFieldSatisfied(field, value)
+    const canAddOptionsOnTheFly =
+        field?.can_add_options === true &&
+        !!field?.metadata_field_id &&
+        (field?.type === 'select' || field?.type === 'multiselect') &&
+        !isDisabled
+
     const handleChange = (newValue) => {
         if (!isDisabled) {
             onChange(newValue)
         }
+    }
+
+    const submitNewOption = useCallback(async () => {
+        const label = addOptionLabel.trim()
+        if (!label || addOptionLoading || !field?.metadata_field_id) {
+            return
+        }
+        setAddOptionLoading(true)
+        setAddOptionError(null)
+        const valueSlug = slugifyMetadataOptionValue(label)
+        const url =
+            typeof route === 'function'
+                ? route('tenant.metadata.fields.values.add', { field: field.metadata_field_id })
+                : `/app/tenant/metadata/fields/${field.metadata_field_id}/values`
+        try {
+            const res = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest',
+                    Accept: 'application/json',
+                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || '',
+                },
+                credentials: 'same-origin',
+                body: JSON.stringify({ value: valueSlug, system_label: label }),
+            })
+            const data = await res.json().catch(() => ({}))
+            if (!res.ok) {
+                throw new Error(
+                    (typeof data.error === 'string' && data.error) || data?.message || `Request failed (${res.status})`
+                )
+            }
+            const newValue = data.option?.value ?? valueSlug
+            const displayLabel = data.option?.display_label ?? label
+            setAppendedOptions((prev) => [...prev, { value: newValue, display_label: displayLabel }])
+            if (field.type === 'multiselect') {
+                const cur = Array.isArray(value) ? value : []
+                if (!isDisabled) {
+                    onChange([...cur, newValue])
+                }
+            } else if (field.type === 'select' && !isDisabled) {
+                onChange(newValue)
+            }
+            setAddOptionLabel('')
+            setAddOptionOpen(false)
+        } catch (e) {
+            setAddOptionError(e?.message || 'Failed to add value')
+        } finally {
+            setAddOptionLoading(false)
+        }
+    }, [addOptionLabel, addOptionLoading, field, isDisabled, onChange, value])
+
+    const renderOptionAddRow = (className = '') => {
+        if (!canAddOptionsOnTheFly) {
+            return null
+        }
+        return (
+            <div
+                className={`rounded-md border border-dashed border-slate-200 bg-slate-50/80 px-2 py-2 text-left ${className}`.trim()}
+            >
+                {!addOptionOpen ? (
+                    <button
+                        type="button"
+                        onClick={() => {
+                            setAddOptionOpen(true)
+                            setAddOptionError(null)
+                        }}
+                        className="text-xs font-medium text-indigo-600 hover:text-indigo-500"
+                    >
+                        + Add new value
+                    </button>
+                ) : (
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+                        <div className="min-w-0 flex-1">
+                            <label htmlFor={`add-opt-${field.metadata_field_id}`} className="sr-only">
+                                New {field.display_label} option
+                            </label>
+                            <input
+                                id={`add-opt-${field.metadata_field_id}`}
+                                type="text"
+                                value={addOptionLabel}
+                                onChange={(e) => setAddOptionLabel(e.target.value)}
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Enter') {
+                                        e.preventDefault()
+                                        submitNewOption()
+                                    }
+                                }}
+                                placeholder="New option label"
+                                disabled={addOptionLoading}
+                                className="block w-full rounded border border-slate-200 bg-white px-2 py-1.5 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                            />
+                        </div>
+                        <div className="flex shrink-0 gap-2">
+                            <button
+                                type="button"
+                                onClick={submitNewOption}
+                                disabled={addOptionLoading || !addOptionLabel.trim()}
+                                className="rounded bg-indigo-600 px-2.5 py-1.5 text-xs font-medium text-white shadow-sm hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                                {addOptionLoading ? 'Adding…' : 'Add'}
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setAddOptionOpen(false)
+                                    setAddOptionLabel('')
+                                    setAddOptionError(null)
+                                }}
+                                disabled={addOptionLoading}
+                                className="rounded border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                            >
+                                Cancel
+                            </button>
+                        </div>
+                    </div>
+                )}
+                {addOptionError ? <p className="mt-1 text-xs text-red-600">{addOptionError}</p> : null}
+            </div>
+        )
     }
 
     // C9.2: Collections field — render inside General group when collectionProps provided (uploader)
@@ -228,8 +400,8 @@ const MetadataFieldInput = forwardRef(function MetadataFieldInput(
             )
 
         case 'select':
-            // Handle empty options
-            if (!field.options || field.options.length === 0) {
+            // Handle empty options (unless user may add values on the fly)
+            if (!mergedOptions.length && !canAddOptionsOnTheFly) {
                 return (
                     <div>
                         <label htmlFor={field.key} className="block text-sm font-medium text-gray-700 mb-1">
@@ -251,43 +423,141 @@ const MetadataFieldInput = forwardRef(function MetadataFieldInput(
             }
 
             return (
-                <div className="flex items-center gap-2 min-w-0">
-                    <label htmlFor={field.key} className="flex-shrink-0 w-56 text-sm font-medium text-gray-700">
-                        {field.display_label}
-                        {isRequired && <span className="text-red-500 ml-0.5">*</span>}
-                    </label>
-                    <select
-                        id={field.key}
-                        name={field.key}
-                        value={value || ''}
-                        onChange={(e) => handleChange(e.target.value)}
-                        disabled={isDisabled}
-                        title={!canEdit ? "You don't have permission to edit this field" : undefined}
-                        className={`flex-1 min-w-0 rounded border shadow-sm focus:ring-indigo-500 text-sm text-gray-900 bg-white ${
-                            hasError ? 'border-red-300 focus:border-red-500 focus:ring-red-500' : 'border-gray-300 focus:border-indigo-500 focus:ring-indigo-500'
-                        } ${isDisabled ? 'bg-gray-50 text-gray-500 cursor-not-allowed opacity-60' : ''}`}
-                    >
-                        <option value="">Select</option>
-                        {field.options.map((option) => (
-                            <option key={option.value} value={option.value}>
-                                {option.display_label}
-                            </option>
-                        ))}
-                    </select>
-                    {hasError && <span className="flex-shrink-0 text-xs text-red-600">Required</span>}
+                <div className="min-w-0 space-y-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                        <label htmlFor={field.key} className="flex-shrink-0 w-56 text-sm font-medium text-gray-700">
+                            {field.display_label}
+                            {isRequired && <span className="text-red-500 ml-0.5">*</span>}
+                        </label>
+                        <div className="min-w-0 flex-1">
+                            <select
+                                id={field.key}
+                                name={field.key}
+                                value={value || ''}
+                                onChange={(e) => handleChange(e.target.value || null)}
+                                disabled={isDisabled}
+                                title={!canEdit ? "You don't have permission to edit this field" : undefined}
+                                className={`w-full min-w-0 rounded border shadow-sm focus:ring-indigo-500 text-sm text-gray-900 bg-white ${
+                                    hasError
+                                        ? 'border-red-300 focus:border-red-500 focus:ring-red-500'
+                                        : 'border-gray-300 focus:border-indigo-500 focus:ring-indigo-500'
+                                } ${isDisabled ? 'bg-gray-50 text-gray-500 cursor-not-allowed opacity-60' : ''}`}
+                            >
+                                <option value="">{mergedOptions.length ? 'Select' : 'Add a value below'}</option>
+                                {mergedOptions.map((option) => (
+                                    <option key={option.value} value={option.value}>
+                                        {option.display_label}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+                        {hasError && <span className="flex-shrink-0 text-xs text-red-600">Required</span>}
+                    </div>
+                    {renderOptionAddRow()}
                 </div>
             )
 
-        case 'multiselect':
-            if (!field.options || field.options.length === 0) {
+        case 'multiselect': {
+            const isModalList = layout === 'modal'
+            if (!mergedOptions.length) {
+                if (canAddOptionsOnTheFly) {
+                    return (
+                        <div
+                            className={
+                                isModalList
+                                    ? 'flex w-full min-w-0 flex-col gap-2'
+                                    : 'flex min-w-0 flex-col gap-2 sm:flex-row sm:items-start sm:gap-4'
+                            }
+                        >
+                            <label
+                                className={
+                                    isModalList
+                                        ? 'text-sm font-medium text-gray-700'
+                                        : 'shrink-0 text-sm font-medium text-gray-700 sm:w-56 sm:pt-0.5'
+                                }
+                            >
+                                {field.display_label}
+                                {isRequired && <span className="text-red-500 ml-0.5">*</span>}
+                            </label>
+                            <div className="min-w-0 flex-1 space-y-2">
+                                <p className="text-xs text-gray-500">No values yet. Add the first one below, then select it.</p>
+                                {renderOptionAddRow()}
+                            </div>
+                        </div>
+                    )
+                }
                 return (
-                    <div className="flex items-center gap-2 min-w-0">
-                        <label className="flex-shrink-0 w-56 text-sm font-medium text-gray-700">{field.display_label}</label>
+                    <div
+                        className={
+                            isModalList
+                                ? 'flex w-full min-w-0 flex-col gap-1.5'
+                                : 'flex min-w-0 items-center gap-2'
+                        }
+                    >
+                        <label
+                            className={
+                                isModalList
+                                    ? 'text-sm font-medium text-gray-700'
+                                    : 'w-56 flex-shrink-0 text-sm font-medium text-gray-700'
+                            }
+                        >
+                            {field.display_label}
+                        </label>
                         <span className="text-xs text-gray-500">No options</span>
                     </div>
                 )
             }
             const currentValues = Array.isArray(value) ? value : []
+            const listClassName = isModalList
+                ? 'h-[min(32rem,55vh)] w-full min-h-[12rem] divide-y divide-gray-100 overflow-y-auto rounded-lg border border-gray-200 bg-gradient-to-b from-white to-slate-50/80 shadow-sm'
+                : 'max-h-64 divide-y divide-gray-100 overflow-y-auto rounded-lg border border-gray-200 bg-gradient-to-b from-white to-slate-50/80 shadow-sm'
+            if (isModalList) {
+                return (
+                    <div className="flex w-full min-w-0 min-h-0 flex-1 flex-col gap-2">
+                        <label className="shrink-0 text-sm font-medium text-gray-700">
+                            {field.display_label}
+                            {isRequired && <span className="text-red-500 ml-0.5">*</span>}
+                        </label>
+                        <div className="min-h-0 w-full min-w-0 flex-1">
+                            <ul className={listClassName} aria-label={field.display_label}>
+                                {mergedOptions.map((option) => {
+                                    const isSelected = currentValues.includes(option.value)
+                                    return (
+                                        <li key={option.value}>
+                                            <label
+                                                className={`flex cursor-pointer items-start gap-3 px-3 py-2.5 transition-colors ${
+                                                    isSelected ? 'bg-indigo-50/60' : 'hover:bg-white/90'
+                                                } ${isDisabled ? 'cursor-not-allowed opacity-60' : ''}`}
+                                            >
+                                                <input
+                                                    type="checkbox"
+                                                    checked={isSelected}
+                                                    onChange={(e) => {
+                                                        const newValues = e.target.checked
+                                                            ? [...currentValues, option.value]
+                                                            : currentValues.filter((v) => v !== option.value)
+                                                        handleChange(newValues)
+                                                    }}
+                                                    disabled={isDisabled}
+                                                    title={!canEdit ? "You don't have permission to edit this field" : undefined}
+                                                    className={`mt-0.5 h-4 w-4 shrink-0 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 ${
+                                                        hasError ? 'border-red-300' : ''
+                                                    } ${isDisabled ? 'cursor-not-allowed' : ''}`}
+                                                />
+                                                <span className="min-w-0 flex-1 text-sm leading-snug text-gray-800">
+                                                    {option.display_label}
+                                                </span>
+                                            </label>
+                                        </li>
+                                    )
+                                })}
+                            </ul>
+                        </div>
+                        {renderOptionAddRow()}
+                        {hasError && <p className="text-xs text-red-600">Required</p>}
+                    </div>
+                )
+            }
             return (
                 <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:gap-4">
                     <label className="shrink-0 text-sm font-medium text-gray-700 sm:w-56 sm:pt-0.5">
@@ -296,10 +566,10 @@ const MetadataFieldInput = forwardRef(function MetadataFieldInput(
                     </label>
                     <div className="min-w-0 flex-1 space-y-1.5">
                         <ul
-                            className="max-h-64 divide-y divide-gray-100 overflow-y-auto rounded-lg border border-gray-200 bg-gradient-to-b from-white to-slate-50/80 shadow-sm"
+                            className={listClassName}
                             aria-label={field.display_label}
                         >
-                            {field.options.map((option) => {
+                            {mergedOptions.map((option) => {
                                 const isSelected = currentValues.includes(option.value)
                                 return (
                                     <li key={option.value}>
@@ -331,10 +601,12 @@ const MetadataFieldInput = forwardRef(function MetadataFieldInput(
                                 )
                             })}
                         </ul>
+                        {renderOptionAddRow()}
                         {hasError && <p className="text-xs text-red-600">Required</p>}
                     </div>
                 </div>
             )
+        }
 
         case 'rating':
             return (

@@ -48,15 +48,15 @@ class TenantAgencySyncAndConvertTest extends TestCase
         $clientOwner->tenants()->attach($client->id, ['role' => 'owner']);
 
         $service = app(TenantAgencyService::class);
-        $link = $service->attach($client, $agency, 'member', [], $clientOwner);
+        $link = $service->attach($client, $agency, 'agency_partner', [], $clientOwner);
 
         $lateJoiner = User::factory()->create();
         $lateJoiner->tenants()->attach($agency->id, ['role' => 'member']);
 
-        $agencyAdmin = User::factory()->create();
-        $agencyAdmin->tenants()->attach($agency->id, ['role' => 'admin']);
-
-        $response = $this->actingAs($agencyAdmin)
+        // Use existing agency owner for the request: attach() already put them on the client, so sync
+        // should add only staff who joined the agency after the link (e.g. lateJoiner). A separate
+        // agency admin here would also be absent from the client and would inflate `added`.
+        $response = $this->actingAs($agencyOwner)
             ->withSession(['tenant_id' => $agency->id])
             ->postJson("/app/api/agency/tenant-agencies/{$link->id}/sync-users");
 
@@ -95,7 +95,7 @@ class TenantAgencySyncAndConvertTest extends TestCase
         ]);
 
         $service = app(TenantAgencyService::class);
-        $service->attach($client, $agency, 'member', [], $clientOwner);
+        $service->attach($client, $agency, 'agency_partner', [], $clientOwner);
 
         $pivotBefore = DB::table('tenant_user')
             ->where('tenant_id', $client->id)
@@ -141,7 +141,7 @@ class TenantAgencySyncAndConvertTest extends TestCase
         $clientOwner->tenants()->attach($client->id, ['role' => 'owner']);
 
         $service = app(TenantAgencyService::class);
-        $link = $service->attach($client, $agencyA, 'member', [], $clientOwner);
+        $link = $service->attach($client, $agencyA, 'agency_partner', [], $clientOwner);
 
         $this->actingAs($ownerB)
             ->withSession(['tenant_id' => $agencyB->id])

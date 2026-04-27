@@ -15,6 +15,7 @@ use App\Services\EnterpriseDownloadPolicy;
 use App\Services\FeatureGate;
 use App\Services\PlanService;
 use App\Services\TagQualityMetricsService;
+use App\Support\Roles\RoleRegistry;
 use App\Traits\HandlesFlashMessages;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -364,7 +365,9 @@ class CompanyController extends Controller
         $planService = app(PlanService::class);
         $canUseRequireLandingPage = $planService->canUseRequireLandingPage($tenant);
 
-        $canManageAgencies = $user->hasPermissionForTenant($tenant, 'team.manage');
+        $tenantRoleForAgencies = strtolower((string) $user->getRoleForTenant($tenant));
+        $canManageAgencies = $user->hasPermissionForTenant($tenant, 'team.manage')
+            && in_array($tenantRoleForAgencies, ['owner', 'admin'], true);
         $settingsBrands = $tenant->brands()->orderBy('name')->get(['id', 'name']);
         $creatorModuleEnabled = app(FeatureGate::class)->creatorModuleEnabled($tenant);
         $creatorModuleBrands = $creatorModuleEnabled
@@ -379,6 +382,27 @@ class CompanyController extends Controller
                 ->get()
                 ->map(fn (\App\Models\TenantAgency $row) => $row->toApiArray());
         }
+
+        $agencyRelationshipRoleOptions = [];
+        if ($canManageAgencies) {
+            $agencyRelationshipRoleOptions = collect(
+                RoleRegistry::assignableAgencyRelationshipRolesForInviter($user, $tenant, null)
+            )
+                ->map(fn ($role) => [
+                    'value' => $role,
+                    'label' => RoleRegistry::tenantRoleDisplayLabel($role),
+                ])
+                ->values()
+                ->all();
+        }
+
+        $brandRoleOptions = collect(RoleRegistry::brandRoles())
+            ->map(fn ($role) => [
+                'value' => $role,
+                'label' => ucfirst(str_replace('_', ' ', $role)),
+            ])
+            ->values()
+            ->all();
 
         // Phase M-2: Include tenant settings
         return Inertia::render('Companies/Settings', [
@@ -404,6 +428,8 @@ class CompanyController extends Controller
             'can_use_require_landing_page' => $canUseRequireLandingPage,
             'settings_brands' => $settingsBrands,
             'linked_agencies' => $linkedAgencies,
+            'agency_relationship_role_options' => $agencyRelationshipRoleOptions,
+            'brand_role_options' => $brandRoleOptions,
             'can_manage_agencies' => $canManageAgencies,
             'creator_module_enabled' => $creatorModuleEnabled,
             'creator_module_brands' => $creatorModuleBrands,

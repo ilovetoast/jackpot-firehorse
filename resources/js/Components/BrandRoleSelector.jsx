@@ -1,28 +1,59 @@
 import { useState, useEffect, useRef } from 'react'
 import { TagIcon } from '@heroicons/react/24/outline'
 
-export default function BrandRoleSelector({ 
-    brands, 
-    selectedBrands = [], 
-    onChange, 
+export default function BrandRoleSelector({
+    brands,
+    selectedBrands = [],
+    onChange,
     errors = {},
     required = true,
     allowSelectAll = true,
 }) {
+    const [brandRoles, setBrandRoles] = useState([])
+    const [rolesLoading, setRolesLoading] = useState(true)
+
+    useEffect(() => {
+        let cancelled = false
+        fetch('/app/api/roles/brand', {
+            credentials: 'same-origin',
+            headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+        })
+            .then((r) => r.json())
+            .then((data) => {
+                if (cancelled) return
+                const list = Array.isArray(data.roles) ? data.roles : []
+                setBrandRoles(list)
+            })
+            .catch(() => {
+                if (!cancelled) setBrandRoles([])
+            })
+            .finally(() => {
+                if (!cancelled) setRolesLoading(false)
+            })
+        return () => {
+            cancelled = true
+        }
+    }, [])
+
+    const roleValues = brandRoles.map((r) => r.value)
+    const defaultRole = roleValues.includes('viewer') ? 'viewer' : roleValues[0] || 'viewer'
+
+    const normalizeRole = (role) => {
+        let r = role
+        if (r === 'owner') r = 'admin'
+        if (r === 'member') r = 'viewer'
+        if (roleValues.length && !roleValues.includes(r)) {
+            return defaultRole
+        }
+        return r || defaultRole
+    }
+
     const [brandAssignments, setBrandAssignments] = useState(() => {
-        // Initialize with selectedBrands if provided
         if (selectedBrands && selectedBrands.length > 0) {
-            return selectedBrands.map(b => {
+            return selectedBrands.map((b) => {
                 let role = b.role
-                // Convert 'owner' to 'admin' for brand roles (owner is only for tenant-level)
-                if (role === 'owner') {
-                    role = 'admin'
-                }
-                // Convert 'member' to 'viewer' for brand roles (member is only for tenant-level)
-                if (role === 'member') {
-                    role = 'viewer'
-                }
-                // Default to 'viewer' if no role specified
+                if (role === 'owner') role = 'admin'
+                if (role === 'member') role = 'viewer'
                 return {
                     brand_id: b.brand_id || b.id,
                     role: role || 'viewer',
@@ -31,68 +62,65 @@ export default function BrandRoleSelector({
         }
         return []
     })
-    
+
     const isInitialMount = useRef(true)
     const onChangeRef = useRef(onChange)
-    
-    // Keep onChange ref up to date
+
     useEffect(() => {
         onChangeRef.current = onChange
     }, [onChange])
 
     useEffect(() => {
-        // Skip onChange on initial mount to prevent infinite loop
+        if (rolesLoading || brandRoles.length === 0) {
+            return
+        }
+        setBrandAssignments((prev) =>
+            prev.map((b) => ({
+                ...b,
+                role: normalizeRole(b.role),
+            }))
+        )
+    }, [rolesLoading, brandRoles])
+
+    useEffect(() => {
         if (isInitialMount.current) {
             isInitialMount.current = false
             return
         }
-        
-        // Only call onChange if it exists and we're not on initial mount
         if (onChangeRef.current) {
             onChangeRef.current(brandAssignments)
         }
     }, [brandAssignments])
 
     const toggleBrand = (brandId) => {
-        const exists = brandAssignments.find(b => b.brand_id === brandId)
-        
+        const exists = brandAssignments.find((b) => b.brand_id === brandId)
+
         if (exists) {
-            // Remove brand
-            setBrandAssignments(brandAssignments.filter(b => b.brand_id !== brandId))
+            setBrandAssignments(brandAssignments.filter((b) => b.brand_id !== brandId))
         } else {
-            // Add brand with default role 'viewer' (member is tenant-level only)
             setBrandAssignments([
                 ...brandAssignments,
-                { brand_id: brandId, role: 'viewer' },
+                { brand_id: brandId, role: defaultRole },
             ])
         }
     }
 
     const updateRole = (brandId, role) => {
-        setBrandAssignments(brandAssignments.map(b => 
-            b.brand_id === brandId ? { ...b, role } : b
-        ))
+        setBrandAssignments(
+            brandAssignments.map((b) => (b.brand_id === brandId ? { ...b, role } : b))
+        )
     }
 
     const selectAll = () => {
-        const allBrands = brands.map(b => ({
+        const allBrands = brands.map((b) => ({
             brand_id: b.id,
-            role: 'viewer', // Default to viewer (member is tenant-level only)
+            role: defaultRole,
         }))
         setBrandAssignments(allBrands)
     }
 
     const selectNone = () => {
         setBrandAssignments([])
-    }
-
-    const isValidRole = (role) => {
-        // Owner and member are not valid brand roles (tenant-level only)
-        if (role === 'owner' || role === 'member') {
-            return false
-        }
-        // Valid brand roles: viewer, contributor, brand_manager, admin
-        return ['viewer', 'contributor', 'brand_manager', 'admin'].includes(role)
     }
 
     return (
@@ -122,14 +150,21 @@ export default function BrandRoleSelector({
                 )}
             </div>
 
-            {brands && brands.length > 0 ? (
+            {rolesLoading && (
+                <p className="text-sm text-gray-500 py-2">Loading role options…</p>
+            )}
+
+            {!rolesLoading && brands && brands.length > 0 ? (
                 <div className="space-y-3 border border-gray-200 rounded-lg p-4">
                     {brands.map((brand) => {
-                        const assignment = brandAssignments.find(b => b.brand_id === brand.id)
+                        const assignment = brandAssignments.find((b) => b.brand_id === brand.id)
                         const isSelected = !!assignment
 
                         return (
-                            <div key={brand.id} className="flex items-center justify-between py-2 px-3 bg-white rounded-md border border-gray-200 hover:border-indigo-300 transition-colors">
+                            <div
+                                key={brand.id}
+                                className="flex items-center justify-between py-2 px-3 bg-white rounded-md border border-gray-200 hover:border-indigo-300 transition-colors"
+                            >
                                 <label className="flex items-center flex-1 cursor-pointer">
                                     <input
                                         type="checkbox"
@@ -146,17 +181,18 @@ export default function BrandRoleSelector({
                                     </span>
                                 </label>
 
-                                {isSelected && (
+                                {isSelected && brandRoles.length > 0 && (
                                     <select
                                         value={assignment.role === 'owner' ? 'admin' : assignment.role}
                                         onChange={(e) => updateRole(brand.id, e.target.value)}
                                         onClick={(e) => e.stopPropagation()}
                                         className="ml-4 block rounded-md border-0 py-1.5 px-3 text-sm text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 focus:ring-2 focus:ring-inset focus:ring-indigo-600"
                                     >
-                                        <option value="viewer">Viewer</option>
-                                        <option value="contributor">Contributor</option>
-                                        <option value="brand_manager">Brand Manager</option>
-                                        <option value="admin">Admin</option>
+                                        {brandRoles.map((r) => (
+                                            <option key={r.value} value={r.value}>
+                                                {r.label}
+                                            </option>
+                                        ))}
                                     </select>
                                 )}
                             </div>
@@ -164,19 +200,17 @@ export default function BrandRoleSelector({
                     })}
                 </div>
             ) : (
-                <div className="text-sm text-gray-500 py-2">
-                    No brands available. Please create a brand first.
-                </div>
+                !rolesLoading && (
+                    <div className="text-sm text-gray-500 py-2">
+                        No brands available. Please create a brand first.
+                    </div>
+                )
             )}
 
-            {errors.brands && (
-                <p className="mt-2 text-sm text-red-600">{errors.brands}</p>
-            )}
+            {errors.brands && <p className="mt-2 text-sm text-red-600">{errors.brands}</p>}
 
             {required && brandAssignments.length === 0 && (
-                <p className="mt-2 text-sm text-gray-500">
-                    At least one brand must be selected.
-                </p>
+                <p className="mt-2 text-sm text-gray-500">At least one brand must be selected.</p>
             )}
         </div>
     )

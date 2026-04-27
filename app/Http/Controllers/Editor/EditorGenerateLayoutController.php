@@ -390,31 +390,34 @@ class EditorGenerateLayoutController extends Controller
                 ->tap($applyPhotoOnlyFilter)
                 ->with(['latestBrandIntelligenceScore', 'category']);
 
-            $query->where(function ($outer) use ($brandTagIds, $photographyCategories) {
-                if ($brandTagIds !== []) {
-                    $outer->whereIn('id', $brandTagIds);
-                }
+            $useLegacyMetadata = $brandTagIds === [] && $this->supportsLegacyWizardBackgroundMetadataFilter();
+            $hasBackgroundDisjuncts = $brandTagIds !== []
+                || $photographyCategories->isNotEmpty()
+                || $useLegacyMetadata;
 
-                if ($photographyCategories->isNotEmpty()) {
-                    // Any image filed under a Photography-like DAM category — use the
-                    // same JSON cast the asset grid uses (works on MySQL + PostgreSQL).
-                    $catIds = $photographyCategories->pluck('id')->map(fn ($id) => (int) $id)->all();
-                    $outer->orWhere(function ($q) use ($catIds) {
-                        $q->whereNotNull('metadata')
-                            ->whereIn(DB::raw(Asset::categoryIdMetadataCastExpression()), $catIds);
-                    });
-                }
+            // If nothing narrows the pool (no tags, no resolvable Photography folder,
+            // and no legacy metadata on this driver), an empty nested `where` group
+            // can match zero rows. Omit the disjunctive filter and let the base scopes
+            // return a broad first pass (then scoring still prefers real photos).
+            if ($hasBackgroundDisjuncts) {
+                $query->where(function ($outer) use ($brandTagIds, $photographyCategories, $useLegacyMetadata) {
+                    if ($brandTagIds !== []) {
+                        $outer->whereIn('id', $brandTagIds);
+                    }
 
-                // When this brand has no library hits for the wizard tag set, keep the
-                // legacy MySQL metadata-based pool. (JSON_EXTRACT is not portable — it
-                // would throw on PostgreSQL and the whole background list would be empty.)
-                if ($brandTagIds === [] && DB::getDriverName() === 'mysql') {
-                    $outer->orWhere(function ($q) {
-                        $q->whereRaw("JSON_EXTRACT(metadata, '$.fields.photo_type') IN ('\"lifestyle\"', '\"editorial\"', '\"event\"', '\"hero\"')")
-                            ->orWhereRaw("JSON_EXTRACT(metadata, '$.fields.subject_type') = '\"scene\"'");
-                    });
-                }
-            });
+                    if ($photographyCategories->isNotEmpty()) {
+                        $catIds = $photographyCategories->pluck('id')->map(fn ($id) => (int) $id)->all();
+                        $outer->orWhere(function ($q) use ($catIds) {
+                            $q->whereNotNull('metadata')
+                                ->whereIn(DB::raw(Asset::categoryIdMetadataCastExpression()), $catIds);
+                        });
+                    }
+
+                    if ($useLegacyMetadata) {
+                        $this->applyLegacyWizardBackgroundMetadataOrWhere($outer);
+                    }
+                });
+            }
 
             $assets = $query
                 ->orderByDesc('created_at')
@@ -568,10 +571,63 @@ class EditorGenerateLayoutController extends Controller
             ->where(function ($q) {
                 $q->whereIn('slug', ['photography', 'photographs', 'photo', 'photos'])
                     ->orWhere('slug', 'like', 'photograph%')
-                    ->orWhere('slug', 'like', 'photo%');
+                    ->orWhere('slug', 'like', 'photo%')
+                    // e.g. product-photography, library-photos, lifestyle-photography
+                    ->orWhere('slug', 'like', '%photography%')
+                    ->orWhere('slug', 'like', '%-photo')
+                    ->orWhere('slug', 'like', '%-photos%')
+                    ->orWhereRaw('LOWER(categories.name) LIKE ?', ['%photograph%']);
             })
             ->active()
             ->get();
+    }
+
+    /**
+     * Legacy intake metadata (photo_type / subject_type) was only applied on MySQL, so
+     * brands on PostgreSQL with no tag/category match never entered the first pass.
+     */
+    private function supportsLegacyWizardBackgroundMetadataFilter(): bool
+    {
+        return in_array(DB::getDriverName(), ['mysql', 'pgsql', 'sqlite'], true);
+    }
+
+    /**
+     * Or-group: same semantics as the historical MySQL JSON_EXTRACT branch, using
+     * driver-specific JSON access so the wizard background pool is not empty on Postgres.
+     *
+     * @param  \Illuminate\Database\Eloquent\Builder|\Illuminate\Database\Query\Builder  $parent
+     */
+    private function applyLegacyWizardBackgroundMetadataOrWhere($parent): void
+    {
+        $driver = DB::getDriverName();
+        if ($driver === 'mysql') {
+            $parent->orWhere(function ($q) {
+                $q->whereNotNull('metadata')
+                    ->where(function ($inner) {
+                        $inner->whereRaw("JSON_EXTRACT(metadata, '$.fields.photo_type') IN ('\"lifestyle\"', '\"editorial\"', '\"event\"', '\"hero\"')")
+                            ->orWhereRaw("JSON_EXTRACT(metadata, '$.fields.subject_type') = '\"scene\"'");
+                    });
+            });
+
+            return;
+        }
+
+        if (in_array($driver, ['pgsql', 'sqlite'], true)) {
+            $pathPhotoType = $driver === 'pgsql'
+                ? "metadata->'fields'->>'photo_type'"
+                : "json_extract(metadata, '$.fields.photo_type')";
+            $pathSubject = $driver === 'pgsql'
+                ? "metadata->'fields'->>'subject_type'"
+                : "json_extract(metadata, '$.fields.subject_type')";
+
+            $parent->orWhere(function ($q) use ($pathPhotoType, $pathSubject) {
+                $q->whereNotNull('metadata')
+                    ->where(function ($inner) use ($pathPhotoType, $pathSubject) {
+                        $inner->whereIn(DB::raw($pathPhotoType), ['lifestyle', 'editorial', 'event', 'hero'])
+                            ->orWhere(DB::raw($pathSubject), 'scene');
+                    });
+            });
+        }
     }
 
     /**
@@ -796,11 +852,16 @@ class EditorGenerateLayoutController extends Controller
         $photoPayloads = [];
         foreach ($photoAssets as $asset) {
             $fileUrl = $asset->deliveryUrl(AssetVariant::ORIGINAL, DeliveryContext::AUTHENTICATED);
+            $thumbMedium = $asset->deliveryUrl(AssetVariant::THUMB_MEDIUM, DeliveryContext::AUTHENTICATED);
+            $thumbSmall = $asset->deliveryUrl(AssetVariant::THUMB_SMALL, DeliveryContext::AUTHENTICATED);
+            if (! $fileUrl) {
+                $fileUrl = $thumbMedium ?: $thumbSmall;
+            }
             if (! $fileUrl) {
                 continue;
             }
-            $thumbnailUrl = $asset->deliveryUrl(AssetVariant::THUMB_MEDIUM, DeliveryContext::AUTHENTICATED)
-                ?: $asset->deliveryUrl(AssetVariant::THUMB_SMALL, DeliveryContext::AUTHENTICATED)
+            $thumbnailUrl = $thumbMedium
+                ?: $thumbSmall
                 ?: $fileUrl;
             $photoPayloads[] = [
                 'id' => (string) $asset->id,

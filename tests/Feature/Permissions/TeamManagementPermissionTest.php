@@ -25,7 +25,7 @@ class TeamManagementPermissionTest extends TestCase
     }
 
     #[Test]
-    public function team_management_returns_403_without_permission(): void
+    public function team_management_redirects_without_permission(): void
     {
         $tenant = Tenant::create([
             'name' => 'Test Company',
@@ -57,7 +57,12 @@ class TeamManagementPermissionTest extends TestCase
             ->withSession(['tenant_id' => $tenant->id, 'brand_id' => $brand->id])
             ->get(route('companies.team'));
 
-        $response->assertStatus(403);
+        // Non-JSON /app/* 403s are rendered as a redirect with a toast (see bootstrap/app.php).
+        $response->assertRedirect(route('assets.index'));
+        $response->assertSessionHas(
+            'warning',
+            'Only administrators and owners can access team management.'
+        );
     }
 
     #[Test]

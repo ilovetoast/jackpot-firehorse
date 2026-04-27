@@ -8,6 +8,7 @@ use App\Models\Brand;
 use App\Models\BrandInvitation;
 use App\Models\CollectionUser;
 use App\Models\Tenant;
+use App\Models\TenantAgency;
 use App\Models\TenantInvitation;
 use App\Models\User;
 use App\Services\ActivityRecorder;
@@ -16,7 +17,6 @@ use App\Support\Roles\RoleRegistry;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rules\Password as PasswordRule;
@@ -69,24 +69,17 @@ class TeamController extends Controller
             ];
         });
 
-        $inviterRole = (string) $user->getRoleForTenant($tenant);
-        $assignableForInvite = RoleRegistry::assignableTenantRolesForInviter($inviterRole);
-        $order = ['member' => 0, 'admin' => 1, 'agency_partner' => 2, 'agency_admin' => 3];
+        $assignableForInvite = $tenant->is_agency
+            ? RoleRegistry::assignableAgencyWorkspaceRolesForInviter($user, $tenant)
+            : RoleRegistry::directAssignableTenantRolesForInviter($user, $tenant);
+        $order = ['member' => 0, 'admin' => 1];
         $tenantRoles = collect($assignableForInvite)
             ->sortBy(fn ($role) => $order[$role] ?? 99)
             ->values()
-            ->map(function ($role) {
-                $label = match ($role) {
-                    'agency_admin' => 'Agency admin',
-                    'agency_partner' => 'Agency partner',
-                    default => ucfirst($role),
-                };
-
-                return [
-                    'value' => $role,
-                    'label' => $label,
-                ];
-            })
+            ->map(fn ($role) => [
+                'value' => $role,
+                'label' => RoleRegistry::tenantRoleDisplayLabel($role),
+            ])
             ->all();
 
         return Inertia::render('Companies/Team', [
@@ -251,8 +244,14 @@ class TeamController extends Controller
             abort(404, 'User is not a member of this company.');
         }
 
-        if ($response = $this->guardAgencyManagedUser($request, $tenant, $user)) {
-            return $response;
+        if ($user->isAgencyManagedMemberOf($tenant)) {
+            $msg = 'Agency-managed members are controlled through Company Settings → Agencies.';
+
+            if ($request->expectsJson() || $request->wantsJson()) {
+                return response()->json(['message' => $msg, 'error' => 'agency_managed_user'], 422);
+            }
+
+            return back()->withErrors(['role' => $msg]);
         }
 
         // Prevent changing the owner role (must always be one owner)
@@ -263,20 +262,30 @@ class TeamController extends Controller
             ]);
         }
 
-        // Validate using RoleRegistry
         $validated = $request->validate([
             'role' => [
                 'required',
                 'string',
                 function ($attribute, $value, $fail) {
                     try {
-                        RoleRegistry::validateTenantRoleAssignment($value);
+                        RoleRegistry::validateDirectCompanyTenantRoleAssignment($value);
                     } catch (\InvalidArgumentException $e) {
                         $fail($e->getMessage());
                     }
                 },
             ],
         ]);
+
+        $assignable = RoleRegistry::directAssignableTenantRolesForInviter($authUser, $tenant);
+        if (! in_array(strtolower($validated['role']), $assignable, true)) {
+            $labels = array_map(fn ($r) => RoleRegistry::tenantRoleDisplayLabel($r), $assignable);
+
+            return $this->teamRoleForbiddenResponse(
+                $request,
+                'role',
+                'You do not have permission to assign this company role. Allowed roles: '.implode(', ', $labels).'.'
+            );
+        }
 
         // Get old role for logging
         $oldRole = $user->getRoleForTenant($tenant);
@@ -483,18 +492,17 @@ class TeamController extends Controller
             abort(403, 'Only administrators and owners can invite team members.');
         }
 
-        // Validate using RoleRegistry - no automatic conversion
         $validated = $request->validate([
             'email' => 'required|email|max:255',
             'role' => [
                 'nullable',
                 'string',
                 function ($attribute, $value, $fail) {
-                    if ($value === null) {
-                        return; // Nullable, skip validation
+                    if ($value === null || $value === '') {
+                        return;
                     }
                     try {
-                        RoleRegistry::validateTenantRoleAssignment($value);
+                        RoleRegistry::validateDirectCompanyTenantRoleAssignment($value);
                     } catch (\InvalidArgumentException $e) {
                         $fail($e->getMessage());
                     }
@@ -546,26 +554,34 @@ class TeamController extends Controller
             ]);
         }
 
+        $linkedAgencyIds = TenantAgency::query()
+            ->where('tenant_id', $tenant->id)
+            ->pluck('agency_tenant_id');
+        if ($linkedAgencyIds->isNotEmpty() && $existingUser && $existingUser->tenants()->whereIn('tenants.id', $linkedAgencyIds)->exists()) {
+            return back()->withErrors([
+                'email' => 'This user belongs to a linked agency. Add them through the agency partnership, or invite them as a direct company member.',
+            ]);
+        }
+
         // Generate invite token
         $inviteToken = Str::random(64);
         $inviteUrl = route('gateway.invite', [
             'token' => $inviteToken,
         ]);
 
-        // Determine tenant role (use provided role or default to 'member')
-        // Default to 'member' if no role provided
         $tenantRole = $validated['role'] ?? 'member';
-
-        // Ensure tenant role is valid and assignable (RoleRegistry validation already ensured this)
-        if (! RoleRegistry::isAssignableTenantRole($tenantRole)) {
-            $tenantRole = 'member'; // Fallback to member if somehow invalid
+        try {
+            RoleRegistry::validateDirectCompanyTenantRoleAssignment($tenantRole);
+        } catch (\InvalidArgumentException $e) {
+            return back()->withErrors(['role' => $e->getMessage()]);
         }
 
-        $inviterRole = (string) $authUser->getRoleForTenant($tenant);
-        $assignable = RoleRegistry::assignableTenantRolesForInviter($inviterRole);
+        $assignable = RoleRegistry::directAssignableTenantRolesForInviter($authUser, $tenant);
         if (! in_array(strtolower($tenantRole), $assignable, true)) {
+            $labels = array_map(fn ($r) => RoleRegistry::tenantRoleDisplayLabel($r), $assignable);
+
             return back()->withErrors([
-                'role' => 'You do not have permission to assign this company role. New invites for your role are limited to: '.implode(', ', $assignable).'.',
+                'role' => 'You do not have permission to assign this company role. Allowed roles: '.implode(', ', $labels).'.',
             ]);
         }
 
@@ -779,12 +795,24 @@ class TeamController extends Controller
             return null;
         }
 
-        $msg = 'This user is managed by an agency link. Change access in Company Settings → Agencies, or remove the agency.';
+        $msg = 'Agency-managed members are controlled through Company Settings → Agencies.';
 
         if ($request->expectsJson() || $request->wantsJson()) {
             return response()->json(['message' => $msg, 'error' => 'agency_managed_user'], 422);
         }
 
         return back()->withErrors(['team' => $msg]);
+    }
+
+    /**
+     * @return \Illuminate\Http\JsonResponse|\Illuminate\Http\RedirectResponse
+     */
+    protected function teamRoleForbiddenResponse(Request $request, string $field, string $message)
+    {
+        if ($request->expectsJson() || $request->wantsJson()) {
+            return response()->json(['message' => $message, 'errors' => [$field => [$message]]], 422);
+        }
+
+        return back()->withErrors([$field => $message]);
     }
 }

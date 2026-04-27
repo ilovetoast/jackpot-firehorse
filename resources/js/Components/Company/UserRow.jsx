@@ -24,7 +24,7 @@ const COMPANY_ROLE_LABEL = {
     owner: 'Owner',
     admin: 'Admin',
     member: 'Member',
-    agency_admin: 'Agency admin',
+    agency_admin: 'Agency manager',
     agency_partner: 'Agency partner',
 }
 
@@ -48,6 +48,7 @@ export default function UserRow({
     onDeleteFromCompany,
     updatingKeys = {},
     groupedUnderAgencySection = false,
+    manageAgencyAccessHref = '/app/companies/settings#agencies',
     linkedAgencies = [],
     onConvertToAgency,
     convertPending = false,
@@ -167,8 +168,17 @@ export default function UserRow({
                     </select>
                 ) : (
                     <span className={`inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-medium ${getRoleColor(user.company_role)}`}>
-                        {COMPANY_ROLE_LABEL[user.company_role] || (user.company_role === 'owner' ? 'Owner' : user.company_role === 'admin' ? 'Admin' : 'Member')}
+                        {COMPANY_ROLE_LABEL[user.company_role] ||
+                            (user.company_role === 'owner' ? 'Owner' : user.company_role === 'admin' ? 'Admin' : 'Member')}
                     </span>
+                )}
+                {isAgencyManaged && (
+                    <a
+                        href={manageAgencyAccessHref}
+                        className="shrink-0 text-xs font-medium text-indigo-600 hover:text-indigo-800 underline decoration-indigo-200 underline-offset-2"
+                    >
+                        Manage agency access
+                    </a>
                 )}
                 {updatingKeys[`tenant_${user.id}`] && (
                     <span className="text-xs text-gray-500">Updating...</span>

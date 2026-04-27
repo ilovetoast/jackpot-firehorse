@@ -88,6 +88,8 @@ export default function AssetMetadataEditModal({ assetId, field, primaryColor, o
         onClose()
     }
 
+    const isMultiselectField = field?.type === 'multiselect'
+
     return (
         <>
             {/* Backdrop */}
@@ -97,18 +99,20 @@ export default function AssetMetadataEditModal({ assetId, field, primaryColor, o
                 aria-hidden="true"
             />
 
-            {/* Modal */}
+            {/* Modal — multiselect: flex column + wide shell so the option list can use height */}
             <div
                 className="fixed inset-0 z-50 flex items-center justify-center p-4"
                 onClick={(e) => e.stopPropagation()}
             >
                 <div
-                    className={`bg-white rounded-lg shadow-xl w-full max-h-[90vh] overflow-y-auto ${
-                        field?.type === 'multiselect' ? 'max-w-lg' : 'max-w-md'
-                    }`}
+                    className={
+                        isMultiselectField
+                            ? 'bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[min(90vh,56rem)] flex flex-col overflow-hidden'
+                            : 'bg-white rounded-lg shadow-xl w-full max-w-md max-h-[90vh] overflow-y-auto'
+                    }
                 >
                     {/* Header */}
-                    <div className="sticky top-0 z-10 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
+                    <div className="shrink-0 z-10 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
                         <h3 className="text-lg font-semibold text-gray-900">
                             Edit {field.display_label}
                         </h3>
@@ -124,14 +128,20 @@ export default function AssetMetadataEditModal({ assetId, field, primaryColor, o
                     </div>
 
                     {/* Content */}
-                    <div className="px-6 py-6">
+                    <div
+                        className={
+                            isMultiselectField
+                                ? 'min-h-0 flex flex-1 flex-col overflow-hidden px-6 py-4'
+                                : 'px-6 py-6'
+                        }
+                    >
                         {error && (
-                            <div className="mb-4 rounded-md bg-red-50 p-4">
+                            <div className="mb-4 rounded-md bg-red-50 p-4 shrink-0">
                                 <div className="text-sm text-red-800">{error}</div>
                             </div>
                         )}
 
-                        <div className="space-y-4">
+                        <div className={isMultiselectField ? 'flex min-h-0 flex-1 flex-col' : 'space-y-4'}>
                             {/* Boolean with display_widget=toggle (or starred): toggle in modal using brand primary color */}
                             {(field.type === 'boolean' && (field.display_widget === 'toggle' || field.key === 'starred' || field.field_key === 'starred')) ? (
                                 <label className="flex items-center justify-between gap-4 cursor-pointer">
@@ -161,13 +171,14 @@ export default function AssetMetadataEditModal({ assetId, field, primaryColor, o
                                     disabled={saving}
                                     showError={false}
                                     isUploadContext={false}
+                                    layout={isMultiselectField ? 'modal' : 'default'}
                                 />
                             )}
                         </div>
                     </div>
 
                     {/* Footer */}
-                    <div className="sticky bottom-0 bg-white border-t border-gray-200 px-6 py-4 flex items-center justify-end gap-3">
+                    <div className="shrink-0 bg-white border-t border-gray-200 px-6 py-4 flex items-center justify-end gap-3">
                         <button
                             type="button"
                             onClick={handleCancel}

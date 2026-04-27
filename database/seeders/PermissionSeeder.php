@@ -28,6 +28,7 @@ class PermissionSeeder extends Seeder
             'company_settings.edit',
             'company_settings.manage_download_policy',
             'company_settings.manage_ai_settings',
+            'company_settings.manage_generative',
             'company_settings.view_tag_quality',
             'team.manage',
             'activity_logs.view',

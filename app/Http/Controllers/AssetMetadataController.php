@@ -46,6 +46,7 @@ use App\Services\BrandIntelligence\BrandIntelligenceScheduleService;
 use App\Services\BulkMetadataService;
 use App\Services\EmbeddedUsageRightsSuggestionService;
 use App\Services\MetadataApprovalResolver;
+use App\Services\MetadataOptionEditGuard;
 use App\Services\MetadataPermissionResolver;
 use App\Services\MetadataPersistenceService;
 use App\Services\MetadataSchemaResolver;
@@ -626,6 +627,34 @@ class AssetMetadataController extends Controller
     }
 
     /**
+     * Whether the user may add new select/multiselect options in the asset edit UI (tenant custom fields only;
+     * matches {@see TenantMetadataFieldController::addValue} authorization and {@see MetadataOptionEditGuard}).
+     *
+     * @param  array<string, mixed>  $schemaField  Field row from resolved edit schema (field_id, type, key, …)
+     */
+    protected function userCanAddMetadataFieldValues(?User $user, ?Tenant $tenant, ?object $fieldDef, array $schemaField): bool
+    {
+        if (! $user || ! $tenant || ! $fieldDef) {
+            return false;
+        }
+
+        $type = $schemaField['type'] ?? $fieldDef->type ?? null;
+        if (! in_array($type, ['select', 'multiselect'], true)) {
+            return false;
+        }
+
+        if (($fieldDef->scope ?? null) !== 'tenant') {
+            return false;
+        }
+
+        if (MetadataOptionEditGuard::isRestricted($fieldDef)) {
+            return false;
+        }
+
+        return $user->hasPermissionForTenant($tenant, 'metadata.fields.values.manage');
+    }
+
+    /**
      * Normalize value based on field type.
      *
      * @param  mixed  $value
@@ -1003,6 +1032,8 @@ class AssetMetadataController extends Controller
                 // Phase B2: Add readonly and population_mode flags
                 'readonly' => $isReadonly,
                 'population_mode' => $populationMode,
+                // Tenant custom select/multiselect: same permission as POST …/values (add option on the fly in edit UI)
+                'can_add_options' => $this->userCanAddMetadataFieldValues($user, $tenant, $fieldDef, $field),
             ];
         }
 

@@ -85,8 +85,13 @@ export default function AgencyStripBrandSelect({
 
     const scrollBar = isTransparentVariant ? 'scrollbar-cinematic' : 'scrollbar-thin'
 
+    const clientLabelClass = isTransparentVariant
+        ? 'shrink-0 text-[10px] font-semibold uppercase tracking-wider text-white/60'
+        : 'shrink-0 text-[10px] font-semibold uppercase tracking-wider text-slate-500 sm:text-xs'
+
     return (
-        <div className="flex shrink-0 items-center gap-2 sm:gap-2.5">
+        <div className="flex shrink-0 items-center gap-1.5 sm:gap-2.5">
+            <span className={clientLabelClass}>Client</span>
             <Listbox value={selectedValue} onChange={handleListboxChange}>
                 {/*
                     isolation + high z: options are position:absolute; they extend below the agency strip over the
@@ -96,7 +101,7 @@ export default function AgencyStripBrandSelect({
                     <Listbox.Button
                         className={`group inline-flex max-w-[10rem] min-w-0 items-center gap-1 rounded-lg px-2 py-1.5 text-left text-xs font-medium transition focus:outline-none focus:ring-2 focus:ring-offset-1 sm:max-w-[14rem] sm:text-sm ${buttonBase}`}
                         style={!isTransparentVariant ? { color: brandColor } : undefined}
-                        aria-label={`Agency brand: ${currentLabel}. Open to switch client brand.`}
+                        aria-label={`Client: ${currentLabel}. Open menu to switch brand.`}
                     >
                         <span className="min-w-0 flex-1 truncate" title={currentLabel}>
                             {currentLabel}

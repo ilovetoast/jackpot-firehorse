@@ -2,6 +2,9 @@
 
 namespace App\Support\Roles;
 
+use App\Models\Tenant;
+use App\Models\User;
+
 /**
  * Canonical Role Registry
  *
@@ -40,25 +43,121 @@ class RoleRegistry
     }
 
     /**
-     * Company roles a user may assign when sending a team invite, based on their own company role.
-     * Agency admins on a client company can invite day-to-day members only — not other admins
-     * or additional agency staff roles; those are reserved for the client owner/admin.
+     * Direct company membership roles (Company → Team, non–agency-relationship).
      *
-     * @return list<string> Lowercase role names, subset of {@see assignableTenantRoles()}
+     * @return list<string>
      */
-    public static function assignableTenantRolesForInviter(string $inviterRole): array
+    public static function directCompanyTenantRoles(): array
     {
-        $r = strtolower($inviterRole);
+        return ['admin', 'member'];
+    }
+
+    /**
+     * Client-side agency partnership grants only (stored on {@see \App\Models\TenantAgency} and
+     * agency-managed {@code tenant_user} rows). Never use for generic Company → Team invite.
+     *
+     * @return list<string>
+     */
+    public static function agencyRelationshipRoles(): array
+    {
+        return ['agency_partner', 'agency_admin'];
+    }
+
+    /**
+     * Human-readable label for a tenant role key (UI). Keys stay snake_case internally.
+     */
+    public static function tenantRoleDisplayLabel(string $role): string
+    {
+        return match (strtolower($role)) {
+            'owner' => 'Owner',
+            'admin' => 'Admin',
+            'member' => 'Member',
+            'agency_admin' => 'Agency manager',
+            'agency_partner' => 'Agency partner',
+            default => ucfirst(str_replace('_', ' ', strtolower($role))),
+        };
+    }
+
+    /**
+     * @return array<string, string> role key => display label
+     */
+    public static function tenantRoleLabelsKeyed(): array
+    {
+        $out = [];
+        foreach (self::tenantRoles() as $role) {
+            $out[$role] = self::tenantRoleDisplayLabel($role);
+        }
+
+        return $out;
+    }
+
+    /**
+     * Roles a user may assign for **direct** company invites (Company → Team).
+     * Excludes partnership roles ({@see agencyRelationshipRoles()}) and owner.
+     *
+     * @return list<string>
+     */
+    public static function directAssignableTenantRolesForInviter(User $inviter, Tenant $tenant): array
+    {
+        $r = strtolower((string) $inviter->getRoleForTenant($tenant));
 
         if (in_array($r, ['owner', 'admin'], true)) {
-            return self::assignableTenantRoles();
+            return self::directCompanyTenantRoles();
         }
 
         if ($r === 'agency_admin') {
             return ['member'];
         }
 
-        // Defensive: any other case with team.manage should not escalate company roles
+        return ['member'];
+    }
+
+    /**
+     * Partnership relationship roles a client inviter may set when linking/managing an agency.
+     *
+     * @return list<string>
+     */
+    public static function assignableAgencyRelationshipRolesForInviter(User $inviter, Tenant $clientTenant, ?Tenant $agencyTenant = null): array
+    {
+        $r = strtolower((string) $inviter->getRoleForTenant($clientTenant));
+        if (in_array($r, ['owner', 'admin'], true)) {
+            return self::agencyRelationshipRoles();
+        }
+
+        return [];
+    }
+
+    /**
+     * Roles assignable on the **agency tenant** workspace (agency staff), not client partnership keys.
+     *
+     * @return list<string>
+     */
+    public static function assignableAgencyWorkspaceRolesForInviter(User $inviter, Tenant $agencyTenant): array
+    {
+        if (! $agencyTenant->is_agency) {
+            return [];
+        }
+
+        return self::directAssignableTenantRolesForInviter($inviter, $agencyTenant);
+    }
+
+    /**
+     * @deprecated Use {@see directAssignableTenantRolesForInviter()} for invite UI.
+     *
+     * @return list<string>
+     */
+    public static function assignableTenantRolesForInviter(string $inviterRole): array
+    {
+        $r = strtolower($inviterRole);
+
+        if (in_array($r, ['owner', 'admin'], true)) {
+            return self::directCompanyTenantRoles();
+        }
+
+        if ($r === 'agency_admin') {
+            return ['member'];
+        }
+
         return ['member'];
     }
 
@@ -139,6 +238,60 @@ class RoleRegistry
     public static function isBrandApproverRole(string $role): bool
     {
         return in_array(strtolower($role), self::brandApproverRoles(), true);
+    }
+
+    public static function isAgencyRelationshipRole(string $role): bool
+    {
+        return in_array(strtolower($role), self::agencyRelationshipRoles(), true);
+    }
+
+    public static function isDirectCompanyTenantRole(string $role): bool
+    {
+        return in_array(strtolower($role), self::directCompanyTenantRoles(), true);
+    }
+
+    /**
+     * Validate **direct** company role (admin/member only) for Company → Team invite and role updates.
+     *
+     * @throws \InvalidArgumentException
+     */
+    public static function validateDirectCompanyTenantRoleAssignment(string $role): void
+    {
+        $role = strtolower($role);
+
+        if ($role === 'owner') {
+            throw new \InvalidArgumentException(
+                'Owner cannot be assigned via team invite or the team role dropdown. Use ownership transfer.'
+            );
+        }
+
+        if (! self::isDirectCompanyTenantRole($role)) {
+            throw new \InvalidArgumentException(
+                "Invalid company role for direct team management: {$role}. Allowed roles: ".implode(', ', self::directCompanyTenantRoles()).'.'
+            );
+        }
+    }
+
+    /**
+     * Validate partnership relationship role for TenantAgency / agency-managed provisioning only.
+     *
+     * @throws \InvalidArgumentException
+     */
+    public static function validateAgencyRelationshipRoleAssignment(string $role): void
+    {
+        $role = strtolower($role);
+
+        if (! self::isValidTenantRole($role)) {
+            throw new \InvalidArgumentException(
+                "Invalid tenant role: {$role}. Valid roles are: ".implode(', ', self::tenantRoles())
+            );
+        }
+
+        if (! self::isAgencyRelationshipRole($role)) {
+            throw new \InvalidArgumentException(
+                "Role '{$role}' is not an agency partnership role. Use ".implode(' or ', self::agencyRelationshipRoles()).' for agency links.'
+            );
+        }
     }
 
     /**

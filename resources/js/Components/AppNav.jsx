@@ -214,10 +214,13 @@ export default function AppNav({
     const hasAdminOrOwnerRole = can('team.manage')
 
     const companyNm = activeCompany?.name?.trim() ?? ''
+    const brandNmForMenu = (activeBrand?.name?.trim() || companyNm) || ''
     const overviewNavTitle = companyNm ? `Overview (${companyNm})` : 'Overview'
     const brandGuidelinesNavTitle = companyNm ? `Brand Guidelines (${companyNm})` : 'Brand Guidelines'
-    const companySettingsLabel = companyNm ? `Company overview (${companyNm})` : 'Company overview'
-    const brandSettingsLabel = companyNm ? `Brand settings (${companyNm})` : 'Brand settings'
+    /** Account menu: tenant / company scope (team, billing, workspace admins) — not the brand creative hub. */
+    const companySettingsLabel = 'Company settings'
+    /** Account menu: brand identity, guidelines, portal */
+    const brandSettingsLabel = brandNmForMenu ? `${brandNmForMenu} Settings` : 'Brand settings'
 
     /** Company default brand color (from shared auth) + active brand; drives workspace menu accent */
     const workspaceBrandColor = activeBrand?.primary_color || activeCompany?.primary_color || '#6366f1'

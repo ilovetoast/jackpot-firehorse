@@ -226,7 +226,17 @@ export default function ManageFieldsWorkspace({
             return categoryData
         } catch (e) {
             console.error('Failed to load field category data:', e)
-            return { suppressed: [], visible: categories.map((c) => c.id), overrides: {} }
+            const fallback = {
+                suppressed: [],
+                visible: categories.map((c) => c.id),
+                overrides: {},
+                __loadError: true,
+            }
+            setFieldCategoryData((prev) => ({
+                ...prev,
+                [field.id]: fallback,
+            }))
+            return fallback
         }
     }, [categories])
 
@@ -243,25 +253,57 @@ export default function ManageFieldsWorkspace({
 
     const getFieldsForCategory = useMemo(() => {
         if (!selectedCategoryId) {
-            return { enabled: [], available: [], enabledAutomated: [], availableAutomated: [] }
+            return {
+                enabled: [],
+                available: [],
+                pending: [],
+                enabledAutomated: [],
+                availableAutomated: [],
+                pendingAutomated: [],
+            }
         }
         const enabled = []
         const available = []
+        const pending = []
         const enabledAutomated = []
         const availableAutomated = []
+        const pendingAutomated = []
         manageableFields.forEach((field) => {
-            const categoryData = fieldCategoryData[field.id] || { suppressed: [], visible: [] }
+            const categoryData = fieldCategoryData[field.id]
+            if (categoryData === undefined) {
+                pending.push(field)
+                return
+            }
+            if (categoryData.__loadError) {
+                available.push(field)
+                return
+            }
             const isEnabled = !(categoryData.suppressed || []).some((sid) => eq(sid, selectedCategoryId))
             if (isEnabled) enabled.push(field)
             else available.push(field)
         })
         automatedFields.forEach((field) => {
-            const categoryData = fieldCategoryData[field.id] || { suppressed: [], visible: [] }
+            const categoryData = fieldCategoryData[field.id]
+            if (categoryData === undefined) {
+                pendingAutomated.push(field)
+                return
+            }
+            if (categoryData.__loadError) {
+                availableAutomated.push(field)
+                return
+            }
             const isEnabled = !(categoryData.suppressed || []).some((sid) => eq(sid, selectedCategoryId))
             if (isEnabled) enabledAutomated.push(field)
             else availableAutomated.push(field)
         })
-        return { enabled, available, enabledAutomated, availableAutomated }
+        return {
+            enabled,
+            available,
+            pending,
+            enabledAutomated,
+            availableAutomated,
+            pendingAutomated,
+        }
     }, [selectedCategoryId, manageableFields, automatedFields, fieldCategoryData])
 
     const tableRows = useMemo(() => {
@@ -272,60 +314,73 @@ export default function ManageFieldsWorkspace({
             if (!resolvedTypeKey) return true
             return field.key !== resolvedTypeKey
         }
-        const { enabled, available, enabledAutomated, availableAutomated } = getFieldsForCategory
+        const {
+            enabled,
+            available,
+            pending,
+            enabledAutomated,
+            availableAutomated,
+            pendingAutomated,
+        } = getFieldsForCategory
 
-        const primaryTypeField = resolvedTypeKey
-            ? enabled.find((f) => f.key === resolvedTypeKey) ||
-              available.find((f) => f.key === resolvedTypeKey) ||
-              null
-            : null
+        const findFieldByKey = (key) =>
+            enabled.find((f) => f.key === key) ||
+            available.find((f) => f.key === key) ||
+            pending.find((f) => f.key === key) ||
+            null
+
+        const isPending = (field, automated) => {
+            if (!field) return false
+            return automated
+                ? pendingAutomated.some((f) => f.id === field.id)
+                : pending.some((f) => f.id === field.id)
+        }
+
+        const primaryTypeField = resolvedTypeKey ? findFieldByKey(resolvedTypeKey) : null
         const descriptorKeys = ['environment_type', 'subject_type']
         const primaryDescriptorFields = descriptorKeys
-            .map(
-                (key) =>
-                    enabled.find((f) => f.key === key) || available.find((f) => f.key === key) || null
-            )
+            .map((key) => findFieldByKey(key))
             .filter(Boolean)
 
-        const otherEnabled = enabled.filter(
-            (f) =>
-                !hideTypeFamilyMember(f) &&
-                !descriptorKeys.includes(f.key) &&
-                !(resolvedTypeKey && f.key === resolvedTypeKey)
-        )
-        const otherAvailable = available.filter(
-            (f) =>
-                !hideTypeFamilyMember(f) &&
-                !descriptorKeys.includes(f.key) &&
-                !(resolvedTypeKey && f.key === resolvedTypeKey)
-        )
+        const otherFilter = (f) =>
+            !hideTypeFamilyMember(f) && !descriptorKeys.includes(f.key) && !(resolvedTypeKey && f.key === resolvedTypeKey)
+        const otherEnabled = enabled.filter(otherFilter)
+        const otherAvailable = available.filter(otherFilter)
+        const otherPending = pending.filter(otherFilter)
 
         const rows = []
-        const pushRow = (field, { automated, enabled: en }) => {
+        const pushRow = (field, { automated, enabled: en, visibilityLoading = false }) => {
             rows.push({
                 field,
                 isAutomated: automated,
                 isEnabled: en,
+                visibilityLoading,
                 key: `${field.id}-${automated ? 'a' : 'm'}`,
             })
         }
 
         if (primaryTypeField) {
+            const loading = isPending(primaryTypeField, false)
             pushRow(primaryTypeField, {
                 automated: false,
-                enabled: enabled.some((f) => f.id === primaryTypeField.id),
+                enabled: !loading && enabled.some((f) => f.id === primaryTypeField.id),
+                visibilityLoading: loading,
             })
         }
         primaryDescriptorFields.forEach((field) => {
+            const loading = isPending(field, false)
             pushRow(field, {
                 automated: false,
-                enabled: enabled.some((f) => f.id === field.id),
+                enabled: !loading && enabled.some((f) => f.id === field.id),
+                visibilityLoading: loading,
             })
         })
-        otherEnabled.forEach((f) => pushRow(f, { automated: false, enabled: true }))
-        otherAvailable.forEach((f) => pushRow(f, { automated: false, enabled: false }))
-        enabledAutomated.forEach((f) => pushRow(f, { automated: true, enabled: true }))
-        availableAutomated.forEach((f) => pushRow(f, { automated: true, enabled: false }))
+        otherEnabled.forEach((f) => pushRow(f, { automated: false, enabled: true, visibilityLoading: false }))
+        otherAvailable.forEach((f) => pushRow(f, { automated: false, enabled: false, visibilityLoading: false }))
+        otherPending.forEach((f) => pushRow(f, { automated: false, enabled: false, visibilityLoading: true }))
+        enabledAutomated.forEach((f) => pushRow(f, { automated: true, enabled: true, visibilityLoading: false }))
+        availableAutomated.forEach((f) => pushRow(f, { automated: true, enabled: false, visibilityLoading: false }))
+        pendingAutomated.forEach((f) => pushRow(f, { automated: true, enabled: false, visibilityLoading: true }))
 
         return rows
     }, [selectedCategoryId, selectedCategory, getFieldsForCategory, typeFamilyFieldKeys])
@@ -844,9 +899,12 @@ export default function ManageFieldsWorkspace({
                                 </td>
                             </tr>
                         ) : null}
-                        {displayTableRows.map(({ field, isAutomated, isEnabled, key: rowKey }) => {
+                        {displayTableRows.map(
+                            ({ field, isAutomated, isEnabled, visibilityLoading, key: rowKey }) => {
                             const data = fieldCategoryData[field.id]
-                            const pct = coveragePercent(field, selectedCategoryId, data, isAutomated)
+                            const pct = visibilityLoading
+                                ? null
+                                : coveragePercent(field, selectedCategoryId, data, isAutomated)
                             const onToggle = wrapToggle(field, selectedCategoryId)
                             const detailData = fieldCategoryData[field.id]
                             const detailEffective =
@@ -857,7 +915,15 @@ export default function ManageFieldsWorkspace({
                             const primaryTypeKey = selectedCategory?.type_field?.field_key ?? null
                             return (
                                 <Fragment key={rowKey}>
-                                    <tr className={isEnabled ? '' : 'bg-gray-50/60'}>
+                                    <tr
+                                        className={
+                                            visibilityLoading
+                                                ? 'bg-slate-50/80'
+                                                : isEnabled
+                                                  ? ''
+                                                  : 'bg-gray-50/60'
+                                        }
+                                    >
                                         <td className="px-4 py-3">
                                             <div className="flex flex-wrap items-center gap-2">
                                                 <span className="text-sm font-medium text-gray-900">
@@ -870,37 +936,55 @@ export default function ManageFieldsWorkspace({
                                                 )}
                                             </div>
                                         </td>
-                                        <td className="px-4 py-3 text-sm text-gray-700">{pct}%</td>
+                                        <td className="px-4 py-3 text-sm text-gray-500">
+                                            {visibilityLoading ? '—' : `${pct}%`}
+                                        </td>
                                         <td className="px-4 py-3">
                                             <button
                                                 type="button"
                                                 role="switch"
-                                                aria-checked={isEnabled}
-                                                disabled={!canManageVisibility || !selectedCategoryId}
+                                                aria-checked={!visibilityLoading && isEnabled}
+                                                aria-busy={visibilityLoading}
+                                                disabled={
+                                                    !canManageVisibility ||
+                                                    !selectedCategoryId ||
+                                                    visibilityLoading
+                                                }
                                                 onClick={() => onToggle(field.id, selectedCategoryId, !isEnabled)}
-                                                className={switchClass(isEnabled)}
+                                                className={`${switchClass(!visibilityLoading && isEnabled)} ${
+                                                    visibilityLoading ? 'cursor-wait opacity-60' : ''
+                                                }`}
                                             >
                                                 <span
                                                     className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition ${
-                                                        isEnabled ? 'translate-x-5' : 'translate-x-0'
+                                                        isEnabled && !visibilityLoading
+                                                            ? 'translate-x-5'
+                                                            : 'translate-x-0'
                                                     }`}
                                                 />
                                             </button>
-                                            <span className="ml-2 text-xs text-gray-500">{isEnabled ? 'Enabled' : 'Off'}</span>
+                                            <span className="ml-2 text-xs text-gray-500">
+                                                {visibilityLoading
+                                                    ? 'Loading…'
+                                                    : isEnabled
+                                                      ? 'Enabled'
+                                                      : 'Off'}
+                                            </span>
                                         </td>
                                         <td className="px-4 py-3 text-right">
                                             <button
                                                 type="button"
+                                                disabled={visibilityLoading}
                                                 onClick={() =>
                                                     setExpandedDetailKey((k) => (k === rowKey ? null : rowKey))
                                                 }
-                                                className="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-indigo-600 shadow-sm hover:bg-indigo-50"
+                                                className="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-indigo-600 shadow-sm hover:bg-indigo-50 disabled:cursor-not-allowed disabled:opacity-50"
                                             >
                                                 {isExpanded ? 'Collapse' : 'Edit'}
                                             </button>
                                         </td>
                                     </tr>
-                                    {isExpanded && detailEffective && (
+                                    {isExpanded && detailEffective && !visibilityLoading && (
                                         <tr className="bg-gray-50/80">
                                             <td colSpan={4} className="px-4 py-4">
                                                 <div className="space-y-4 max-w-xl">

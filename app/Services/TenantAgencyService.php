@@ -40,7 +40,7 @@ class TenantAgencyService
             throw ValidationException::withMessages(['agency_tenant_id' => 'This agency is already linked.']);
         }
 
-        \App\Support\Roles\RoleRegistry::validateTenantRoleAssignment($tenantRole);
+        \App\Support\Roles\RoleRegistry::validateAgencyRelationshipRoleAssignment($tenantRole);
 
         $brandAssignments = $this->normalizeBrandAssignments($clientTenant, $brandAssignments);
 
@@ -88,7 +88,7 @@ class TenantAgencyService
         }
 
         $tenantRole = strtolower((string) $tenantAgency->role);
-        \App\Support\Roles\RoleRegistry::validateTenantRoleAssignment($tenantRole);
+        \App\Support\Roles\RoleRegistry::validateAgencyRelationshipRoleAssignment($tenantRole);
 
         $brandAssignments = $this->normalizeBrandAssignments($clientTenant, $tenantAgency->brand_assignments ?? []);
 
@@ -172,7 +172,7 @@ class TenantAgencyService
         }
 
         $tenantRole = strtolower((string) $tenantAgency->role);
-        \App\Support\Roles\RoleRegistry::validateTenantRoleAssignment($tenantRole);
+        \App\Support\Roles\RoleRegistry::validateAgencyRelationshipRoleAssignment($tenantRole);
         $brandAssignments = $this->normalizeBrandAssignments($clientTenant, $tenantAgency->brand_assignments ?? []);
 
         DB::transaction(function () use ($clientTenant, $agencyTenant, $subjectUser, $tenantRole, $brandAssignments) {
@@ -186,6 +186,63 @@ class TenantAgencyService
                 $brand = Brand::where('id', $ba['brand_id'])->where('tenant_id', $clientTenant->id)->first();
                 if ($brand) {
                     $subjectUser->setRoleForBrand($brand, $ba['role']);
+                }
+            }
+        });
+    }
+
+    /**
+     * Update partnership relationship role and brand template; reapplies to agency-managed members.
+     */
+    public function updatePartnershipLink(
+        TenantAgency $tenantAgency,
+        string $newTenantRole,
+        array $brandAssignmentsRaw,
+        User $actor,
+    ): void {
+        $clientTenant = $tenantAgency->tenant;
+        $agencyTenant = $tenantAgency->agencyTenant;
+        if (! $agencyTenant || ! $agencyTenant->is_agency) {
+            throw ValidationException::withMessages(['tenant_agency' => 'Invalid agency link.']);
+        }
+
+        $assignable = \App\Support\Roles\RoleRegistry::assignableAgencyRelationshipRolesForInviter($actor, $clientTenant, $agencyTenant);
+        $newTenantRole = strtolower($newTenantRole);
+        if ($assignable === [] || ! in_array($newTenantRole, $assignable, true)) {
+            throw ValidationException::withMessages([
+                'role' => 'You do not have permission to set this agency partnership role.',
+            ]);
+        }
+        \App\Support\Roles\RoleRegistry::validateAgencyRelationshipRoleAssignment($newTenantRole);
+        $brandAssignments = $this->normalizeBrandAssignments($clientTenant, $brandAssignmentsRaw);
+
+        DB::transaction(function () use ($tenantAgency, $newTenantRole, $brandAssignments, $clientTenant, $agencyTenant) {
+            $tenantAgency->update([
+                'role' => $newTenantRole,
+                'brand_assignments' => $brandAssignments,
+            ]);
+
+            $userIds = DB::table('tenant_user')
+                ->where('tenant_id', $clientTenant->id)
+                ->where('is_agency_managed', true)
+                ->where('agency_tenant_id', $agencyTenant->id)
+                ->pluck('user_id');
+
+            foreach ($userIds as $userId) {
+                DB::table('tenant_user')
+                    ->where('tenant_id', $clientTenant->id)
+                    ->where('user_id', $userId)
+                    ->update(['role' => $newTenantRole]);
+
+                $user = User::find($userId);
+                if (! $user) {
+                    continue;
+                }
+                foreach ($brandAssignments as $ba) {
+                    $brand = Brand::where('id', $ba['brand_id'])->where('tenant_id', $clientTenant->id)->first();
+                    if ($brand) {
+                        $user->setRoleForBrand($brand, $ba['role']);
+                    }
                 }
             }
         });

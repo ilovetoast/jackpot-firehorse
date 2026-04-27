@@ -411,6 +411,7 @@ export default function PendingMetadataList({ assetId }) {
 
 // Edit & Approve Modal Component
 function EditApproveModal({ metadataId, field, value, onChange, onSave, onClose, processing }) {
+    const isMultiselect = field.field_type === 'multiselect'
     return (
         <>
             {/* Backdrop */}
@@ -425,13 +426,31 @@ function EditApproveModal({ metadataId, field, value, onChange, onSave, onClose,
                 className="fixed inset-0 z-50 flex items-center justify-center p-4"
                 onClick={(e) => e.stopPropagation()}
             >
-                <div className="bg-white rounded-lg shadow-xl max-w-md w-full max-h-[90vh] overflow-y-auto">
-                    <div className="p-6">
-                        <h3 className="text-lg font-semibold text-gray-900 mb-4">
+                <div
+                    className={
+                        isMultiselect
+                            ? 'bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[min(90vh,56rem)] flex flex-col overflow-hidden'
+                            : 'bg-white rounded-lg shadow-xl max-w-md w-full max-h-[90vh] overflow-y-auto'
+                    }
+                >
+                    <div
+                        className={
+                            isMultiselect
+                                ? 'flex min-h-0 flex-1 flex-col p-6'
+                                : 'p-6'
+                        }
+                    >
+                        <h3
+                            className={
+                                isMultiselect
+                                    ? 'shrink-0 text-lg font-semibold text-gray-900 mb-4'
+                                    : 'text-lg font-semibold text-gray-900 mb-4'
+                            }
+                        >
                             Edit & Approve: {field.field_label}
                         </h3>
 
-                        <div className="mb-4">
+                        <div className={isMultiselect ? 'mb-4 flex min-h-0 flex-1 flex-col' : 'mb-4'}>
                             <MetadataFieldInput
                                 field={{
                                     key: field.field_key,
@@ -444,10 +463,17 @@ function EditApproveModal({ metadataId, field, value, onChange, onSave, onClose,
                                 onChange={onChange}
                                 disabled={processing}
                                 isUploadContext={false}
+                                layout={isMultiselect ? 'modal' : 'default'}
                             />
                         </div>
 
-                        <div className="flex items-center justify-end gap-3">
+                        <div
+                            className={
+                                isMultiselect
+                                    ? 'shrink-0 flex items-center justify-end gap-3'
+                                    : 'flex items-center justify-end gap-3'
+                            }
+                        >
                             <button
                                 type="button"
                                 onClick={onClose}

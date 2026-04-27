@@ -16,7 +16,7 @@ export default function GlobalUserControls({
     effectiveCollection = null,
     collectionOnly = false,
     workspaceBrandColor = '#6366f1',
-    companySettingsLabel = 'Company overview',
+    companySettingsLabel = 'Company settings',
     brandSettingsLabel = 'Brand settings',
 }) {
     const page = usePage()

@@ -1,3 +1,4 @@
+import { useLayoutEffect, useRef, useState } from 'react'
 import { Menu, MenuButton, MenuItem, MenuItems } from '@headlessui/react'
 import {
     Bars3Icon,
@@ -40,6 +41,42 @@ function LayerTypeIcon({ layer, className }: { layer: Layer; className: string }
     return <Bars3Icon className={cls} aria-hidden />
 }
 
+type LayerHeaderDensity = 'default' | 'cozy' | 'compact'
+
+function useLayerHeaderToolbarDensity() {
+    const ref = useRef<HTMLDivElement>(null)
+    const [density, setDensity] = useState<LayerHeaderDensity>('default')
+
+    useLayoutEffect(() => {
+        const el = ref.current
+        if (!el || typeof ResizeObserver === 'undefined') {
+            return
+        }
+        const apply = (width: number) => {
+            if (width < 252) {
+                setDensity('compact')
+            } else if (width < 360) {
+                setDensity('cozy')
+            } else {
+                setDensity('default')
+            }
+        }
+        apply(el.getBoundingClientRect().width)
+        const ro = new ResizeObserver((entries) => {
+            const w = entries[0]?.contentRect.width
+            if (w != null) {
+                apply(w)
+            }
+        })
+        ro.observe(el)
+        return () => {
+            ro.disconnect()
+        }
+    }, [])
+
+    return { ref, density }
+}
+
 export function StudioLayerHeader({
     layer,
     name,
@@ -64,47 +101,46 @@ export function StudioLayerHeader({
     disabled?: boolean
 }) {
     const locked = layer.locked || disabled
-    return (
-        <div className={studioPanelSurfaces.layerAnchor}>
-            <div className="flex items-start gap-2.5">
-                <div
-                    className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-gray-700 bg-gray-800/50 text-gray-100 shadow-inner ring-1 ring-inset ring-black/20"
-                    title={layerTypeLabel(layer)}
-                >
-                    <LayerTypeIcon layer={layer} className="h-4 w-4" />
-                </div>
-                <div className="min-w-0 flex-1 pt-0.5">
-                    <input
-                        type="text"
-                        value={name}
-                        disabled={locked}
-                        onChange={(e) => onNameChange(e.target.value)}
-                        onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
-                                ;(e.target as HTMLInputElement).blur()
-                            }
-                        }}
-                        className="w-full rounded-md border border-transparent bg-transparent px-1 py-0.5 text-[15px] font-semibold leading-tight text-gray-100 placeholder:text-gray-500 hover:border-gray-700 focus:border-indigo-400/40 focus:outline-none focus:ring-1 focus:ring-indigo-400/30 disabled:opacity-50"
-                        placeholder="Layer name"
-                    />
-                </div>
-                <div
-                    className="flex shrink-0 flex-wrap items-center justify-end gap-1.5 pt-0.5"
-                    role="toolbar"
-                    aria-label="Layer actions"
-                >
+    const { ref: densityRef, density } = useLayerHeaderToolbarDensity()
+    const btnSize = density === 'default' ? 'lg' : density === 'cozy' ? 'md' : 'sm'
+    const typeBox =
+        density === 'default' ? 'h-8 w-8' : density === 'cozy' ? 'h-7 w-7' : 'h-6 w-6'
+    const typeGlyph =
+        density === 'default' ? 'h-4 w-4' : density === 'cozy' ? 'h-3.5 w-3.5' : 'h-3 w-3'
+    const actionGlyph =
+        density === 'default' ? 'h-5 w-5' : density === 'cozy' ? 'h-4 w-4' : 'h-3.5 w-3.5'
+    const moreMenuBtn =
+        density === 'default'
+            ? 'h-10 w-10'
+            : density === 'cozy'
+              ? 'h-8 w-8'
+              : 'h-7 w-7'
+    const toolbarGap = density === 'default' ? 'gap-1.5' : density === 'cozy' ? 'gap-1' : 'gap-0.5'
+
+    const toolbar = (
+        <div
+            className={`flex min-w-0 flex-wrap items-center justify-end ${toolbarGap} ${
+                density === 'compact' ? 'w-full pt-0' : 'pt-0.5'
+            }`}
+            role="toolbar"
+            aria-label="Layer actions"
+        >
                     <StudioIconButton
-                        size="lg"
+                        size={btnSize}
                         title={layer.visible ? 'Hide layer' : 'Show layer'}
                         aria-label={layer.visible ? 'Hide layer' : 'Show layer'}
                         active={layer.visible}
                         disabled={disabled}
                         onClick={onToggleVisible}
                     >
-                        {layer.visible ? <EyeIcon className="h-5 w-5" /> : <EyeSlashIcon className="h-5 w-5" />}
+                        {layer.visible ? (
+                            <EyeIcon className={actionGlyph} />
+                        ) : (
+                            <EyeSlashIcon className={actionGlyph} />
+                        )}
                     </StudioIconButton>
                     <StudioIconButton
-                        size="lg"
+                        size={btnSize}
                         title={layer.locked ? 'Unlock layer' : 'Lock layer'}
                         aria-label={layer.locked ? 'Unlock layer' : 'Lock layer'}
                         active={layer.locked}
@@ -112,39 +148,39 @@ export function StudioLayerHeader({
                         onClick={onToggleLock}
                     >
                         {layer.locked ? (
-                            <LockClosedIcon className="h-5 w-5" />
+                            <LockClosedIcon className={actionGlyph} />
                         ) : (
-                            <LockOpenIcon className="h-5 w-5" />
+                            <LockOpenIcon className={actionGlyph} />
                         )}
                     </StudioIconButton>
                     <StudioIconButton
-                        size="lg"
+                        size={btnSize}
                         title="Duplicate layer"
                         aria-label="Duplicate layer"
                         disabled={disabled}
                         onClick={onDuplicate}
                     >
-                        <Square2StackIcon className="h-5 w-5" />
+                        <Square2StackIcon className={actionGlyph} />
                     </StudioIconButton>
                     <StudioIconButton
-                        size="lg"
+                        size={btnSize}
                         title="Delete layer"
                         aria-label="Delete layer"
                         subtleDanger
                         disabled={disabled}
                         onClick={onDelete}
                     >
-                        <TrashIcon className="h-5 w-5" />
+                        <TrashIcon className={actionGlyph} />
                     </StudioIconButton>
                     <Menu as="div" className="relative">
                         <MenuButton
                             type="button"
                             disabled={disabled}
-                            className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-gray-800/90 bg-gray-900/35 text-gray-300 transition-colors hover:border-gray-700 hover:bg-gray-800/50 hover:text-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400/45 disabled:cursor-not-allowed disabled:opacity-40"
+                            className={`inline-flex items-center justify-center rounded-md border border-gray-800/90 bg-gray-900/35 text-gray-300 transition-colors hover:border-gray-700 hover:bg-gray-800/50 hover:text-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400/45 disabled:cursor-not-allowed disabled:opacity-40 ${moreMenuBtn}`}
                             title="More layer actions"
                             aria-label="More layer actions"
                         >
-                            <EllipsisVerticalIcon className="h-5 w-5" aria-hidden />
+                            <EllipsisVerticalIcon className={actionGlyph} aria-hidden />
                         </MenuButton>
                         <MenuItems
                             transition
@@ -176,8 +212,48 @@ export function StudioLayerHeader({
                             </MenuItem>
                         </MenuItems>
                     </Menu>
-                </div>
+        </div>
+    )
+
+    const nameAndType = (
+        <>
+            <div
+                className={`mt-0.5 flex shrink-0 items-center justify-center rounded-lg border border-gray-700 bg-gray-800/50 text-gray-100 shadow-inner ring-1 ring-inset ring-black/20 ${typeBox}`}
+                title={layerTypeLabel(layer)}
+            >
+                <LayerTypeIcon layer={layer} className={typeGlyph} />
             </div>
+            <div className="min-w-0 flex-1 pt-0.5">
+                <input
+                    type="text"
+                    value={name}
+                    disabled={locked}
+                    onChange={(e) => onNameChange(e.target.value)}
+                    onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                            ;(e.target as HTMLInputElement).blur()
+                        }
+                    }}
+                    className="w-full rounded-md border border-transparent bg-transparent px-1 py-0.5 text-[15px] font-semibold leading-tight text-gray-100 placeholder:text-gray-500 hover:border-gray-700 focus:border-indigo-400/40 focus:outline-none focus:ring-1 focus:ring-indigo-400/30 disabled:opacity-50"
+                    placeholder="Layer name"
+                />
+            </div>
+        </>
+    )
+
+    return (
+        <div className={studioPanelSurfaces.layerAnchor}>
+            {density === 'compact' ? (
+                <div ref={densityRef} className="flex min-w-0 flex-col gap-1.5">
+                    <div className="flex min-w-0 items-start gap-2.5">{nameAndType}</div>
+                    {toolbar}
+                </div>
+            ) : (
+                <div ref={densityRef} className="flex min-w-0 items-start gap-2.5">
+                    {nameAndType}
+                    {toolbar}
+                </div>
+            )}
         </div>
     )
 }

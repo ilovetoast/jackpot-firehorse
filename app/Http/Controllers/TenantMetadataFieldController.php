@@ -624,6 +624,10 @@ class TenantMetadataFieldController extends Controller
                 'success' => true,
                 'option_id' => $optionId,
                 'message' => 'Value added successfully',
+                'option' => [
+                    'value' => $validated['value'],
+                    'display_label' => $systemLabel,
+                ],
             ], 201);
         } catch (\Exception $e) {
             Log::error('Failed to add metadata field value', [

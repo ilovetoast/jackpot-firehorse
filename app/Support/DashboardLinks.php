@@ -13,24 +13,18 @@ use App\Models\User;
 final class DashboardLinks
 {
     /**
-     * Labels for settings links in headers/menus. When company and brand names match, use role-only
-     * wording so “Velvet Hammer” is not repeated next to the workspace selector and both links.
+     * Labels for workspace menu links (company / tenant vs brand). Kept in sync with AppNav + GlobalUserControls.
+     * When company and brand names match, same labels: company = “Company settings”, brand = “{Name} Settings”.
      *
      * @return array{company: string, brand: string}
      */
     public static function workspaceSettingsLabels(?string $companyName, ?string $brandName): array
     {
-        $c = $companyName !== null ? trim($companyName) : '';
         $b = $brandName !== null ? trim($brandName) : '';
-        $same = $c !== '' && $b !== '' && strcasecmp($c, $b) === 0;
-
-        if ($same) {
-            return ['company' => 'Company overview', 'brand' => 'Brand settings'];
-        }
 
         return [
-            'company' => $c !== '' ? $c.' overview' : 'Company overview',
-            'brand' => $b !== '' ? $b.' settings' : 'Brand settings',
+            'company' => 'Company settings',
+            'brand' => $b !== '' ? $b.' Settings' : 'Brand settings',
         ];
     }
 

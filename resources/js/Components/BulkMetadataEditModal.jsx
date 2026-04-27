@@ -618,6 +618,7 @@ export default function BulkMetadataEditModal({
                                             disabled={false}
                                             showError={false}
                                             isUploadContext={false}
+                                            layout="modal"
                                             tagsPlaceholder="Type or pick tags to remove…"
                                         />
                                     </div>
@@ -668,6 +669,7 @@ export default function BulkMetadataEditModal({
                                         disabled={false}
                                         showError={false}
                                         isUploadContext={false}
+                                        layout={selectedField.type === 'multiselect' ? 'modal' : 'default'}
                                     />
                                 )}
                                 <button

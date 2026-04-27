@@ -47,6 +47,7 @@ export default function AgencyDashboard({
     agency_team = [],
     agency_team_external = [],
     agency_brands_summary = [],
+    tenant_role_labels = {},
 }) {
     const [dashTab, setDashTab] = useState('overview')
     const [readinessToast, setReadinessToast] = useState(null)
@@ -147,8 +148,10 @@ export default function AgencyDashboard({
     }
 
     const formatCompanyRole = (r) => {
-        if (!r || typeof r !== 'string') return 'Member'
-        return r.charAt(0).toUpperCase() + r.slice(1)
+        if (!r || typeof r !== 'string') return tenant_role_labels.member || 'Member'
+        const key = r.toLowerCase()
+        if (tenant_role_labels[key]) return tenant_role_labels[key]
+        return key.charAt(0).toUpperCase() + key.slice(1).replace(/_/g, ' ')
     }
 
     /** Human copy for incubation window deadline (advisory). */
@@ -531,8 +534,8 @@ export default function AgencyDashboard({
                                             </span>
                                             <h2 className="mt-1 text-lg font-semibold text-white">Brands and access</h2>
                                             <p className={`mt-2 max-w-2xl ${bodyMuted}`}>
-                                                Brands in your agency company and how many team members have active access. Client-workspace
-                                                brands are managed from the Clients tab.
+                                                Brands in your agency workspace and how many team members have active access. Client brand
+                                                access is controlled by each client&apos;s agency partnership and brand scope—not from here.
                                             </p>
                                         </div>
                                         {canManageAgencyTeam && (
@@ -576,10 +579,10 @@ export default function AgencyDashboard({
                                 <div className={`${glassPanel} p-6 sm:p-8`}>
                                     <h2 className="text-lg font-semibold text-white">Team</h2>
                                     <p className={`mt-2 ${bodyMuted}`}>
-                                        Agency workspace members (company + brand roles) are listed first. External guests—invited with
-                                        collection-only access and no brand membership—are not agency staff; they appear separately with the
-                                        collections they can open. Rows marked “synced” were added via client workspace access from another
-                                        agency tenant.
+                                        Agency staff are managed inside your agency workspace (company role + this workspace&apos;s brands).
+                                        Client access is inherited through each client&apos;s agency partnership and brand access rules—not by
+                                        assigning client-side partnership roles here. External guests with collection-only access and no brand
+                                        membership appear separately. Rows marked “synced” came from another agency tenant via a client link.
                                     </p>
                                     {agency_team.length === 0 && agency_team_external.length === 0 ? (
                                         <p className={`mt-6 ${bodyMuted}`}>No team members loaded.</p>
@@ -592,8 +595,8 @@ export default function AgencyDashboard({
                                                         <thead>
                                                             <tr className="border-b border-white/10 text-[10px] font-semibold uppercase tracking-wider text-white/40">
                                                                 <th className="px-4 py-3 font-semibold">Member</th>
-                                                                <th className="hidden px-4 py-3 font-semibold sm:table-cell">Company role</th>
-                                                                <th className="px-4 py-3 font-semibold">Brand access</th>
+                                                                <th className="hidden px-4 py-3 font-semibold sm:table-cell">Workspace role</th>
+                                                                <th className="px-4 py-3 font-semibold">Brand access (this agency)</th>
                                                             </tr>
                                                         </thead>
                                                         <tbody className="divide-y divide-white/10">
@@ -660,7 +663,7 @@ export default function AgencyDashboard({
                                                             <thead>
                                                                 <tr className="border-b border-white/10 text-[10px] font-semibold uppercase tracking-wider text-white/40">
                                                                     <th className="px-4 py-3 font-semibold">Member</th>
-                                                                    <th className="hidden px-4 py-3 font-semibold sm:table-cell">Company role</th>
+                                                                    <th className="hidden px-4 py-3 font-semibold sm:table-cell">Workspace role</th>
                                                                     <th className="px-4 py-3 font-semibold">Collections</th>
                                                                 </tr>
                                                             </thead>

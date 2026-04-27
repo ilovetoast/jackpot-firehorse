@@ -1701,7 +1701,7 @@ export default function AssetEditor() {
         if (typeof window === 'undefined') return
         window.localStorage.setItem(ASSET_EDITOR_CANVAS_SECTION_KEY, canvasSectionOpen ? '1' : '0')
     }, [canvasSectionOpen])
-    const [propertiesAdvancedOpen, setPropertiesAdvancedOpen] = useState(false)
+    const [propertiesElementPositioningOpen, setPropertiesElementPositioningOpen] = useState(false)
     const [propertiesImageEditModelOpen, setPropertiesImageEditModelOpen] = useState(false)
     const [propertiesMaskDetailsOpen, setPropertiesMaskDetailsOpen] = useState(false)
     const [propertiesVideoDetailsOpen, setPropertiesVideoDetailsOpen] = useState(false)
@@ -2302,25 +2302,6 @@ export default function AssetEditor() {
         if (!selectedLayer) return ids
         ids.push('layer', 'element', 'actions', 'history', 'advanced')
         return ids
-    }, [selectedLayer])
-
-    const studioElementSectionDescription = useMemo(() => {
-        if (!selectedLayer) {
-            return 'Appearance, frame, and placement'
-        }
-        if (isImageLayer(selectedLayer) || isGenerativeImageLayer(selectedLayer)) {
-            return 'Source, frame, size, and rotation'
-        }
-        if (isTextLayer(selectedLayer)) {
-            return 'Content, typography, box, and placement'
-        }
-        if (isVideoLayer(selectedLayer)) {
-            return 'Source, trim, fit, size, and rotation'
-        }
-        if (isFillLayer(selectedLayer) || isMaskLayer(selectedLayer)) {
-            return 'Shape, fill, and placement'
-        }
-        return 'Appearance and placement'
     }, [selectedLayer])
 
     const studioActionsSectionDescription = useMemo(() => {
@@ -10696,27 +10677,318 @@ export default function AssetEditor() {
                                     collapsed={!studioPropertiesSectionOpen.element}
                                     onToggleCollapsed={() => handleStudioPropertiesSectionToggle('element')}
                                     icon={<SwatchIcon className="h-3.5 w-3.5" aria-hidden />}
-                                    description={studioElementSectionDescription}
                                     railIcon={<SwatchIcon className="h-4 w-4 shrink-0" aria-hidden />}
                                     railShortLabel="Element"
                                     railActive={studioPropertiesSectionActive === 'element'}
                                 >
-                                    <div id="jp-element-panel" className="space-y-4">
+                                    <div id="jp-element-panel" className="space-y-3">
                                     {isImageLayer(selectedLayer) && (
-                                        <div>
-                                            <p className="mb-1.5 text-[9px] font-semibold uppercase tracking-wider text-gray-500">
-                                                Source
-                                            </p>
+                                        <>
+                                        <div className="space-y-2">
+                                            <div className="grid grid-cols-1 gap-1.5 min-[300px]:grid-cols-3">
                                             <button
                                                 type="button"
                                                 disabled={selectedLayer.locked}
                                                 onClick={() => openPickerForReplaceImage(selectedLayer.id)}
-                                                className="flex w-full items-center justify-center gap-1.5 rounded-md border border-dashed border-indigo-500/40 bg-indigo-950/20 px-2.5 py-2 text-[11px] font-semibold text-indigo-100 transition-colors hover:border-indigo-400/55 hover:bg-indigo-900/25 disabled:cursor-not-allowed disabled:opacity-45"
+                                                className="flex min-h-[2.5rem] items-center justify-center gap-1.5 rounded-md border border-dashed border-indigo-500/40 bg-indigo-950/20 px-2 py-2 text-[10px] font-semibold text-indigo-100 transition-colors hover:border-indigo-400/55 hover:bg-indigo-900/25 disabled:cursor-not-allowed disabled:opacity-45"
                                             >
                                                 <PhotoIcon className="h-3.5 w-3.5 shrink-0 text-indigo-300" aria-hidden />
                                                 Replace image
                                             </button>
+                                            <button
+                                                type="button"
+                                                onClick={() =>
+                                                    window.requestAnimationFrame(() => {
+                                                        window.document
+                                                            .getElementById('jp-element-ai-image')
+                                                            ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                                                    })
+                                                }
+                                                className="flex min-h-[2.5rem] items-center justify-center gap-1.5 rounded-md border border-violet-500/35 bg-violet-950/30 px-2 py-2 text-[10px] font-semibold text-violet-100 transition-colors hover:border-violet-400/50 hover:bg-violet-900/30"
+                                            >
+                                                <SparklesIcon className="h-3.5 w-3.5 shrink-0 text-violet-200" aria-hidden />
+                                                AI image editing
+                                            </button>
+                                            <button
+                                                id="jp-element-still-to-video"
+                                                type="button"
+                                                disabled={selectedLayer.locked || !aiEnabled}
+                                                onClick={() =>
+                                                    openStudioAnimateModal({
+                                                        sourceKind: 'layer_isolated',
+                                                        layerId: selectedLayer.id,
+                                                    })
+                                                }
+                                                className="flex min-h-[2.5rem] items-center justify-center gap-1.5 rounded-md border border-violet-700/50 bg-violet-950/30 px-2 py-2 text-[10px] font-semibold text-violet-100 transition-colors hover:border-violet-500/70 hover:bg-violet-900/40 disabled:cursor-not-allowed disabled:opacity-45"
+                                                title={!aiEnabled ? 'AI is disabled for this workspace' : 'Queue still → video (AI)'}
+                                            >
+                                                <span className="flex items-center gap-0.5" aria-hidden>
+                                                    <FilmIcon className="h-3.5 w-3.5" />
+                                                    <SparklesIcon className="h-3 w-3" />
+                                                </span>
+                                                Still to video
+                                            </button>
+                                            </div>
                                         </div>
+                                        <div className="space-y-1.5">
+                                            <label className="text-[9px] font-semibold uppercase tracking-wider text-gray-500">
+                                                Blend mode
+                                            </label>
+                                            <select
+                                                value={selectedLayer.blendMode ?? 'normal'}
+                                                onChange={(e) =>
+                                                    updateLayer(selectedLayer.id, (l) => ({
+                                                        ...l,
+                                                        blendMode: e.target.value as LayerBlendMode,
+                                                    }))
+                                                }
+                                                className={studioPanelInputs.fieldSm}
+                                            >
+                                                {LAYER_BLEND_MODE_OPTIONS.map((opt) => (
+                                                    <option key={opt.value} value={opt.value}>
+                                                        {opt.label}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                        <div id="jp-element-ai-image" className="scroll-mt-1">
+                                        <StudioSmartActionCard
+                                            title="AI image editing"
+                                            icon={<SparklesIcon className="h-5 w-5" aria-hidden />}
+                                        >
+                                            {studioAiVideoForSelectedStill ? (
+                                                <div className="mb-1 rounded-lg border border-violet-600/50 bg-violet-950/35 p-2.5">
+                                                    <p className="text-[10px] font-semibold text-violet-100">
+                                                        Original still and AI clip
+                                                    </p>
+                                                    <p className="mt-1 text-[9px] leading-snug text-gray-400">
+                                                        Choose which layer is on the canvas, or run image AI on the still.
+                                                    </p>
+                                                    <div className="mt-2 space-y-1">
+                                                        <p className="text-[9px] font-medium uppercase tracking-wide text-violet-200/70">
+                                                            Canvas &amp; selection
+                                                        </p>
+                                                        <StudioSegmentedControl
+                                                            aria-label="Original still or AI video clip"
+                                                            value={studioAiStillClipCanvasMode ?? 'still'}
+                                                            disabled={selectedLayer.locked}
+                                                            onChange={(m) => {
+                                                                if (!studioAiVideoForSelectedStill || !selectedLayer) {
+                                                                    return
+                                                                }
+                                                                switchStudioAiStillOrClip(
+                                                                    m,
+                                                                    selectedLayer.id,
+                                                                    studioAiVideoForSelectedStill.videoLayerId,
+                                                                )
+                                                            }}
+                                                            segments={[...STUDIO_AI_STILL_CLIP_SEGMENTS]}
+                                                        />
+                                                    </div>
+                                                </div>
+                                            ) : null}
+                                            {!studioAiVideoForSelectedStill ? (
+                                                <div className="space-y-2 text-gray-100">
+                                                    <div className="space-y-1">
+                                                        <p className="text-[9px] font-semibold uppercase tracking-wider text-indigo-300/70">
+                                                            Quick
+                                                        </p>
+                                                        <div className="grid grid-cols-1 gap-1.5 min-[300px]:grid-cols-2">
+                                                            {IMAGE_LAYER_QUICK_ACTIONS.map((qa) => {
+                                                                const Ic = qa.Icon
+                                                                return (
+                                                                    <button
+                                                                        key={qa.id}
+                                                                        type="button"
+                                                                        disabled={
+                                                                            selectedLayer.locked ||
+                                                                            selectedLayer.aiEdit?.status === 'editing' ||
+                                                                            imageEditUsageBlocked
+                                                                        }
+                                                                        title={qa.instruction}
+                                                                        aria-label={`${qa.label}. ${qa.instruction.slice(0, 120)}${qa.instruction.length > 120 ? '…' : ''}`}
+                                                                        onClick={() =>
+                                                                            void runImageLayerEdit(selectedLayer.id, {
+                                                                                instructionOverride: qa.instruction,
+                                                                            })
+                                                                        }
+                                                                        className="flex min-h-[48px] items-center gap-2 rounded-lg border border-indigo-500/30 bg-indigo-950/25 px-2 py-1.5 text-left text-[10px] font-medium text-indigo-100/95 shadow-sm transition-colors hover:border-indigo-400/50 hover:bg-indigo-900/35 disabled:cursor-not-allowed disabled:opacity-45"
+                                                                    >
+                                                                        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-indigo-500/25 bg-indigo-600/20 text-indigo-200">
+                                                                            <Ic className="h-3.5 w-3.5" aria-hidden />
+                                                                        </span>
+                                                                        <span className="min-w-0 flex-1 leading-snug">
+                                                                            {qa.label}
+                                                                        </span>
+                                                                    </button>
+                                                                )
+                                                            })}
+                                                        </div>
+                                                    </div>
+                                                    <StudioDisclosureSection
+                                                        id="jp-image-edit-model"
+                                                        title="Model"
+                                                        subtitle="Quality vs speed"
+                                                        variant="muted"
+                                                        open={propertiesImageEditModelOpen}
+                                                        onOpenChange={setPropertiesImageEditModelOpen}
+                                                    >
+                                                        <div className="grid grid-cols-1 gap-1.5 min-[420px]:grid-cols-3 min-[420px]:gap-1">
+                                                            {IMAGE_EDIT_MODEL_PRESETS.map((preset) => {
+                                                                const Ic = preset.Icon
+                                                                const current = normalizeEditModelKey(
+                                                                    selectedLayer.aiEdit?.editModelKey
+                                                                )
+                                                                const active = current === preset.value
+                                                                return (
+                                                                    <button
+                                                                        key={preset.value}
+                                                                        type="button"
+                                                                        disabled={
+                                                                            selectedLayer.locked ||
+                                                                            selectedLayer.aiEdit?.status === 'editing'
+                                                                        }
+                                                                        onClick={() => {
+                                                                            updateLayer(selectedLayer.id, (l) => {
+                                                                                if (!isImageLayer(l)) {
+                                                                                    return l
+                                                                                }
+                                                                                return {
+                                                                                    ...l,
+                                                                                    aiEdit: {
+                                                                                        ...l.aiEdit,
+                                                                                        editModelKey: preset.value,
+                                                                                    },
+                                                                                }
+                                                                            })
+                                                                        }}
+                                                                        className={`flex flex-col items-stretch gap-0.5 rounded-lg border px-2 py-2 text-left transition-colors ${
+                                                                            active
+                                                                                ? 'border-indigo-500 bg-indigo-600/30 ring-2 ring-indigo-500/50 ring-offset-1 ring-offset-gray-950'
+                                                                                : 'border-indigo-500/25 bg-gray-900/50 hover:border-indigo-500/50 hover:bg-indigo-950/30'
+                                                                        } disabled:cursor-not-allowed disabled:opacity-50`}
+                                                                    >
+                                                                        <span className="flex items-center gap-1.5 text-[10px] font-semibold text-indigo-100">
+                                                                            <Ic className="h-3.5 w-3.5 shrink-0 text-indigo-300" />
+                                                                            {preset.title}
+                                                                        </span>
+                                                                        <span className="text-[8px] leading-tight text-gray-500">
+                                                                            {preset.subtitle}
+                                                                        </span>
+                                                                    </button>
+                                                                )
+                                                            })}
+                                                        </div>
+                                                    </StudioDisclosureSection>
+                                                    {genUsageError && (
+                                                        <p className="text-[9px] text-amber-300/90">{genUsageError}</p>
+                                                    )}
+                                                    <label className="mb-0.5 block text-[9px] font-bold uppercase tracking-wider text-indigo-300/80">
+                                                        Prompt
+                                                    </label>
+                                                    <textarea
+                                                        value={selectedLayer.aiEdit?.prompt ?? ''}
+                                                        onChange={(e) => {
+                                                            const v = e.target.value
+                                                            updateLayer(selectedLayer.id, (l) => {
+                                                                if (!isImageLayer(l)) {
+                                                                    return l
+                                                                }
+                                                                return {
+                                                                    ...l,
+                                                                    aiEdit: { ...l.aiEdit, prompt: v },
+                                                                }
+                                                            })
+                                                        }}
+                                                        rows={3}
+                                                        placeholder="What should change on this image?"
+                                                        disabled={selectedLayer.locked || selectedLayer.aiEdit?.status === 'editing'}
+                                                        className="w-full rounded-lg border border-indigo-500/40 bg-gray-900/80 px-2.5 py-1.5 text-xs text-gray-100 placeholder:text-gray-500 focus:border-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-500/40"
+                                                    />
+                                                    {imageEditActionError && (
+                                                        <p className="mt-1 text-[10px] text-red-400">{imageEditActionError}</p>
+                                                    )}
+                                                    {selectedLayer.aiEdit?.status === 'error' && !imageEditActionError && (
+                                                        <p className="mt-1 text-[10px] text-red-400">Couldn’t apply — try again.</p>
+                                                    )}
+                                                    <div className="mt-2 flex flex-col gap-1.5">
+                                                        <div className="flex flex-wrap gap-1.5">
+                                                            <button
+                                                                type="button"
+                                                                disabled={
+                                                                    selectedLayer.locked ||
+                                                                    selectedLayer.aiEdit?.status === 'editing' ||
+                                                                    imageEditUsageBlocked
+                                                                }
+                                                                title={
+                                                                    genUsageError
+                                                                        ? genUsageError
+                                                                        : imageEditUsageBlocked
+                                                                          ? "You've used all AI image generations for this month"
+                                                                          : 'Apply your prompt to this layer'
+                                                                }
+                                                                onClick={() => void runImageLayerEdit(selectedLayer.id)}
+                                                                className="group inline-flex min-h-[2.25rem] min-w-0 flex-1 items-center justify-center gap-1.5 rounded-lg border-2 border-indigo-500/60 bg-indigo-600 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:bg-indigo-500 disabled:cursor-not-allowed disabled:border-indigo-800/80 disabled:bg-indigo-950/80"
+                                                            >
+                                                                <ArrowPathIcon className="h-3.5 w-3.5 group-disabled:opacity-60" />
+                                                                Apply
+                                                            </button>
+                                                            {selectedLayer.aiEdit?.resultSrc ? (
+                                                                <button
+                                                                    type="button"
+                                                                    disabled={
+                                                                        selectedLayer.locked ||
+                                                                        selectedLayer.aiEdit?.status === 'editing' ||
+                                                                        imageEditUsageBlocked ||
+                                                                        !(selectedLayer.aiEdit?.prompt ?? '').trim()
+                                                                    }
+                                                                    title="Same prompt on the latest AI result"
+                                                                    onClick={() => void runImageLayerEdit(selectedLayer.id)}
+                                                                    className="inline-flex min-h-[2.25rem] min-w-0 flex-1 items-center justify-center rounded-lg border-2 border-indigo-500/30 bg-indigo-950/40 px-3 py-2 text-xs font-semibold text-indigo-100 hover:border-indigo-400/50 hover:bg-indigo-900/30 disabled:cursor-not-allowed disabled:opacity-40"
+                                                                >
+                                                                    Again
+                                                                </button>
+                                                            ) : null}
+                                                        </div>
+                                                        {(selectedLayer.aiEdit?.previousResults?.length ?? 0) > 0 && (
+                                                            <button
+                                                                type="button"
+                                                                disabled={
+                                                                    selectedLayer.locked || selectedLayer.aiEdit?.status === 'editing'
+                                                                }
+                                                                onClick={() =>
+                                                                    updateLayer(selectedLayer.id, (l) => {
+                                                                        if (!isImageLayer(l)) {
+                                                                            return l
+                                                                        }
+                                                                        const stack = [...(l.aiEdit?.previousResults ?? [])]
+                                                                        if (stack.length === 0) {
+                                                                            return l
+                                                                        }
+                                                                        const nextSrc = stack[stack.length - 1]
+                                                                        return {
+                                                                            ...l,
+                                                                            src: nextSrc,
+                                                                            aiEdit: {
+                                                                                ...l.aiEdit,
+                                                                                previousResults: stack.slice(0, -1),
+                                                                                resultSrc: nextSrc,
+                                                                                status: 'idle',
+                                                                            },
+                                                                        }
+                                                                    })
+                                                                }
+                                                                className="w-full rounded-md border border-gray-600/80 bg-gray-800/50 py-1.5 text-[10px] font-medium text-gray-300 hover:border-gray-500 hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
+                                                            >
+                                                                Step back one edit
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            ) : null}
+                                        </StudioSmartActionCard>
+                                        </div>
+                                        </>
                                     )}
                                     {isVideoLayer(selectedLayer) && (
                                         <StudioSmartActionCard
@@ -11128,11 +11400,123 @@ export default function AssetEditor() {
                                             </div>
                                         </StudioSmartActionCard>
                                     )}
-                                    <div className="space-y-3 border-t border-gray-800/60 pt-3">
-                                        <p className="mb-1.5 text-[9px] font-semibold uppercase tracking-wider text-gray-500">
-                                            Transform
-                                        </p>
+                                    {!isImageLayer(selectedLayer) && (
+                                        <div className="space-y-1.5">
+                                            <label className="text-[9px] font-semibold uppercase tracking-wider text-gray-500">
+                                                Blend mode
+                                            </label>
+                                            <select
+                                                value={selectedLayer.blendMode ?? 'normal'}
+                                                onChange={(e) =>
+                                                    updateLayer(selectedLayer.id, (l) => ({
+                                                        ...l,
+                                                        blendMode: e.target.value as LayerBlendMode,
+                                                    }))
+                                                }
+                                                className={studioPanelInputs.fieldSm}
+                                            >
+                                                {LAYER_BLEND_MODE_OPTIONS.map((opt) => (
+                                                    <option key={opt.value} value={opt.value}>
+                                                        {opt.label}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                    )}
+                                    <StudioDisclosureSection
+                                        id="jp-element-positioning"
+                                        title="Positioning & sizing"
+                                        subtitle="Placement, fit, and transform"
+                                        variant="default"
+                                        open={propertiesElementPositioningOpen}
+                                        onOpenChange={setPropertiesElementPositioningOpen}
+                                    >
                                     <div className="space-y-3">
+                                        {isImageLayer(selectedLayer) && (
+                                            <div className="space-y-2">
+                                                <p className="text-[9px] font-semibold uppercase tracking-wider text-gray-500">
+                                                    Object fit
+                                                </p>
+                                                <StudioSegmentedControl
+                                                    aria-label="Object fit within layer bounds"
+                                                    value={selectedLayer.fit ?? 'cover'}
+                                                    disabled={selectedLayer.locked}
+                                                    onChange={(v) =>
+                                                        updateLayer(selectedLayer.id, (l) => {
+                                                            if (!isImageLayer(l)) {
+                                                                return l
+                                                            }
+                                                            return { ...l, fit: v }
+                                                        })
+                                                    }
+                                                    segments={OBJECT_FIT_CHOICES.map((opt) => ({
+                                                        value: opt.value,
+                                                        label: opt.short,
+                                                        title: opt.title,
+                                                    }))}
+                                                />
+                                                {/*
+                                                  * Snap the layer shape back to the asset's aspect ratio.
+                                                  */}
+                                                {selectedLayer.naturalWidth &&
+                                                    selectedLayer.naturalHeight &&
+                                                    selectedLayer.naturalWidth > 0 &&
+                                                    selectedLayer.naturalHeight > 0 &&
+                                                    (() => {
+                                                        const nw = selectedLayer.naturalWidth
+                                                        const nh = selectedLayer.naturalHeight
+                                                        const lw = selectedLayer.transform.width
+                                                        const lh = selectedLayer.transform.height
+                                                        const layerRatio = lw / Math.max(1, lh)
+                                                        const imageRatio = nw / Math.max(1, nh)
+                                                        const misaligned =
+                                                            Math.abs(layerRatio - imageRatio) / imageRatio > 0.02
+                                                        if (!misaligned) {
+                                                            return null
+                                                        }
+                                                        return (
+                                                            <button
+                                                                type="button"
+                                                                disabled={selectedLayer.locked}
+                                                                onClick={() =>
+                                                                    updateLayer(selectedLayer.id, (l) => {
+                                                                        if (!isImageLayer(l)) {
+                                                                            return l
+                                                                        }
+                                                                        const inw = l.naturalWidth ?? 0
+                                                                        const inh = l.naturalHeight ?? 0
+                                                                        if (inw <= 0 || inh <= 0) {
+                                                                            return l
+                                                                        }
+                                                                        const ilw = l.transform.width
+                                                                        const ilh = l.transform.height
+                                                                        const area = Math.max(1, ilw * ilh)
+                                                                        const ir = inw / Math.max(1, inh)
+                                                                        const newW = Math.round(Math.sqrt(area * ir))
+                                                                        const newH = Math.max(1, Math.round(newW / ir))
+                                                                        const cx = l.transform.x + ilw / 2
+                                                                        const cy = l.transform.y + ilh / 2
+                                                                        return {
+                                                                            ...l,
+                                                                            transform: {
+                                                                                ...l.transform,
+                                                                                x: Math.round(cx - newW / 2),
+                                                                                y: Math.round(cy - newH / 2),
+                                                                                width: newW,
+                                                                                height: newH,
+                                                                            },
+                                                                        }
+                                                                    })
+                                                                }
+                                                                className="w-full rounded-md border border-indigo-800 bg-indigo-950/40 px-2 py-1.5 text-left text-[10px] font-medium text-indigo-200 shadow-sm hover:bg-indigo-900/40 disabled:cursor-not-allowed disabled:opacity-50"
+                                                                title="Match the file aspect ratio; recenters and keeps about the same area."
+                                                            >
+                                                                Fit layer to image shape
+                                                            </button>
+                                                        )
+                                                    })()}
+                                            </div>
+                                        )}
                                         <div>
                                             <p className="mb-1.5 text-[9px] font-semibold uppercase tracking-wider text-gray-500">
                                                 Placement
@@ -11246,7 +11630,7 @@ export default function AssetEditor() {
                                             />
                                         </div>
                                     </div>
-                                    </div>
+                                    </StudioDisclosureSection>
                                     <div className="space-y-3 border-t border-gray-800/60 pt-3">
                                         <p className="mb-1.5 text-[9px] font-semibold uppercase tracking-wider text-gray-500">
                                             Appearance
@@ -11893,97 +12277,6 @@ export default function AssetEditor() {
                                                 />
                                             </>
                                         )}
-                                    </div>
-                                )}
-
-                                {isImageLayer(selectedLayer) && (
-                                    <div className="space-y-3">
-                                        <p className="text-[11px] leading-snug text-gray-400">
-                                            <span className="font-medium text-gray-300">Object fit</span> — how the file
-                                            maps into the layer box (resize the layer to change the frame).
-                                        </p>
-                                        <StudioSegmentedControl
-                                            aria-label="Object fit within layer bounds"
-                                            value={selectedLayer.fit ?? 'cover'}
-                                            disabled={selectedLayer.locked}
-                                            onChange={(v) =>
-                                                updateLayer(selectedLayer.id, (l) => {
-                                                    if (!isImageLayer(l)) {
-                                                        return l
-                                                    }
-                                                    return { ...l, fit: v }
-                                                })
-                                            }
-                                            segments={OBJECT_FIT_CHOICES.map((opt) => ({
-                                                value: opt.value,
-                                                label: opt.short,
-                                                title: opt.title,
-                                            }))}
-                                        />
-                                        {/*
-                                          * Snap the layer shape back to the asset's aspect ratio.
-                                          * This is the one-click fix for "my logo is cropped in a
-                                          * square" — it resizes the layer so no part of the image
-                                          * is cut off, keeping it centered in its current slot.
-                                          */}
-                                        {selectedLayer.naturalWidth &&
-                                            selectedLayer.naturalHeight &&
-                                            selectedLayer.naturalWidth > 0 &&
-                                            selectedLayer.naturalHeight > 0 &&
-                                            (() => {
-                                                const nw = selectedLayer.naturalWidth
-                                                const nh = selectedLayer.naturalHeight
-                                                const lw = selectedLayer.transform.width
-                                                const lh = selectedLayer.transform.height
-                                                const layerRatio = lw / Math.max(1, lh)
-                                                const imageRatio = nw / Math.max(1, nh)
-                                                // Only offer the action when the layer shape is meaningfully
-                                                // off the image's aspect — otherwise the button is a no-op.
-                                                const misaligned =
-                                                    Math.abs(layerRatio - imageRatio) / imageRatio > 0.02
-                                                if (!misaligned) return null
-                                                return (
-                                                    <button
-                                                        type="button"
-                                                        disabled={selectedLayer.locked}
-                                                        onClick={() =>
-                                                            updateLayer(selectedLayer.id, (l) => {
-                                                                if (!isImageLayer(l)) return l
-                                                                const inw = l.naturalWidth ?? 0
-                                                                const inh = l.naturalHeight ?? 0
-                                                                if (inw <= 0 || inh <= 0) return l
-                                                                const ilw = l.transform.width
-                                                                const ilh = l.transform.height
-                                                                // Preserve the layer's current pixel area —
-                                                                // users expect "fix the shape" not "shrink".
-                                                                const area = Math.max(1, ilw * ilh)
-                                                                const ir = inw / Math.max(1, inh)
-                                                                const newW = Math.round(Math.sqrt(area * ir))
-                                                                const newH = Math.max(1, Math.round(newW / ir))
-                                                                const cx = l.transform.x + ilw / 2
-                                                                const cy = l.transform.y + ilh / 2
-                                                                return {
-                                                                    ...l,
-                                                                    transform: {
-                                                                        ...l.transform,
-                                                                        x: Math.round(cx - newW / 2),
-                                                                        y: Math.round(cy - newH / 2),
-                                                                        width: newW,
-                                                                        height: newH,
-                                                                    },
-                                                                }
-                                                            })
-                                                        }
-                                                        className="w-full rounded-md border border-indigo-800 bg-indigo-950/40 px-3 py-2 text-left text-xs font-medium text-indigo-200 shadow-sm hover:bg-indigo-900/40 disabled:cursor-not-allowed disabled:opacity-50"
-                                                        title="Match the source file’s width:height (not the canvas). Keeps roughly the same pixel area and re-centers."
-                                                    >
-                                                        <span className="block">Fit layer to image shape</span>
-                                                        <span className="mt-0.5 block text-[9px] font-normal leading-snug text-indigo-300/80">
-                                                            Natural file aspect · not document aspect
-                                                        </span>
-                                                    </button>
-                                                )
-                                            })()}
                                     </div>
                                 )}
 
@@ -12850,268 +13143,6 @@ export default function AssetEditor() {
                                         </StudioSmartActionCard>
                                     )}
 
-                                    {isImageLayer(selectedLayer) && (
-                                        <StudioSmartActionCard
-                                            title="AI Image Tools"
-                                            icon={<SparklesIcon className="h-5 w-5" aria-hidden />}
-                                        >
-                                            {studioAiVideoForSelectedStill ? (
-                                                <div className="mb-1 rounded-lg border border-violet-600/50 bg-violet-950/35 p-2.5">
-                                                    <p className="text-[10px] font-semibold text-violet-100">
-                                                        Original still and AI clip
-                                                    </p>
-                                                    <p className="mt-1 text-[9px] leading-snug text-gray-400">
-                                                        Choose what appears on the canvas and which layer is selected. Switch
-                                                        back to the still any time to run Modify image and other image tools.
-                                                    </p>
-                                                    <div className="mt-2 space-y-1">
-                                                        <p className="text-[9px] font-medium uppercase tracking-wide text-violet-200/70">
-                                                            Canvas &amp; selection
-                                                        </p>
-                                                        <StudioSegmentedControl
-                                                            aria-label="Original still or AI video clip"
-                                                            value={studioAiStillClipCanvasMode ?? 'still'}
-                                                            disabled={selectedLayer.locked}
-                                                            onChange={(m) => {
-                                                                if (!studioAiVideoForSelectedStill || !selectedLayer) {
-                                                                    return
-                                                                }
-                                                                switchStudioAiStillOrClip(
-                                                                    m,
-                                                                    selectedLayer.id,
-                                                                    studioAiVideoForSelectedStill.videoLayerId,
-                                                                )
-                                                            }}
-                                                            segments={[...STUDIO_AI_STILL_CLIP_SEGMENTS]}
-                                                        />
-                                                    </div>
-                                                </div>
-                                            ) : null}
-                                            {!studioAiVideoForSelectedStill ? (
-                                                <div className="space-y-2 text-gray-100">
-                                                    <p className="text-[10px] leading-snug text-indigo-200/75">
-                                                        Edits the source image, not only the visible crop. Adjust fit or frame
-                                                        first if needed.
-                                                    </p>
-                                                    <div className="space-y-1">
-                                                        <p className="text-[9px] font-semibold uppercase tracking-wider text-indigo-300/70">
-                                                            Quick
-                                                        </p>
-                                                        <div className="grid grid-cols-1 gap-1.5 min-[300px]:grid-cols-2">
-                                                            {IMAGE_LAYER_QUICK_ACTIONS.map((qa) => {
-                                                                const Ic = qa.Icon
-                                                                return (
-                                                                    <button
-                                                                        key={qa.id}
-                                                                        type="button"
-                                                                        disabled={
-                                                                            selectedLayer.locked ||
-                                                                            selectedLayer.aiEdit?.status === 'editing' ||
-                                                                            imageEditUsageBlocked
-                                                                        }
-                                                                        title={qa.instruction}
-                                                                        aria-label={`${qa.label}. ${qa.instruction.slice(0, 120)}${qa.instruction.length > 120 ? '…' : ''}`}
-                                                                        onClick={() =>
-                                                                            void runImageLayerEdit(selectedLayer.id, {
-                                                                                instructionOverride: qa.instruction,
-                                                                            })
-                                                                        }
-                                                                        className="flex min-h-[48px] items-center gap-2 rounded-lg border border-indigo-500/30 bg-indigo-950/25 px-2 py-1.5 text-left text-[10px] font-medium text-indigo-100/95 shadow-sm transition-colors hover:border-indigo-400/50 hover:bg-indigo-900/35 disabled:cursor-not-allowed disabled:opacity-45"
-                                                                    >
-                                                                        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-indigo-500/25 bg-indigo-600/20 text-indigo-200">
-                                                                            <Ic className="h-3.5 w-3.5" aria-hidden />
-                                                                        </span>
-                                                                        <span className="min-w-0 flex-1 leading-snug">
-                                                                            {qa.label}
-                                                                        </span>
-                                                                    </button>
-                                                                )
-                                                            })}
-                                                        </div>
-                                                    </div>
-                                                    <StudioDisclosureSection
-                                                        id="jp-image-edit-model"
-                                                        title="Model"
-                                                        subtitle="Quality vs speed"
-                                                        variant="muted"
-                                                        open={propertiesImageEditModelOpen}
-                                                        onOpenChange={setPropertiesImageEditModelOpen}
-                                                    >
-                                                        <div className="grid grid-cols-1 gap-1.5 min-[420px]:grid-cols-3 min-[420px]:gap-1">
-                                                            {IMAGE_EDIT_MODEL_PRESETS.map((preset) => {
-                                                                const Ic = preset.Icon
-                                                                const current = normalizeEditModelKey(
-                                                                    selectedLayer.aiEdit?.editModelKey
-                                                                )
-                                                                const active = current === preset.value
-                                                                return (
-                                                                    <button
-                                                                        key={preset.value}
-                                                                        type="button"
-                                                                        disabled={
-                                                                            selectedLayer.locked ||
-                                                                            selectedLayer.aiEdit?.status === 'editing'
-                                                                        }
-                                                                        onClick={() => {
-                                                                            updateLayer(selectedLayer.id, (l) => {
-                                                                                if (!isImageLayer(l)) {
-                                                                                    return l
-                                                                                }
-                                                                                return {
-                                                                                    ...l,
-                                                                                    aiEdit: {
-                                                                                        ...l.aiEdit,
-                                                                                        editModelKey: preset.value,
-                                                                                    },
-                                                                                }
-                                                                            })
-                                                                        }}
-                                                                        className={`flex flex-col items-stretch gap-0.5 rounded-lg border px-2 py-2 text-left transition-colors ${
-                                                                            active
-                                                                                ? 'border-indigo-500 bg-indigo-600/30 ring-2 ring-indigo-500/50 ring-offset-1 ring-offset-gray-950'
-                                                                                : 'border-indigo-500/25 bg-gray-900/50 hover:border-indigo-500/50 hover:bg-indigo-950/30'
-                                                                        } disabled:cursor-not-allowed disabled:opacity-50`}
-                                                                    >
-                                                                        <span className="flex items-center gap-1.5 text-[10px] font-semibold text-indigo-100">
-                                                                            <Ic className="h-3.5 w-3.5 shrink-0 text-indigo-300" />
-                                                                            {preset.title}
-                                                                        </span>
-                                                                        <span className="text-[8px] leading-tight text-gray-500">
-                                                                            {preset.subtitle}
-                                                                        </span>
-                                                                    </button>
-                                                                )
-                                                            })}
-                                                        </div>
-                                                    </StudioDisclosureSection>
-                                                    {genUsageError && (
-                                                        <p className="text-[9px] text-amber-300/90">{genUsageError}</p>
-                                                    )}
-                                                    <label className="mb-0.5 block text-[9px] font-bold uppercase tracking-wider text-indigo-300/80">
-                                                        Prompt
-                                                    </label>
-                                                    <textarea
-                                                        value={selectedLayer.aiEdit?.prompt ?? ''}
-                                                        onChange={(e) => {
-                                                            const v = e.target.value
-                                                            updateLayer(selectedLayer.id, (l) => {
-                                                                if (!isImageLayer(l)) {
-                                                                    return l
-                                                                }
-                                                                return {
-                                                                    ...l,
-                                                                    aiEdit: { ...l.aiEdit, prompt: v },
-                                                                }
-                                                            })
-                                                        }}
-                                                        rows={3}
-                                                        placeholder="What should change on this image?"
-                                                        disabled={selectedLayer.locked || selectedLayer.aiEdit?.status === 'editing'}
-                                                        className="w-full rounded-lg border border-indigo-500/40 bg-gray-900/80 px-2.5 py-1.5 text-xs text-gray-100 placeholder:text-gray-500 focus:border-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-500/40"
-                                                    />
-                                                    {imageEditActionError && (
-                                                        <p className="mt-1 text-[10px] text-red-400">{imageEditActionError}</p>
-                                                    )}
-                                                    {selectedLayer.aiEdit?.status === 'error' && !imageEditActionError && (
-                                                        <p className="mt-1 text-[10px] text-red-400">Couldn’t apply — try again.</p>
-                                                    )}
-                                                    <div className="mt-2 flex flex-col gap-1.5">
-                                                        <div className="flex flex-wrap gap-1.5">
-                                                            <button
-                                                                type="button"
-                                                                disabled={
-                                                                    selectedLayer.locked ||
-                                                                    selectedLayer.aiEdit?.status === 'editing' ||
-                                                                    imageEditUsageBlocked
-                                                                }
-                                                                title={
-                                                                    genUsageError
-                                                                        ? genUsageError
-                                                                        : imageEditUsageBlocked
-                                                                          ? "You've used all AI image generations for this month"
-                                                                          : 'Apply your prompt to this layer'
-                                                                }
-                                                                onClick={() => void runImageLayerEdit(selectedLayer.id)}
-                                                                className="group inline-flex min-h-[2.25rem] min-w-0 flex-1 items-center justify-center gap-1.5 rounded-lg border-2 border-indigo-500/60 bg-indigo-600 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:bg-indigo-500 disabled:cursor-not-allowed disabled:border-indigo-800/80 disabled:bg-indigo-950/80"
-                                                            >
-                                                                <ArrowPathIcon className="h-3.5 w-3.5 group-disabled:opacity-60" />
-                                                                Apply
-                                                            </button>
-                                                            {selectedLayer.aiEdit?.resultSrc ? (
-                                                                <button
-                                                                    type="button"
-                                                                    disabled={
-                                                                        selectedLayer.locked ||
-                                                                        selectedLayer.aiEdit?.status === 'editing' ||
-                                                                        imageEditUsageBlocked ||
-                                                                        !(selectedLayer.aiEdit?.prompt ?? '').trim()
-                                                                    }
-                                                                    title="Same prompt on the latest AI result"
-                                                                    onClick={() => void runImageLayerEdit(selectedLayer.id)}
-                                                                    className="inline-flex min-h-[2.25rem] min-w-0 flex-1 items-center justify-center rounded-lg border-2 border-indigo-500/30 bg-indigo-950/40 px-3 py-2 text-xs font-semibold text-indigo-100 hover:border-indigo-400/50 hover:bg-indigo-900/30 disabled:cursor-not-allowed disabled:opacity-40"
-                                                                >
-                                                                    Again
-                                                                </button>
-                                                            ) : null}
-                                                        </div>
-                                                        {(selectedLayer.aiEdit?.previousResults?.length ?? 0) > 0 && (
-                                                            <button
-                                                                type="button"
-                                                                disabled={
-                                                                    selectedLayer.locked || selectedLayer.aiEdit?.status === 'editing'
-                                                                }
-                                                                onClick={() =>
-                                                                    updateLayer(selectedLayer.id, (l) => {
-                                                                        if (!isImageLayer(l)) {
-                                                                            return l
-                                                                        }
-                                                                        const stack = [...(l.aiEdit?.previousResults ?? [])]
-                                                                        if (stack.length === 0) {
-                                                                            return l
-                                                                        }
-                                                                        const nextSrc = stack[stack.length - 1]
-                                                                        return {
-                                                                            ...l,
-                                                                            src: nextSrc,
-                                                                            aiEdit: {
-                                                                                ...l.aiEdit,
-                                                                                previousResults: stack.slice(0, -1),
-                                                                                resultSrc: nextSrc,
-                                                                                status: 'idle',
-                                                                            },
-                                                                        }
-                                                                    })
-                                                                }
-                                                                className="w-full rounded-md border border-gray-600/80 bg-gray-800/50 py-1.5 text-[10px] font-medium text-gray-300 hover:border-gray-500 hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
-                                                            >
-                                                                Step back one edit
-                                                            </button>
-                                                        )}
-                                                    </div>
-                                                </div>
-                                            ) : null}
-                                            <button
-                                                type="button"
-                                                disabled={selectedLayer.locked || !aiEnabled}
-                                                onClick={() => {
-                                                    setStudioPropertiesSectionOpen((prev) => ({
-                                                        ...prev,
-                                                        history: true,
-                                                    }))
-                                                    requestAnimationFrame(() => {
-                                                        window.document
-                                                            .getElementById('jp-history-panel')
-                                                            ?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
-                                                    })
-                                                }}
-                                                className="mt-2 w-full rounded-lg border border-violet-700/45 bg-violet-950/20 px-2 py-1.5 text-[10px] font-semibold text-violet-100 hover:bg-violet-900/35 disabled:cursor-not-allowed disabled:opacity-45"
-                                                title="Image → video (AI) lives under History"
-                                            >
-                                                Animate image → History
-                                            </button>
-                                        </StudioSmartActionCard>
-                                    )}
-
                                     {isGenerativeImageLayer(selectedLayer) && (
                                         <StudioSmartActionCard
                                             title="Generate / Refine"
@@ -13705,7 +13736,7 @@ export default function AssetEditor() {
                                     collapsed={!studioPropertiesSectionOpen.history}
                                     onToggleCollapsed={() => handleStudioPropertiesSectionToggle('history')}
                                     icon={<FolderOpenIcon className="h-3.5 w-3.5" aria-hidden />}
-                                    description="Version timeline, image→video, and runs for this layer"
+                                    description="Versions and runs for this layer"
                                     railIcon={<FolderOpenIcon className="h-4 w-4 shrink-0" aria-hidden />}
                                     railShortLabel="History"
                                     railActive={studioPropertiesSectionActive === 'history'}
@@ -13724,8 +13755,7 @@ export default function AssetEditor() {
                                                         )}
                                                     </div>
                                                     <p className="mb-2 text-[10px] leading-snug text-gray-500">
-                                                        Original left → newest right · click to load. Replace the source
-                                                        from Element.
+                                                        Oldest left → newest right · click to load.
                                                     </p>
                                                     <div
                                                         className="flex max-w-full items-stretch gap-0 overflow-x-auto overflow-y-visible rounded-lg border border-gray-700/80 bg-gray-950/40 px-2 py-2 scroll-smooth"
@@ -13787,35 +13817,6 @@ export default function AssetEditor() {
                                             )}
                                             {(isImageLayer(selectedLayer) || isGenerativeImageLayer(selectedLayer)) && (
                                                 <div className="mt-2">
-                                                    <p className="mb-1.5 text-[9px] font-semibold uppercase tracking-wider text-gray-500">
-                                                        Motion
-                                                    </p>
-                                                    <button
-                                                        type="button"
-                                                        disabled={selectedLayer.locked || !aiEnabled}
-                                                        onClick={() =>
-                                                            openStudioAnimateModal({
-                                                                sourceKind: 'layer_isolated',
-                                                                layerId: selectedLayer.id,
-                                                            })
-                                                        }
-                                                        className="flex w-full items-center justify-center gap-2 rounded-lg border border-violet-700/50 bg-violet-950/30 px-3 py-2.5 text-xs font-semibold text-violet-100 shadow-sm transition-colors hover:border-violet-500/70 hover:bg-violet-900/40 disabled:cursor-not-allowed disabled:opacity-45"
-                                                        title={
-                                                            !aiEnabled
-                                                                ? 'AI is disabled for this workspace'
-                                                                : 'Queue image-to-video; other layers stay on top for playback and export'
-                                                        }
-                                                    >
-                                                        <span className="flex items-center gap-0.5" aria-hidden>
-                                                            <FilmIcon className="h-4 w-4" />
-                                                            <SparklesIcon className="h-3.5 w-3.5" />
-                                                        </span>
-                                                        Image → video (AI)
-                                                    </button>
-                                                    <p className={studioPanelText.microHint}>
-                                                        Renders add a video layer; your still stays in the stack (hidden)
-                                                        so you can switch back in Properties.
-                                                    </p>
                                                     {(() => {
                                                         const jobs = compositionAnimations.filter(
                                                             (j) => j.source_layer_id === selectedLayer.id,
@@ -14049,45 +14050,15 @@ export default function AssetEditor() {
                                     collapsed={!studioPropertiesSectionOpen.advanced}
                                     onToggleCollapsed={() => handleStudioPropertiesSectionToggle('advanced')}
                                     icon={<AdjustmentsHorizontalIcon className="h-3.5 w-3.5" aria-hidden />}
-                                    description="Optional — blend and export"
+                                    description="Reserved for future options"
                                     contentClassName="space-y-2"
                                     railIcon={<AdjustmentsHorizontalIcon className="h-4 w-4 shrink-0" aria-hidden />}
                                     railShortLabel="Advanced"
                                     railActive={studioPropertiesSectionActive === 'advanced'}
                                 >
-                                    <StudioDisclosureSection
-                                        id="jp-advanced-blend"
-                                        title="Blend & export"
-                                        subtitle="Compositing"
-                                        variant="muted"
-                                        open={propertiesAdvancedOpen}
-                                        onOpenChange={setPropertiesAdvancedOpen}
-                                    >
-                                        <div>
-                                            <label className="mb-1 block text-[10px] font-medium text-gray-500">
-                                                Blend mode
-                                            </label>
-                                            <p className="mb-1.5 text-[9px] leading-snug text-gray-600">
-                                                How this layer composites over layers below.
-                                            </p>
-                                            <select
-                                                value={selectedLayer.blendMode ?? 'normal'}
-                                                onChange={(e) =>
-                                                    updateLayer(selectedLayer.id, (l) => ({
-                                                        ...l,
-                                                        blendMode: e.target.value as LayerBlendMode,
-                                                    }))
-                                                }
-                                                className={studioPanelInputs.fieldSm}
-                                            >
-                                                {LAYER_BLEND_MODE_OPTIONS.map((opt) => (
-                                                    <option key={opt.value} value={opt.value}>
-                                                        {opt.label}
-                                                    </option>
-                                                ))}
-                                            </select>
-                                        </div>
-                                    </StudioDisclosureSection>
+                                    <p className="text-[10px] leading-snug text-gray-500">
+                                        Blend mode is under <span className="text-gray-400">Element</span> above.
+                                    </p>
                                 </StudioPanelGroup>
                             </div>
                         )}

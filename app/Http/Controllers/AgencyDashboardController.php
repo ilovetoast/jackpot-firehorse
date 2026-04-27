@@ -16,6 +16,7 @@ use App\Services\AgencyBrandAccessService;
 use App\Services\IncubationWorkspaceService;
 use App\Services\TenantAgencyService;
 use App\Support\DashboardLinks;
+use App\Support\Roles\RoleRegistry;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -336,6 +337,7 @@ class AgencyDashboardController extends Controller
 
         return Inertia::render('Agency/Dashboard', [
             'tenant' => $tenant,
+            'tenant_role_labels' => RoleRegistry::tenantRoleLabelsKeyed(),
             'agency' => [
                 'tier' => [
                     'name' => $tierName,

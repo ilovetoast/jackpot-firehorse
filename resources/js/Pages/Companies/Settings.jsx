@@ -34,6 +34,8 @@ export default function CompanySettings({
     can_use_require_landing_page: canUseRequireLandingPage = false,
     settings_brands = [],
     linked_agencies = [],
+    agency_relationship_role_options = [],
+    brand_role_options = [],
     can_manage_agencies = false,
     creator_module_enabled = false,
     creator_module_brands = [],
@@ -57,8 +59,20 @@ export default function CompanySettings({
     const [agencySearchResults, setAgencySearchResults] = useState([])
     const [agencySearchLoading, setAgencySearchLoading] = useState(false)
     const [selectedAgencyTenantId, setSelectedAgencyTenantId] = useState(null)
-    const [agencyTenantRole, setAgencyTenantRole] = useState('agency_admin')
+    const [agencyTenantRole, setAgencyTenantRole] = useState(
+        () => agency_relationship_role_options[0]?.value ?? 'agency_admin'
+    )
     const [agencyBrandRole, setAgencyBrandRole] = useState('contributor')
+
+    useEffect(() => {
+        if (!agency_relationship_role_options?.length) {
+            return
+        }
+        const allowed = new Set(agency_relationship_role_options.map((o) => o.value))
+        if (!allowed.has(agencyTenantRole)) {
+            setAgencyTenantRole(agency_relationship_role_options[0].value)
+        }
+    }, [agency_relationship_role_options, agencyTenantRole])
     const [agencySelectedBrandIds, setAgencySelectedBrandIds] = useState(() => new Set())
     const [agencySaving, setAgencySaving] = useState(false)
     const [agencyError, setAgencyError] = useState(null)
@@ -1042,7 +1056,7 @@ export default function CompanySettings({
                                             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                                                 <div>
                                                     <label htmlFor="agency-tenant-role" className="block text-sm font-medium text-gray-700">
-                                                        Tenant role (for agency users)
+                                                        Agency partnership access
                                                     </label>
                                                     <select
                                                         id="agency-tenant-role"
@@ -1050,10 +1064,11 @@ export default function CompanySettings({
                                                         onChange={(e) => setAgencyTenantRole(e.target.value)}
                                                         className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
                                                     >
-                                                        <option value="agency_admin">Agency admin</option>
-                                                        <option value="admin">Admin</option>
-                                                        <option value="member">Member</option>
-                                                        <option value="agency_partner">Agency partner</option>
+                                                        {(agency_relationship_role_options || []).map((opt) => (
+                                                            <option key={opt.value} value={opt.value}>
+                                                                {opt.label}
+                                                            </option>
+                                                        ))}
                                                     </select>
                                                 </div>
                                                 <div>
@@ -1066,10 +1081,11 @@ export default function CompanySettings({
                                                         onChange={(e) => setAgencyBrandRole(e.target.value)}
                                                         className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
                                                     >
-                                                        <option value="admin">Admin</option>
-                                                        <option value="brand_manager">Brand manager</option>
-                                                        <option value="contributor">Contributor</option>
-                                                        <option value="viewer">Viewer</option>
+                                                        {(brand_role_options || []).map((opt) => (
+                                                            <option key={opt.value} value={opt.value}>
+                                                                {opt.label}
+                                                            </option>
+                                                        ))}
                                                     </select>
                                                 </div>
                                             </div>

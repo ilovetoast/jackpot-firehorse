@@ -43,6 +43,18 @@ These are **tenant (company) roles** on a **client** company (`tenants` row), no
 - **Agency-managed membership:** Users added **by the agency** to a client may be flagged on `tenant_user` (e.g. `is_agency_managed`, `agency_tenant_id`) so the **Team** page and policies can treat them as “under the partnership” rather than a one-off direct hire. **Brand roles** (`brand_user.role`) still define what they can do **per brand** (upload, approve, etc.).
 - **Effective permissions:** Always resolve from **`RoleRegistry`** + **`PermissionMap`** via **`TenantPermissionResolver`** / **`AuthPermissionService`**—do not infer from the word “agency” alone.
 
+### Where tenant roles are managed (strict split)
+
+| Surface | What you manage | Tenant role keys involved |
+|--------|------------------|---------------------------|
+| **Company → Team** | **Direct** company members only | **Admin**, **Member** on the client (or **Admin**, **Member** on the agency workspace when the active tenant is an agency). **Owner** is never assignable here. |
+| **Company settings → Agencies** | **Client ↔ agency partnership** (`TenantAgency`) | **`agency_admin`**, **`agency_partner`** as *relationship grants* on the **client** tenant for users provisioned through the link. Only **client owner** or **client admin** may create/update/remove partnerships (not client-side `agency_admin`). |
+| **Agency Dashboard → Team** | Read/copy for agency context; **Manage team** goes to the same Team page in the **agency** tenant | Agency **workspace** roles are **Admin** / **Member** (and **Owner** via normal rules). This is **not** the same as client-side **`agency_admin`** / **`agency_partner`**, which exist only on **client** tenants. |
+
+- **`agency_admin`** / **`agency_partner`** are **partnership roles**, not generic “invite from Team” roles. The generic `TeamController::invite` and `TeamController::updateTenantRole` routes reject them with **422**; partnership flows use `TenantAgencyService` / `TenantAgencyController` (and related APIs).
+- **UI labels:** The internal key **`agency_admin`** is labeled **Agency manager** (or **Agency admin**) in product copy; never show raw strings like `Agency_admin`.
+- **Context-aware checks:** Prefer **`$user->canForContext($permission, $tenant, $brand)`** / **`AuthPermissionService::can()`** when tenant or brand context matters.
+
 For product flows (incubation, transfers, rewards), see also [AGENCY_INCUBATION_ROADMAP.md](./AGENCY_INCUBATION_ROADMAP.md).
 
 ### Important Notes
@@ -267,7 +279,7 @@ $user->getRoleForBrand($brand) // Returns: 'admin', 'brand_manager', 'contributo
 
 **Tenant-level role check**:
 ```php
-$user->getRoleForTenant($tenant) // Returns: 'owner', 'admin', 'member', or null
+$user->getRoleForTenant($tenant) // Returns: 'owner', 'admin', 'member', 'agency_admin', 'agency_partner', or null
 ```
 
 ### Default Behavior
@@ -291,11 +303,12 @@ These roles are kept in the seeder for backward compatibility but should not be 
 
 ### Role Simplification
 
-Tenant-level roles have been simplified to keep only essential roles:
+Tenant-level roles have been simplified for **direct** membership:
 
 - **Removed**: `support` and `compliance` tenant-level roles
-- **Kept**: Only Owner, Admin, and Member for tenant-level
-- **Rationale**: All other roles should be brand-scoped where complexity actually matters
+- **Kept for direct client/agency workspace membership**: **Owner**, **Admin**, **Member** (see `RoleRegistry::directCompanyTenantRoles()`)
+- **Kept for client↔agency partnership grants on the client tenant**: **`agency_admin`**, **`agency_partner`** (see `RoleRegistry::agencyRelationshipRoles()`). These are **not** selectable on **Company → Team** invite; they are set via **Company settings → Agencies** / `TenantAgency`.
+- **Rationale**: Brand-scoped complexity stays in **brand roles**; partnership grants stay in explicit agency-link flows.
 - **Migration**: Any users with `support` or `compliance` tenant roles should be migrated to appropriate brand-scoped roles or removed
 - **Note**: Site-level roles (`site_support`, `site_compliance`) remain unchanged (separate from tenant roles)
 
@@ -348,15 +361,23 @@ The 'member' role is **tenant-level only**:
 **All role lists come from a single registry** - `App\Support\Roles\RoleRegistry`:
 
 - `RoleRegistry::tenantRoles()` - All tenant roles (including owner)
-- `RoleRegistry::assignableTenantRoles()` - Assignable tenant roles (excludes owner)
+- `RoleRegistry::assignableTenantRoles()` - Assignable tenant roles (excludes owner; includes partnership keys for seeders/general assignability)
+- `RoleRegistry::directCompanyTenantRoles()` - **Admin**, **Member** only (direct Team management)
+- `RoleRegistry::agencyRelationshipRoles()` - **`agency_partner`**, **`agency_admin`** (partnership grants only)
+- `RoleRegistry::directAssignableTenantRolesForInviter($user, $tenant)` - Direct invite / team role dropdown subset for the inviter
+- `RoleRegistry::assignableAgencyRelationshipRolesForInviter($user, $clientTenant, $agencyTenant?)` - Partnership role options for client owner/admin
+- `RoleRegistry::assignableAgencyWorkspaceRolesForInviter($user, $agencyTenant)` - Agency workspace Team when `is_agency`
+- `RoleRegistry::tenantRoleDisplayLabel($role)` - Canonical UI label (e.g. **Agency manager** for `agency_admin`)
 - `RoleRegistry::brandRoles()` - All brand roles
 - `RoleRegistry::brandApproverRoles()` - Brand roles that can approve assets
 
 **Validation methods**:
-- `RoleRegistry::validateTenantRoleAssignment($role)` - Validates and throws if invalid/not assignable
-- `RoleRegistry::validateBrandRoleAssignment($role)` - Validates and throws if invalid
+- `RoleRegistry::validateTenantRoleAssignment($role)` - Validates general assignable tenant role (excludes owner)
+- `RoleRegistry::validateDirectCompanyTenantRoleAssignment($role)` - **Admin** / **Member** only (generic Team routes)
+- `RoleRegistry::validateAgencyRelationshipRoleAssignment($role)` - Partnership roles only (`TenantAgency` flows)
+- `RoleRegistry::validateBrandRoleAssignment($role)` - Validates brand role
 
-**NO hardcoded role arrays** - all validation must use RoleRegistry.
+**NO hardcoded role arrays in controllers** - use `RoleRegistry` (front-end loads brand lists from `GET /app/api/roles/brand` where applicable).
 
 ## Why Site Roles Are Not in PermissionMap
 
