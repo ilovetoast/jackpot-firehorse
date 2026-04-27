@@ -198,6 +198,22 @@ return [
         'large_asset_timeout_seconds' => (int) env('THUMBNAIL_LARGE_TIMEOUT_SECONDS', 1800),
 
         /*
+         * PSD/PSB: {@see GenerateThumbnailsJob} raises its timeout to at least this so flatten is not
+         * killed mid-run. Keep <= HORIZON_IMAGES_PSD_WORKER_TIMEOUT when using the images-psd queue.
+         */
+        'psd_timeout_seconds' => (int) env('THUMBNAIL_PSD_TIMEOUT_SECONDS', 7200),
+
+        /*
+         * When true, OOM / ImageMagick resource-limit errors end in one step: asset SKIPPED with
+         * thumbnail_skip_reason=server_resource_limit, job returns successfully (no queue retries).
+         * Low-RAM servers: also lower THUMBNAIL_MAX_SOURCE_BYTES and tune system ImageMagick policy.xml.
+         */
+        'resource_exhaustion_terminal' => filter_var(
+            env('THUMBNAIL_RESOURCE_EXHAUSTION_TERMINAL', true),
+            FILTER_VALIDATE_BOOL
+        ),
+
+        /*
          * Max source file size (bytes) for thumbnail/preview rasterization. When set > 0, larger
          * files skip thumbnail generation gracefully (SKIPPED) so workers do not OOM or retry forever.
          * Production: raise if workers have more RAM (e.g. 5368709120 = 5GB). 0 = no limit.
@@ -425,6 +441,11 @@ return [
          */
         'process_asset_job_timeout_seconds' => (int) env('PROCESS_ASSET_JOB_TIMEOUT_SECONDS', 290),
         'process_asset_job_timeout_heavy_seconds' => (int) env('PROCESS_ASSET_JOB_TIMEOUT_HEAVY_SECONDS', 1780),
+        /*
+         * ProcessAssetJob on QUEUE_IMAGES_PSD_QUEUE only. Keep <= Horizon supervisor timeout for
+         * supervisor-images-psd (HORIZON_IMAGES_PSD_WORKER_TIMEOUT). Large PSD flatten can run long.
+         */
+        'process_asset_job_timeout_psd_seconds' => (int) env('PROCESS_ASSET_JOB_TIMEOUT_PSD_SECONDS', 7200),
     ],
 
     /*

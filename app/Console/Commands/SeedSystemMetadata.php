@@ -159,7 +159,7 @@ class SeedSystemMetadata extends Command
             // 1. Creative / Descriptive
             [
                 'key' => 'photo_type',
-                'system_label' => 'Photo Type',
+                'system_label' => 'Shot Type',
                 'type' => 'select',
                 'applies_to' => 'image',
                 'group_key' => 'creative',
@@ -169,12 +169,19 @@ class SeedSystemMetadata extends Command
                 'is_upload_visible' => true,
                 'is_internal_only' => false,
                 'options' => [
-                    ['value' => 'studio', 'system_label' => 'Studio'],
+                    ['value' => 'product_only', 'system_label' => 'Product-only'],
+                    ['value' => 'product_in_use', 'system_label' => 'Product in use'],
                     ['value' => 'lifestyle', 'system_label' => 'Lifestyle'],
-                    ['value' => 'product', 'system_label' => 'Product'],
+                    ['value' => 'portrait', 'system_label' => 'Portrait'],
+                    ['value' => 'detail_closeup', 'system_label' => 'Detail/Close-up'],
+                    ['value' => 'flat_lay', 'system_label' => 'Flat lay'],
+                    ['value' => 'packaging_label', 'system_label' => 'Packaging/Label'],
+                    ['value' => 'interior', 'system_label' => 'Interior'],
+                    ['value' => 'exterior', 'system_label' => 'Exterior'],
+                    ['value' => 'event', 'system_label' => 'Event'],
                     ['value' => 'action', 'system_label' => 'Action'],
-                    ['value' => 'flat_lay', 'system_label' => 'Flat Lay'],
-                    ['value' => 'macro', 'system_label' => 'Macro'],
+                    ['value' => 'scenic', 'system_label' => 'Scenic'],
+                    ['value' => 'mockup_render', 'system_label' => 'Mockup/Render'],
                 ],
             ],
             [

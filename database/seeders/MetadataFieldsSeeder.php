@@ -15,6 +15,11 @@ use Illuminate\Support\Facades\DB;
  * - Sets field-level properties (AI eligible, population mode, etc.)
  * - Configures category-specific settings (enabled/disabled, primary placement, AI eligible)
  *
+ * Deploy: option lists for system fields (Subject, Environment, Shot Type / photo_type) do NOT auto-update
+ * on git push. After deploying, run e.g. `php artisan db:seed --class=MetadataFieldsSeeder` on staging/production
+ * (or your full database seeder) so `metadata_options` and field labels sync. Existing asset metadata values
+ * that used removed option slugs may need a one-time data migration.
+ *
  * Category Configuration Format:
  * [
  *     'category_slug' => [
@@ -201,10 +206,10 @@ class MetadataFieldsSeeder extends Seeder
      */
     protected function seedBasicFields(): void
     {
-        // Photo Type (Photography) — production / shoot style options (see syncOptions list)
+        // Shot Type (DB key: photo_type) — “What kind of visual is it?” Sync replaces option rows not in this list.
         $photoTypeId = $this->getOrCreateField([
             'key' => 'photo_type',
-            'system_label' => 'Photo Type',
+            'system_label' => 'Shot Type',
             'type' => 'select',
             'applies_to' => 'image',
             'scope' => 'system',
@@ -218,14 +223,19 @@ class MetadataFieldsSeeder extends Seeder
             'display_widget' => 'select',
         ]);
         $this->syncOptions($photoTypeId, [
-            ['value' => 'studio', 'system_label' => 'Studio'],
+            ['value' => 'product_only', 'system_label' => 'Product-only'],
+            ['value' => 'product_in_use', 'system_label' => 'Product in use'],
             ['value' => 'lifestyle', 'system_label' => 'Lifestyle'],
-            ['value' => 'product', 'system_label' => 'Product'],
             ['value' => 'portrait', 'system_label' => 'Portrait'],
+            ['value' => 'detail_closeup', 'system_label' => 'Detail/Close-up'],
+            ['value' => 'flat_lay', 'system_label' => 'Flat lay'],
+            ['value' => 'packaging_label', 'system_label' => 'Packaging/Label'],
+            ['value' => 'interior', 'system_label' => 'Interior'],
+            ['value' => 'exterior', 'system_label' => 'Exterior'],
             ['value' => 'event', 'system_label' => 'Event'],
-            ['value' => 'editorial', 'system_label' => 'Editorial'],
-            ['value' => 'macro_detail', 'system_label' => 'Macro / Detail'],
-            ['value' => 'flat_lay', 'system_label' => 'Flat Lay'],
+            ['value' => 'action', 'system_label' => 'Action'],
+            ['value' => 'scenic', 'system_label' => 'Scenic'],
+            ['value' => 'mockup_render', 'system_label' => 'Mockup/Render'],
         ]);
 
         // Logo Type (Logos) — options: primary, secondary, promotional only; no AI by default
@@ -628,12 +638,15 @@ class MetadataFieldsSeeder extends Seeder
             'ai_eligible' => true,
             'display_widget' => 'select',
         ]);
+        // “Where is it?” — sync replaces options not listed (staging: run MetadataFieldsSeeder after deploy).
         $this->syncOptions($environmentTypeId, [
-            ['value' => 'studio', 'system_label' => 'Studio'],
             ['value' => 'indoor', 'system_label' => 'Indoor'],
             ['value' => 'outdoor', 'system_label' => 'Outdoor'],
+            ['value' => 'studio', 'system_label' => 'Studio'],
             ['value' => 'urban', 'system_label' => 'Urban'],
             ['value' => 'nature', 'system_label' => 'Nature'],
+            ['value' => 'mixed_composite', 'system_label' => 'Mixed/Composite'],
+            ['value' => 'unknown', 'system_label' => 'Unknown'],
         ]);
 
         $subjectTypeId = $this->getOrCreateField([
@@ -651,15 +664,17 @@ class MetadataFieldsSeeder extends Seeder
             'ai_eligible' => true,
             'display_widget' => 'select',
         ]);
+        // “What is the main thing?” — sync replaces options not listed.
         $this->syncOptions($subjectTypeId, [
             ['value' => 'product', 'system_label' => 'Product'],
             ['value' => 'person', 'system_label' => 'Person'],
-            ['value' => 'food', 'system_label' => 'Food'],
+            ['value' => 'food_beverage', 'system_label' => 'Food/Beverage'],
             ['value' => 'architecture', 'system_label' => 'Architecture'],
-            ['value' => 'landscape', 'system_label' => 'Landscape'],
-            ['value' => 'abstract', 'system_label' => 'Abstract'],
+            ['value' => 'landscape_place', 'system_label' => 'Landscape/Place'],
             ['value' => 'object', 'system_label' => 'Object'],
-            ['value' => 'texture', 'system_label' => 'Texture'],
+            ['value' => 'texture_pattern', 'system_label' => 'Texture/Pattern'],
+            ['value' => 'text_graphic', 'system_label' => 'Text/Graphic'],
+            ['value' => 'abstract', 'system_label' => 'Abstract'],
         ]);
 
         // Season (system, applies_to=all). Fonts and logos categories hide this via

@@ -110,6 +110,20 @@ class GenerateThumbnailsJob implements ShouldQueue
         $this->timeout = max($job, $large);
         $this->tries = max(1, (int) config('assets.processing.pipeline_job_max_tries', 64));
         $this->configureImagesQueue();
+
+        try {
+            $version = AssetVersion::query()->find($this->assetVersionId);
+            $asset = $version?->asset ?? Asset::query()->find($this->assetVersionId);
+            if ($asset) {
+                $mime = $version?->mime_type ?? $asset->mime_type;
+                if (PipelineQueueResolver::isPsdLike($mime, $asset->original_filename)) {
+                    $psdT = (int) config('assets.thumbnail.psd_timeout_seconds', 7200);
+                    $this->timeout = max($this->timeout, $psdT);
+                }
+            }
+        } catch (\Throwable) {
+            // Constructor must not throw; fallback to default timeout
+        }
     }
 
     public function retryUntil(): \DateTimeInterface
@@ -1219,6 +1233,44 @@ class GenerateThumbnailsJob implements ShouldQueue
                 $asset = $v ? $v->asset : Asset::find($this->assetVersionId);
             }
 
+            if (! isset($version)) {
+                $version = AssetVersion::find($this->assetVersionId);
+            }
+
+            // OOM / ImageMagick resource limits: retrying the same job on the same hardware will not help.
+            // Mark SKIPPED, complete the job successfully so Bus::chain continues (no 32x retry / Sentry spam).
+            if (
+                $asset
+                && (bool) config('assets.thumbnail.resource_exhaustion_terminal', true)
+                && $this->isResourceExhaustionException($e)
+            ) {
+                $this->applyResourceExhaustionSkip($asset, $version, $e);
+                $asset->refresh();
+                $this->finalizeTerminalThumbnailFailureAndContinuePipeline($asset, $e->getMessage());
+                \App\Services\UploadDiagnosticLogger::jobFail('GenerateThumbnailsJob', $asset->id, $e->getMessage(), [
+                    'server_resource_limit' => true,
+                    'terminal_no_retry' => true,
+                ]);
+                try {
+                    \App\Services\ActivityRecorder::logAsset(
+                        $asset,
+                        \App\Enums\EventType::ASSET_THUMBNAIL_SKIPPED,
+                        [
+                            'reason' => 'server_resource_limit',
+                            'message' => $e->getMessage(),
+                        ]
+                    );
+                } catch (\Throwable $logEx) {
+                    Log::warning('[GenerateThumbnailsJob] Activity log failed (resource skip)', ['error' => $logEx->getMessage()]);
+                }
+                Log::warning('[GenerateThumbnailsJob] Terminal skip — server resource limit (no retry)', [
+                    'asset_id' => $asset->id,
+                    'exception' => get_class($e),
+                ]);
+
+                return;
+            }
+
             if ($asset) {
                 Log::error('[GenerateThumbnailsJob] Thumbnail generation failed', [
                     'asset_id' => $asset->id,
@@ -1593,12 +1645,15 @@ class GenerateThumbnailsJob implements ShouldQueue
         app(SystemIncidentService::class)->resolveOpenQueueJobFailuresForAsset((string) $asset->id);
 
         $isTimeout = $this->isLikelyTimeoutOrExhaustion($exception);
-        $userLine = $isTimeout
-            ? 'Processing this file took too long, so we stopped trying to build a preview. You can still download the original.'
-            : 'We could not generate a preview for this file after several attempts. You can still download the original.';
+        $isResource = $this->isResourceExhaustionException($exception);
+        $userLine = $isResource
+            ? 'This file is too large or complex for our preview service to process on this server. You can still download the original.'
+            : ($isTimeout
+                ? 'Processing this file took too long, so we stopped trying to build a preview. You can still download the original.'
+                : 'We could not generate a preview for this file after several attempts. You can still download the original.');
 
         $meta = array_merge($asset->metadata ?? [], [
-            'thumbnail_skip_reason' => 'generation_exhausted',
+            'thumbnail_skip_reason' => $isResource ? 'server_resource_limit' : 'generation_exhausted',
             'thumbnail_skip_message' => $userLine,
             'preview_unavailable_user_message' => $userLine,
             'pipeline_preview_exhausted_at' => now()->toIso8601String(),
@@ -1619,7 +1674,7 @@ class GenerateThumbnailsJob implements ShouldQueue
             $version->update([
                 'pipeline_status' => 'complete',
                 'metadata' => array_merge($version->metadata ?? [], [
-                    'thumbnail_skip_reason' => 'generation_exhausted',
+                    'thumbnail_skip_reason' => $isResource ? 'server_resource_limit' : 'generation_exhausted',
                     'thumbnails_generated' => false,
                 ]),
             ]);
@@ -1635,6 +1690,7 @@ class GenerateThumbnailsJob implements ShouldQueue
             'asset_id' => $asset->id,
             'error' => $exception->getMessage(),
             'attempts' => $this->attempts(),
+            'is_resource' => $isResource,
         ]);
 
         try {
@@ -1642,7 +1698,7 @@ class GenerateThumbnailsJob implements ShouldQueue
                 $asset,
                 \App\Enums\EventType::ASSET_THUMBNAIL_SKIPPED,
                 [
-                    'reason' => 'generation_exhausted',
+                    'reason' => $isResource ? 'server_resource_limit' : 'generation_exhausted',
                     'attempts' => $this->attempts(),
                 ]
             );
@@ -1655,6 +1711,66 @@ class GenerateThumbnailsJob implements ShouldQueue
             'error' => $exception->getMessage(),
             'attempts' => $this->attempts(),
         ]);
+    }
+
+    /**
+     * True when the worker or ImageMagick hit a hard resource limit (retrying the same work will not help
+     * without different hardware, policy, or a smaller source file).
+     */
+    protected function isResourceExhaustionException(\Throwable $e): bool
+    {
+        $msg = strtolower($e->getMessage().' ');
+        $p = $e->getPrevious();
+        while ($p) {
+            $msg .= strtolower($p->getMessage().' ');
+            $p = $p->getPrevious();
+        }
+
+        return str_contains($msg, 'allowed memory size')
+            || str_contains($msg, 'out of memory')
+            || str_contains($msg, 'memory exhausted')
+            || str_contains($msg, 'memory allocation failed')
+            || str_contains($msg, 'cannot allocate memory')
+            || str_contains($msg, 'resource temporarily unavailable')
+            || str_contains($msg, 'cache resources exhausted')
+            || str_contains($msg, 'cache resources are exhausted')
+            || str_contains($msg, 'limitdisk')
+            || str_contains($msg, 'map cache')
+            || (str_contains($msg, 'magick:')
+                && (str_contains($msg, 'memory') || str_contains($msg, 'resource') || str_contains($msg, 'limit')));
+    }
+
+    /**
+     * Terminal SKIPPED after OOM / IM resource error — same UX intent as over max_source_bytes.
+     */
+    protected function applyResourceExhaustionSkip(Asset $asset, ?AssetVersion $version, \Throwable $e): void
+    {
+        $userMsg = 'This file is too large or complex for our preview service to process on this server. You can still download the original.';
+
+        $metadata = array_merge($asset->metadata ?? [], [
+            'thumbnail_skip_reason' => 'server_resource_limit',
+            'thumbnail_skip_message' => $userMsg,
+            'preview_unavailable_user_message' => $userMsg,
+            'thumbnails_generated' => false,
+            'pipeline_preview_last_error' => $this->sanitizeErrorMessage($e->getMessage()),
+            'pipeline_resource_limit_at' => now()->toIso8601String(),
+        ]);
+
+        $asset->update([
+            'thumbnail_status' => ThumbnailStatus::SKIPPED,
+            'thumbnail_error' => null,
+            'thumbnail_started_at' => null,
+            'metadata' => $metadata,
+        ]);
+        if ($version) {
+            $version->update([
+                'pipeline_status' => 'complete',
+                'metadata' => array_merge($version->metadata ?? [], [
+                    'thumbnail_skip_reason' => 'server_resource_limit',
+                    'thumbnails_generated' => false,
+                ]),
+            ]);
+        }
     }
 
     protected function applyMaxSourceBytesSkip(Asset $asset, ?AssetVersion $version, int $fileSizeBytes, int $maxBytes): void

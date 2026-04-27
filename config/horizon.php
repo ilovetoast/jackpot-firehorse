@@ -8,6 +8,12 @@ use Illuminate\Support\Str;
  */
 $horizonQueueWorkersEnabled = filter_var(env('QUEUE_WORKERS_ENABLED', true), FILTER_VALIDATE_BOOL);
 
+/*
+ * When QUEUE_IMAGES_PSD_QUEUE is empty, PSD/PSB assets use the size-based “heavy” queue only; the
+ * images-psd worker then receives no jobs. Set QUEUE_IMAGES_PSD_QUEUE=images-psd to enable isolation.
+ */
+$imagesPsdQueueName = env('QUEUE_IMAGES_PSD_QUEUE') ?: 'images-psd';
+
 return [
 
     /*
@@ -107,6 +113,7 @@ return [
         'redis:downloads' => 300,
         'redis:images' => 300,
         'redis:images-heavy' => 600,
+        'redis:images-psd' => 1200,
         'redis:pdf-processing' => 300,
         'redis:ai' => 600,
         'redis:ai-low' => 900,
@@ -249,6 +256,9 @@ return [
         /*
          * Large originals (see ASSET_PIPELINE_HEAVY_MIN_BYTES): same job classes as images queue,
          * but workers need more RAM and a longer kill timeout. Keep maxProcesses low.
+         *
+         * supervisor-images-psd: optional — only when QUEUE_IMAGES_PSD_QUEUE is set (e.g. images-psd).
+         * Isolates huge Photoshop/PSB flatten work from other large rasters. Same job classes; tune RAM high.
          */
         'supervisor-images-heavy' => [
             'connection' => 'redis',
@@ -263,6 +273,20 @@ return [
             // Heavy originals: one retry for transient OOM / S3 / rsvg failures.
             'tries' => 2,
             'timeout' => (int) env('HORIZON_IMAGES_HEAVY_WORKER_TIMEOUT', 1800),
+            'nice' => 0,
+        ],
+        'supervisor-images-psd' => [
+            'connection' => 'redis',
+            'queue' => [$imagesPsdQueueName],
+            'balance' => 'auto',
+            'autoScalingStrategy' => 'time',
+            'maxProcesses' => 1,
+            'minProcesses' => 1,
+            'maxTime' => 3600,
+            'maxJobs' => 30,
+            'memory' => (int) env('HORIZON_IMAGES_PSD_MEMORY', 8192),
+            'tries' => 2,
+            'timeout' => (int) env('HORIZON_IMAGES_PSD_WORKER_TIMEOUT', 7200),
             'nice' => 0,
         ],
         'supervisor-pdf-processing' => [
@@ -348,6 +372,12 @@ return [
                 'balanceMaxShift' => 1,
                 'balanceCooldown' => 5,
             ],
+            'supervisor-images-psd' => [
+                'maxProcesses' => 1,
+                'minProcesses' => 1,
+                'balanceMaxShift' => 1,
+                'balanceCooldown' => 10,
+            ],
             'supervisor-pdf-processing' => [
                 'maxProcesses' => 2,
                 'balanceMaxShift' => 1,
@@ -389,6 +419,10 @@ return [
                 'minProcesses' => 1,
                 'timeout' => (int) env('HORIZON_IMAGES_HEAVY_WORKER_TIMEOUT', 1800),
             ],
+            'supervisor-images-psd' => [
+                'maxProcesses' => 1,
+                'minProcesses' => 1,
+            ],
             'supervisor-pdf-processing' => [
                 'maxProcesses' => 1,
             ],
@@ -414,6 +448,10 @@ return [
                 'maxProcesses' => 2,
             ],
             'supervisor-images-heavy' => [
+                'maxProcesses' => 1,
+                'minProcesses' => 1,
+            ],
+            'supervisor-images-psd' => [
                 'maxProcesses' => 1,
                 'minProcesses' => 1,
             ],

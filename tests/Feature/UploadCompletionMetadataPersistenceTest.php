@@ -144,7 +144,7 @@ class UploadCompletionMetadataPersistenceTest extends TestCase
             [
                 'id' => 1,
                 'key' => 'photo_type',
-                'system_label' => 'Photo Type',
+                'system_label' => 'Shot Type',
                 'type' => 'select',
                 'scope' => 'system',
                 'applies_to' => 'image',
@@ -179,16 +179,16 @@ class UploadCompletionMetadataPersistenceTest extends TestCase
         DB::table('metadata_options')->insert([
             [
                 'metadata_field_id' => 1,
-                'value' => 'studio',
-                'system_label' => 'Studio',
+                'value' => 'lifestyle',
+                'system_label' => 'Lifestyle',
                 'is_system' => true,
                 'created_at' => now(),
                 'updated_at' => now(),
             ],
             [
                 'metadata_field_id' => 1,
-                'value' => 'outdoor',
-                'system_label' => 'Outdoor',
+                'value' => 'product_only',
+                'system_label' => 'Product-only',
                 'is_system' => true,
                 'created_at' => now(),
                 'updated_at' => now(),
@@ -200,7 +200,7 @@ class UploadCompletionMetadataPersistenceTest extends TestCase
     {
         $metadata = [
             'fields' => [
-                'photo_type' => 'studio',
+                'photo_type' => 'lifestyle',
                 'usage_rights' => 'commercial',
             ],
         ];
@@ -232,7 +232,7 @@ class UploadCompletionMetadataPersistenceTest extends TestCase
         $photoTypeMetadata = $metadataRows->where('metadata_field_id', $photoTypeField->id)->first();
         
         $this->assertNotNull($photoTypeMetadata, 'photo_type metadata must be persisted');
-        $this->assertEquals('studio', json_decode($photoTypeMetadata->value_json, true));
+        $this->assertEquals('lifestyle', json_decode($photoTypeMetadata->value_json, true));
         $this->assertEquals('user', $photoTypeMetadata->source);
         $this->assertNotNull($photoTypeMetadata->approved_at, 'Upload-time metadata must be auto-approved');
     }
@@ -241,7 +241,7 @@ class UploadCompletionMetadataPersistenceTest extends TestCase
     {
         $metadata = [
             'fields' => [
-                'photo_type' => 'studio',
+                'photo_type' => 'lifestyle',
             ],
         ];
 
@@ -297,7 +297,7 @@ class UploadCompletionMetadataPersistenceTest extends TestCase
     {
         $metadata = [
             'fields' => [
-                'photo_type' => 'studio',
+                'photo_type' => 'lifestyle',
                 'usage_rights' => 'commercial',
             ],
         ];
@@ -329,7 +329,7 @@ class UploadCompletionMetadataPersistenceTest extends TestCase
 
         $this->assertNotNull($photoTypeMetadata);
         $this->assertNotNull($usageRightsMetadata);
-        $this->assertEquals('studio', json_decode($photoTypeMetadata->value_json, true));
+        $this->assertEquals('lifestyle', json_decode($photoTypeMetadata->value_json, true));
         $this->assertEquals('commercial', json_decode($usageRightsMetadata->value_json, true));
     }
 
@@ -337,7 +337,7 @@ class UploadCompletionMetadataPersistenceTest extends TestCase
     {
         $metadata = [
             'fields' => [
-                'photo_type' => 'studio',
+                'photo_type' => 'lifestyle',
             ],
         ];
 
@@ -395,7 +395,7 @@ class UploadCompletionMetadataPersistenceTest extends TestCase
 
         $metadata = [
             'fields' => [
-                'photo_type' => 'studio',
+                'photo_type' => 'lifestyle',
             ],
         ];
 
@@ -445,7 +445,7 @@ class UploadCompletionMetadataPersistenceTest extends TestCase
 
         $globalMetadata = [
             'fields' => [
-                'photo_type' => 'studio',
+                'photo_type' => 'lifestyle',
             ],
         ];
 
@@ -530,7 +530,7 @@ class UploadCompletionMetadataPersistenceTest extends TestCase
         // Upload to first category with photo_type metadata
         $metadata1 = [
             'fields' => [
-                'photo_type' => 'studio',
+                'photo_type' => 'lifestyle',
             ],
         ];
 

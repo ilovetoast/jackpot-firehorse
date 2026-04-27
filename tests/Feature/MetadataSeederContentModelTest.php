@@ -48,7 +48,7 @@ class MetadataSeederContentModelTest extends TestCase
             'created_at' => now(),
             'updated_at' => now(),
         ];
-        foreach (['tags' => 'Tags', 'collection' => 'Collection', 'photo_type' => 'Photo Type'] as $key => $label) {
+        foreach (['tags' => 'Tags', 'collection' => 'Collection', 'photo_type' => 'Shot Type'] as $key => $label) {
             if (! DB::table('metadata_fields')->where('key', $key)->exists()) {
                 DB::table('metadata_fields')->insert(array_merge($base, ['key' => $key, 'system_label' => $label]));
             }

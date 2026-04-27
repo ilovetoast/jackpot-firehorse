@@ -635,7 +635,7 @@ class AiMetadataGenerationService
         $prompt .= "- Return JSON format with both 'fields' and 'tags' sections:\n";
         $prompt .= "{\n";
         $prompt .= "  \"fields\": {\n";
-        $prompt .= "    \"photo_type\": {\"value\": \"studio\", \"confidence\": 0.94}\n";
+        $prompt .= "    \"photo_type\": {\"value\": \"lifestyle\", \"confidence\": 0.94}\n";
         $prompt .= "  },\n";
         $prompt .= "  \"tags\": []\n";
         $prompt .= "}\n";

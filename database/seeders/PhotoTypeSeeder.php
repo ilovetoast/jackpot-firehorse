@@ -9,7 +9,7 @@ use Illuminate\Support\Facades\DB;
  * Basic Metadata Fields Seeder
  *
  * Creates essential metadata fields including:
- * - photo_type: Classifies images by type (studio, lifestyle, product, etc.)
+ * - photo_type: Shot type / visual composition (DB key unchanged; label “Shot Type” in MetadataFieldsSeeder).
  * - orientation: Image orientation (landscape, portrait, square)
  * - color_space: Color space (sRGB, Adobe RGB, Display P3)
  * - resolution_class: Resolution classification (low, medium, high, ultra)
@@ -44,7 +44,7 @@ class PhotoTypeSeeder extends Seeder
     {
         $fieldId = $this->getOrCreateField([
             'key' => 'photo_type',
-            'system_label' => 'Photo Type',
+            'system_label' => 'Shot Type',
             'type' => 'select',
             'applies_to' => 'image',
             'scope' => 'system',
@@ -57,16 +57,26 @@ class PhotoTypeSeeder extends Seeder
         ]);
 
         $options = [
-            ['value' => 'studio', 'system_label' => 'Studio'],
+            ['value' => 'product_only', 'system_label' => 'Product-only'],
+            ['value' => 'product_in_use', 'system_label' => 'Product in use'],
             ['value' => 'lifestyle', 'system_label' => 'Lifestyle'],
-            ['value' => 'product', 'system_label' => 'Product'],
-            ['value' => 'action', 'system_label' => 'Action'],
-            ['value' => 'flat_lay', 'system_label' => 'Flat Lay'],
-            ['value' => 'macro', 'system_label' => 'Macro'],
             ['value' => 'portrait', 'system_label' => 'Portrait'],
-            ['value' => 'landscape', 'system_label' => 'Landscape'],
+            ['value' => 'detail_closeup', 'system_label' => 'Detail/Close-up'],
+            ['value' => 'flat_lay', 'system_label' => 'Flat lay'],
+            ['value' => 'packaging_label', 'system_label' => 'Packaging/Label'],
+            ['value' => 'interior', 'system_label' => 'Interior'],
+            ['value' => 'exterior', 'system_label' => 'Exterior'],
             ['value' => 'event', 'system_label' => 'Event'],
+            ['value' => 'action', 'system_label' => 'Action'],
+            ['value' => 'scenic', 'system_label' => 'Scenic'],
+            ['value' => 'mockup_render', 'system_label' => 'Mockup/Render'],
         ];
+
+        $allowed = array_column($options, 'value');
+        DB::table('metadata_options')
+            ->where('metadata_field_id', $fieldId)
+            ->whereNotIn('value', $allowed)
+            ->delete();
 
         $this->createOptions($fieldId, $options);
     }

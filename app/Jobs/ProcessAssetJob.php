@@ -77,12 +77,19 @@ class ProcessAssetJob implements ShouldQueue
                     $bytes = max($bytes, (int) ($cv->file_size ?? 0));
                 }
             }
-            $queue = PipelineQueueResolver::forByteSize($bytes);
+            $queue = PipelineQueueResolver::forPipeline(
+                $bytes,
+                $version?->mime_type ?? $asset->mime_type,
+                $asset->original_filename
+            );
             $this->onQueue($queue);
             $heavyName = (string) config('queue.images_heavy_queue', 'images-heavy');
-            $this->timeout = $queue === $heavyName
+            $psdName = trim((string) config('queue.images_psd_queue', ''));
+            $this->timeout = ($psdName !== '' && $queue === $psdName)
+                ? (int) config('assets.processing.process_asset_job_timeout_psd_seconds', 7200)
+                : ($queue === $heavyName
                 ? (int) config('assets.processing.process_asset_job_timeout_heavy_seconds', 1780)
-                : (int) config('assets.processing.process_asset_job_timeout_seconds', 290);
+                : (int) config('assets.processing.process_asset_job_timeout_seconds', 290));
         } else {
             $this->configureImagesQueue();
             $this->timeout = (int) config('assets.processing.process_asset_job_timeout_seconds', 290);
@@ -504,7 +511,11 @@ class ProcessAssetJob implements ShouldQueue
         } elseif ($asset->size_bytes) {
             $fileSizeBytes = (int) $asset->size_bytes;
         }
-        $pipelineQueue = PipelineQueueResolver::forByteSize($fileSizeBytes);
+        $pipelineQueue = PipelineQueueResolver::forPipeline(
+            $fileSizeBytes,
+            $mimeForType,
+            $asset->original_filename
+        );
 
         Bus::chain($chainJobs)
             ->onQueue($pipelineQueue)

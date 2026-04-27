@@ -162,7 +162,7 @@ class FilterVisibilityScopeTest extends TestCase
     /**
      * Test 2: Filter appears when at least one value exists.
      *
-     * Add one asset with photo_type = studio. Assert filter payload includes photo_type.
+     * Add one asset with photo_type = lifestyle. Assert filter payload includes photo_type.
      */
     public function test_filter_appears_when_at_least_one_value_exists(): void
     {
@@ -195,7 +195,7 @@ class FilterVisibilityScopeTest extends TestCase
             'storage_root_path' => 'test/with-type.jpg',
             'metadata' => [
                 'category_id' => $this->category->id,
-                'fields' => ['photo_type' => 'studio'],
+                'fields' => ['photo_type' => 'lifestyle'],
             ],
         ]);
 

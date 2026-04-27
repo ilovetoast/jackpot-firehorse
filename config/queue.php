@@ -53,6 +53,20 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | PSD/PSB-only pipeline queue (optional)
+    |--------------------------------------------------------------------------
+    |
+    | When non-empty, ProcessAssetJob and thumbnail regen use this queue for
+    | image/vnd.adobe.photoshop and .psd/.psb so huge Photoshop files do not
+    | contend with other “heavy” images. Requires a Horizon supervisor (see
+    | horizon.php supervisor-images-psd) with high memory and a long timeout.
+    | Empty string = disabled (use images vs images-heavy by byte size only).
+    |
+    */
+    'images_psd_queue' => env('QUEUE_IMAGES_PSD_QUEUE', ''),
+
+    /*
+    |--------------------------------------------------------------------------
     | PDF Processing Queue Name
     |--------------------------------------------------------------------------
     |

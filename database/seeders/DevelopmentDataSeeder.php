@@ -1082,7 +1082,7 @@ class DevelopmentDataSeeder extends Seeder
     {
         return match ($fieldKey) {
             // Asset type fields (one per system category)
-            'photo_type' => fake()->randomElement(['studio', 'lifestyle']),
+            'photo_type' => fake()->randomElement(['lifestyle', 'product_only', 'flat_lay', 'detail_closeup']),
             'logo_type' => fake()->randomElement(['primary', 'secondary', 'promotional']),
             'graphic_type' => fake()->randomElement(['icon', 'effect', 'texture']),
             'video_type' => fake()->randomElement(['b_roll', 'interview']),
@@ -1105,8 +1105,8 @@ class DevelopmentDataSeeder extends Seeder
             'orientation' => fake()->randomElement(['landscape', 'portrait', 'square']),
             'color_space' => fake()->randomElement(['srgb', 'adobe_rgb', 'cmyk']),
             'resolution_class' => fake()->randomElement(['low', 'medium', 'high', 'ultra']),
-            'environment_type' => fake()->randomElement(['indoor', 'outdoor', 'studio', 'urban']),
-            'subject_type' => fake()->randomElement(['product', 'person', 'food', 'architecture']),
+            'environment_type' => fake()->randomElement(['indoor', 'outdoor', 'studio', 'urban', 'nature', 'unknown']),
+            'subject_type' => fake()->randomElement(['product', 'person', 'food_beverage', 'architecture', 'landscape_place']),
             default => fake()->word(),
         };
     }
