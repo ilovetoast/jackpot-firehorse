@@ -78,16 +78,21 @@ export default function AgencyStripBrandSelect({
         ? 'bg-white/10 text-white hover:bg-white/15 focus:ring-white/40 focus:ring-offset-transparent'
         : 'bg-slate-50 text-slate-800 shadow-sm ring-1 ring-slate-200/90 hover:bg-slate-100 focus:ring-indigo-500 focus:ring-offset-white'
 
+    // Opaque background so the main <nav> border/shadow (sibling below the agency strip) never shows through
     const panelBase = isTransparentVariant
-        ? 'border border-white/10 bg-slate-900/98 text-white shadow-xl ring-1 ring-black/20 backdrop-blur-sm'
-        : 'border border-slate-200/90 bg-white text-slate-900 shadow-xl ring-1 ring-black/5'
+        ? 'border border-white/10 bg-slate-900 text-white shadow-2xl ring-1 ring-white/10'
+        : 'border border-slate-200/90 bg-white text-slate-900 shadow-2xl ring-1 ring-black/5'
 
     const scrollBar = isTransparentVariant ? 'scrollbar-cinematic' : 'scrollbar-thin'
 
     return (
         <div className="flex shrink-0 items-center gap-2 sm:gap-2.5">
             <Listbox value={selectedValue} onChange={handleListboxChange}>
-                <div className="relative">
+                {/*
+                    isolation + high z: options are position:absolute; they extend below the agency strip over the
+                    main nav. This subtree must own a stacking context above the nav’s top edge/shadow.
+                */}
+                <div className="relative z-[200] isolate">
                     <Listbox.Button
                         className={`group inline-flex max-w-[10rem] min-w-0 items-center gap-1 rounded-lg px-2 py-1.5 text-left text-xs font-medium transition focus:outline-none focus:ring-2 focus:ring-offset-1 sm:max-w-[14rem] sm:text-sm ${buttonBase}`}
                         style={!isTransparentVariant ? { color: brandColor } : undefined}
@@ -110,7 +115,7 @@ export default function AgencyStripBrandSelect({
                         leaveTo="opacity-0"
                     >
                         <Listbox.Options
-                            className={`absolute right-0 z-[160] mt-1 max-h-60 min-w-[12rem] max-w-[min(100vw-2rem,20rem)] overflow-y-auto rounded-lg py-1 focus:outline-none ${scrollBar} ${panelBase}`}
+                            className={`absolute right-0 z-[1] mt-1 max-h-60 min-w-[12rem] max-w-[min(100vw-2rem,20rem)] overflow-y-auto rounded-lg py-1 focus:outline-none ${scrollBar} ${panelBase}`}
                         >
                             {list.map((b) => {
                                 const v = optionKey(b)

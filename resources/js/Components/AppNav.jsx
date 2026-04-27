@@ -866,7 +866,7 @@ export default function AppNav({
             */}
             {agencyStripVisible && (
                 <div
-                    className={`relative z-[41] flex items-center transition-colors duration-300 ${
+                    className={`relative z-[50] flex items-center overflow-visible transition-colors duration-300 ${
                         isCinematicNav ? 'text-white/90' : 'text-slate-800'
                     }`}
                     style={{

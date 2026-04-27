@@ -31,6 +31,19 @@ Tenant roles are Spatie roles assigned via the `tenant_user` pivot table.
 | **Owner** 👑 | Full company access | Company founder, primary administrator |
 | **Admin** | Company administration | Can manage company settings, users, and brands |
 | **Member** | Basic company membership | Default role for new users |
+| **Agency admin** | Client-granted company access for a **linked agency** | Agency staff working in a client company’s workspace—treated like **admin** for most company permissions (see `PermissionMap`) |
+| **Agency partner** | Limited company access after certain agency↔client flows | Asset-oriented access: **no** company settings, billing, or team management (narrower than admin) |
+
+### Agency roles and relationships (short)
+
+These are **tenant (company) roles** on a **client** company (`tenants` row), not roles on the agency’s own tenant.
+
+- **Agency tenant vs client tenant:** An **agency** is a company whose tenant has `is_agency = true`. **Client** companies link to that agency through the **agency partnership** (configured under **Company settings → Agencies**). The same person can switch workspace between the agency tenant and linked clients (e.g. agency nav / brand switcher).
+- **Why they exist:** Clients can grant people from a partner agency access to their **company** without making them a full **Admin**. **Agency admin** is the strong grant (broadly aligned with **admin** in `PermissionMap`). **Agency partner** is a lighter, asset-focused footprint (no `team.manage` / company settings stack).
+- **Agency-managed membership:** Users added **by the agency** to a client may be flagged on `tenant_user` (e.g. `is_agency_managed`, `agency_tenant_id`) so the **Team** page and policies can treat them as “under the partnership” rather than a one-off direct hire. **Brand roles** (`brand_user.role`) still define what they can do **per brand** (upload, approve, etc.).
+- **Effective permissions:** Always resolve from **`RoleRegistry`** + **`PermissionMap`** via **`TenantPermissionResolver`** / **`AuthPermissionService`**—do not infer from the word “agency” alone.
+
+For product flows (incubation, transfers, rewards), see also [AGENCY_INCUBATION_ROADMAP.md](./AGENCY_INCUBATION_ROADMAP.md).
 
 ### Important Notes
 
@@ -49,8 +62,9 @@ Each tenant role has different permission sets:
 - **Owner**: All permissions (full access to everything)
 - **Admin**: All manager permissions + governance permissions
 - **Member**: Basic company membership (minimal permissions, typically needs brand roles to access assets)
+- **Agency admin** / **Agency partner**: See [Agency roles and relationships (short)](#agency-roles-and-relationships-short); exact permission sets are in `app/Support/Roles/PermissionMap.php` under `tenantPermissions()`.
 
-**Note:** Only Owner, Admin, and Member are tenant-level roles. All other roles (Brand Manager, Manager, Contributor, Uploader, Viewer) are brand-scoped and assigned per brand.
+**Note:** Tenant-level roles include **Owner**, **Admin**, **Member**, **Agency admin**, and **Agency partner** (see `RoleRegistry`). **Brand-scoped** titles (Brand Manager, Contributor, Viewer, etc.) are **not** tenant roles—they are **brand roles** in `brand_user.role`.
 
 ---
 
@@ -145,7 +159,7 @@ These are separate from tenant roles and control access to the admin dashboard a
 ### Seeders
 
 - **`RoleSeeder.php`**: Creates all Spatie roles (tenant-level and legacy roles)
-- **`TenantRoleSeeder.php`**: Ensures tenant roles are properly seeded (Owner, Admin, Member)
+- **`TenantRoleSeeder.php`**: Ensures tenant roles are properly seeded (including owner, admin, member, and agency-related roles per `RoleRegistry`)
 - **`PermissionSeeder.php`**: Creates and assigns permissions to roles
 
 ### Database Structure
