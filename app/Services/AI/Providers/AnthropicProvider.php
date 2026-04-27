@@ -98,6 +98,37 @@ class AnthropicProvider implements AIProviderInterface
         $model = $options['model'] ?? config('ai.anthropic.model', 'claude-sonnet-4-20250514');
         $maxTokens = $options['max_tokens'] ?? 4096;
 
+        $refUrls = $options['reference_image_data_urls'] ?? [];
+        if (! is_array($refUrls)) {
+            $refUrls = [];
+        }
+        $refUrls = array_values(array_filter($refUrls, static fn ($u) => is_string($u) && $u !== ''));
+
+        $content = [
+            [
+                'type' => 'text',
+                'text' => $prompt,
+            ],
+        ];
+        foreach ($refUrls as $refUrl) {
+            if (preg_match('#^data:(image/[^;]+);base64,(.+)$#', $refUrl, $rm)) {
+                $content[] = [
+                    'type' => 'image',
+                    'source' => [
+                        'type' => 'base64',
+                        'media_type' => $rm[1],
+                        'data' => $rm[2],
+                    ],
+                ];
+            }
+        }
+        if ($refUrls !== []) {
+            $content[] = [
+                'type' => 'text',
+                'text' => 'The last image after this line is the primary asset; apply the task only to that final image.',
+            ];
+        }
+
         if (preg_match('#^data:(image/[^;]+);base64,(.+)$#', $imageBase64DataUrl, $m)) {
             $mediaType = $m[1];
             $data = $m[2];
@@ -105,26 +136,22 @@ class AnthropicProvider implements AIProviderInterface
             throw new \InvalidArgumentException('Image must be a base64 data URL (data:image/...;base64,...)');
         }
 
+        $content[] = [
+            'type' => 'image',
+            'source' => [
+                'type' => 'base64',
+                'media_type' => $mediaType,
+                'data' => $data,
+            ],
+        ];
+
         $body = [
             'model' => $model,
             'max_tokens' => $maxTokens,
             'messages' => [
                 [
                     'role' => 'user',
-                    'content' => [
-                        [
-                            'type' => 'image',
-                            'source' => [
-                                'type' => 'base64',
-                                'media_type' => $mediaType,
-                                'data' => $data,
-                            ],
-                        ],
-                        [
-                            'type' => 'text',
-                            'text' => $prompt,
-                        ],
-                    ],
+                    'content' => $content,
                 ],
             ],
         ];

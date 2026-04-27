@@ -161,6 +161,19 @@ class Category extends Model
     }
 
     /**
+     * Custom categories only: when true, AI vision may include peer tag hints and a few same-category
+     * reference thumbnails (opt-in; system/template categories never use this — use category setting only there).
+     */
+    public function isAiLibraryReferenceContextEnabled(): bool
+    {
+        if ($this->is_system) {
+            return false;
+        }
+
+        return (bool) data_get($this->settings, 'ai_use_library_references', false);
+    }
+
+    /**
      * Default EBI enablement for a system category slug (new categories + migration backfill).
      * Execution-style categories default on; core asset library categories (logos/photography/graphics) off.
      */

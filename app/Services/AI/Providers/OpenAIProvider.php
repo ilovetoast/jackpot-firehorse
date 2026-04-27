@@ -688,6 +688,7 @@ class OpenAIProvider implements AIProviderInterface
      *                          - model: Model name to use (default: gpt-4o-mini)
      *                          - max_tokens: Maximum tokens in response (default: 1000)
      *                          - response_format: Response format (default: ['type' => 'json_object'])
+     *                          - reference_image_data_urls: optional extra data URLs before the primary image
      * @return array Response array with:
      *               - text: Generated text response (typically JSON string)
      *               - tokens_in: Number of input tokens used
@@ -709,23 +710,45 @@ class OpenAIProvider implements AIProviderInterface
         }
 
         try {
+            $refUrls = $options['reference_image_data_urls'] ?? [];
+            if (! is_array($refUrls)) {
+                $refUrls = [];
+            }
+            $refUrls = array_values(array_filter($refUrls, static fn ($u) => is_string($u) && $u !== ''));
+
+            $content = [
+                [
+                    'type' => 'text',
+                    'text' => $prompt,
+                ],
+            ];
+            foreach ($refUrls as $refUrl) {
+                $content[] = [
+                    'type' => 'image_url',
+                    'image_url' => [
+                        'url' => $refUrl,
+                    ],
+                ];
+            }
+            if ($refUrls !== []) {
+                $content[] = [
+                    'type' => 'text',
+                    'text' => 'The last image in this message (after the above reference images) is the primary asset; apply structured fields and tags only to that final image unless the instruction text already says otherwise.',
+                ];
+            }
+            $content[] = [
+                'type' => 'image_url',
+                'image_url' => [
+                    'url' => $imageBase64DataUrl,
+                ],
+            ];
+
             $response = $this->sendChatCompletionsRequest([
                 'model' => $model,
                 'messages' => [
                     [
                         'role' => 'user',
-                        'content' => [
-                            [
-                                'type' => 'text',
-                                'text' => $prompt,
-                            ],
-                            [
-                                'type' => 'image_url',
-                                'image_url' => [
-                                    'url' => $imageBase64DataUrl,
-                                ],
-                            ],
-                        ],
+                        'content' => $content,
                     ],
                 ],
                 'max_tokens' => $maxTokens,

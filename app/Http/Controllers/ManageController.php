@@ -88,6 +88,9 @@ class ManageController extends Controller
                     'upgrade_available' => $category->upgrade_available ?? false,
                     'deletion_available' => $category->deletion_available ?? false,
                     'ebi_enabled' => $category->isEbiEnabled(),
+                    'ai_use_library_references' => $category->is_system
+                        ? false
+                        : (bool) data_get($category->settings, 'ai_use_library_references', false),
                 ];
             })
             ->values();

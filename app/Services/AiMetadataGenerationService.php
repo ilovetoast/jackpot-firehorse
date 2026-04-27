@@ -121,10 +121,18 @@ class AiMetadataGenerationService
             ];
         }
 
+        $category = null;
+        $catId = $asset->metadata['category_id'] ?? null;
+        if ($catId !== null && $catId !== '') {
+            $category = Category::find($catId);
+        }
+        $lib = app(CategoryAiLibraryContextService::class)->buildForAsset($asset, $category);
+        $libAddendum = (string) ($lib['prompt_addendum'] ?? '');
+
         // Build prompt (structured + tags, or tags-only)
         $prompt = ! empty($fields)
-            ? $this->buildPrompt($asset, $fields)
-            : $this->buildPromptTagsOnly($asset);
+            ? $this->buildPrompt($asset, $fields, $libAddendum)
+            : $this->buildPromptTagsOnly($asset, $libAddendum);
 
         // Fetch image bytes internally via S3/IAM (never pass presigned URLs to AI providers)
         $imageBase64DataUrl = $this->fetchThumbnailAsBase64DataUrl($asset);
@@ -136,12 +144,17 @@ class AiMetadataGenerationService
             throw new \Exception('AI image fetch failed before provider call');
         }
 
-        // Call provider's image analysis method (passes base64 data URL, not S3 URL)
-        $response = $this->provider->analyzeImage($imageBase64DataUrl, $prompt, [
+        $analyzeOptions = [
             'model' => $this->defaultModel,
             'max_tokens' => 1000,
             'response_format' => ['type' => 'json_object'],
-        ]);
+        ];
+        if (! empty($lib['reference_image_data_urls']) && is_array($lib['reference_image_data_urls'])) {
+            $analyzeOptions['reference_image_data_urls'] = $lib['reference_image_data_urls'];
+        }
+
+        // Call provider's image analysis method (passes base64 data URL, not S3 URL)
+        $response = $this->provider->analyzeImage($imageBase64DataUrl, $prompt, $analyzeOptions);
 
         // Parse response (returns both candidates and tags from ONE Vision API call)
         $parsed = $this->parseResponse($response, $asset, $fields);
@@ -589,9 +602,10 @@ class AiMetadataGenerationService
      * Uses ONE Vision API call to infer both structured field values and general descriptive tags.
      *
      * @param  array  $fields  Field definitions
+     * @param  string  $libraryAddendum  Optional custom-category peer context ({@see CategoryAiLibraryContextService})
      * @return string Prompt text
      */
-    protected function buildPrompt(Asset $asset, array $fields): string
+    protected function buildPrompt(Asset $asset, array $fields, string $libraryAddendum = ''): string
     {
         $fieldsJson = [];
         foreach ($fields as $field) {
@@ -610,6 +624,9 @@ class AiMetadataGenerationService
         $prompt = "Analyze this image and provide both structured metadata field values and searchable tags.\n\n";
 
         $prompt .= $ctx;
+        if ($libraryAddendum !== '') {
+            $prompt .= $libraryAddendum;
+        }
 
         $prompt .= "STRUCTURED FIELDS:\n";
         $prompt .= "For each field below, select ONLY from the provided allowed values.\n";
@@ -648,7 +665,7 @@ class AiMetadataGenerationService
     /**
      * Tags-only prompt when no structured fields qualify (e.g. executions with only Tags AI-enabled).
      */
-    protected function buildPromptTagsOnly(Asset $asset): string
+    protected function buildPromptTagsOnly(Asset $asset, string $libraryAddendum = ''): string
     {
         $min = $this->getTaggingMinConfidence();
         $minStr = number_format($min, 2, '.', '');
@@ -657,6 +674,9 @@ class AiMetadataGenerationService
         $prompt = "Analyze this image and generate SEARCHABLE TAGS for a digital asset management system.\n\n";
 
         $prompt .= $ctx;
+        if ($libraryAddendum !== '') {
+            $prompt .= $libraryAddendum;
+        }
 
         $prompt .= "TAGGING RULES (STRICT):\n";
         $prompt .= "- Never use \"photo shoot\" or \"photoshoot\" as a tag — redundant in photography libraries; use specific visible subjects instead\n";

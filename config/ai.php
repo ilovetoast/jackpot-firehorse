@@ -40,6 +40,16 @@ return [
     'metadata_tagging' => [
         'min_confidence' => (float) env('AI_METADATA_TAGGING_MIN_CONFIDENCE', 0.90),
         /**
+         * Custom category only (settings.ai_use_library_references): rank peer assets in-DB
+         * (quality_rating, download count) and add tag text + optional reference thumbnails. No ML — local SQL only.
+         */
+        'library_reference_context' => [
+            'peer_pool' => 48,
+            'max_text_peer_assets' => 8,
+            'max_tags_per_peer' => 8,
+            'max_reference_images' => 2,
+        ],
+        /**
          * Normalized tags (whole string, after {@see AiMetadataGenerationService::normalizeTag}) that Vision
          * often misassigns on packaging, sell sheets, and product hero art — dropped before candidates are stored.
          * Comma-separated env override replaces the default list (use empty string to allow all).

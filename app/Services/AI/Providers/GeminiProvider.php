@@ -63,25 +63,46 @@ class GeminiProvider implements AIProviderInterface
             throw new \InvalidArgumentException("Model '{$model}' is not available for Gemini vision/image.");
         }
 
+        $refUrls = $options['reference_image_data_urls'] ?? [];
+        if (! is_array($refUrls)) {
+            $refUrls = [];
+        }
+        $refUrls = array_values(array_filter($refUrls, static fn ($u) => is_string($u) && $u !== ''));
+
+        $parts = [
+            ['text' => $prompt],
+        ];
+        foreach ($refUrls as $refUrl) {
+            if (preg_match('#^data:(image/[^;]+);base64,(.+)$#', $refUrl, $rm)) {
+                $parts[] = [
+                    'inlineData' => [
+                        'mimeType' => $rm[1],
+                        'data' => $rm[2],
+                    ],
+                ];
+            }
+        }
+        if ($refUrls !== []) {
+            $parts[] = ['text' => 'The last image below is the primary asset; follow the instruction for that image only.'];
+        }
+
         if (! preg_match('#^data:(image/[^;]+);base64,(.+)$#', $imageBase64DataUrl, $m)) {
             throw new \InvalidArgumentException('Image must be a base64 data URL (data:image/...;base64,...).');
         }
 
         $mimeType = $m[1];
         $data = $m[2];
+        $parts[] = [
+            'inlineData' => [
+                'mimeType' => $mimeType,
+                'data' => $data,
+            ],
+        ];
 
         return $this->generateContent(
             [
                 [
-                    'parts' => [
-                        [
-                            'inlineData' => [
-                                'mimeType' => $mimeType,
-                                'data' => $data,
-                            ],
-                        ],
-                        ['text' => $prompt],
-                    ],
+                    'parts' => $parts,
                 ],
             ],
             $model

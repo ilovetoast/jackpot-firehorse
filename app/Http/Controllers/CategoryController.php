@@ -379,6 +379,43 @@ class CategoryController extends Controller
     }
 
     /**
+     * Toggle library reference context for AI vision (custom categories only; settings.ai_use_library_references).
+     */
+    public function patchAiLibraryReferences(Request $request, Brand $brand, Category $category): JsonResponse
+    {
+        $tenant = app('tenant');
+        $user = $request->user();
+
+        if ($brand->tenant_id !== $tenant->id || $category->tenant_id !== $tenant->id || $category->brand_id !== $brand->id) {
+            abort(403);
+        }
+
+        if ($category->is_system) {
+            return response()->json([
+                'message' => 'Library reference context is only available for custom categories.',
+            ], 422);
+        }
+
+        if (! $user->hasPermissionForTenant($tenant, 'metadata.tenant.visibility.manage')
+            && ! $user->hasPermissionForTenant($tenant, 'brand_categories.manage')) {
+            abort(403, 'You do not have permission to update this category setting.');
+        }
+
+        $validated = $request->validate([
+            'ai_use_library_references' => 'required|boolean',
+        ]);
+
+        $settings = $category->settings ?? [];
+        $settings['ai_use_library_references'] = $validated['ai_use_library_references'];
+        $category->update(['settings' => $settings]);
+
+        return response()->json([
+            'success' => true,
+            'ai_use_library_references' => (bool) data_get($category->fresh()->settings, 'ai_use_library_references', false),
+        ]);
+    }
+
+    /**
      * Reorder metadata fields for a category.
      * PATCH /brands/{brand}/categories/{category}/fields/reorder
      * Payload: { field_order: [array of field IDs in new order] }

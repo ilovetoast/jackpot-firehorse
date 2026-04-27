@@ -1136,6 +1136,7 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
             Route::put('/brands/{brand}/categories/{category}', [\App\Http\Controllers\CategoryController::class, 'update'])->name('brands.categories.update');
             Route::patch('/api/brands/{brand}/categories/{category}/visibility', [\App\Http\Controllers\CategoryController::class, 'updateVisibility'])->name('brands.categories.visibility');
             Route::patch('/api/brands/{brand}/categories/{category}/ebi-enabled', [\App\Http\Controllers\CategoryController::class, 'patchEbiEnabled'])->name('brands.categories.ebi-enabled');
+            Route::patch('/api/brands/{brand}/categories/{category}/ai-library-references', [\App\Http\Controllers\CategoryController::class, 'patchAiLibraryReferences'])->name('brands.categories.ai-library-references');
             Route::delete('/brands/{brand}/categories/{category}', [\App\Http\Controllers\CategoryController::class, 'destroy'])->name('brands.categories.destroy');
             Route::put('/api/brands/{brand}/categories/reorder', [\App\Http\Controllers\CategoryController::class, 'reorder'])->name('brands.categories.reorder');
             Route::post('/brands/{brand}/categories/update-order', [\App\Http\Controllers\CategoryController::class, 'updateOrder'])->name('brands.categories.update-order');

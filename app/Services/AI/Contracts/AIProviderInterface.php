@@ -78,6 +78,8 @@ interface AIProviderInterface
      *   - model: Model name to use (overrides default)
      *   - max_tokens: Maximum tokens in response (default: 1000)
      *   - response_format: Response format (e.g., ['type' => 'json_object'])
+     *   - reference_image_data_urls: optional list of extra data URLs (same-category peers); primary image is still
+     *     the main parameter; capable providers attach references before the target.
      *   - other provider-specific options
      * @return array Response array with:
      *   - text: Generated text response (typically JSON string)

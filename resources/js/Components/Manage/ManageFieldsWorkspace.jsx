@@ -119,6 +119,7 @@ export default function ManageFieldsWorkspace({
     const [confirmDisableCoreOpen, setConfirmDisableCoreOpen] = useState(false)
     const [pendingDisable, setPendingDisable] = useState(null)
     const [ebiToggleLoading, setEbiToggleLoading] = useState(false)
+    const [aiLibRefToggleLoading, setAiLibRefToggleLoading] = useState(false)
 
     const noticeTimerRef = useRef(null)
     useEffect(() => {
@@ -200,6 +201,57 @@ export default function ManageFieldsWorkspace({
             setEbiToggleLoading(false)
         }
     }, [brand?.id, canToggleEbi, selectedCategory, postNotice])
+
+    const canToggleAiLibRef =
+        (canManageVisibility || canManageBrandCategories) &&
+        !!brand?.id &&
+        !!selectedCategory &&
+        !selectedCategory.is_system
+
+    const toggleAiLibraryReferences = useCallback(async () => {
+        if (!canToggleAiLibRef || !selectedCategory) return
+        const brandId = brand.id
+        const current = selectedCategory.ai_use_library_references === true
+        const newValue = !current
+        setAiLibRefToggleLoading(true)
+        try {
+            const url =
+                typeof route === 'function'
+                    ? route('brands.categories.ai-library-references', { brand: brandId, category: selectedCategory.id })
+                    : `/app/api/brands/${brandId}/categories/${selectedCategory.id}/ai-library-references`
+            const response = await fetch(url, {
+                method: 'PATCH',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'X-CSRF-TOKEN': getCsrfToken(),
+                    Accept: 'application/json',
+                },
+                credentials: 'same-origin',
+                body: JSON.stringify({ ai_use_library_references: newValue }),
+            })
+            if (response.ok) {
+                postNotice(
+                    newValue
+                        ? 'AI library reference hints enabled for this custom folder.'
+                        : 'AI library reference hints off for this folder.'
+                )
+                router.reload({ only: ['categories'] })
+            } else {
+                const errorData = await response.json().catch(() => ({}))
+                postNotice(
+                    errorData.message || errorData.error || 'Failed to update AI library reference setting.',
+                    'error',
+                    4000
+                )
+            }
+        } catch (error) {
+            console.error('Failed to toggle ai_use_library_references:', error)
+            postNotice('Failed to update AI library reference setting.', 'error')
+        } finally {
+            setAiLibRefToggleLoading(false)
+        }
+    }, [brand?.id, canToggleAiLibRef, selectedCategory, postNotice])
 
     useEffect(() => {
         setExpandedDetailKey(null)
@@ -816,29 +868,58 @@ export default function ManageFieldsWorkspace({
             </div>
 
             {canToggleEbi && selectedCategory && (
-                <div className="flex flex-col gap-3 rounded-lg border border-gray-200 bg-white px-4 py-3 shadow-sm sm:flex-row sm:items-center sm:justify-between">
-                    <div className="min-w-0">
-                        <p className="text-sm font-medium text-gray-900">Enable Brand Intelligence</p>
-                        <p className="mt-0.5 text-xs text-gray-500">
-                            When on, assets in this category are scored after analysis (same idea as AI field toggles).
-                        </p>
-                    </div>
-                    <button
-                        type="button"
-                        role="switch"
-                        aria-checked={selectedCategory.ebi_enabled === true}
-                        disabled={ebiToggleLoading}
-                        onClick={toggleEbiEnabled}
-                        className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 ${
-                            selectedCategory.ebi_enabled === true ? 'bg-indigo-600' : 'bg-gray-200'
-                        }`}
-                    >
-                        <span
-                            className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                                selectedCategory.ebi_enabled === true ? 'translate-x-5' : 'translate-x-0'
+                <div className="space-y-3">
+                    <div className="flex flex-col gap-3 rounded-lg border border-gray-200 bg-white px-4 py-3 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+                        <div className="min-w-0">
+                            <p className="text-sm font-medium text-gray-900">Enable Brand Intelligence</p>
+                            <p className="mt-0.5 text-xs text-gray-500">
+                                When on, assets in this category are scored after analysis (same idea as AI field toggles).
+                            </p>
+                        </div>
+                        <button
+                            type="button"
+                            role="switch"
+                            aria-checked={selectedCategory.ebi_enabled === true}
+                            disabled={ebiToggleLoading}
+                            onClick={toggleEbiEnabled}
+                            className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 ${
+                                selectedCategory.ebi_enabled === true ? 'bg-indigo-600' : 'bg-gray-200'
                             }`}
-                        />
-                    </button>
+                        >
+                            <span
+                                className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                                    selectedCategory.ebi_enabled === true ? 'translate-x-5' : 'translate-x-0'
+                                }`}
+                            />
+                        </button>
+                    </div>
+                    {canToggleAiLibRef && (
+                        <div className="flex flex-col gap-3 rounded-lg border border-gray-200 bg-white px-4 py-3 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+                            <div className="min-w-0">
+                                <p className="text-sm font-medium text-gray-900">AI — use library as context</p>
+                                <p className="mt-0.5 text-xs text-gray-500">
+                                    Optional: vision tagging may use peer tag hints and a few thumbnails from this folder
+                                    (ranked by star rating and downloads). System folders ignore this.
+                                </p>
+                            </div>
+                            <button
+                                type="button"
+                                role="switch"
+                                aria-checked={selectedCategory.ai_use_library_references === true}
+                                disabled={aiLibRefToggleLoading}
+                                onClick={toggleAiLibraryReferences}
+                                className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 ${
+                                    selectedCategory.ai_use_library_references === true ? 'bg-indigo-600' : 'bg-gray-200'
+                                }`}
+                            >
+                                <span
+                                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                                        selectedCategory.ai_use_library_references === true ? 'translate-x-5' : 'translate-x-0'
+                                    }`}
+                                />
+                            </button>
+                        </div>
+                    )}
                 </div>
             )}
 

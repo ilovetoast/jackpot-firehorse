@@ -37,6 +37,9 @@ class FluxProvider implements AIProviderInterface
 
     public function analyzeImage(string $imageBase64DataUrl, string $prompt, array $options = []): array
     {
+        if (! empty($options['reference_image_data_urls'])) {
+            Log::debug('FluxProvider: reference_image_data_urls ignored (no multi-image vision).');
+        }
         throw new \BadMethodCallException('FluxProvider does not support vision analyzeImage.');
     }
 
