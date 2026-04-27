@@ -144,7 +144,7 @@ class UploadCompletionMetadataPersistenceTest extends TestCase
             [
                 'id' => 1,
                 'key' => 'photo_type',
-                'system_label' => 'Composition type',
+                'system_label' => 'Photo type',
                 'type' => 'select',
                 'scope' => 'system',
                 'applies_to' => 'image',

@@ -1106,7 +1106,7 @@ export default function ByCategoryView({
                                                 When on, vision tagging may include text from highly-rated, downloaded
                                                 peers in <strong>this</strong> folder and up to a few of their
                                                 thumbnails. System folders (e.g. Photography) do not use this; generic
-                                                fields like composition type stay model-only.
+                                                fields like photo type stay model-only.
                                             </p>
                                         </div>
                                         <button
