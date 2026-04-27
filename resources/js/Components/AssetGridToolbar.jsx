@@ -83,6 +83,9 @@ export default function AssetGridToolbar({
     /** Deliverables: grid thumbnail mode — 'standard' | 'enhanced' | 'presentation' */
     executionThumbnailViewMode = null,
     onExecutionThumbnailViewModeChange = null,
+    /** Assets: uniform grid only — 'cover' | 'contain' (see AssetGridViewOptionsDropdown) */
+    gridImageFit = 'contain',
+    onGridImageFitChange = null,
 }) {
     const inertiaPage = usePage()
     const pageProps = inertiaPage.props
@@ -443,6 +446,8 @@ export default function AssetGridToolbar({
         primaryColor,
         executionThumbnailViewMode,
         onExecutionThumbnailViewModeChange,
+        gridImageFit,
+        onGridImageFitChange,
     }
 
     const mobileResultPanelClass =

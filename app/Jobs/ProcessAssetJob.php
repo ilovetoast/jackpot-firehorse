@@ -13,6 +13,7 @@ use App\Services\SystemIncidentService;
 use App\Jobs\Concerns\QueuesOnImagesChannel;
 use App\Jobs\ProcessVideoInsightsBatchJob;
 use App\Support\Logging\PipelineLogger;
+use App\Support\Logging\PipelineStepTimer;
 use App\Support\PipelineQueueResolver;
 use App\Enums\ThumbnailStatus;
 use Illuminate\Bus\Queueable;
@@ -32,6 +33,8 @@ use Sentry\Tracing\TransactionContext;
 class ProcessAssetJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, QueuesOnImagesChannel, SerializesModels;
+
+    protected ?PipelineStepTimer $pipelineStepTimer = null;
 
     /**
      * Overridden in constructor from config (default 64). Must cover many throttle release() cycles.
@@ -226,6 +229,8 @@ class ProcessAssetJob implements ShouldQueue
             $version = DB::transaction(fn () => AssetVersion::where('id', $asset->currentVersion->id)->lockForUpdate()->first());
         }
         $thumbnailJobId = $version ? $version->id : $asset->id;
+        $this->pipelineStepTimer = PipelineStepTimer::start('ProcessAssetJob', (string) $asset->id, $version?->id);
+        $this->pipelineStepTimer->lap('models_resolved', $asset, $version);
 
         // Phase 7: Idempotent - skip if the main pipeline has already been dispatched and finished this version.
         // Eager {@see GenerateThumbnailsJob} (e.g. studio animation) can set pipeline_status=complete before
@@ -254,14 +259,26 @@ class ProcessAssetJob implements ShouldQueue
         ]);
 
         if (config('assets.processing.throttle_enabled', true)) {
+            $this->pipelineStepTimer?->lap('before_throttle', $asset, $version, [
+                'queue_attempt' => $this->attempts(),
+            ]);
             $key = $this->assetProcessingThrottleKey($asset);
             Redis::throttle($key)
                 ->allow((int) config('assets.processing.throttle_max', 5))
                 ->every((int) config('assets.processing.throttle_decay_seconds', 60))
                 ->then(
-                    fn () => $this->runAssetProcessingPipeline($asset, $version, $thumbnailJobId),
-                    function () use ($asset) {
+                    function () use ($asset, $version, $thumbnailJobId) {
+                        $this->pipelineStepTimer?->lap('throttle_acquired', $asset, $version, [
+                            'queue_attempt' => $this->attempts(),
+                        ]);
+                        $this->runAssetProcessingPipeline($asset, $version, $thumbnailJobId);
+                    },
+                    function () use ($asset, $version) {
                         $delay = (int) config('assets.processing.throttle_release_seconds', 10);
+                        $this->pipelineStepTimer?->lap('throttle_saturated_release', $asset, $version, [
+                            'release_delay_seconds' => $delay,
+                            'queue_attempt' => $this->attempts(),
+                        ]);
                         Log::info('[ProcessAssetJob] Pipeline throttle saturated; releasing job', [
                             'asset_id' => $asset->id,
                             'delay_seconds' => $delay,
@@ -273,6 +290,7 @@ class ProcessAssetJob implements ShouldQueue
             return;
         }
 
+        $this->pipelineStepTimer?->lap('throttle_disabled', $asset, $version);
         $this->runAssetProcessingPipeline($asset, $version, $thumbnailJobId);
     }
 
@@ -316,6 +334,7 @@ class ProcessAssetJob implements ShouldQueue
     protected function runAssetProcessingPipeline(Asset $asset, ?AssetVersion $version, string $thumbnailJobId): void
     {
         try {
+        $this->pipelineStepTimer?->lap('pipeline_entry', $asset, $version);
         // Version-aware: Run FileInspectionService for deterministic metadata (no S3 Content-Type, no extension guessing)
         if ($version) {
             $bucket = $asset->storageBucket; // null = use default s3 disk (legacy)
@@ -344,6 +363,7 @@ class ProcessAssetJob implements ShouldQueue
                     'height' => $inspection['height'],
                 ]);
             }
+            $this->pipelineStepTimer?->lap('file_inspection', $asset->fresh(), $version->fresh());
         }
 
         // ZIP/archive short-circuit: never run full pipeline — complete immediately to avoid indefinite processing
@@ -405,6 +425,8 @@ class ProcessAssetJob implements ShouldQueue
             return;
         }
 
+        $this->pipelineStepTimer?->lap('pre_set_generating_thumbnails', $asset, $version);
+
         // 1. When upload finishes: set analysis_status = 'generating_thumbnails'
         $asset->update(['analysis_status' => 'generating_thumbnails']);
         AnalysisStatusLogger::log($asset, 'uploading', 'generating_thumbnails', 'ProcessAssetJob');
@@ -424,6 +446,10 @@ class ProcessAssetJob implements ShouldQueue
                 'metadata' => array_merge($asset->metadata ?? [], $processingStarted),
             ]);
         }
+
+        $vFresh = $version?->fresh();
+        $aFresh = $asset->fresh();
+        $this->pipelineStepTimer?->lap('processing_marked_started', $aFresh, $vFresh);
 
         // Emit processing started event
         AssetEvent::create([
@@ -520,6 +546,13 @@ class ProcessAssetJob implements ShouldQueue
         Bus::chain($chainJobs)
             ->onQueue($pipelineQueue)
             ->dispatch();
+
+        $vFresh2 = $version?->fresh();
+        $aFresh2 = $asset->fresh();
+        $this->pipelineStepTimer?->lap('chain_dispatched', $aFresh2, $vFresh2, [
+            'chain_job_count' => count($chainJobs),
+            'pipeline_queue' => $pipelineQueue,
+        ]);
 
         if ($isVideo && config('assets.video_ai.enabled', true) && config('assets.video_ai.auto_run_after_upload', false)) {
             $asset->refresh();

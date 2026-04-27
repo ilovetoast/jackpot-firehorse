@@ -542,11 +542,18 @@ export default function AssetsIndex({
         const v = localStorage.getItem('assetGridLayout')
         return v === 'masonry' ? 'masonry' : 'grid'
     }
+
+    const getStoredGridImageFit = () => {
+        if (typeof window === 'undefined') return 'contain'
+        const v = localStorage.getItem('assetGridImageFit')
+        return v === 'cover' || v === 'contain' ? v : 'contain'
+    }
     
     // Card size with scaling enabled - loads from localStorage
     const [cardSize, setCardSize] = useState(getStoredCardSize)
     const [showInfo, setShowInfo] = useState(getStoredShowInfo)
     const [layoutMode, setLayoutMode] = useState(getStoredGridLayout)
+    const [gridImageFit, setGridImageFit] = useState(getStoredGridImageFit)
 
     // Card style from brand settings: clean (guidelines) | impact (default)
     const cardStyle = (auth?.activeBrand?.asset_grid_style ?? 'clean') === 'impact' ? 'default' : 'guidelines'
@@ -569,6 +576,12 @@ export default function AssetsIndex({
             localStorage.setItem('assetGridLayout', layoutMode)
         }
     }, [layoutMode])
+
+    useEffect(() => {
+        if (typeof window !== 'undefined') {
+            localStorage.setItem('assetGridImageFit', gridImageFit)
+        }
+    }, [gridImageFit])
 
     // Handle category selection - triggers Inertia reload with slug-based category query param (?category=rarr)
     const handleCategorySelect = useCallback((category) => {
@@ -1316,6 +1329,8 @@ export default function AssetsIndex({
                                 onCardSizeChange={setCardSize}
                                 layoutMode={layoutMode}
                                 onLayoutModeChange={setLayoutMode}
+                                gridImageFit={gridImageFit}
+                                onGridImageFitChange={setGridImageFit}
                                 primaryColor={workspaceAccentColor}
                                 selectedCount={selectedCount}
                                 filterable_schema={filterable_schema}
@@ -1400,6 +1415,7 @@ export default function AssetsIndex({
                                     onAssetDoubleClick={handleAssetDoubleClick}
                                     cardSize={cardSize}
                                     layoutMode={layoutMode}
+                                    gridImageFit={gridImageFit}
                                     cardStyle={cardStyle}
                                     showInfo={showInfo}
                                     selectedAssetId={activeAssetId}

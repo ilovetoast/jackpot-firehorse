@@ -18,6 +18,7 @@ use App\Services\SystemIncidentService;
 use App\Services\ThumbnailGenerationService;
 use App\Support\AdminLogStream;
 use App\Support\Logging\PipelineLogger;
+use App\Support\Logging\PipelineStepTimer;
 use App\Support\PipelineQueueResolver;
 use App\Support\ProcessingMetrics;
 use App\Support\ThumbnailMetadata;
@@ -165,6 +166,7 @@ class GenerateThumbnailsJob implements ShouldQueue
         // Wrap all thumbnail logic in try/catch and enforce a terminal state
         // Phase 3A: Load version first, fallback to legacy (asset ID) when version not found
         try {
+            $pipelineTimer = null;
             $version = AssetVersion::find($this->assetVersionId);
             if ($version) {
                 // Phase 7: Idempotent - skip if version already failed
@@ -242,6 +244,12 @@ class GenerateThumbnailsJob implements ShouldQueue
                     'source_path' => $sourcePath,
                 ]);
             }
+
+            $pipelineTimer = PipelineStepTimer::start('GenerateThumbnailsJob', (string) $asset->id, $version?->id);
+            $pipelineTimer->lap('source_resolved', $asset, $version, [
+                'queue_job_id' => $this->job?->getJobId() ?? 'unknown',
+                'queue_attempt' => $this->attempts(),
+            ]);
 
             // Log asset state at start (after asset lookup)
             PipelineLogger::warning('THUMBNAILS: ASSET LOADED', [
@@ -676,6 +684,8 @@ class GenerateThumbnailsJob implements ShouldQueue
 
             // TASK 2: Update status to processing and record start time for timeout detection
             // CRITICAL: This sets PROCESSING - the catch block MUST set a terminal state if exception occurs
+            $pipelineTimer?->lap('before_mark_processing', $asset, $version);
+
             $asset->update([
                 'thumbnail_status' => ThumbnailStatus::PROCESSING,
                 'thumbnail_error' => null,
@@ -713,9 +723,11 @@ class GenerateThumbnailsJob implements ShouldQueue
                 'asset_id' => $asset->id,
             ]);
             $mode = ThumbnailMode::default();
+            $pipelineTimer?->lap('before_thumbnail_service', $asset, $version);
             $result = $version
             ? $thumbnailService->generateThumbnailsForVersion($version, $mode)
             : $thumbnailService->generateThumbnails($asset, null, null, null, $mode);
+            $pipelineTimer?->lap('after_thumbnail_service', $asset, $version);
 
             // Service returns structured array keyed by mode: thumbnails[mode][style], etc.
             $previewThumbnails = $result['preview_thumbnails'][$mode] ?? [];
@@ -792,6 +804,7 @@ class GenerateThumbnailsJob implements ShouldQueue
 
                 $asset->refresh();
                 $this->finalizeTerminalThumbnailFailureAndContinuePipeline($asset, $errorMessage);
+                $pipelineTimer?->lap('terminal_no_final_thumbnails', $asset, $version);
 
                 return;
             }
@@ -897,6 +910,10 @@ class GenerateThumbnailsJob implements ShouldQueue
                 }
             }
 
+            $pipelineTimer?->lap('s3_head_verification_done', $asset, $version, [
+                'final_thumb_styles' => array_keys($finalThumbnails),
+            ]);
+
             // CRITICAL: Only mark as COMPLETED if ALL thumbnails are valid
             // Step 4: Job truth enforcement - never mark COMPLETED unless files are real and readable
             //
@@ -965,6 +982,7 @@ class GenerateThumbnailsJob implements ShouldQueue
 
                 $asset->refresh();
                 $this->finalizeTerminalThumbnailFailureAndContinuePipeline($asset, $errorMessage);
+                $pipelineTimer?->lap('terminal_verification_failed', $asset, $version);
 
                 return;
             }
@@ -1129,7 +1147,9 @@ class GenerateThumbnailsJob implements ShouldQueue
                 'created_at' => now(),
             ]);
 
-            if ($version && config('assets.thumbnail.preferred.enabled', true)) {
+            // TODO: Preferred thumbnails temporarily off by default (see config assets.thumbnail.preferred.enabled).
+            // Re-enable for an environment with: THUMBNAIL_PREFERRED_ENABLED=true
+            if ($version && config('assets.thumbnail.preferred.enabled', false)) {
                 GeneratePreferredThumbnailJob::markPreferredProcessing($asset, $version);
                 GeneratePreferredThumbnailJob::dispatch($asset->id, $version->id, false)
                     ->onQueue(PipelineQueueResolver::imagesQueueForAsset($asset));
@@ -1166,6 +1186,9 @@ class GenerateThumbnailsJob implements ShouldQueue
                 'asset_id' => $asset->id,
                 'job_id' => $this->job?->getJobId() ?? 'unknown',
                 'attempt' => $this->attempts(),
+            ]);
+            $pipelineTimer?->lap('handle_success', $asset->fresh(), $version?->fresh(), [
+                'queue_job_id' => $this->job?->getJobId() ?? 'unknown',
             ]);
 
             // TASK 2: Terminal state guarantee - COMPLETED

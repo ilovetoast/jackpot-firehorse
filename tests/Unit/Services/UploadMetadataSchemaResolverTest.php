@@ -618,7 +618,7 @@ class UploadMetadataSchemaResolverTest extends TestCase
         $this->assertContains('technical', $groupKeys);
         $this->assertContains('general', $groupKeys, 'Null group_key should map to "general"');
 
-        // Verify groups use upload display order (creative → technical → general; custom would be last)
+        // Verify groups use upload display order (creative → technical → general)
         $this->assertEquals('creative', $uploadSchema['groups'][0]['key'], 'Creative group first');
         $this->assertEquals('technical', $uploadSchema['groups'][1]['key']);
         $this->assertEquals('general', $uploadSchema['groups'][2]['key']);
@@ -629,6 +629,86 @@ class UploadMetadataSchemaResolverTest extends TestCase
 
         $generalGroup = collect($uploadSchema['groups'])->firstWhere('key', 'general');
         $this->assertEquals('General', $generalGroup['label']);
+    }
+
+    /**
+     * Custom (tenant) group_key should appear directly after Creative in uploader / edit schema.
+     */
+    public function test_custom_group_follows_creative_in_display_order(): void
+    {
+        $tenant = Tenant::create([
+            'name' => 'Test Tenant',
+            'slug' => 'test-tenant',
+        ]);
+        $brand = Brand::create([
+            'tenant_id' => $tenant->id,
+            'name' => 'Test Brand',
+            'slug' => 'test-brand',
+        ]);
+        $category = Category::create([
+            'tenant_id' => $tenant->id,
+            'brand_id' => $brand->id,
+            'asset_type' => 'image',
+            'name' => 'Test Category',
+            'slug' => 'test-category',
+            'is_system' => false,
+            'is_private' => false,
+            'is_locked' => false,
+        ]);
+
+        $ids = [];
+        foreach (
+            [
+                ['key' => 'field_creative', 'group_key' => 'creative'],
+                ['key' => 'field_tenant_custom', 'group_key' => 'custom'],
+                ['key' => 'field_technical', 'group_key' => 'technical'],
+            ] as $def
+        ) {
+            $ids[] = DB::table('metadata_fields')->insertGetId(array_merge([
+                'system_label' => $def['key'],
+                'type' => 'text',
+                'applies_to' => 'image',
+                'scope' => 'system',
+                'is_filterable' => true,
+                'is_user_editable' => true,
+                'is_ai_trainable' => false,
+                'is_upload_visible' => true,
+                'is_internal_only' => false,
+                'plan_gate' => null,
+                'deprecated_at' => null,
+                'replacement_field_id' => null,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ], $def));
+        }
+        foreach ($ids as $fieldId) {
+            DB::table('metadata_field_visibility')->insert([
+                'metadata_field_id' => $fieldId,
+                'tenant_id' => $tenant->id,
+                'brand_id' => null,
+                'category_id' => null,
+                'is_hidden' => false,
+                'is_upload_hidden' => false,
+                'is_filter_hidden' => false,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+        }
+
+        $uploadSchema = $this->resolver->resolve(
+            $tenant->id,
+            $brand->id,
+            $category->id,
+            'image'
+        );
+
+        $this->assertCount(3, $uploadSchema['groups']);
+        $keys = array_column($uploadSchema['groups'], 'key');
+        $this->assertSame(['creative', 'custom', 'technical'], $keys);
+
+        $customGroup = collect($uploadSchema['groups'])->firstWhere('key', 'custom');
+        $this->assertNotNull($customGroup);
+        $this->assertEquals('Custom', $customGroup['label']);
     }
 
     /**
@@ -985,7 +1065,7 @@ class UploadMetadataSchemaResolverTest extends TestCase
 
         // Verify group structure
         $groupKeys = array_column($uploadSchema['groups'], 'key');
-        $this->assertEquals(['creative', 'general', 'technical'], $groupKeys, 'Groups should be sorted');
+        $this->assertEquals(['creative', 'technical', 'general'], $groupKeys, 'Groups should follow sortGroupedFieldsByUploadDisplayOrder');
 
         // Verify Creative group
         $creativeGroup = collect($uploadSchema['groups'])->firstWhere('key', 'creative');

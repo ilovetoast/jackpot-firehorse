@@ -9,6 +9,7 @@ use App\Models\AssetEvent;
 use App\Models\AssetMetadata;
 use App\Models\AssetVersion;
 use App\Services\AssetProcessingFailureService;
+use App\Support\Logging\PipelineStepTimer;
 use App\Support\VideoDisplayProbe;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -55,6 +56,8 @@ class ExtractMetadataJob implements ShouldQueue
 
         $asset = Asset::findOrFail($this->assetId);
         $version = $this->versionId ? AssetVersion::find($this->versionId) : null;
+        $timer = PipelineStepTimer::start('ExtractMetadataJob', (string) $this->assetId, $this->versionId);
+        $timer->lap('asset_loaded', $asset, $version);
 
         // Phase 7: When version-aware, delete existing metadata for this version (idempotent rerun)
         if ($version) {
@@ -69,6 +72,7 @@ class ExtractMetadataJob implements ShouldQueue
                     'asset_id' => $asset->id,
                 ]);
                 \App\Services\UploadDiagnosticLogger::jobSkip('ExtractMetadataJob', $asset->id, 'already_extracted');
+                $timer->lap('exit_already_extracted', $asset, $version);
 
                 return;
             }
@@ -83,12 +87,15 @@ class ExtractMetadataJob implements ShouldQueue
             \App\Services\UploadDiagnosticLogger::jobSkip('ExtractMetadataJob', $asset->id, 'asset_not_visible', [
                 'status' => $asset->status->value,
             ]);
+            $timer->lap('exit_not_visible', $asset, $version);
 
             return;
         }
 
         // Extract metadata: use version->file_path when version-aware
+        $timer->lap('before_extract_metadata', $asset, $version);
         $metadata = $this->extractMetadata($asset, $version);
+        $timer->lap('after_extract_metadata', $asset, $version);
 
         // Update asset metadata
         $currentMetadata = $asset->metadata ?? [];
@@ -121,6 +128,7 @@ class ExtractMetadataJob implements ShouldQueue
         \App\Services\UploadDiagnosticLogger::jobComplete('ExtractMetadataJob', $asset->id, [
             'metadata_keys' => array_keys($metadata),
         ]);
+        $timer->lap('handle_complete', $asset, $version);
 
         // Job chaining is handled by Bus::chain() in ProcessAssetJob
         // No need to dispatch next job here

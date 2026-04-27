@@ -65,6 +65,8 @@ export default function AssetCard({
     /** Deliverables grid: standard | enhanced | presentation — null disables mode-aware thumbnails */
     executionThumbnailViewMode = null,
     gridSearchQuery = '',
+    /** Uniform grid (Assets): 'cover' | 'contain' — passed from View menu; undefined uses ThumbnailPreview defaults */
+    gridImageFit = undefined,
 }) {
     const { auth } = usePage().props
     /** Brand Guidelines Google Fonts (no DAM file) — grid preview only, no drawer */
@@ -164,6 +166,13 @@ export default function AssetCard({
     const isVideo = Boolean(asset?.mime_type?.startsWith('video/') || videoExtensions.includes(extLower))
     /** Poster or preview frame — when absent, ThumbnailPreview shows the frosted play placeholder (no double overlay). */
     const videoHasPosterFrame = Boolean(asset?.final_thumbnail_url || asset?.preview_thumbnail_url)
+
+    const thumbnailForceObjectFit = useMemo(() => {
+        if (layoutMode === 'grid' && (gridImageFit === 'cover' || gridImageFit === 'contain')) {
+            return gridImageFit
+        }
+        return isVideo ? 'cover' : null
+    }, [layoutMode, gridImageFit, isVideo])
 
     const highlightTokens = useMemo(() => searchTokensForHighlight(gridSearchQuery), [gridSearchQuery])
     const videoSummary =
@@ -737,7 +746,7 @@ export default function AssetCard({
                                     thumbnailVersion={thumbnailVersion}
                                     shouldAnimateThumbnail={shouldAnimateThumbnail}
                                     primaryColor={primaryColor}
-                                    forceObjectFit={isVideo ? 'cover' : null}
+                                    forceObjectFit={thumbnailForceObjectFit}
                                     masonryMaxHeight={isMasonry ? masonryMaxHeightPx : null}
                                     masonryMinHeight={isMasonry ? masonryThumbnailMinHeightPx : null}
                                 />

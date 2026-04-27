@@ -7,6 +7,7 @@ use App\Enums\AssetStatus;
 use App\Models\Asset;
 use App\Jobs\Concerns\QueuesOnImagesChannel;
 use App\Models\AssetVersion;
+use App\Support\Logging\PipelineStepTimer;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -46,8 +47,13 @@ class ExtractEmbeddedMetadataJob implements ShouldQueue
 
         $version = $this->versionId ? AssetVersion::find($this->versionId) : null;
 
+        $timer = PipelineStepTimer::start('ExtractEmbeddedMetadataJob', $this->assetId, $this->versionId);
+        $timer->lap('ready', $asset, $version);
+
         try {
+            $timer->lap('before_embedded_extract', $asset, $version);
             $service->extractAndPersist($asset, $version);
+            $timer->lap('after_embedded_extract', $asset, $version);
         } catch (\Throwable $e) {
             Log::warning('[ExtractEmbeddedMetadataJob] Non-fatal embedded extraction failure', [
                 'asset_id' => $this->assetId,

@@ -53,7 +53,7 @@ class GeneratePreferredThumbnailJob implements ShouldQueue
 
     public function handle(ThumbnailGenerationService $thumbnailService): void
     {
-        if (! config('assets.thumbnail.preferred.enabled', true)) {
+        if (! config('assets.thumbnail.preferred.enabled', false)) {
             return;
         }
 

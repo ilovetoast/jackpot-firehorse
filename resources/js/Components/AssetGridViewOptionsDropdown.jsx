@@ -110,12 +110,25 @@ export default function AssetGridViewOptionsDropdown({
     /** Deliverables: grid uses standard | enhanced | presentation thumbnails */
     executionThumbnailViewMode = null,
     onExecutionThumbnailViewModeChange = null,
+    /** Assets library only: uniform grid thumbnail scaling (CSS object-fit). Hidden in masonry. */
+    gridImageFit = 'contain',
+    onGridImageFitChange = null,
 }) {
     const currentPresetIndex = SIZE_PRESETS.indexOf(snapToPreset(cardSize))
     const idx = currentPresetIndex >= 0 ? currentPresetIndex : 1
     const sizeLabel = SIZE_LABELS[idx] ?? 'Default'
     const layoutLabel = layoutMode === 'masonry' ? 'Masonry' : 'Grid'
-    const triggerSubtitle = `${sizeLabel} · ${layoutLabel}`
+    const fitLabel =
+        typeof onGridImageFitChange === 'function' &&
+        layoutMode === 'grid' &&
+        (gridImageFit === 'cover' || gridImageFit === 'contain')
+            ? gridImageFit === 'cover'
+                ? 'Cover'
+                : 'Contain'
+            : null
+    const triggerSubtitle = fitLabel
+        ? `${sizeLabel} · ${layoutLabel} · ${fitLabel}`
+        : `${sizeLabel} · ${layoutLabel}`
 
     const executionGridModeSection =
         executionThumbnailViewMode != null && onExecutionThumbnailViewModeChange ? (
@@ -221,6 +234,36 @@ export default function AssetGridViewOptionsDropdown({
                     </button>
                 </div>
             </div>
+
+            {typeof onGridImageFitChange === 'function' && layoutMode === 'grid' ? (
+                <div className="border-t border-gray-100 pt-2">
+                    <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-gray-500">Image fit</p>
+                    <p className="mb-2 text-xs text-gray-600 leading-snug">
+                        For uniform grid only: fit the image inside the tile (contain) or fill the tile (may crop, cover).
+                    </p>
+                    <div className="grid grid-cols-2 gap-0.5 rounded-lg border border-gray-200 bg-white p-0.5" role="group" aria-label="Image fit">
+                        {[
+                            { fit: 'contain', label: 'Contain' },
+                            { fit: 'cover', label: 'Cover' },
+                        ].map(({ fit, label }) => (
+                            <button
+                                key={fit}
+                                type="button"
+                                onClick={() => onGridImageFitChange(fit)}
+                                className={`rounded-md px-2 py-2 text-xs font-medium transition-colors ${
+                                    gridImageFit === fit
+                                        ? 'text-white shadow-sm'
+                                        : 'text-gray-700 hover:bg-gray-50'
+                                }`}
+                                style={gridImageFit === fit ? { backgroundColor: primaryColor } : undefined}
+                                aria-pressed={gridImageFit === fit}
+                            >
+                                {label}
+                            </button>
+                        ))}
+                    </div>
+                </div>
+            ) : null}
 
             <div className="border-t border-gray-100 pt-2">
                 <div className="flex items-center justify-between gap-3 rounded-lg px-1 py-1">

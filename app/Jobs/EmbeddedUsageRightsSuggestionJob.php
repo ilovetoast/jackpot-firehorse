@@ -7,6 +7,7 @@ use App\Models\Asset;
 use App\Services\AiMetadataSuggestionService;
 use App\Jobs\Concerns\QueuesOnImagesChannel;
 use App\Services\EmbeddedUsageRightsSuggestionService;
+use App\Support\Logging\PipelineStepTimer;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -44,6 +45,10 @@ class EmbeddedUsageRightsSuggestionJob implements ShouldQueue
             return;
         }
 
+        $timer = PipelineStepTimer::start('EmbeddedUsageRightsSuggestionJob', $this->assetId, null);
+        $timer->lap('ready', $asset, null);
+        $timer->lap('before_merge', $asset, null);
         $embeddedService->mergeEmbeddedUsageRightsIntoAsset($asset, $suggestionService);
+        $timer->lap('after_merge', $asset, null);
     }
 }

@@ -842,10 +842,10 @@ class MetadataFieldsSeeder extends Seeder
             ['value' => 'wayfinding', 'system_label' => 'Wayfinding'],
         ]);
 
-        // 5. Video (Executions)
+        // 5. Video (Executions category — field key stays execution_video_type for taxonomy)
         $executionVideoTypeId = $this->getOrCreateField([
             'key' => 'execution_video_type',
-            'system_label' => 'Execution Video Type',
+            'system_label' => 'Video Type',
             'type' => 'select',
             'applies_to' => 'all',
             'scope' => 'system',

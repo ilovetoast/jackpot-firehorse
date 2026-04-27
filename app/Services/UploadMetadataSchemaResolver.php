@@ -245,7 +245,7 @@ class UploadMetadataSchemaResolver
      * Group fields by group_key.
      *
      * Fields with null group_key go into "General" group.
-     * Groups use {@see sortGroupedFieldsByUploadDisplayOrder} (standard buckets first, {@code custom} last).
+     * Groups use {@see sortGroupedFieldsByUploadDisplayOrder} (standard buckets; {@code custom} directly after {@code creative}).
      * Fields within groups maintain their original order.
      *
      * @param array $fields Filtered upload fields
@@ -267,13 +267,15 @@ class UploadMetadataSchemaResolver
     }
 
     /**
-     * Upload form group order: standard buckets first, other tenant-defined keys in the middle,
-     * {@see $group_key} {@code custom} last so “Custom” fields sit below General / Rights.
+     * Upload / edit form group order: known buckets in a stable order, then any other group keys
+     * (alphanumeric). Tenant {@code custom} fields sit next to {@code creative} in the uploader
+     * instead of at the very bottom.
      */
     protected function sortGroupedFieldsByUploadDisplayOrder(array $grouped): array
     {
         $priority = [
             'creative',
+            'custom',
             'technical',
             'commercial',
             'ai',
@@ -297,18 +299,9 @@ class UploadMetadataSchemaResolver
         }
 
         $remaining = array_values(array_diff($keys, $orderedKeys));
-        $customKeys = [];
-        $otherTail = [];
-        foreach ($remaining as $k) {
-            if (strcasecmp((string) $k, 'custom') === 0) {
-                $customKeys[] = $k;
-            } else {
-                $otherTail[] = $k;
-            }
-        }
-        sort($otherTail, SORT_NATURAL | SORT_FLAG_CASE);
+        sort($remaining, SORT_NATURAL | SORT_FLAG_CASE);
 
-        $finalKeys = array_merge($orderedKeys, $otherTail, $customKeys);
+        $finalKeys = array_merge($orderedKeys, $remaining);
 
         $out = [];
         foreach ($finalKeys as $k) {
@@ -353,6 +346,7 @@ class UploadMetadataSchemaResolver
         $labelMap = [
             'general' => 'General',
             'creative' => 'Creative',
+            'custom' => 'Custom',
             'technical' => 'Technical',
             'commercial' => 'Commercial',
             'legal' => 'Legal / Rights',

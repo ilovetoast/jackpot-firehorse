@@ -86,6 +86,8 @@ export default function AssetGrid({
     executionThumbnailViewMode = null, // Deliverables: standard | enhanced | presentation
     /** Server ?q= — highlight matching video AI tags in card when non-empty */
     gridSearchQuery = '',
+    /** Assets uniform grid: 'cover' | 'contain' from View menu */
+    gridImageFit = undefined,
 }) {
     const safeAssets = (assets || []).filter(Boolean)
     const selection = useSelectionOptional()
@@ -344,6 +346,7 @@ export default function AssetGrid({
                     masonryMaxHeightPx={masonryMaxPx}
                     executionThumbnailViewMode={executionThumbnailViewMode}
                     gridSearchQuery={gridSearchQuery}
+                    gridImageFit={gridImageFit}
                 />
             </div>
         )

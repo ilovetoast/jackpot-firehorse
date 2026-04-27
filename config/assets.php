@@ -309,9 +309,12 @@ return [
         /*
          * Async "preferred" thumbnails (smart-cropped margins) — generated after original completes.
          * See GeneratePreferredThumbnailJob and ThumbnailSmartCropService.
+         *
+         * Default false: optional second pass; set THUMBNAIL_PREFERRED_ENABLED=true to re-enable when
+         * workers can absorb the extra queue load.
          */
         'preferred' => [
-            'enabled' => env('THUMBNAIL_PREFERRED_ENABLED', true),
+            'enabled' => env('THUMBNAIL_PREFERRED_ENABLED', false),
             /*
              * When smart crop was applied, reject preferred thumbnails below this confidence (0–1).
              * Prevents visibly bad crops; asset keeps original thumbnails only.
@@ -402,6 +405,11 @@ return [
     |
     */
     'processing' => [
+        /**
+         * When true, log [pipeline_timing] lines for ProcessAssetJob, chain steps, and
+         * GenerateThumbnailsJob (per-step ms + ms since processing_started_at).
+         */
+        'log_step_timings' => (bool) env('ASSET_PIPELINE_LOG_STEP_TIMINGS', false),
         'throttle_enabled' => env('ASSET_PROCESSING_THROTTLE_ENABLED', true),
         'throttle_key' => env('ASSET_PROCESSING_THROTTLE_KEY', 'asset-processing'),
         'throttle_per_tenant' => env('ASSET_PROCESSING_THROTTLE_PER_TENANT', false),
