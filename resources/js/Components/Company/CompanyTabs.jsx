@@ -2,11 +2,10 @@ import { Link, usePage } from '@inertiajs/react'
 import PermissionGate from '../PermissionGate'
 
 /**
- * Tab navigation for Company section — Overview, Team, Permissions, Activity, Setting, Agency.
- * Use on Company Overview and other company pages for consistent nav.
+ * Company shell — horizontal tabs; violet active state (aligned with company / Jackpot primary accent).
  *
- * @param {'default'|'cinematic'} variant — cinematic = dark / glass shell (Agency dashboard, etc.)
- * @param {boolean} showAgencyTab — when false, hides the Agency dashboard tab (e.g. Company Portal links there in-page instead).
+ * @param {'default'|'cinematic'} variant — cinematic = dark / glass (Agency dashboard)
+ * @param {boolean} showAgencyTab
  */
 export default function CompanyTabs({ variant = 'default', showAgencyTab = true }) {
     const page = usePage()
@@ -16,45 +15,83 @@ export default function CompanyTabs({ variant = 'default', showAgencyTab = true 
     const isAgency = auth?.activeCompany?.is_agency === true
     const cinematic = variant === 'cinematic'
 
-    const tabClass = (isActive) =>
-        cinematic
-            ? `whitespace-nowrap border-b-2 py-4 px-1 text-sm font-medium ${
-                  isActive
-                      ? 'border-white/50 text-white'
-                      : 'border-transparent text-white/45 hover:border-white/25 hover:text-white/85'
-              }`
-            : `whitespace-nowrap border-b-2 py-4 px-1 text-sm font-medium ${
-                  isActive ? 'border-indigo-500 text-indigo-600' : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
-              }`
+    const tabClass = (isActive) => {
+        const base = 'whitespace-nowrap border-b-2 py-3.5 px-1.5 text-sm font-medium transition-colors -mb-px min-h-[2.75rem] flex items-center sm:px-2.5 sm:min-h-0 sm:py-3.5'
+        if (cinematic) {
+            return `${base} ${
+                isActive
+                    ? 'border-white/50 text-white'
+                    : 'border-transparent text-white/50 hover:text-white/85'
+            }`
+        }
+        return `${base} ${
+            isActive
+                ? 'border-violet-600 text-violet-800'
+                : 'border-transparent text-slate-500 hover:text-slate-800 hover:border-slate-200'
+        }`
+    }
 
     return (
-        <div className={cinematic ? 'mb-6 border-b border-white/10' : 'mb-6 border-b border-gray-200'}>
-            <nav className="-mb-px flex flex-wrap gap-x-6" aria-label="Company sections">
-                <Link href="/app" className={tabClass(currentPath === '/app' || currentPath === '/app/')}>
-                    Overview
+        <div
+            className={
+                cinematic
+                    ? 'mb-6 border-b border-white/10'
+                    : '-mt-0.5 border-b border-slate-200/90'
+            }
+        >
+            <nav
+                className="flex flex-wrap items-stretch gap-x-1.5 sm:gap-x-2 md:gap-x-3"
+                aria-label="Company areas"
+            >
+                <Link
+                    href="/app"
+                    className={tabClass(currentPath === '/app' || currentPath === '/app/')}
+                    aria-current={currentPath === '/app' || currentPath === '/app/' ? 'page' : undefined}
+                >
+                    Dashboard
                 </Link>
                 <PermissionGate permission="team.manage">
-                    <Link href="/app/companies/team" className={tabClass(currentPath === '/app/companies/team')}>
-                        Team
+                    <Link
+                        href="/app/companies/team"
+                        className={tabClass(currentPath === '/app/companies/team')}
+                        aria-current={currentPath === '/app/companies/team' ? 'page' : undefined}
+                    >
+                        People
                     </Link>
                 </PermissionGate>
                 <PermissionGate permission="team.manage">
-                    <Link href="/app/companies/permissions" className={tabClass(currentPath.startsWith('/app/companies/permissions'))}>
-                        Permissions
+                    <Link
+                        href="/app/companies/permissions"
+                        className={tabClass(currentPath.startsWith('/app/companies/permissions'))}
+                        aria-current={currentPath.startsWith('/app/companies/permissions') ? 'page' : undefined}
+                    >
+                        Access
                     </Link>
                 </PermissionGate>
                 <PermissionGate permission="activity_logs.view">
-                    <Link href="/app/companies/activity" className={tabClass(currentPath.startsWith('/app/companies/activity'))}>
+                    <Link
+                        href="/app/companies/activity"
+                        className={tabClass(currentPath.startsWith('/app/companies/activity'))}
+                        aria-current={currentPath.startsWith('/app/companies/activity') ? 'page' : undefined}
+                    >
                         Activity
                     </Link>
                 </PermissionGate>
                 <PermissionGate permission="company_settings.view">
-                    <Link href="/app/companies/settings" className={tabClass(currentPath.startsWith('/app/companies/settings'))}>
-                        Setting
+                    <Link
+                        href="/app/companies/settings"
+                        className={tabClass(currentPath.startsWith('/app/companies/settings'))}
+                        aria-current={currentPath.startsWith('/app/companies/settings') ? 'page' : undefined}
+                    >
+                        Admin
                     </Link>
                 </PermissionGate>
                 {isAgency && showAgencyTab && (
-                    <Link href="/app/agency/dashboard" className={tabClass(currentPath.startsWith('/app/agency/dashboard'))}>
+                    <Link
+                        href="/app/agency/dashboard"
+                        className={tabClass(currentPath.startsWith('/app/agency/dashboard'))}
+                        aria-current={currentPath.startsWith('/app/agency/dashboard') ? 'page' : undefined}
+                    >
                         Agency dashboard
                     </Link>
                 )}

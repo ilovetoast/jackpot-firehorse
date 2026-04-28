@@ -824,6 +824,34 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
                 Route::delete('/studio/animations/{animationJob}', [\App\Http\Controllers\Studio\StudioAnimationController::class, 'destroy'])
                     ->whereNumber('animationJob')
                     ->name('app.studio.animations.destroy');
+
+                Route::get('/studio/documents/{document}/layers/{layer}/extract-layers/options', [\App\Http\Controllers\Studio\StudioLayerExtractionController::class, 'extractOptions'])
+                    ->whereNumber('document')
+                    ->name('app.studio.documents.layers.extract-layers.options');
+                Route::post('/studio/documents/{document}/layers/{layer}/extract-layers', [\App\Http\Controllers\Studio\StudioLayerExtractionController::class, 'extract'])
+                    ->whereNumber('document')
+                    ->name('app.studio.documents.layers.extract-layers');
+                Route::post('/studio/documents/{document}/layers/{layer}/extract-layers/confirm', [\App\Http\Controllers\Studio\StudioLayerExtractionController::class, 'confirm'])
+                    ->whereNumber('document')
+                    ->name('app.studio.documents.layers.extract-layers.confirm');
+                Route::get('/studio/layer-extraction-sessions/{session}', [\App\Http\Controllers\Studio\StudioLayerExtractionController::class, 'sessionShow'])
+                    ->name('app.studio.layer-extraction-sessions.show');
+                Route::get('/studio/layer-extraction-sessions/{session}/candidates/{candidate}/preview', [\App\Http\Controllers\Studio\StudioLayerExtractionController::class, 'preview'])
+                    ->name('app.studio.layer-extraction-sessions.preview');
+                Route::post('/studio/layer-extraction-sessions/{session}/pick', [\App\Http\Controllers\Studio\StudioLayerExtractionController::class, 'pick'])
+                    ->name('app.studio.layer-extraction-sessions.pick');
+                Route::post('/studio/layer-extraction-sessions/{session}/box', [\App\Http\Controllers\Studio\StudioLayerExtractionController::class, 'box'])
+                    ->name('app.studio.layer-extraction-sessions.box');
+                Route::post('/studio/layer-extraction-sessions/{session}/clear-picks', [\App\Http\Controllers\Studio\StudioLayerExtractionController::class, 'clearPicks'])
+                    ->name('app.studio.layer-extraction-sessions.clear-picks');
+                Route::post('/studio/layer-extraction-sessions/{session}/clear-manual-candidates', [\App\Http\Controllers\Studio\StudioLayerExtractionController::class, 'clearManualCandidates'])
+                    ->name('app.studio.layer-extraction-sessions.clear-manual-candidates');
+                Route::post('/studio/layer-extraction-sessions/{session}/candidates/{candidate}/refine', [\App\Http\Controllers\Studio\StudioLayerExtractionController::class, 'refineCandidate'])
+                    ->name('app.studio.layer-extraction-sessions.candidates.refine');
+                Route::post('/studio/layer-extraction-sessions/{session}/candidates/{candidate}/reset-refine', [\App\Http\Controllers\Studio\StudioLayerExtractionController::class, 'resetCandidateRefine'])
+                    ->name('app.studio.layer-extraction-sessions.candidates.reset-refine');
+                Route::delete('/studio/layer-extraction-sessions/{session}/candidates/{candidate}', [\App\Http\Controllers\Studio\StudioLayerExtractionController::class, 'removeCandidate'])
+                    ->name('app.studio.layer-extraction-sessions.candidates.remove');
             });
 
             // Phase J.2.3: Tag UX API endpoints

@@ -7,7 +7,7 @@ export default function SectionHeader({ eyebrow, title, description, align = 'ce
     return (
         <div className={`${wrap} ${className}`}>
             {eyebrow && (
-                <p className="text-sm font-semibold uppercase tracking-[0.2em] text-indigo-400/90">{eyebrow}</p>
+                <p className="text-sm font-semibold uppercase tracking-[0.2em] text-violet-400/90">{eyebrow}</p>
             )}
             <h2 className={`mt-2 font-display text-3xl font-bold tracking-tight text-white sm:text-4xl lg:text-5xl text-balance`}>
                 {title}

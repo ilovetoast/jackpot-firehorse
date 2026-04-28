@@ -126,11 +126,11 @@ export default function ManageTagsWorkspace({ brandId, canPurge }) {
     }
 
     return (
-        <div className="mt-8 space-y-4">
-            <div className="rounded-lg border border-gray-200 bg-white shadow-sm">
-                <div className="border-b border-gray-100 px-4 py-3 sm:px-6">
-                    <h3 className="text-sm font-semibold text-gray-900">Tags in use</h3>
-                    <p className="mt-1 text-xs text-gray-500">
+        <div className="mt-6 space-y-4 sm:mt-8">
+            <div className="rounded-xl border border-slate-200/90 bg-white shadow-sm">
+                <div className="border-b border-slate-100 px-4 py-3 sm:px-6">
+                    <h3 className="text-sm font-semibold text-slate-900">Tags in use</h3>
+                    <p className="mt-1 text-xs text-slate-500">
                         Canonical tags on assets in this brand. Removing a tag deletes it from every asset that has it (and
                         matching approved metadata rows). Up to {MAX_BULK_TAGS} tags per bulk action.
                     </p>
@@ -141,8 +141,8 @@ export default function ManageTagsWorkspace({ brandId, canPurge }) {
                 )}
 
                 {canPurge && selectedTags.length > 0 && (
-                    <div className="flex flex-wrap items-center gap-2 border-b border-gray-100 bg-slate-50 px-4 py-2 sm:px-6">
-                        <span className="text-sm text-gray-600">{selectedTags.length} selected</span>
+                    <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 bg-slate-50/80 px-4 py-2 sm:px-6">
+                        <span className="text-sm text-slate-600">{selectedTags.length} selected</span>
                         <button
                             type="button"
                             onClick={() => setBulkConfirmOpen(true)}
@@ -154,63 +154,66 @@ export default function ManageTagsWorkspace({ brandId, canPurge }) {
                 )}
 
                 <div className="overflow-x-auto">
-                    <table className="min-w-full divide-y divide-gray-200 text-sm">
-                        <thead className="bg-gray-50">
+                    <table className="min-w-full divide-y divide-slate-200 text-sm">
+                        <thead className="bg-slate-50/80">
                             <tr>
                                 {canPurge && (
-                                    <th className="w-10 px-3 py-2 text-left">
+                                    <th className="w-10 px-3 py-2.5 text-left">
                                         <input
                                             ref={headerCheckboxRef}
                                             type="checkbox"
                                             checked={allOnPageSelected}
                                             onChange={toggleSelectAllOnPage}
-                                            className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                            className="rounded border-slate-300 text-violet-600 focus:ring-violet-500"
                                             aria-label="Select all on this page"
                                         />
                                     </th>
                                 )}
-                                <th className="px-3 py-2 text-left font-medium text-gray-600">Tag</th>
-                                <th className="px-3 py-2 text-right font-medium text-gray-600">Assets</th>
-                                {canPurge && <th className="px-3 py-2 text-right font-medium text-gray-600">Actions</th>}
+                                <th className="px-3 py-2.5 text-left font-medium text-slate-600">Tag</th>
+                                <th className="px-3 py-2.5 text-right font-medium text-slate-600">Assets</th>
+                                {canPurge && <th className="px-3 py-2.5 text-right font-medium text-slate-600">Actions</th>}
                             </tr>
                         </thead>
-                        <tbody className="divide-y divide-gray-100 bg-white">
+                        <tbody className="divide-y divide-slate-100 bg-white">
                             {loading ? (
                                 <tr>
-                                    <td colSpan={canPurge ? 4 : 2} className="px-4 py-8 text-center text-gray-500">
+                                    <td colSpan={canPurge ? 4 : 2} className="px-4 py-8 text-center text-slate-500">
                                         Loading…
                                     </td>
                                 </tr>
                             ) : tags.length === 0 ? (
                                 <tr>
-                                    <td colSpan={canPurge ? 4 : 2} className="px-4 py-8 text-center text-gray-500">
+                                    <td colSpan={canPurge ? 4 : 2} className="px-4 py-8 text-center text-slate-500">
                                         No tags on assets in this brand yet.
                                     </td>
                                 </tr>
                             ) : (
                                 tags.map((row) => (
-                                    <tr key={row.tag}>
+                                    <tr
+                                        key={row.tag}
+                                        className="transition-colors hover:bg-slate-50/50"
+                                    >
                                         {canPurge && (
-                                            <td className="px-3 py-2">
+                                            <td className="px-3 py-2.5">
                                                 <input
                                                     type="checkbox"
                                                     checked={selectedTags.includes(row.tag)}
                                                     onChange={() => toggleSelect(row.tag)}
-                                                    className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                                    className="rounded border-slate-300 text-violet-600 focus:ring-violet-500"
                                                     aria-label={`Select ${row.tag}`}
                                                 />
                                             </td>
                                         )}
-                                        <td className="px-3 py-2 font-medium text-gray-900">{row.tag}</td>
-                                        <td className="px-3 py-2 text-right tabular-nums text-gray-600">
+                                        <td className="px-3 py-2.5 font-medium text-slate-900">{row.tag}</td>
+                                        <td className="px-3 py-2.5 text-right tabular-nums text-slate-600">
                                             {row.asset_count}
                                         </td>
                                         {canPurge && (
-                                            <td className="px-3 py-2 text-right">
+                                            <td className="px-3 py-2.5 text-right">
                                                 <button
                                                     type="button"
                                                     onClick={() => setPurgeTarget(row)}
-                                                    className="text-sm font-medium text-red-600 hover:text-red-500"
+                                                    className="text-sm font-medium text-red-600/90 hover:text-red-700"
                                                 >
                                                     Remove from all…
                                                 </button>
@@ -224,7 +227,7 @@ export default function ManageTagsWorkspace({ brandId, canPurge }) {
                 </div>
 
                 {meta.last_page > 1 && (
-                    <div className="flex items-center justify-between border-t border-gray-100 px-4 py-3 text-sm text-gray-600 sm:px-6">
+                    <div className="flex flex-col gap-2 border-t border-slate-100 px-4 py-3 text-sm text-slate-600 sm:flex-row sm:items-center sm:justify-between sm:px-6">
                         <span>
                             Page {meta.current_page} of {meta.last_page} · {meta.total} distinct tags
                         </span>
@@ -233,7 +236,7 @@ export default function ManageTagsWorkspace({ brandId, canPurge }) {
                                 type="button"
                                 disabled={page <= 1 || loading}
                                 onClick={() => setPage((p) => Math.max(1, p - 1))}
-                                className="rounded-md border border-gray-300 bg-white px-3 py-1 disabled:opacity-40"
+                                className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-slate-700 shadow-sm disabled:cursor-not-allowed disabled:opacity-40 hover:bg-slate-50"
                             >
                                 Previous
                             </button>
@@ -241,7 +244,7 @@ export default function ManageTagsWorkspace({ brandId, canPurge }) {
                                 type="button"
                                 disabled={page >= meta.last_page || loading}
                                 onClick={() => setPage((p) => p + 1)}
-                                className="rounded-md border border-gray-300 bg-white px-3 py-1 disabled:opacity-40"
+                                className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-slate-700 shadow-sm disabled:cursor-not-allowed disabled:opacity-40 hover:bg-slate-50"
                             >
                                 Next
                             </button>
@@ -251,18 +254,18 @@ export default function ManageTagsWorkspace({ brandId, canPurge }) {
             </div>
 
             {!canPurge && (
-                <p className="text-sm text-gray-500">
+                <p className="text-sm text-slate-500">
                     You can view tag usage. To remove tags from all assets, you need the{' '}
-                    <span className="font-medium text-gray-700">assets.tags.delete</span> permission.
+                    <span className="font-medium text-slate-800">assets.tags.delete</span> permission.
                 </p>
             )}
 
-            <p className="text-xs text-gray-500">
+            <p className="text-xs text-slate-500">
                 Find assets missing tags from{' '}
-                <Link href="/app/insights/metadata" className="font-medium text-indigo-600 hover:text-indigo-500">
+                <Link href="/app/insights/metadata" className="font-medium text-violet-600 hover:text-violet-500">
                     Insights → Metadata
                 </Link>{' '}
-                (<span className="font-medium text-gray-700">Fix missing tags</span>).
+                (<span className="font-medium text-slate-700">Fix missing tags</span>).
             </p>
 
             <ConfirmDialog

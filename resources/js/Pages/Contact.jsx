@@ -100,7 +100,7 @@ export default function Contact({ plan }) {
                     </div>
 
                     <div className="mt-10 flex flex-wrap gap-x-6 gap-y-2 text-sm">
-                        <Link href="/product" className="font-semibold text-indigo-400 hover:text-indigo-300 transition-colors">
+                        <Link href="/product" className="font-semibold text-violet-400 hover:text-violet-300 transition-colors">
                             Product overview →
                         </Link>
                         <Link href="/pricing" className="font-semibold text-white/50 hover:text-white/75 transition-colors">
@@ -216,7 +216,7 @@ function QuickContactForm({ planKey, prompts }) {
                     type="checkbox"
                     checked={data.consent_marketing}
                     onChange={(e) => setData('consent_marketing', e.target.checked)}
-                    className="mt-0.5 h-3.5 w-3.5 rounded border-white/20 bg-white/[0.03] text-indigo-500 focus:ring-indigo-400/60"
+                    className="mt-0.5 h-3.5 w-3.5 rounded border-white/20 bg-white/[0.03] text-violet-500 focus:ring-violet-400/60"
                 />
                 <span>Also send me occasional product updates. (Optional — we'll reply to your message either way.)</span>
             </label>
@@ -243,7 +243,7 @@ function QuickContactForm({ planKey, prompts }) {
                 <ul className="space-y-2">
                     {prompts.map((prompt) => (
                         <li key={prompt} className="flex items-center gap-2 text-sm text-white/45">
-                            <span className="h-1 w-1 rounded-full bg-indigo-400/60 flex-shrink-0" />
+                            <span className="h-1 w-1 rounded-full bg-violet-400/60 flex-shrink-0" />
                             {prompt}
                         </li>
                     ))}
@@ -254,7 +254,7 @@ function QuickContactForm({ planKey, prompts }) {
 }
 
 const inputClass =
-    'w-full rounded-xl bg-white/[0.03] px-4 py-3 text-sm text-white placeholder:text-white/30 ring-1 ring-inset ring-white/[0.08] focus:ring-2 focus:ring-indigo-400/60 focus:outline-none transition-shadow'
+    'w-full rounded-xl bg-white/[0.03] px-4 py-3 text-sm text-white placeholder:text-white/30 ring-1 ring-inset ring-white/[0.08] focus:ring-2 focus:ring-violet-400/60 focus:outline-none transition-shadow'
 
 function Field({ label, required, error, hint, children }) {
     return (

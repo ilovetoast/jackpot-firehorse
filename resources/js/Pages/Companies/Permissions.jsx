@@ -3,6 +3,8 @@ import { useState } from 'react'
 import React from 'react'
 import AppNav from '../../Components/AppNav'
 import CompanyTabs from '../../Components/Company/CompanyTabs'
+import ScopeBanner from '../../Components/Company/ScopeBanner'
+import { CompanyAdminTopBar } from '../../Components/Company/CompanyControlCenterShell'
 import AppHead from '../../Components/AppHead'
 import AppFooter from '../../Components/AppFooter'
 import { ChevronDownIcon, ChevronRightIcon } from '@heroicons/react/24/outline'
@@ -127,17 +129,17 @@ export default function CompanyPermissions({
     }
 
     return (
-        <div className="min-h-screen flex flex-col bg-gray-50">
-            <AppHead title="Company Permissions" />
+        <div className="min-h-screen flex flex-col bg-slate-50">
+            <AppHead title="Access" />
             <AppNav brand={auth.activeBrand} tenant={tenant} />
+            <CompanyAdminTopBar
+                title="Access"
+                subtitle={`How company and brand roles map to permissions for ${tenant.name}. Owners and admins can view all restricted categories.`}
+            />
             <main className="flex-1">
-                <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
-                    {/* Header */}
-                    <div className="mb-6">
-                        <h1 className="text-3xl font-bold text-gray-900">Company Permissions</h1>
-                        <p className="mt-2 text-sm text-gray-600">
-                            View which permissions each role has for {tenant.name}. Owners and admins can view all restricted categories.
-                        </p>
+                <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-6">
+                    <div className="mb-4">
+                        <ScopeBanner scope="company" name={tenant.name} />
                     </div>
 
                     <CompanyTabs />
@@ -160,7 +162,7 @@ export default function CompanyPermissions({
                                 </div>
                             </div>
                             <div className="flex items-start gap-2.5">
-                                <svg className="mt-0.5 h-4 w-4 flex-shrink-0 text-indigo-500" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor">
+                                <svg className="mt-0.5 h-4 w-4 flex-shrink-0 text-violet-500" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor">
                                     <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
                                 </svg>
                                 <div>
@@ -176,8 +178,8 @@ export default function CompanyPermissions({
                     <div className="rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
                         <div className="border-b border-gray-200 px-6 py-4">
                             <div className="flex items-center">
-                                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-indigo-100 mr-3">
-                                    <span className="text-indigo-600">🏢</span>
+                                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-violet-100 mr-3">
+                                    <span className="text-violet-600">🏢</span>
                                 </div>
                                 <div>
                                     <h2 className="text-lg font-semibold text-gray-900">Company Roles & Permissions</h2>
@@ -208,12 +210,12 @@ export default function CompanyPermissions({
 
                                         return (
                                             <React.Fragment key={groupKey}>
-                                                <tr className="bg-indigo-50 border-t-2 border-indigo-200">
+                                                <tr className="bg-violet-50 border-t-2 border-violet-200">
                                                     <td colSpan={company_roles.length + 1} className="px-4 py-3">
                                                         <button
                                                             type="button"
                                                             onClick={() => toggleSection(groupKey)}
-                                                            className="flex items-center gap-2 text-sm font-semibold text-indigo-900 hover:text-indigo-700 w-full text-left"
+                                                            className="flex items-center gap-2 text-sm font-semibold text-violet-900 hover:text-violet-700 w-full text-left"
                                                         >
                                                             {collapsedSections[groupKey] ? (
                                                                 <ChevronRightIcon className="h-5 w-5" />
@@ -222,7 +224,7 @@ export default function CompanyPermissions({
                                                             )}
                                                             <span className="mr-2">🏢</span>
                                                             <span>{group.title}</span>
-                                                            <span className="ml-2 text-xs font-normal text-indigo-600 bg-indigo-100 px-2 py-0.5 rounded">Company-Level</span>
+                                                            <span className="ml-2 text-xs font-normal text-violet-600 bg-violet-100 px-2 py-0.5 rounded">Company-Level</span>
                                                         </button>
                                                     </td>
                                                 </tr>
@@ -271,11 +273,11 @@ export default function CompanyPermissions({
                                                                 <td key={role.id} className="whitespace-nowrap px-4 py-3 text-center">
                                                                     {isChecked || hasAutomaticAccess ? (
                                                                         <div className="flex items-center justify-center gap-1">
-                                                                            <svg className={`h-5 w-5 ${isCompanyOwnerOrAdmin ? 'text-indigo-600' : 'text-green-500'}`} fill="currentColor" viewBox="0 0 20 20">
+                                                                            <svg className={`h-5 w-5 ${isCompanyOwnerOrAdmin ? 'text-violet-600' : 'text-green-500'}`} fill="currentColor" viewBox="0 0 20 20">
                                                                                 <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
                                                                             </svg>
                                                                             {isCompanyOwnerOrAdmin && (
-                                                                                <svg className="h-4 w-4 text-indigo-500" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor" title="Company-level access (overrides brand restrictions)">
+                                                                                <svg className="h-4 w-4 text-violet-500" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor" title="Company-level access (overrides brand restrictions)">
                                                                                     <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
                                                                                 </svg>
                                                                             )}
@@ -370,11 +372,11 @@ export default function CompanyPermissions({
                                                                 <td key={role.id} className="whitespace-nowrap px-4 py-3 text-center">
                                                                     {isChecked || hasAutomaticAccess ? (
                                                                         <div className="flex items-center justify-center gap-1">
-                                                                            <svg className={`h-5 w-5 ${hasCompanyOverride ? 'text-indigo-600' : 'text-green-500'}`} fill="currentColor" viewBox="0 0 20 20">
+                                                                            <svg className={`h-5 w-5 ${hasCompanyOverride ? 'text-violet-600' : 'text-green-500'}`} fill="currentColor" viewBox="0 0 20 20">
                                                                                 <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
                                                                             </svg>
                                                                             {hasCompanyOverride && (
-                                                                                <svg className="h-4 w-4 text-indigo-500" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor" title="Company-level override">
+                                                                                <svg className="h-4 w-4 text-violet-500" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor" title="Company-level override">
                                                                                     <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
                                                                                 </svg>
                                                                             )}
@@ -404,7 +406,7 @@ export default function CompanyPermissions({
                                                     <button
                                                         type="button"
                                                         onClick={() => toggleSection('other')}
-                                                        className="flex items-center gap-2 text-sm font-semibold text-gray-900 hover:text-indigo-600 w-full text-left"
+                                                        className="flex items-center gap-2 text-sm font-semibold text-gray-900 hover:text-violet-600 w-full text-left"
                                                     >
                                                         {collapsedSections.other ? (
                                                             <ChevronRightIcon className="h-5 w-5" />

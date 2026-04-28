@@ -46,7 +46,7 @@ export default function NewsletterSignup({ source = null, className = '' }) {
                     value={data.email}
                     onChange={(e) => setData('email', e.target.value)}
                     placeholder="you@company.com"
-                    className="flex-1 rounded-xl bg-white/[0.03] px-4 py-3 text-sm text-white placeholder:text-white/30 ring-1 ring-inset ring-white/[0.08] focus:ring-2 focus:ring-indigo-400/60 focus:outline-none transition-shadow"
+                    className="flex-1 rounded-xl bg-white/[0.03] px-4 py-3 text-sm text-white placeholder:text-white/30 ring-1 ring-inset ring-white/[0.08] focus:ring-2 focus:ring-violet-400/60 focus:outline-none transition-shadow"
                 />
                 <button
                     type="submit"
@@ -62,7 +62,7 @@ export default function NewsletterSignup({ source = null, className = '' }) {
                     type="checkbox"
                     checked={data.consent_marketing}
                     onChange={(e) => setData('consent_marketing', e.target.checked)}
-                    className="mt-0.5 h-3.5 w-3.5 rounded border-white/20 bg-white/[0.03] text-indigo-500 focus:ring-indigo-400/60"
+                    className="mt-0.5 h-3.5 w-3.5 rounded border-white/20 bg-white/[0.03] text-violet-500 focus:ring-violet-400/60"
                 />
                 <span>I'd like to receive product updates and occasional news from Jackpot. Unsubscribe anytime.</span>
             </label>

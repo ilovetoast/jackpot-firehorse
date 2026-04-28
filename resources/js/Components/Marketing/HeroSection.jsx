@@ -66,7 +66,7 @@ export default function HeroSection({
                     {secondaryCta && (
                         <Link
                             href={secondaryCta.href}
-                            className="inline-flex items-center gap-1 text-sm font-semibold text-indigo-400 hover:text-indigo-300 transition-colors"
+                            className="inline-flex items-center gap-1 text-sm font-semibold text-violet-400 hover:text-violet-300 transition-colors"
                         >
                             {secondaryCta.text}
                             <span aria-hidden="true">→</span>

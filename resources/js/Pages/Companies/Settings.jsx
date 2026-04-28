@@ -4,6 +4,8 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import AppNav from '../../Components/AppNav'
 import AppFooter from '../../Components/AppFooter'
 import CompanyTabs from '../../Components/Company/CompanyTabs'
+import ScopeBanner from '../../Components/Company/ScopeBanner'
+import { CompanyAdminTopBar } from '../../Components/Company/CompanyControlCenterShell'
 import ConfirmDialog from '../../Components/ConfirmDialog'
 import AiTaggingSettings from '../../Components/Companies/AiTaggingSettings'
 import AiUsagePanel from '../../Components/Companies/AiUsagePanel'
@@ -39,9 +41,15 @@ export default function CompanySettings({
     can_manage_agencies = false,
     creator_module_enabled = false,
     creator_module_brands = [],
+    focal_point_ai: focalPointAiProp = {
+        feature_enabled: true,
+        require_preferred_thumbs: false,
+        preferred_thumbnails_enabled: true,
+    },
 }) {
     const page = usePage()
     const { auth, errors: pageErrors = {}, flash = {} } = page.props
+    const currentPath = typeof page.url === 'string' ? new URL(page.url, 'http://localhost').pathname : ''
     const { can } = usePermission()
     const canViewAiUsage = can('ai.usage.view')
     const canEditViaPermission = can('company_settings.edit')
@@ -94,6 +102,22 @@ export default function CompanySettings({
     // get darkened to remain readable.
     const brandPrimary = auth?.activeBrand?.primary_color || '#6366f1'
     const brandPrimaryOnWhite = useMemo(() => ensureAccentContrastOnWhite(brandPrimary), [brandPrimary])
+
+    const focalPointAiEnvBlocked = useMemo(() => {
+        if (!focalPointAiProp) {
+            return false
+        }
+        if (!focalPointAiProp.feature_enabled) {
+            return true
+        }
+        if (
+            focalPointAiProp.require_preferred_thumbs &&
+            !focalPointAiProp.preferred_thumbnails_enabled
+        ) {
+            return true
+        }
+        return false
+    }, [focalPointAiProp])
 
     const csrf = () => document.querySelector('meta[name="csrf-token"]')?.content || ''
 
@@ -471,144 +495,176 @@ export default function CompanySettings({
         return statusMap[status] || status
     }
 
-    /** @type {{ id: string, label: string | null, items: { id: string, label: string, canAccess: boolean, ownerOnly?: boolean }[] }[]} */
+    const canViewActivityNav = can('activity_logs.view')
+
+    /** @type {{ id: string, label: string, items: { id: string, label: string, canAccess: boolean, ownerOnly?: boolean, href?: string }[] }[]} */
     const navGroups = [
         {
-            id: 'general',
-            label: null,
+            id: 'account',
+            label: 'Account',
             items: [
-                { id: 'company-information', label: 'Company Information', canAccess: canEditCompanySettings },
-                { id: 'plan-billing', label: 'Plan & Billing', canAccess: true },
-                { id: 'enterprise-download-policy', label: 'Enterprise Download Policy', canAccess: true },
+                { id: 'company-information', label: 'Company profile', canAccess: canEditCompanySettings },
+                { id: 'plan-billing', label: 'Plan & billing', canAccess: true },
+                { id: 'ai-usage', label: 'Usage', canAccess: canViewAiUsage },
+                { id: 'enterprise-download-policy', label: 'Download policy', canAccess: true },
             ],
         },
         {
-            id: 'company',
-            label: 'Company',
+            id: 'access',
+            label: 'Access',
             items: [
-                { id: 'team-members', label: 'Team Members', canAccess: true },
+                { id: 'team-members', label: 'Team members', canAccess: true },
                 ...(can_manage_agencies ? [{ id: 'agencies', label: 'Agencies', canAccess: true }] : []),
-                { id: 'brands-settings', label: 'Brands Settings', canAccess: true },
-                ...(canViewMetadata
-                    ? [{ id: 'metadata-settings', label: 'Categories & Fields', canAccess: true }]
+                { id: 'companies-permissions', label: 'Roles & permissions', canAccess: can('team.manage'), href: '/app/companies/permissions' },
+                { id: 'ownership-transfer', label: 'Ownership transfer', canAccess: canOwnershipTransfer, ownerOnly: true },
+            ],
+        },
+        {
+            id: 'brand-system',
+            label: 'Brand system',
+            items: [
+                { id: 'brands-settings', label: 'Brand defaults', canAccess: true },
+                ...(canViewMetadata ? [{ id: 'metadata-settings', label: 'Categories & fields', canAccess: true }] : []),
+                { id: 'creator-module', label: 'Creator module', canAccess: true },
+                ...(canManageGenerative ? [{ id: 'generative-settings', label: 'Studio defaults', canAccess: true }] : []),
+                ...(canManageAiSettings
+                    ? [{ id: 'ai-focal-photography-settings', label: 'Photo focal points', canAccess: true }]
                     : []),
             ],
         },
         {
             id: 'ai',
-            label: 'AI',
+            label: 'AI & automation',
             items: [
-                { id: 'ai-settings', label: 'AI Settings', canAccess: canManageAiSettings },
-                // "Generative" renamed to "Studio" to match the product nav; underlying settings key
-                // (`generative_enabled`) and route/middleware identifiers are intentionally NOT renamed.
-                ...(canManageGenerative ? [{ id: 'generative-settings', label: 'Studio', canAccess: true }] : []),
-                ...(canManageAiSettings
-                    ? [{ id: 'ai-focal-photography-settings', label: 'Photo focal point', canAccess: true }]
-                    : []),
+                { id: 'ai-settings', label: 'AI settings', canAccess: canManageAiSettings },
+                { id: 'brand-alignment-settings', label: 'Brand alignment', canAccess: canManageAiSettings },
                 { id: 'tag-quality', label: 'Insights', canAccess: canViewTagQuality },
-                { id: 'ai-usage', label: 'Usage', canAccess: canViewAiUsage },
             ],
         },
         {
-            id: 'owner',
-            label: null,
+            id: 'system',
+            label: 'System',
             items: [
-                { id: 'ownership-transfer', label: 'Ownership Transfer', canAccess: canOwnershipTransfer, ownerOnly: true },
-                { id: 'danger-zone', label: 'Danger Zone', canAccess: canDeleteCompany, ownerOnly: true },
+                ...(canViewActivityNav
+                    ? [{ id: 'companies-activity', label: 'Activity log', canAccess: true, href: '/app/companies/activity' }]
+                    : []),
+                { id: 'danger-zone', label: 'Danger zone', canAccess: canDeleteCompany, ownerOnly: true },
             ],
         },
     ]
 
+    const navItemActive = (item) => {
+        if (item.href) {
+            if (currentPath === item.href) {
+                return true
+            }
+            if (item.href !== '/' && currentPath.startsWith(item.href + '/')) {
+                return true
+            }
+            return false
+        }
+        return activeSection === item.id
+    }
+
+    const renderNavItem = (item) => {
+        if (item.href && item.canAccess === false) {
+            return null
+        }
+        const active = navItemActive(item)
+        const className = [
+            'w-full text-left rounded-md px-2.5 py-2 text-sm font-medium transition-colors',
+            active
+                ? 'bg-violet-800 text-white shadow-sm ring-1 ring-inset ring-violet-600/50'
+                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900',
+            !item.canAccess ? 'opacity-75' : '',
+        ].join(' ')
+
+        const labelInner = (
+            <span className="flex items-center justify-between gap-2">
+                {item.label}
+                {!item.canAccess && item.ownerOnly && (
+                    <span
+                        className="ml-1.5 inline-flex shrink-0 items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800"
+                        title="Owner only"
+                    >
+                        Owner only
+                    </span>
+                )}
+            </span>
+        )
+
+        if (item.href) {
+            return (
+                <Link
+                    key={item.id}
+                    href={item.href}
+                    className={className}
+                    aria-current={active ? 'page' : undefined}
+                >
+                    {labelInner}
+                </Link>
+            )
+        }
+        return (
+            <button
+                key={item.id}
+                type="button"
+                onClick={() => handleSectionClick(item.id)}
+                className={className}
+                aria-current={active ? 'true' : undefined}
+            >
+                {labelInner}
+            </button>
+        )
+    }
+
     return (
-        <div className="min-h-screen flex flex-col bg-gray-50">
-            <AppHead title="Company Settings" />
+        <div className="min-h-screen flex flex-col bg-slate-50">
+            <AppHead title="Company admin" />
             <AppNav brand={auth.activeBrand} tenant={tenant} />
+            <CompanyAdminTopBar
+                title="Company admin"
+                subtitle="Account-level configuration for your company. Brand identity and creative settings live under each brand."
+            />
             <main className="flex-1">
-                <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
-                    {/* Header */}
-                    <div className="mb-6">
-                        <h1 className="text-3xl font-bold text-gray-900">Company Settings</h1>
-                        <p className="mt-2 text-sm text-gray-600">Manage your company's settings and preferences</p>
+                <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-6 sm:py-7">
+                    <div className="mb-4">
+                        <ScopeBanner scope="company" name={tenant.name || 'this company'} />
+                        <p className="mt-2 text-sm text-slate-600">
+                            Company-level settings apply to every brand in this company.
+                        </p>
                     </div>
 
                     <CompanyTabs />
 
-                    {/* Two-column layout: left sidebar nav + main content */}
-                    <div className="flex flex-col lg:flex-row gap-8">
-                        {/* Left sidebar nav - Tailwind UI docs style */}
-                        <aside className="lg:w-56 flex-shrink-0">
-                            <nav className="sticky top-8 flex flex-col gap-4" aria-label="Company settings sections">
+                    {/* Admin console: left IA + right content cards */}
+                    <div className="mt-6 flex flex-col gap-6 lg:flex-row lg:gap-8">
+                        <aside className="lg:w-64 flex-shrink-0">
+                            <nav
+                                className="sticky top-6 flex max-h-[calc(100vh-2rem)] flex-col gap-4 overflow-y-auto rounded-xl border border-slate-200/80 bg-white p-3 shadow-sm"
+                                aria-label="Company admin sections"
+                            >
                                 {navGroups.map((group) => (
-                                    <div key={group.id} className={group.label ? '' : 'space-y-1'}>
-                                        {group.label ? (
-                                            <>
-                                                <p className="px-1 pb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">
-                                                    {group.label}
-                                                </p>
-                                                <div className="rounded-lg border border-gray-200 bg-gray-50/90 p-1 shadow-sm">
-                                                    <div className="flex flex-col gap-0.5">
-                                                        {group.items.map((item) => (
-                                                            <button
-                                                                key={item.id}
-                                                                type="button"
-                                                                onClick={() => handleSectionClick(item.id)}
-                                                                className={`w-full text-left rounded-md px-2.5 py-2 text-sm font-medium transition-colors ${
-                                                                    activeSection === item.id
-                                                                        ? 'bg-indigo-50 text-indigo-700 shadow-sm'
-                                                                        : 'text-gray-600 hover:bg-white hover:text-gray-900'
-                                                                } ${!item.canAccess ? 'opacity-75' : ''}`}
-                                                            >
-                                                                <span className="flex items-center justify-between gap-2">
-                                                                    {item.label}
-                                                                    {!item.canAccess && item.ownerOnly && (
-                                                                        <span className="ml-1.5 inline-flex shrink-0 items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800" title="Owner only">
-                                                                            Owner only
-                                                                        </span>
-                                                                    )}
-                                                                </span>
-                                                            </button>
-                                                        ))}
-                                                    </div>
-                                                </div>
-                                            </>
-                                        ) : (
-                                            group.items.map((item) => (
-                                                <button
-                                                    key={item.id}
-                                                    type="button"
-                                                    onClick={() => handleSectionClick(item.id)}
-                                                    className={`w-full text-left rounded-md px-3 py-2 text-sm font-medium transition-colors ${
-                                                        activeSection === item.id
-                                                            ? 'bg-indigo-50 text-indigo-700'
-                                                            : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
-                                                    } ${!item.canAccess ? 'opacity-75' : ''}`}
-                                                >
-                                                    <span className="flex items-center justify-between gap-2">
-                                                        {item.label}
-                                                        {!item.canAccess && item.ownerOnly && (
-                                                            <span className="ml-1.5 inline-flex shrink-0 items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800" title="Owner only">
-                                                                Owner only
-                                                            </span>
-                                                        )}
-                                                    </span>
-                                                </button>
-                                            ))
-                                        )}
+                                    <div key={group.id} className="min-w-0">
+                                        <p className="px-1.5 pb-1.5 text-[10px] font-bold uppercase tracking-widest text-slate-500">
+                                            {group.label}
+                                        </p>
+                                        <div className="flex flex-col gap-0.5">{group.items.map((item) => renderNavItem(item))}</div>
                                     </div>
                                 ))}
                             </nav>
                         </aside>
 
-                        {/* Main content */}
-                        <div className="flex-1 min-w-0">
+                        {/* Main content — existing section cards (forms unchanged) */}
+                        <div className="min-w-0 flex-1">
 
-                    {/* Company Information */}
+                    {/* Company profile */}
                     <div id="company-information" className="mb-12 scroll-mt-8">
                         {canEditCompanySettings ? (
-                        <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
+                        <div className="overflow-hidden rounded-lg border border-slate-200/90 bg-white shadow-sm ring-1 ring-slate-100/50">
                             <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
                                 <div className="lg:col-span-1 px-6 py-6 border-b lg:border-b-0 lg:border-r border-gray-200">
-                                    <h2 className="text-lg font-semibold text-gray-900">Company Information</h2>
+                                    <h2 className="text-lg font-semibold text-gray-900">Company profile</h2>
                                     <p className="mt-1 text-sm text-gray-500">Update your company name and details</p>
                                 </div>
                                 <div className="lg:col-span-2 px-6 py-6">
@@ -626,7 +682,7 @@ export default function CompanySettings({
                                             required
                                             value={data.name}
                                             onChange={(e) => handleNameChange(e.target.value)}
-                                            className="block w-full rounded-md border-0 py-1.5 px-3 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6"
+                                            className="block w-full rounded-md border-0 py-1.5 px-3 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-violet-600 sm:text-sm sm:leading-6"
                                         />
                                         {errors.name && <p className="mt-2 text-sm text-red-600">{errors.name}</p>}
                                     </div>
@@ -648,7 +704,7 @@ export default function CompanySettings({
                                                 required
                                                 value={data.slug}
                                                 onChange={(e) => handleSlugChange(e.target.value)}
-                                                className="block w-full min-w-0 flex-1 rounded-none border-0 py-1.5 px-3 text-gray-900 ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6"
+                                                className="block w-full min-w-0 flex-1 rounded-none border-0 py-1.5 px-3 text-gray-900 ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-violet-600 sm:text-sm sm:leading-6"
                                                 placeholder="your-company-name"
                                             />
                                             <span className="inline-flex items-center rounded-r-md border border-l-0 border-gray-300 bg-gray-50 px-3 text-gray-500 sm:text-sm">
@@ -692,7 +748,7 @@ export default function CompanySettings({
                                             required
                                             value={data.timezone}
                                             onChange={(e) => setData('timezone', e.target.value)}
-                                            className="block w-full rounded-md border-0 py-1.5 px-3 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6"
+                                            className="block w-full rounded-md border-0 py-1.5 px-3 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 focus:ring-2 focus:ring-inset focus:ring-violet-600 sm:text-sm sm:leading-6"
                                         >
                                             {timezones.map((tz) => (
                                                 <option key={tz.value} value={tz.value}>
@@ -723,8 +779,8 @@ export default function CompanySettings({
                                                 <button
                                                     type="button"
                                                     onClick={() => setData('settings.enable_metadata_approval', !data.settings?.enable_metadata_approval)}
-                                                    className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:ring-offset-2 ${
-                                                        data.settings?.enable_metadata_approval ? 'bg-indigo-600' : 'bg-gray-200'
+                                                    className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-violet-600 focus:ring-offset-2 ${
+                                                        data.settings?.enable_metadata_approval ? 'bg-violet-600' : 'bg-gray-200'
                                                     }`}
                                                     role="switch"
                                                     aria-checked={data.settings?.enable_metadata_approval}
@@ -756,8 +812,8 @@ export default function CompanySettings({
                                                 <button
                                                     type="button"
                                                     onClick={() => setData('settings.features.contributor_asset_approval', !data.settings?.features?.contributor_asset_approval)}
-                                                    className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:ring-offset-2 ${
-                                                        data.settings?.features?.contributor_asset_approval ? 'bg-indigo-600' : 'bg-gray-200'
+                                                    className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-violet-600 focus:ring-offset-2 ${
+                                                        data.settings?.features?.contributor_asset_approval ? 'bg-violet-600' : 'bg-gray-200'
                                                     }`}
                                                     role="switch"
                                                     aria-checked={data.settings?.features?.contributor_asset_approval}
@@ -789,7 +845,7 @@ export default function CompanySettings({
                                             value={data.settings?.download_name_template ?? ''}
                                             onChange={(e) => setData('settings.download_name_template', e.target.value)}
                                             placeholder="{{brand}}-download-{{date}}"
-                                            className="block w-full rounded-md border-0 py-1.5 px-3 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6"
+                                            className="block w-full rounded-md border-0 py-1.5 px-3 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-violet-600 sm:text-sm sm:leading-6"
                                         />
                                         <p className="mt-2 text-sm text-gray-600">
                                             <span className="font-medium">Preview:</span>{' '}
@@ -821,7 +877,7 @@ export default function CompanySettings({
                                     <button
                                         type="submit"
                                         disabled={processing || slugCheckStatus === 'taken' || slugCheckStatus === 'invalid' || isCheckingSlug}
-                                        className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:opacity-50"
+                                        className="rounded-md bg-violet-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-violet-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-600 disabled:opacity-50"
                                     >
                                         Save Changes
                                     </button>
@@ -837,7 +893,7 @@ export default function CompanySettings({
                                     <div className="blur-sm select-none pointer-events-none">
                                         <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
                                             <div className="lg:col-span-1 px-6 py-6 border-b lg:border-b-0 lg:border-r border-gray-200">
-                                                <h2 className="text-lg font-semibold text-gray-900">Company Information</h2>
+                                                <h2 className="text-lg font-semibold text-gray-900">Company profile</h2>
                                                 <p className="mt-1 text-sm text-gray-500">Update your company name and details</p>
                                             </div>
                                             <div className="lg:col-span-2 px-6 py-6">
@@ -942,7 +998,7 @@ export default function CompanySettings({
                                                                 ? `${route('brands.edit', { brand: b.id })}?tab=creators`
                                                                 : `/app/brands/${b.id}/edit?tab=creators`
                                                         }
-                                                        className="text-sm font-semibold text-indigo-600 hover:text-indigo-800"
+                                                        className="text-sm font-semibold text-violet-600 hover:text-violet-800"
                                                     >
                                                         Creator settings →
                                                     </Link>
@@ -1024,7 +1080,7 @@ export default function CompanySettings({
                                                     value={agencySearch}
                                                     onChange={(e) => setAgencySearch(e.target.value)}
                                                     placeholder="Type at least 2 characters…"
-                                                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                                                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-violet-500 focus:ring-violet-500 sm:text-sm"
                                                     autoComplete="off"
                                                 />
                                                 {agencySearchLoading && (
@@ -1042,7 +1098,7 @@ export default function CompanySettings({
                                                                         setAgencySearchResults([])
                                                                     }}
                                                                     className={`w-full px-3 py-2 text-left text-sm hover:bg-gray-50 ${
-                                                                        selectedAgencyTenantId === t.id ? 'bg-indigo-50 text-indigo-900' : 'text-gray-900'
+                                                                        selectedAgencyTenantId === t.id ? 'bg-violet-50 text-violet-900' : 'text-gray-900'
                                                                     }`}
                                                                 >
                                                                     <span className="font-medium">{t.name}</span>
@@ -1062,7 +1118,7 @@ export default function CompanySettings({
                                                         id="agency-tenant-role"
                                                         value={agencyTenantRole}
                                                         onChange={(e) => setAgencyTenantRole(e.target.value)}
-                                                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                                                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-violet-500 focus:ring-violet-500 sm:text-sm"
                                                     >
                                                         {(agency_relationship_role_options || []).map((opt) => (
                                                             <option key={opt.value} value={opt.value}>
@@ -1079,7 +1135,7 @@ export default function CompanySettings({
                                                         id="agency-brand-role"
                                                         value={agencyBrandRole}
                                                         onChange={(e) => setAgencyBrandRole(e.target.value)}
-                                                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                                                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-violet-500 focus:ring-violet-500 sm:text-sm"
                                                     >
                                                         {(brand_role_options || []).map((opt) => (
                                                             <option key={opt.value} value={opt.value}>
@@ -1103,7 +1159,7 @@ export default function CompanySettings({
                                                                     type="checkbox"
                                                                     checked={agencySelectedBrandIds.has(b.id)}
                                                                     onChange={() => toggleAgencyBrand(b.id)}
-                                                                    className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                                                    className="h-4 w-4 rounded border-gray-300 text-violet-600 focus:ring-violet-500"
                                                                 />
                                                                 <label htmlFor={`agency-brand-${b.id}`} className="text-sm text-gray-700">
                                                                     {b.name}
@@ -1182,14 +1238,14 @@ export default function CompanySettings({
                     </div>
                     )}
 
-                    {/* Brands Settings */}
+                    {/* Brand defaults (tenant-wide workspace defaults) */}
                     <div id="brands-settings" className="mb-12 scroll-mt-8">
-                        <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
+                        <div className="overflow-hidden rounded-lg border border-slate-200/90 bg-white shadow-sm ring-1 ring-slate-100/50">
                             <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
                                 {/* Left: Header */}
                                 <div className="lg:col-span-1 px-6 py-6 border-b lg:border-b-0 lg:border-r border-gray-200">
-                                    <h2 className="text-lg font-semibold text-gray-900">Brands Settings</h2>
-                                    <p className="mt-1 text-sm text-gray-500">Manage your brands and their settings</p>
+                                    <h2 className="text-lg font-semibold text-gray-900">Brand defaults</h2>
+                                    <p className="mt-1 text-sm text-gray-500">Per-brand creative settings live in each brand — this is the company-wide brand list and workspace entry.</p>
                                 </div>
                                 {/* Right: Content */}
                                 <div className="lg:col-span-2 px-6 py-6">
@@ -1286,7 +1342,7 @@ export default function CompanySettings({
                                                                 settings: nextSettings,
                                                             }, { preserveScroll: true })
                                                         }}
-                                                        className="mt-1 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-60"
+                                                        className="mt-1 h-4 w-4 rounded border-gray-300 text-violet-600 focus:ring-violet-500 disabled:opacity-60"
                                                     />
                                                     <div>
                                                         <label htmlFor="policy-require-landing" className="text-sm font-medium text-gray-900">
@@ -1312,7 +1368,7 @@ export default function CompanySettings({
                                                         checked={downloadPolicy.disable_single_asset_downloads ?? false}
                                                         disabled={!hasDownloadPolicyAccess}
                                                         onChange={(e) => hasDownloadPolicyAccess && persistDownloadPolicy({ ...downloadPolicy, disable_single_asset_downloads: e.target.checked })}
-                                                        className="mt-1 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-60"
+                                                        className="mt-1 h-4 w-4 rounded border-gray-300 text-violet-600 focus:ring-violet-500 disabled:opacity-60"
                                                     />
                                                     <div>
                                                         <label htmlFor="policy-disable-single" className="text-sm font-medium text-gray-900">
@@ -1338,7 +1394,7 @@ export default function CompanySettings({
                                                         checked={downloadPolicy.require_password_for_public ?? false}
                                                         disabled={!hasDownloadPolicyAccess}
                                                         onChange={(e) => hasDownloadPolicyAccess && persistDownloadPolicy({ ...downloadPolicy, require_password_for_public: e.target.checked })}
-                                                        className="mt-1 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-60"
+                                                        className="mt-1 h-4 w-4 rounded border-gray-300 text-violet-600 focus:ring-violet-500 disabled:opacity-60"
                                                     />
                                                     <div>
                                                         <label htmlFor="policy-password" className="text-sm font-medium text-gray-900">
@@ -1372,7 +1428,7 @@ export default function CompanySettings({
                                                                 disallow_non_expiring: on,
                                                             })
                                                         }}
-                                                        className="mt-1 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-60"
+                                                        className="mt-1 h-4 w-4 rounded border-gray-300 text-violet-600 focus:ring-violet-500 disabled:opacity-60"
                                                     />
                                                     <div className="flex-1">
                                                         <label htmlFor="policy-expiration" className="text-sm font-medium text-gray-900">
@@ -1400,7 +1456,7 @@ export default function CompanySettings({
                                                             if (v != null && (v < 1 || v > 365)) return
                                                             persistDownloadPolicy({ ...downloadPolicy, force_expiration_days: v || null })
                                                         }}
-                                                        className="block w-20 rounded-md border border-gray-300 py-1.5 px-2 text-sm text-gray-900 disabled:bg-gray-50 disabled:opacity-70 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                                                        className="block w-20 rounded-md border border-gray-300 py-1.5 px-2 text-sm text-gray-900 disabled:bg-gray-50 disabled:opacity-70 focus:border-violet-500 focus:ring-1 focus:ring-violet-500"
                                                     />
                                                 </div>
                                             </div>
@@ -1448,7 +1504,7 @@ export default function CompanySettings({
                                                             ? route('manage.categories')
                                                             : '/app/manage/categories'
                                                     }
-                                                    className="inline-flex items-center rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
+                                                    className="inline-flex items-center rounded-md bg-violet-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-violet-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-600"
                                                 >
                                                     Open Manage → Categories
                                                     <svg className="ml-2 h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
@@ -1528,8 +1584,8 @@ export default function CompanySettings({
                                                                 },
                                                             })
                                                         }}
-                                                        className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:ring-offset-2 disabled:opacity-50 ${
-                                                            data.settings?.ai_enabled !== false ? 'bg-indigo-600' : 'bg-gray-200'
+                                                        className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-violet-600 focus:ring-offset-2 disabled:opacity-50 ${
+                                                            data.settings?.ai_enabled !== false ? 'bg-violet-600' : 'bg-gray-200'
                                                         }`}
                                                         role="switch"
                                                         aria-checked={data.settings?.ai_enabled !== false}
@@ -1777,14 +1833,17 @@ export default function CompanySettings({
                                                 </div>
                                                 <div className="lg:col-span-2 px-6 py-6">
                                                     <BrandedAiCard
-                                                        variant="indigo"
+                                                        variant="violet"
                                                         badgeLabel="Photography"
                                                         title="AI focal point for photos"
                                                         description="Runs only for eligible photography images when no focal point is set yet and the point is not locked. Uses your workspace AI settings and credits."
                                                         icon={ViewfinderCircleIcon}
-                                                        cascadedOff={data.settings?.ai_enabled === false}
+                                                        cascadedOff={
+                                                            data.settings?.ai_enabled === false ||
+                                                            focalPointAiEnvBlocked
+                                                        }
                                                     >
-                                                        <div className="flex items-center justify-between rounded-lg border border-indigo-100 bg-white p-3 shadow-sm">
+                                                        <div className="flex items-center justify-between rounded-lg border border-violet-100 bg-white p-3 shadow-sm">
                                                             <div className="flex-1 pr-4">
                                                                 <label
                                                                     htmlFor="ai_auto_focal_point_photography"
@@ -1807,7 +1866,12 @@ export default function CompanySettings({
                                                                 )}
                                                                 <button
                                                                     type="button"
-                                                                    disabled={focalPointAiSaving}
+                                                                    disabled={
+                                                                        focalPointAiSaving ||
+                                                                        data.settings?.ai_enabled ===
+                                                                            false ||
+                                                                        focalPointAiEnvBlocked
+                                                                    }
                                                                     onClick={() => {
                                                                         const nextVal = !(
                                                                             data.settings?.ai_auto_focal_point_photography === true
@@ -1844,9 +1908,9 @@ export default function CompanySettings({
                                                                             },
                                                                         )
                                                                     }}
-                                                                    className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:ring-offset-2 disabled:opacity-50 ${
+                                                                    className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-violet-600 focus:ring-offset-2 disabled:opacity-50 ${
                                                                         data.settings?.ai_auto_focal_point_photography === true
-                                                                            ? 'bg-indigo-600'
+                                                                            ? 'bg-violet-600'
                                                                             : 'bg-gray-200'
                                                                     }`}
                                                                     role="switch"
@@ -1864,7 +1928,7 @@ export default function CompanySettings({
                                                                 </button>
                                                             </div>
                                                         </div>
-                                                        <div className="mt-3 rounded-lg border border-indigo-100 bg-white p-3 shadow-sm">
+                                                        <div className="mt-3 rounded-lg border border-violet-100 bg-white p-3 shadow-sm">
                                                             <label
                                                                 htmlFor="ai_focal_point_subject"
                                                                 className="block text-sm font-medium text-gray-900"
@@ -1883,7 +1947,8 @@ export default function CompanySettings({
                                                                 value={data.settings?.ai_focal_point_subject ?? 'auto'}
                                                                 disabled={
                                                                     focalPointAiSaving ||
-                                                                    data.settings?.ai_enabled === false
+                                                                    data.settings?.ai_enabled === false ||
+                                                                    focalPointAiEnvBlocked
                                                                 }
                                                                 onChange={(e) => {
                                                                     const previousSubject =
@@ -1925,7 +1990,7 @@ export default function CompanySettings({
                                                                         },
                                                                     )
                                                                 }}
-                                                                className="mt-2 block w-full rounded-md border border-gray-300 bg-white py-2 pl-3 pr-8 text-sm text-gray-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
+                                                                className="mt-2 block w-full rounded-md border border-gray-300 bg-white py-2 pl-3 pr-8 text-sm text-gray-900 shadow-sm focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500 disabled:cursor-not-allowed disabled:opacity-50"
                                                             >
                                                                 <option value="auto">
                                                                     Auto — use Subject / Photo Type when set, else
@@ -1944,6 +2009,29 @@ export default function CompanySettings({
                                                                 <p className="text-xs text-amber-800">
                                                                     AI features are off — automatic focal points are not
                                                                     computed until AI is re-enabled.
+                                                                </p>
+                                                            </div>
+                                                        )}
+                                                        {data.settings?.ai_enabled !== false &&
+                                                            focalPointAiEnvBlocked &&
+                                                            focalPointAiProp?.feature_enabled === false && (
+                                                            <div className="mt-3 rounded-md bg-amber-50 p-2.5">
+                                                                <p className="text-xs text-amber-800">
+                                                                    Photography focal point AI is turned off in this
+                                                                    environment — auto-assign and re-run are not
+                                                                    available.
+                                                                </p>
+                                                            </div>
+                                                        )}
+                                                        {data.settings?.ai_enabled !== false &&
+                                                            focalPointAiEnvBlocked &&
+                                                            focalPointAiProp?.feature_enabled === true && (
+                                                            <div className="mt-3 rounded-md bg-amber-50 p-2.5">
+                                                                <p className="text-xs text-amber-800">
+                                                                    Preferred (smart) thumbnails are disabled in this
+                                                                    environment, so automatic focal point is not run. Turn
+                                                                    on the preferred-thumbnail pipeline or change
+                                                                    deployment settings to allow this feature.
                                                                 </p>
                                                             </div>
                                                         )}
@@ -2132,16 +2220,16 @@ export default function CompanySettings({
                                                 </div>
                                             )}
 
-                                            <div className="rounded-md bg-blue-50 p-4">
+                                            <div className="rounded-md bg-violet-50/90 p-4 ring-1 ring-violet-100/80">
                                                 <div className="flex">
                                                     <div className="flex-shrink-0">
-                                                        <svg className="h-5 w-5 text-blue-400" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
+                                                        <svg className="h-5 w-5 text-violet-500" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
                                                             <path strokeLinecap="round" strokeLinejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" />
                                                         </svg>
                                                     </div>
                                                     <div className="ml-3">
-                                                        <h3 className="text-sm font-medium text-blue-800">Secure Ownership Transfer</h3>
-                                                        <div className="mt-2 text-sm text-blue-700">
+                                                        <h3 className="text-sm font-medium text-violet-900">Secure ownership transfer</h3>
+                                                        <div className="mt-2 text-sm text-violet-800/95">
                                                             <p>Ownership transfers require a secure, multi-step process:</p>
                                                             <ol className="list-decimal list-inside mt-2 space-y-1">
                                                                 <li>You'll receive a confirmation email</li>
@@ -2177,7 +2265,7 @@ export default function CompanySettings({
                                                             name="new_owner"
                                                             value={selectedNewOwner || ''}
                                                             onChange={(e) => setSelectedNewOwner(e.target.value)}
-                                                            className="block w-full rounded-md border-0 py-1.5 px-3 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6"
+                                                            className="block w-full rounded-md border-0 py-1.5 px-3 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 focus:ring-2 focus:ring-inset focus:ring-violet-600 sm:text-sm sm:leading-6"
                                                         >
                                                             <option value="">Select a team member...</option>
                                                             {tenant_users.map((user) => (
@@ -2216,7 +2304,7 @@ export default function CompanySettings({
                                                                 }
                                                             }}
                                                             disabled={!selectedNewOwner || initiatingTransfer}
-                                                            className="inline-flex items-center rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                            className="inline-flex items-center rounded-md bg-violet-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-violet-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-600 disabled:opacity-50 disabled:cursor-not-allowed"
                                                         >
                                                             {initiatingTransfer ? 'Initiating...' : 'Initiate Ownership Transfer'}
                                                         </button>

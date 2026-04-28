@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { Link, router, usePage } from '@inertiajs/react'
 import { DELIVERABLES_PAGE_LABEL } from '../utils/uiLabels'
 import { resolveOverviewIconColor, getContrastRatio, darkenColor, normalizeHexColor } from '../utils/colorUtils'
+import { JACKPOT_VIOLET } from '../components/brand-workspace/brandWorkspaceTokens'
 import { showWorkspaceSwitchingOverlay } from '../utils/workspaceSwitchOverlay'
 import AppBrandLogo from './AppBrandLogo'
 import JackpotLogo from './JackpotLogo'
@@ -206,7 +207,7 @@ export default function AppNav({
             ? collectionOnlyCollections.find((c) => String(c.id) === String(effectiveCollection.id))?.brand
             : null)
         ?? (collectionOnlyCollections?.length === 1 ? collectionOnlyCollections[0].brand : null)
-    const collectionNavAccent = collectionBrandForLogo?.primary_color || '#6366f1'
+    const collectionNavAccent = collectionBrandForLogo?.primary_color || JACKPOT_VIOLET
     /** Main nav tab always reads "Collections" like internal users (not the current collection name). */
     const collectionMainNavTabLabel = 'Collections'
 
@@ -218,12 +219,12 @@ export default function AppNav({
     const overviewNavTitle = companyNm ? `Overview (${companyNm})` : 'Overview'
     const brandGuidelinesNavTitle = companyNm ? `Brand Guidelines (${companyNm})` : 'Brand Guidelines'
     /** Account menu: tenant / company scope (team, billing, workspace admins) — not the brand creative hub. */
-    const companySettingsLabel = 'Company settings'
+    const companySettingsLabel = 'Company admin'
     /** Account menu: brand identity, guidelines, portal */
     const brandSettingsLabel = brandNmForMenu ? `${brandNmForMenu} Settings` : 'Brand settings'
 
     /** Company default brand color (from shared auth) + active brand; drives workspace menu accent */
-    const workspaceBrandColor = activeBrand?.primary_color || activeCompany?.primary_color || '#6366f1'
+    const workspaceBrandColor = activeBrand?.primary_color || activeCompany?.primary_color || JACKPOT_VIOLET
     const agencyBrandColor = agencyHomeCompany?.primary_color || '#4f46e5'
 
     /** Cinematic app shell (Overview, etc.): keep dark translucent chrome on hover — avoid flipping to solid white. */
@@ -472,7 +473,7 @@ export default function AppNav({
             creatorsPathActive
 
         const inactiveNavColor = textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)'
-        const rawBrandColor = activeBrand?.primary_color || '#6366f1'
+        const rawBrandColor = activeBrand?.primary_color || JACKPOT_VIOLET
 
         const accent = (() => {
             if (variant === 'transparent') return rawBrandColor
@@ -483,7 +484,7 @@ export default function AppNav({
                 darkened = darkenColor(darkened, 18)
                 if (getContrastRatio(darkened, '#ffffff') >= 3) return darkened
             }
-            return '#6366f1'
+            return JACKPOT_VIOLET
         })()
 
         const creatorsNavIconColor =
@@ -722,16 +723,16 @@ export default function AppNav({
             {showPlanAlert && planLimitInfo && (() => {
                 const isFree = planLimitInfo.plan_name === 'free'
                 const disabledNames = planLimitInfo.disabled_brand_names || []
-                const accentColor = isFree ? 'indigo' : 'yellow'
+                const accentColor = isFree ? 'violet' : 'yellow'
 
                 return (
-                    <div className={`relative border-b shadow-sm ${isFree ? 'bg-indigo-50 border-indigo-100' : 'bg-white border-yellow-200'}`}>
-                        <div className={`absolute left-0 top-0 bottom-0 w-1 ${isFree ? 'bg-indigo-400' : 'bg-yellow-500'}`} />
+                    <div className={`relative border-b shadow-sm ${isFree ? 'bg-violet-50 border-violet-100' : 'bg-white border-yellow-200'}`}>
+                        <div className={`absolute left-0 top-0 bottom-0 w-1 ${isFree ? 'bg-violet-400' : 'bg-yellow-500'}`} />
                         <div className={isAppPage ? "px-4 sm:px-6 lg:px-8" : "mx-auto max-w-7xl px-4 sm:px-6 lg:px-8"}>
                             <div className="py-3 flex items-center justify-between relative">
                                 <div className="flex items-center ml-4">
                                     {isFree ? (
-                                        <svg className="h-5 w-5 text-indigo-500 mr-3 flex-shrink-0" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
+                                        <svg className="h-5 w-5 text-violet-500 mr-3 flex-shrink-0" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
                                             <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.455 2.456L21.75 6l-1.036.259a3.375 3.375 0 00-2.455 2.456zM16.894 20.567L16.5 21.75l-.394-1.183a2.25 2.25 0 00-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 001.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 001.423 1.423l1.183.394-1.183.394a2.25 2.25 0 00-1.423 1.423z" />
                                         </svg>
                                     ) : (
@@ -741,7 +742,7 @@ export default function AppNav({
                                     )}
                                     <div className="text-sm">
                                         {hasAdminOrOwnerRole ? (
-                                            <div className={isFree ? 'text-indigo-900' : 'text-gray-700'}>
+                                            <div className={isFree ? 'text-violet-900' : 'text-gray-700'}>
                                                 {isFree ? (
                                                     <>
                                                         Your free plan includes <strong>{planLimitInfo.max_brands} brand{planLimitInfo.max_brands !== 1 ? 's' : ''}</strong>.
@@ -749,7 +750,7 @@ export default function AppNav({
                                                             <span> <strong>{disabledNames.join(', ')}</strong> {disabledNames.length === 1 ? 'is' : 'are'} paused until you upgrade.</span>
                                                         )}
                                                         {' '}
-                                                        <Link href="/app/billing" className="font-medium text-indigo-600 underline hover:text-indigo-700" onClick={handleDismissPlanAlert}>
+                                                        <Link href="/app/billing" className="font-medium text-violet-600 underline hover:text-violet-700" onClick={handleDismissPlanAlert}>
                                                             See plans
                                                         </Link> to unlock more.
                                                     </>
@@ -769,7 +770,7 @@ export default function AppNav({
                                             </div>
                                         ) : (
                                             disabledNames.length > 0 && (
-                                                <div className={isFree ? 'text-indigo-800' : 'text-gray-700'}>
+                                                <div className={isFree ? 'text-violet-800' : 'text-gray-700'}>
                                                     <strong>{disabledNames.join(', ')}</strong> {disabledNames.length === 1 ? 'is' : 'are'} not available on the current plan. Ask your admin to upgrade.
                                                 </div>
                                             )
@@ -783,7 +784,7 @@ export default function AppNav({
                                             onClick={handleDismissPlanAlert}
                                             className={`inline-flex items-center rounded-md px-3 py-1.5 text-sm font-semibold text-white shadow-sm ${
                                                 isFree
-                                                    ? 'bg-indigo-500 hover:bg-indigo-400'
+                                                    ? 'bg-violet-500 hover:bg-violet-400'
                                                     : 'bg-yellow-500 hover:bg-yellow-400'
                                             }`}
                                         >
@@ -795,7 +796,7 @@ export default function AppNav({
                                         onClick={handleDismissPlanAlert}
                                         className={`inline-flex rounded-md p-1.5 focus:outline-none focus:ring-2 focus:ring-offset-2 ${
                                             isFree
-                                                ? 'bg-indigo-50 text-indigo-400 hover:text-indigo-500 hover:bg-indigo-100 focus:ring-indigo-500 focus:ring-offset-indigo-50'
+                                                ? 'bg-violet-50 text-violet-500 hover:text-violet-600 hover:bg-violet-100 focus:ring-violet-500 focus:ring-offset-violet-50'
                                                 : 'bg-white text-gray-400 hover:text-gray-500 hover:bg-gray-100 focus:ring-yellow-500 focus:ring-offset-white'
                                         }`}
                                     >
@@ -933,7 +934,7 @@ export default function AppNav({
                                 className={`inline-flex shrink-0 items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 sm:text-sm ${
                                     isCinematicNav
                                         ? 'bg-white/10 text-white hover:bg-white/15 focus-visible:ring-white/40 focus-visible:ring-offset-transparent'
-                                        : 'bg-white shadow-sm ring-1 ring-slate-200/80 hover:bg-slate-50 focus-visible:ring-indigo-500 focus-visible:ring-offset-white'
+                                        : 'bg-white shadow-sm ring-1 ring-slate-200/80 hover:bg-slate-50 focus-visible:ring-violet-500 focus-visible:ring-offset-white'
                                 }`}
                                 style={!isCinematicNav ? { color: agencyBrandColor } : undefined}
                                 title="Agency dashboard"
@@ -1149,7 +1150,7 @@ export default function AppNav({
                                                     aria-disabled="true"
                                                 >
                                                     <SparklesIcon className="h-4 w-4 shrink-0" aria-hidden="true" />
-                                                    Studio<sup className="ml-0.5 text-[7px] font-bold tracking-wide uppercase leading-none align-super" style={{ color: activeBrand?.primary_color || '#6366f1' }}>beta</sup>
+                                                    Studio<sup className="ml-0.5 text-[7px] font-bold tracking-wide uppercase leading-none align-super" style={{ color: activeBrand?.primary_color || JACKPOT_VIOLET }}>beta</sup>
                                                 </span>
                                                 )}
                                             </div>
@@ -1171,7 +1172,7 @@ export default function AppNav({
                                             ? textColor
                                             : textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)',
                                         borderBottomColor: currentUrl.startsWith('/app/assets') && !currentUrl.startsWith('/app/executions')
-                                            ? (activeBrand?.primary_color || '#6366f1')
+                                            ? (activeBrand?.primary_color || JACKPOT_VIOLET)
                                             : 'transparent'
                                     }}
                                 >
@@ -1186,7 +1187,7 @@ export default function AppNav({
                                             ? textColor
                                             : textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)',
                                         borderBottomColor: currentUrl.startsWith('/app/executions')
-                                            ? (activeBrand?.primary_color || '#6366f1')
+                                            ? (activeBrand?.primary_color || JACKPOT_VIOLET)
                                             : 'transparent'
                                     }}
                                 >
@@ -1201,7 +1202,7 @@ export default function AppNav({
                                             ? textColor
                                             : textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)',
                                         borderBottomColor: currentUrl.startsWith('/app/collections')
-                                            ? (activeBrand?.primary_color || '#6366f1')
+                                            ? (activeBrand?.primary_color || JACKPOT_VIOLET)
                                             : 'transparent'
                                     }}
                                 >
@@ -1217,12 +1218,12 @@ export default function AppNav({
                                             ? textColor
                                             : textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)',
                                         borderBottomColor: currentUrl.startsWith('/app/generative')
-                                            ? (activeBrand?.primary_color || '#6366f1')
+                                            ? (activeBrand?.primary_color || JACKPOT_VIOLET)
                                             : 'transparent'
                                     }}
                                 >
                                     <SparklesIcon className="h-4 w-4 shrink-0" />
-                                    Studio<sup className="ml-0.5 text-[7px] font-bold tracking-wide uppercase leading-none align-super" style={{ color: activeBrand?.primary_color || '#6366f1' }}>beta</sup>
+                                    Studio<sup className="ml-0.5 text-[7px] font-bold tracking-wide uppercase leading-none align-super" style={{ color: activeBrand?.primary_color || JACKPOT_VIOLET }}>beta</sup>
                                 </Link>
                                 )}
                                 </div>
@@ -1239,7 +1240,7 @@ export default function AppNav({
                                             ? textColor
                                             : textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)',
                                         borderBottomColor: currentUrl.startsWith('/app/assets') && !currentUrl.startsWith('/app/executions')
-                                            ? (activeBrand?.primary_color || '#6366f1')
+                                            ? (activeBrand?.primary_color || JACKPOT_VIOLET)
                                             : 'transparent'
                                     }}
                                 >
@@ -1254,7 +1255,7 @@ export default function AppNav({
                                             ? textColor
                                             : textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)',
                                         borderBottomColor: currentUrl.startsWith('/app/executions')
-                                            ? (activeBrand?.primary_color || '#6366f1')
+                                            ? (activeBrand?.primary_color || JACKPOT_VIOLET)
                                             : 'transparent'
                                     }}
                                 >
@@ -1269,7 +1270,7 @@ export default function AppNav({
                                             ? textColor
                                             : textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)',
                                         borderBottomColor: currentUrl.startsWith('/app/collections')
-                                            ? (activeBrand?.primary_color || '#6366f1')
+                                            ? (activeBrand?.primary_color || JACKPOT_VIOLET)
                                             : 'transparent'
                                     }}
                                 >
@@ -1285,12 +1286,12 @@ export default function AppNav({
                                             ? textColor
                                             : textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)',
                                         borderBottomColor: currentUrl.startsWith('/app/generative')
-                                            ? (activeBrand?.primary_color || '#6366f1')
+                                            ? (activeBrand?.primary_color || JACKPOT_VIOLET)
                                             : 'transparent'
                                     }}
                                 >
                                     <SparklesIcon className="h-4 w-4 shrink-0" />
-                                    Studio<sup className="ml-0.5 text-[7px] font-bold tracking-wide uppercase leading-none align-super" style={{ color: activeBrand?.primary_color || '#6366f1' }}>beta</sup>
+                                    Studio<sup className="ml-0.5 text-[7px] font-bold tracking-wide uppercase leading-none align-super" style={{ color: activeBrand?.primary_color || JACKPOT_VIOLET }}>beta</sup>
                                 </Link>
                                 )}
                                 </div>
@@ -1445,7 +1446,7 @@ export default function AppNav({
                                     title="Not available for your access — use Collections and Downloads for shared content"
                                     aria-disabled="true"
                                 >
-                                    Studio<sup className="ml-0.5 text-[7px] font-bold tracking-wide uppercase leading-none align-super" style={{ color: activeBrand?.primary_color || '#6366f1' }}>beta</sup>
+                                    Studio<sup className="ml-0.5 text-[7px] font-bold tracking-wide uppercase leading-none align-super" style={{ color: activeBrand?.primary_color || JACKPOT_VIOLET }}>beta</sup>
                                 </div>
                                 )}
                             </div>
@@ -1483,7 +1484,7 @@ export default function AppNav({
                                         className={`flex flex-col items-center justify-center gap-1 min-w-0 flex-1 rounded-lg py-2 px-1 text-xs font-medium transition-colors ${
                                             isDarkNav
                                                 ? (active ? 'text-white bg-white/15' : 'text-white/60 hover:bg-white/10 hover:text-white/80')
-                                                : (active ? 'text-indigo-700 bg-indigo-50' : 'text-gray-500 hover:bg-gray-50')
+                                                : (active ? 'text-violet-800 bg-violet-50' : 'text-gray-500 hover:bg-gray-50')
                                         }`}
                                         aria-label={label}
                                         aria-current={active ? 'page' : undefined}

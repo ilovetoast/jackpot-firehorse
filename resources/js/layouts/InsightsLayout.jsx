@@ -1,9 +1,13 @@
-import { Link, usePage } from '@inertiajs/react'
+import { usePage } from '@inertiajs/react'
 import { useMemo } from 'react'
 import { InsightsBadge, InsightsCountsProvider, useInsightsCounts } from '../contexts/InsightsCountsContext'
 import AppHead from '../Components/AppHead'
 import AppNav from '../Components/AppNav'
 import AppFooter from '../Components/AppFooter'
+import BrandWorkbenchMasthead from '../components/brand-workspace/BrandWorkbenchMasthead'
+import WorkbenchLocalNav from '../components/brand-workspace/WorkbenchLocalNav'
+import { BRAND_WORKBENCH_CONTENT, WORKBENCH_ASIDE_WIDTH, workbenchPageColumnsClass } from '../components/brand-workspace/brandWorkspaceTokens'
+import WorkbenchSegmentedNav from '../components/brand-workspace/WorkbenchSegmentedNav'
 import {
     ChartBarIcon,
     TableCellsIcon,
@@ -21,54 +25,46 @@ const BASE_SIDEBAR_ITEMS = [
     { id: 'activity', label: 'Activity', href: '/app/insights/activity', icon: ClockIcon },
 ]
 
-function InsightsSidebarNav({ activeSection, sidebarItems }) {
+function InsightsWorkbenchNav({ activeSection, sidebarItems }) {
     const { reviewNavTotal } = useInsightsCounts() || { reviewNavTotal: 0 }
 
+    const navItems = useMemo(
+        () =>
+            sidebarItems.map((item) => ({
+                ...item,
+                suffix:
+                    item.id === 'review' && reviewNavTotal > 0 ? (
+                        <InsightsBadge count={reviewNavTotal} className="ml-auto shrink-0 lg:ml-0" />
+                    ) : null,
+            })),
+        [sidebarItems, reviewNavTotal],
+    )
+
     return (
-        <nav className="sticky top-8 space-y-1" aria-label="Insights sections">
-            {sidebarItems.map((item) => {
-                const Icon = item.icon
-                const isActive = activeSection === item.id
-                const reviewBadge = item.id === 'review' ? reviewNavTotal : 0
-                const content = (
-                    <>
-                        <Icon className={`h-5 w-5 shrink-0 ${isActive ? 'text-indigo-600' : 'text-gray-400'}`} />
-                        <span className={isActive ? 'font-medium text-gray-900' : 'text-gray-600'}>{item.label}</span>
-                        {reviewBadge > 0 && <InsightsBadge count={reviewBadge} className="ml-auto" />}
-                    </>
-                )
-                if (item.disabled) {
-                    return (
-                        <div
-                            key={item.id}
-                            className="flex items-center gap-3 px-3 py-2 rounded-md text-gray-400 cursor-not-allowed"
-                        >
-                            <Icon className="h-5 w-5 shrink-0" />
-                            <span>{item.label}</span>
-                            <span className="text-xs text-gray-400">(soon)</span>
-                        </div>
-                    )
-                }
-                return (
-                    <Link
-                        key={item.id}
-                        href={item.href}
-                        className={`flex w-full items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors ${
-                            isActive
-                                ? 'bg-indigo-50 text-indigo-700'
-                                : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
-                        }`}
-                    >
-                        {content}
-                    </Link>
-                )
-            })}
-        </nav>
+        <>
+            <WorkbenchSegmentedNav
+                items={navItems.map(({ id, href, label, disabled, suffix }) => ({
+                    id,
+                    href,
+                    label,
+                    disabled,
+                    suffix,
+                }))}
+                activeId={activeSection}
+                ariaLabel="Insights sections"
+            />
+            <aside className={`hidden shrink-0 ${WORKBENCH_ASIDE_WIDTH} lg:block`}>
+                <WorkbenchLocalNav items={navItems} activeId={activeSection} ariaLabel="Insights sections" />
+            </aside>
+        </>
     )
 }
 
 export default function InsightsLayout({ children, title = 'Insights', activeSection = 'overview' }) {
     const { auth, tenant, creator_module_status, reviewTabCounts } = usePage().props
+    const brand = auth?.activeBrand
+    const company = auth?.activeCompany
+    const brandColor = brand?.primary_color || company?.primary_color
 
     const sidebarItems = useMemo(() => {
         const creatorOn = creator_module_status?.enabled === true
@@ -89,30 +85,28 @@ export default function InsightsLayout({ children, title = 'Insights', activeSec
 
     return (
         <InsightsCountsProvider initialReviewTabCounts={reviewTabCounts ?? null}>
-            <div className="min-h-screen flex flex-col bg-gray-50">
+            <div className="min-h-screen flex flex-col bg-slate-50">
                 <AppHead title={title} />
                 <AppNav brand={auth?.activeBrand} tenant={tenant} />
 
                 <div className="flex-1">
-                    <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
-                        {/* Header */}
-                        <div className="mb-6">
-                            <h1 className="text-3xl font-bold text-gray-900">Insights</h1>
-                            <p className="mt-2 text-sm text-gray-600">
-                                Analytics and metadata health for your brand.
-                            </p>
-                        </div>
+                    <div className={BRAND_WORKBENCH_CONTENT}>
+                        <BrandWorkbenchMasthead
+                            companyName={company?.name}
+                            brandName={brand?.name}
+                            canLinkCompany={
+                                Array.isArray(auth?.effective_permissions) &&
+                                auth.effective_permissions.includes('company_settings.view')
+                            }
+                            companyHref={typeof route === 'function' ? route('companies.settings') : '/app/companies/settings'}
+                            title="Insights"
+                            description="Analytics, metadata health, AI review, and creator performance for this brand."
+                            brandColor={brandColor}
+                        />
 
-                        <div className="flex flex-col lg:flex-row gap-8">
-                            {/* Left sidebar */}
-                            <aside className="lg:w-56 flex-shrink-0">
-                                <InsightsSidebarNav activeSection={activeSection} sidebarItems={sidebarItems} />
-                            </aside>
-
-                            {/* Right content */}
-                            <main className="flex-1 min-w-0">
-                                {children}
-                            </main>
+                        <div className={workbenchPageColumnsClass}>
+                            <InsightsWorkbenchNav activeSection={activeSection} sidebarItems={sidebarItems} />
+                            <main className="min-w-0 flex-1 lg:pl-0">{children}</main>
                         </div>
                     </div>
                 </div>

@@ -2,6 +2,8 @@ import { Link, router, usePage } from '@inertiajs/react'
 import { useState, useEffect } from 'react'
 import AppNav from '../../Components/AppNav'
 import CompanyTabs from '../../Components/Company/CompanyTabs'
+import ScopeBanner from '../../Components/Company/ScopeBanner'
+import { CompanyAdminTopBar } from '../../Components/Company/CompanyControlCenterShell'
 import AppHead from '../../Components/AppHead'
 import AppFooter from '../../Components/AppFooter'
 import Avatar from '../../Components/Avatar'
@@ -227,15 +229,17 @@ export default function CompanyActivity({ tenant, events, pagination, filters, f
     }
 
     return (
-        <div className="min-h-screen flex flex-col bg-gray-50">
-            <AppHead title="Activity Log" />
+        <div className="min-h-screen flex flex-col bg-slate-50">
+            <AppHead title="Activity" />
             <AppNav brand={auth.activeBrand} tenant={tenant} />
+            <CompanyAdminTopBar
+                title="Activity"
+                subtitle="A running history of important events for your company and brands."
+            />
             <main className="flex-1">
-                <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
-                    {/* Header */}
-                    <div className="mb-6">
-                        <h1 className="text-3xl font-bold text-gray-900">Activity Log</h1>
-                        <p className="mt-2 text-sm text-gray-600">A running history of important events in your company.</p>
+                <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-6">
+                    <div className="mb-4">
+                        <ScopeBanner scope="company" name={tenant.name} />
                     </div>
 
                     <CompanyTabs />
@@ -320,7 +324,7 @@ export default function CompanyActivity({ tenant, events, pagination, filters, f
                                         type="checkbox"
                                         checked={!!localFilters.exclude_portal_views}
                                         onChange={(e) => setLocalFilters({ ...localFilters, exclude_portal_views: e.target.checked })}
-                                        className="rounded border-slate-300 text-indigo-600 focus:ring-slate-400/20"
+                                        className="rounded border-slate-300 text-violet-600 focus:ring-slate-400/20"
                                     />
                                     <span className="text-sm font-medium text-slate-600">Exclude portal views</span>
                                 </label>
@@ -336,7 +340,7 @@ export default function CompanyActivity({ tenant, events, pagination, filters, f
                                 </button>
                                 <button
                                     onClick={applyFilters}
-                                    className="inline-flex items-center rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white shadow-sm hover:bg-indigo-500"
+                                    className="inline-flex items-center rounded-lg bg-violet-600 px-3 py-1.5 text-sm font-medium text-white shadow-sm hover:bg-violet-500"
                                 >
                                     Apply
                                 </button>
@@ -440,7 +444,7 @@ export default function CompanyActivity({ tenant, events, pagination, filters, f
                                                                                     {event.subject_url && (
                                                                                         <Link
                                                                                             href={event.subject_url}
-                                                                                            className="text-xs font-medium text-indigo-600 hover:text-indigo-700"
+                                                                                            className="text-xs font-medium text-violet-600 hover:text-violet-700"
                                                                                         >
                                                                                             View →
                                                                                         </Link>
@@ -450,7 +454,7 @@ export default function CompanyActivity({ tenant, events, pagination, filters, f
                                                                                 <div className="mt-1.5">
                                                                                     <Link
                                                                                         href={event.subject_url}
-                                                                                        className="text-xs font-medium text-indigo-600 hover:text-indigo-700"
+                                                                                        className="text-xs font-medium text-violet-600 hover:text-violet-700"
                                                                                     >
                                                                                         View details →
                                                                                     </Link>
@@ -461,7 +465,7 @@ export default function CompanyActivity({ tenant, events, pagination, filters, f
                                                                                 <div className="mt-2">
                                                                                     <button
                                                                                         onClick={() => toggleRowExpansion(event.id)}
-                                                                                        className="text-xs font-medium text-indigo-600 hover:text-indigo-700"
+                                                                                        className="text-xs font-medium text-violet-600 hover:text-violet-700"
                                                                                     >
                                                                                         {isExpanded ? 'Hide details' : 'More details'}
                                                                                     </button>
@@ -575,7 +579,7 @@ export default function CompanyActivity({ tenant, events, pagination, filters, f
                                                         onClick={() => goToPage(pageNum)}
                                                         className={`inline-flex items-center rounded-md px-3 py-2 text-sm font-semibold ${
                                                             pageNum === pagination.current_page
-                                                                ? 'bg-indigo-600 text-white'
+                                                                ? 'bg-violet-600 text-white'
                                                                 : 'bg-white text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50'
                                                         }`}
                                                     >

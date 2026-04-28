@@ -39,10 +39,10 @@ function Toggle({ checked, onChange, disabled = false, className = "" }) {
             onClick={() => !disabled && onChange(!checked)}
             disabled={disabled}
             className={`${
-                checked ? 'bg-indigo-600' : 'bg-gray-200'
+                checked ? 'bg-violet-600' : 'bg-gray-200'
             } ${
                 disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
-            } relative inline-flex h-6 w-11 flex-shrink-0 rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:ring-offset-2 ${className}`}
+            } relative inline-flex h-6 w-11 flex-shrink-0 rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-violet-600 focus:ring-offset-2 ${className}`}
         >
             <span
                 aria-hidden="true"
@@ -301,13 +301,13 @@ export default function AiTaggingSettings({
 
             {/* Saving Indicator */}
             {saving && (
-                <div className="rounded-md bg-blue-50 p-3">
+                <div className="rounded-md bg-violet-50 p-3">
                     <div className="flex">
                         <div className="flex-shrink-0">
-                            <div className="animate-spin rounded-full h-5 w-5 border-2 border-blue-300 border-t-blue-600" />
+                            <div className="animate-spin rounded-full h-5 w-5 border-2 border-violet-300 border-t-violet-600" />
                         </div>
                         <div className="ml-3">
-                            <p className="text-sm text-blue-700">Saving changes...</p>
+                            <p className="text-sm text-violet-800">Saving changes...</p>
                         </div>
                     </div>
                 </div>
@@ -401,7 +401,7 @@ export default function AiTaggingSettings({
                                         value={localTagLimit}
                                         onChange={handleTagLimitChange}
                                         disabled={!canEdit || isAiDisabled}
-                                        className="block w-20 rounded-md border-gray-300 shadow-sm focus:border-indigo-600 focus:ring-indigo-600 text-sm disabled:bg-gray-50 disabled:text-gray-500"
+                                        className="block w-20 rounded-md border-gray-300 shadow-sm focus:border-violet-600 focus:ring-violet-600 text-sm disabled:bg-gray-50 disabled:text-gray-500"
                                         placeholder={String(Math.min(5, maxTagsPerAsset))}
                                     />
                                     <span className="text-sm text-gray-700">per asset</span>
@@ -420,28 +420,28 @@ export default function AiTaggingSettings({
             </div>
 
             {/*
-             * Asset Field Intelligence — branded indigo treatment (parity with Studio's violet
+             * Asset Field Intelligence — branded violet treatment (parity with Studio's violet
              * BrandedAiCard and Brand Alignment's primary-color card over in Settings.jsx).
              * Pill badge + icon tile match the BulkActionsModal "Video AI" pattern so all AI
              * sub-features share one visual language.
              */}
-            <div className="rounded-xl border border-indigo-100 bg-indigo-50/30 p-5 shadow-sm">
-                <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-indigo-100/80 pb-2">
-                    <span className="inline-flex items-center rounded bg-indigo-600 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">
+            <div className="rounded-xl border border-violet-100 bg-violet-50/30 p-5 shadow-sm">
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-violet-100/80 pb-2">
+                    <span className="inline-flex items-center rounded bg-violet-600 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">
                         Asset fields
                     </span>
                     <h3 className="text-sm font-semibold text-gray-800">
                         Structured field intelligence
                     </h3>
-                    <span className="ml-auto flex h-8 w-8 items-center justify-center rounded-md bg-indigo-100">
-                        <SparklesIcon className="h-4 w-4 text-indigo-700" />
+                    <span className="ml-auto flex h-8 w-8 items-center justify-center rounded-md bg-violet-100">
+                        <SparklesIcon className="h-4 w-4 text-violet-700" />
                     </span>
                 </div>
                 <p className="mt-3 text-sm leading-snug text-gray-600">
                     AI analyzes your assets to suggest new fields and field values. Structured data
                     — separate from the Tags section above.
                 </p>
-                <div className="mt-4 flex items-center justify-between rounded-lg border border-indigo-200 bg-white p-3 shadow-sm">
+                <div className="mt-4 flex items-center justify-between rounded-lg border border-violet-200 bg-white p-3 shadow-sm">
                     <div className="flex-1 pr-4">
                         <label className="text-sm font-medium text-gray-900">Enable Asset Field Intelligence</label>
                         <p className="mt-0.5 text-xs text-gray-500">
@@ -454,7 +454,7 @@ export default function AiTaggingSettings({
                         disabled={!canEdit}
                     />
                 </div>
-                <div className="mt-4 rounded-lg border border-indigo-100/80 bg-white/80 px-4 py-3 shadow-sm">
+                <div className="mt-4 rounded-lg border border-violet-100/80 bg-white/80 px-4 py-3 shadow-sm">
                     <div className="flex flex-col gap-2 text-sm text-gray-700 sm:flex-row sm:items-center sm:justify-between">
                         <div className="space-y-1">
                             <p>
@@ -488,7 +488,7 @@ export default function AiTaggingSettings({
                                 runInsightsLoading ||
                                 manualInsightsInCooldown
                             }
-                            className="inline-flex shrink-0 items-center justify-center rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                            className="inline-flex shrink-0 items-center justify-center rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-violet-600 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                         >
                             {runInsightsLoading
                                 ? 'Queueing…'

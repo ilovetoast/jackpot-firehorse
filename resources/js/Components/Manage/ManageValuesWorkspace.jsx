@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { ChevronDownIcon, ChevronRightIcon } from '@heroicons/react/24/outline'
 import axios from 'axios'
 import ConfirmDialog from '../ConfirmDialog'
+import { WorkbenchEmptyState } from '../../components/brand-workspace/workbenchPatterns'
 
 function getCsrfToken() {
     if (typeof document === 'undefined') return ''
@@ -82,7 +83,7 @@ export default function ManageValuesWorkspace({ brandId, brandName, canPurgeMeta
     }
 
     return (
-        <div className="mt-8 space-y-4">
+        <div className="mt-4 space-y-4 sm:mt-6">
             {meta.truncated && (
                 <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
                     Showing up to {meta.row_cap} value groups. If something is missing, narrow usage in the library or ask
@@ -101,12 +102,12 @@ export default function ManageValuesWorkspace({ brandId, brandName, canPurgeMeta
             )}
 
             {loading ? (
-                <p className="text-sm text-gray-500 py-8">Loading values…</p>
+                <p className="py-8 text-sm text-slate-500">Loading values…</p>
             ) : fields.length === 0 ? (
-                <p className="text-sm text-gray-500 py-8">
-                    No approved custom field values found for assets in {brandName ?? 'this brand'}. System and automated
-                    metadata are hidden here; tags are under Tags.
-                </p>
+                <WorkbenchEmptyState
+                    title="No custom field values yet"
+                    description={`Approved values from custom fields on assets in ${brandName ?? 'this brand'} will appear here. System and automated values are hidden; use Tags for tag values.`}
+                />
             ) : (
                 <div className="space-y-2">
                     {fields.map((f) => (

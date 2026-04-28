@@ -103,7 +103,7 @@ export default function BillingIndex({ tenant, current_plan, plans, subscription
     const [addonSubmitting, setAddonSubmitting] = useState(null)
     const [addonError, setAddonError] = useState(null)
 
-    const sitePrimaryColor = site_primary_color || '#6366f1'
+    const sitePrimaryColor = site_primary_color || '#7c3aed'
     const currentPlanData = plans?.find((p) => p.id === current_plan)
     const visiblePlans = plans?.filter(p => PLAN_ORDER.includes(p.id)).sort((a, b) => PLAN_ORDER.indexOf(a.id) - PLAN_ORDER.indexOf(b.id)) || []
 
@@ -207,11 +207,11 @@ export default function BillingIndex({ tenant, current_plan, plans, subscription
                             </div>
                             {currentPlanData && (
                                 <div className="flex items-center gap-4">
-                                    <span className="inline-flex items-center gap-1.5 rounded-full bg-indigo-50 px-3 py-1 text-sm font-medium text-indigo-700">
-                                        <span className="h-1.5 w-1.5 rounded-full bg-indigo-500" />
+                                    <span className="inline-flex items-center gap-1.5 rounded-full bg-violet-50 px-3 py-1 text-sm font-medium text-violet-800">
+                                        <span className="h-1.5 w-1.5 rounded-full bg-violet-500" />
                                         {currentPlanData.name} plan
                                     </span>
-                                    <Link href="/app/billing/overview" className="text-sm font-medium text-indigo-600 hover:text-indigo-500">
+                                    <Link href="/app/billing/overview" className="text-sm font-medium text-violet-600 hover:text-violet-500">
                                         Billing & invoices &rarr;
                                     </Link>
                                 </div>
@@ -242,21 +242,21 @@ export default function BillingIndex({ tenant, current_plan, plans, subscription
                                 <div
                                     key={plan.id}
                                     className={`relative flex flex-col rounded-xl border bg-white ${
-                                        isCurrent ? 'border-indigo-500 ring-2 ring-indigo-500 shadow-lg' :
-                                        isPopular ? 'border-indigo-300 ring-1 ring-indigo-300 shadow-md' :
+                                        isCurrent ? 'border-violet-500 ring-2 ring-violet-500 shadow-lg' :
+                                        isPopular ? 'border-violet-300 ring-1 ring-violet-300 shadow-md' :
                                         'border-gray-200 shadow-sm'
                                     }`}
                                 >
                                     {isCurrent && (
                                         <div className="absolute -top-3 left-0 right-0 flex justify-center">
-                                            <span className="rounded-full bg-indigo-600 px-3 py-1 text-xs font-semibold text-white">
+                                            <span className="rounded-full bg-violet-600 px-3 py-1 text-xs font-semibold text-white">
                                                 Your plan
                                             </span>
                                         </div>
                                     )}
                                     {isPopular && !isCurrent && (
                                         <div className="absolute -top-3 left-0 right-0 flex justify-center">
-                                            <span className="rounded-full bg-indigo-600 px-3 py-1 text-xs font-semibold text-white">
+                                            <span className="rounded-full bg-violet-600 px-3 py-1 text-xs font-semibold text-white">
                                                 Most popular
                                             </span>
                                         </div>
@@ -296,7 +296,7 @@ export default function BillingIndex({ tenant, current_plan, plans, subscription
                                             {highlights.map((item, i) => (
                                                 <li key={i} className="flex items-start gap-2">
                                                     {item.included ? (
-                                                        <svg className="h-4 w-4 mt-0.5 flex-shrink-0 text-indigo-500" fill="currentColor" viewBox="0 0 20 20">
+                                                        <svg className="h-4 w-4 mt-0.5 flex-shrink-0 text-violet-600" fill="currentColor" viewBox="0 0 20 20">
                                                             <path fillRule="evenodd" d="M16.704 4.153a.75.75 0 01.143 1.052l-8 10.5a.75.75 0 01-1.127.075l-4.5-4.5a.75.75 0 011.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 011.05-.143z" clipRule="evenodd" />
                                                         </svg>
                                                     ) : (
@@ -306,7 +306,7 @@ export default function BillingIndex({ tenant, current_plan, plans, subscription
                                                     )}
                                                     <span className={`text-sm ${item.included ? 'text-gray-700' : 'text-gray-400'}`}>
                                                         {item.text}
-                                                        {item.addon && <span className="ml-1 text-xs text-indigo-500">(add-on)</span>}
+                                                        {item.addon && <span className="ml-1 text-xs text-violet-600">(add-on)</span>}
                                                     </span>
                                                 </li>
                                             ))}
@@ -315,7 +315,7 @@ export default function BillingIndex({ tenant, current_plan, plans, subscription
                                         {/* CTA */}
                                         <div className="mt-auto">
                                             {isCurrent ? (
-                                                <button disabled className="w-full rounded-lg bg-indigo-600 py-2.5 text-sm font-semibold text-white cursor-default">
+                                                <button disabled className="w-full rounded-lg bg-violet-600 py-2.5 text-sm font-semibold text-white cursor-default">
                                                     Current Plan
                                                 </button>
                                             ) : plan.id === 'free' && isDowngrade ? (
@@ -353,7 +353,7 @@ export default function BillingIndex({ tenant, current_plan, plans, subscription
                                                     disabled={processingPlanId !== null || !plan.stripe_price_id || plan.stripe_price_id === 'price_free'}
                                                     className={`w-full rounded-lg py-2.5 text-sm font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed ${
                                                         isPopular
-                                                            ? 'bg-indigo-600 text-white hover:bg-indigo-700'
+                                                            ? 'bg-violet-600 text-white hover:bg-violet-500'
                                                             : 'bg-gray-900 text-white hover:bg-gray-800'
                                                     }`}
                                                 >
@@ -400,8 +400,8 @@ export default function BillingIndex({ tenant, current_plan, plans, subscription
                             {/* Storage Add-ons */}
                             <div className="rounded-xl border border-gray-200 bg-white p-5">
                                 <div className="flex items-center gap-2 mb-3">
-                                    <div className="rounded-lg bg-blue-50 p-2">
-                                        <svg className="h-5 w-5 text-blue-600" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
+                                    <div className="rounded-lg bg-violet-50 p-2">
+                                        <svg className="h-5 w-5 text-violet-600" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
                                             <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 6.375c0 2.278-3.694 4.125-8.25 4.125S3.75 8.653 3.75 6.375m16.5 0c0-2.278-3.694-4.125-8.25-4.125S3.75 4.097 3.75 6.375m16.5 0v11.25c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125V6.375m16.5 0v3.75m-16.5-3.75v3.75m16.5 0v3.75C20.25 16.153 16.556 18 12 18s-8.25-1.847-8.25-4.125v-3.75m16.5 0c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125" />
                                         </svg>
                                     </div>
@@ -433,10 +433,10 @@ export default function BillingIndex({ tenant, current_plan, plans, subscription
                                                 key={pkg.id}
                                                 onClick={() => handleAddonAction('/app/billing/storage-addon', { package_id: pkg.id })}
                                                 disabled={addonSubmitting !== null}
-                                                className="w-full flex items-center justify-between rounded-lg border border-gray-200 px-3 py-2 hover:border-indigo-300 hover:bg-indigo-50/50 transition disabled:opacity-50"
+                                                className="w-full flex items-center justify-between rounded-lg border border-gray-200 px-3 py-2 hover:border-violet-300 hover:bg-violet-50/50 transition disabled:opacity-50"
                                             >
                                                 <span className="text-sm font-medium text-gray-900">+{pkg.label}</span>
-                                                <span className="text-sm font-semibold text-indigo-600">${Number(pkg.monthly_price).toFixed(0)}/mo</span>
+                                                <span className="text-sm font-semibold text-violet-600">${Number(pkg.monthly_price).toFixed(0)}/mo</span>
                                             </button>
                                         ))}
                                         {(storage_addon_packages || []).filter(p => (available_addons?.storage || []).includes(p.id)).length === 0 && (
@@ -449,8 +449,8 @@ export default function BillingIndex({ tenant, current_plan, plans, subscription
                             {/* AI Credit Add-ons */}
                             <div className="rounded-xl border border-gray-200 bg-white p-5">
                                 <div className="flex items-center gap-2 mb-3">
-                                    <div className="rounded-lg bg-purple-50 p-2">
-                                        <svg className="h-5 w-5 text-purple-600" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
+                                    <div className="rounded-lg bg-violet-50 p-2">
+                                        <svg className="h-5 w-5 text-violet-600" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
                                             <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.455 2.456L21.75 6l-1.036.259a3.375 3.375 0 00-2.455 2.456zM16.894 20.567L16.5 21.75l-.394-1.183a2.25 2.25 0 00-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 001.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 001.423 1.423l1.183.394-1.183.394a2.25 2.25 0 00-1.423 1.423z" />
                                         </svg>
                                     </div>
@@ -472,10 +472,10 @@ export default function BillingIndex({ tenant, current_plan, plans, subscription
                                             key={pkg.id}
                                             onClick={() => handleAddonAction('/app/billing/ai-credits-addon', { package_id: pkg.id })}
                                             disabled={addonSubmitting !== null}
-                                            className="w-full flex items-center justify-between rounded-lg border border-gray-200 px-3 py-2 hover:border-purple-300 hover:bg-purple-50/50 transition disabled:opacity-50"
+                                            className="w-full flex items-center justify-between rounded-lg border border-gray-200 px-3 py-2 hover:border-violet-300 hover:bg-violet-50/50 transition disabled:opacity-50"
                                         >
                                             <span className="text-sm font-medium text-gray-900">+{pkg.credits.toLocaleString()} credits</span>
-                                            <span className="text-sm font-semibold text-purple-600">${pkg.monthly_price}/mo</span>
+                                            <span className="text-sm font-semibold text-violet-600">${pkg.monthly_price}/mo</span>
                                         </button>
                                     ))}
                                     {(ai_credits_addon_packages || []).filter(p => (available_addons?.ai_credits || []).includes(p.id)).length === 0 && (
@@ -528,7 +528,7 @@ export default function BillingIndex({ tenant, current_plan, plans, subscription
                     <div className="rounded-xl bg-gradient-to-br from-gray-900 to-gray-800 p-8 sm:p-10">
                         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
                             <div className="max-w-xl">
-                                <div className="inline-flex items-center gap-1.5 rounded-full bg-purple-400/10 px-3 py-1 text-xs font-semibold text-purple-400 mb-3">
+                                <div className="inline-flex items-center gap-1.5 rounded-full bg-violet-500/15 px-3 py-1 text-xs font-semibold text-violet-300 mb-3">
                                     <svg className="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 20 20">
                                         <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
                                     </svg>
@@ -548,7 +548,7 @@ export default function BillingIndex({ tenant, current_plan, plans, subscription
                                         'Scoped brand-level access',
                                     ].map((item) => (
                                         <li key={item} className="flex items-center gap-2 text-sm text-gray-300">
-                                            <svg className="h-4 w-4 text-purple-400 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                                            <svg className="h-4 w-4 text-violet-400 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
                                                 <path fillRule="evenodd" d="M16.704 4.153a.75.75 0 01.143 1.052l-8 10.5a.75.75 0 01-1.127.075l-4.5-4.5a.75.75 0 011.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 011.05-.143z" clipRule="evenodd" />
                                             </svg>
                                             {item}
@@ -559,7 +559,7 @@ export default function BillingIndex({ tenant, current_plan, plans, subscription
                             <div className="flex flex-col items-start lg:items-center gap-3">
                                 <Link
                                     href="/agency"
-                                    className="inline-flex items-center justify-center rounded-lg bg-purple-500 px-6 py-3 text-sm font-semibold text-white hover:bg-purple-400 transition whitespace-nowrap"
+                                    className="inline-flex items-center justify-center rounded-lg bg-violet-600 px-6 py-3 text-sm font-semibold text-white shadow-sm hover:bg-violet-500 transition whitespace-nowrap"
                                 >
                                     Learn about the Agency Program
                                 </Link>
@@ -576,7 +576,7 @@ export default function BillingIndex({ tenant, current_plan, plans, subscription
 
                 {/* Footer link */}
                 <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 mt-8 text-center">
-                    <Link href="/app/billing/overview" className="text-sm font-medium text-gray-500 hover:text-gray-700">
+                    <Link href="/app/billing/overview" className="text-sm font-medium text-gray-500 hover:text-violet-700">
                         View billing overview, invoices & usage details &rarr;
                     </Link>
                 </div>

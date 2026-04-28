@@ -81,6 +81,61 @@ class AppServiceProvider extends ServiceProvider
         $this->app->alias(EnsureIncubationWorkspaceNotLocked::class, 'incubation.not_locked');
         $this->app->alias(EnsureOnboardingComplete::class, 'ensure.onboarding');
 
+        $this->app->bind(
+            \App\Studio\LayerExtraction\Contracts\SamSegmentationClientInterface::class,
+            function () {
+                $driver = (string) config('studio_layer_extraction.sam.sam_provider', 'fal');
+                if ($driver === 'fal' && filled((string) config('services.fal.key'))) {
+                    return new \App\Studio\LayerExtraction\Sam\FalSamSegmentationClient((string) config('services.fal.key'));
+                }
+                if ($driver === 'replicate') {
+                    return new \App\Studio\LayerExtraction\Sam\ReplicateSamSegmentationClient(
+                        (string) config('services.replicate.api_token')
+                    );
+                }
+
+                return new \App\Studio\LayerExtraction\Sam\NullSamSegmentationClient;
+            }
+        );
+
+        $this->app->bind(
+            \App\Studio\LayerExtraction\Providers\SamStudioLayerExtractionProvider::class,
+            function ($app) {
+                return new \App\Studio\LayerExtraction\Providers\SamStudioLayerExtractionProvider(
+                    $app->make(\App\Studio\LayerExtraction\Providers\FloodfillStudioLayerExtractionProvider::class),
+                    $app->make(\App\Studio\LayerExtraction\Contracts\SamSegmentationClientInterface::class)
+                );
+            }
+        );
+
+        $this->app->singleton(\App\Services\Fal\FalModelPricingService::class);
+        $this->app->singleton(\App\Services\Studio\StudioLayerExtractionMethodService::class);
+
+        $this->app->bind(
+            \App\Studio\LayerExtraction\Contracts\StudioLayerExtractionProviderInterface::class,
+            fn ($app) => $app->make(\App\Studio\LayerExtraction\Providers\FloodfillStudioLayerExtractionProvider::class)
+        );
+
+        $this->app->bind(
+            \App\Studio\LayerExtraction\Contracts\StudioLayerExtractionInpaintBackgroundInterface::class,
+            function () {
+                if (! (bool) config('studio_layer_extraction.inpaint_enabled', false)) {
+                    return new \App\Studio\LayerExtraction\Providers\NullInpaintBackgroundProvider;
+                }
+                $k = (string) config('studio_layer_extraction.inpaint_provider', 'none');
+                if ($k === 'heuristic') {
+                    return new \App\Studio\LayerExtraction\Providers\HeuristicInpaintBackgroundProvider;
+                }
+                if ($k === 'clipdrop' && filled((string) config('services.clipdrop.key'))) {
+                    return new \App\Studio\LayerExtraction\Providers\ClipdropInpaintBackgroundProvider(
+                        (string) config('services.clipdrop.key')
+                    );
+                }
+
+                return new \App\Studio\LayerExtraction\Providers\NullInpaintBackgroundProvider;
+            }
+        );
+
         $this->app->singleton(AIProviderInterface::class, function ($app) {
             $defaultProviderName = config('ai.default_provider', 'openai');
 

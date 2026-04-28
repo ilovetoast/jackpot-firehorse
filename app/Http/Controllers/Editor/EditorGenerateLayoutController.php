@@ -114,7 +114,8 @@ class EditorGenerateLayoutController extends Controller
         $generativeEditorUsed = ($perFeature['generative_editor_layout']['credits_used'] ?? 0)
             + ($perFeature['generative_editor_images']['credits_used'] ?? 0)
             + ($perFeature['generative_editor_edits']['credits_used'] ?? 0)
-            + ($perFeature['studio_animation']['credits_used'] ?? 0);
+            + ($perFeature['studio_animation']['credits_used'] ?? 0)
+            + ($perFeature['studio_layer_extraction']['credits_used'] ?? 0);
 
         $thisCompositionUsed = null;
         $compositionIdRaw = $request->query('composition_id');

@@ -101,6 +101,12 @@ class AITaskType
     /** Studio Creator — animate full composition snapshot via external video model (e.g. Kling i2v) */
     public const STUDIO_COMPOSITION_ANIMATION = 'studio_composition_animation';
 
+    /** Studio — Fal/SAM (or other remote) layer mask extraction; billed on success, tenant-scoped credits */
+    public const STUDIO_LAYER_EXTRACTION = 'studio_layer_extraction';
+
+    /** Studio — background inpaint (e.g. Clipdrop) after cutout; billed on success */
+    public const STUDIO_LAYER_BACKGROUND_FILL = 'studio_layer_background_fill';
+
     /**
      * Get all task types as an array.
      *
@@ -137,6 +143,8 @@ class AITaskType
             self::EDITOR_EDIT_IMAGE,
             self::EDITOR_LAYOUT_GENERATION,
             self::STUDIO_COMPOSITION_ANIMATION,
+            self::STUDIO_LAYER_EXTRACTION,
+            self::STUDIO_LAYER_BACKGROUND_FILL,
             self::THUMBNAIL_ENHANCEMENT,
             self::THUMBNAIL_PRESENTATION_PREVIEW,
         ];

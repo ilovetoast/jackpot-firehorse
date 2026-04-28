@@ -4,6 +4,7 @@ import CategoryList from '../Metadata/CategoryList'
 import AddCategoryModal from '../Metadata/AddCategoryModal'
 import CategorySettingsModal from '../Metadata/CategorySettingsModal'
 import ConfirmDialog from '../ConfirmDialog'
+import { BRAND_ACCENT_FALLBACK } from '../../components/brand-workspace/brandWorkspaceTokens'
 
 const MANAGE_STRUCTURE_URL =
     typeof route === 'function' ? route('manage.structure') : '/app/manage/structure'
@@ -279,21 +280,32 @@ export default function ManageStructureWorkspace({
 
     return (
         <div className="space-y-6">
-            <div className="rounded-lg bg-white shadow-sm border border-gray-100 p-5 lg:p-6">
-                <h2 className="text-base font-semibold text-gray-900">
+            <div className="rounded-xl border border-slate-200/90 bg-white p-6 shadow-sm">
+                <h2 className="text-base font-semibold text-slate-900">
                     {hubLayout ? 'Folders' : 'Brand structure'}
                 </h2>
-                <p className="mt-1.5 text-sm text-gray-600 leading-relaxed">
+                <p className="mt-1.5 text-sm leading-relaxed text-slate-600">
                     {hubLayout
-                        ? 'Select a folder to configure its fields. Drag to reorder; the eye hides a folder from library sidebars. Add custom folders or use the catalog below. Changes save immediately; a confirmation appears at the top when each save succeeds.'
-                        : 'Drag the handle beside a visible folder to set sidebar order. The eye icon hides a folder from the library sidebars; hidden folders stay under the collapsed Hidden section. Add custom categories or pull in platform folders from the catalog below.'}
+                        ? 'Select a folder to configure its fields. Drag to reorder.'
+                        : 'Drag to reorder folders. Use the eye to hide a folder from library sidebars; hidden folders are below.'}
                 </p>
                 {brand?.name ? (
-                    <p className="mt-3 text-xs text-gray-500">
-                        Active brand: <span className="font-medium text-gray-700">{brand.name}</span>
-                    </p>
+                    <div
+                        className="mt-4 inline-flex max-w-full items-center gap-2 rounded-full border border-slate-200/90 bg-slate-50/90 py-1 pl-2 pr-3 text-xs text-slate-600"
+                        title={brand.name}
+                    >
+                        <span
+                            className="h-2.5 w-2.5 shrink-0 rounded-full ring-1 ring-slate-200/80"
+                            style={{
+                                backgroundColor: brand.primary_color || BRAND_ACCENT_FALLBACK,
+                            }}
+                            aria-hidden
+                        />
+                        <span className="shrink-0 font-medium text-slate-500">Active brand</span>
+                        <span className="min-w-0 truncate font-medium text-slate-800">{brand.name}</span>
+                    </div>
                 ) : null}
-                <div className="mt-4">
+                <div className="mt-5">
                     <CategoryList
                         groupedCategories={groupedCategories}
                         selectedCategoryId={selectedCategoryId}
@@ -328,7 +340,7 @@ export default function ManageStructureWorkspace({
                 {!hubLayout && (
                     <p className="mt-6 text-sm text-gray-600">
                         To configure metadata fields, filters, and visibility per folder, open{' '}
-                        <Link href={MANAGE_CATEGORIES_URL} className="font-medium text-indigo-600 hover:text-indigo-500">
+                        <Link href={MANAGE_CATEGORIES_URL} className="font-medium text-violet-600 hover:text-violet-500">
                             Manage → Categories
                         </Link>
                         .

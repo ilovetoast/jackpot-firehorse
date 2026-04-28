@@ -59,12 +59,12 @@ export default function CompaniesIndex({ companies }) {
                                 </thead>
                                 <tbody className="bg-white divide-y divide-gray-200">
                                     {companies.map((company) => (
-                                        <tr key={company.id} className={company.is_active ? 'bg-indigo-50' : 'hover:bg-gray-50'}>
+                                        <tr key={company.id} className={company.is_active ? 'bg-violet-50' : 'hover:bg-gray-50'}>
                                             <td className="px-6 py-4 whitespace-nowrap">
                                                 <div className="flex items-center">
                                                     <div className="flex-shrink-0">
                                                         {company.is_active && (
-                                                            <div className="h-2 w-2 rounded-full bg-indigo-600" />
+                                                            <div className="h-2 w-2 rounded-full bg-violet-600" />
                                                         )}
                                                     </div>
                                                     <div className="ml-4">
@@ -85,7 +85,7 @@ export default function CompaniesIndex({ companies }) {
                                             </td>
                                             <td className="px-6 py-4 whitespace-nowrap">
                                                 {company.is_active ? (
-                                                    <span className="inline-flex items-center rounded-full bg-indigo-100 px-2.5 py-0.5 text-xs font-medium text-indigo-800">
+                                                    <span className="inline-flex items-center rounded-full bg-violet-100 px-2.5 py-0.5 text-xs font-medium text-violet-800">
                                                         Current
                                                     </span>
                                                 ) : (
@@ -97,14 +97,14 @@ export default function CompaniesIndex({ companies }) {
                                                     <button
                                                         type="button"
                                                         onClick={() => handleSwitch(company.id)}
-                                                        className="text-indigo-600 hover:text-indigo-900"
+                                                        className="text-violet-600 hover:text-violet-900"
                                                     >
                                                         Switch
                                                     </button>
                                                 ) : (
                                                     <Link
                                                         href="/app/companies/settings"
-                                                        className="text-indigo-600 hover:text-indigo-900"
+                                                        className="text-violet-600 hover:text-violet-900"
                                                     >
                                                         More info
                                                     </Link>

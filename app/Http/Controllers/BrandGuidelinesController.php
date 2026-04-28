@@ -163,6 +163,7 @@ class BrandGuidelinesController extends Controller
                 'logo_url' => $brand->logo_path,
                 'logo_dark_url' => $logoDarkUrl,
                 'logo_on_light_url' => $logoOnLightUrl,
+                'logo_horizontal_url' => $brand->logo_horizontal_path,
             ],
             'logoAssets' => $logoAssets,
             'visualReferences' => $visualReferences,

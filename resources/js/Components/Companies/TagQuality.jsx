@@ -125,7 +125,7 @@ export default function TagQuality({
             <div className={`${className}`}>
                 <div className="flex items-center justify-center py-8">
                     <div className="flex items-center space-x-3">
-                        <div className="animate-spin rounded-full h-5 w-5 border-2 border-gray-300 border-t-indigo-600" />
+                        <div className="animate-spin rounded-full h-5 w-5 border-2 border-gray-300 border-t-violet-600" />
                         <div className="text-sm text-gray-500">Loading tag quality metrics...</div>
                     </div>
                 </div>
@@ -235,7 +235,7 @@ export default function TagQuality({
                         type="month"
                         value={timeRange}
                         onChange={(e) => setTimeRange(e.target.value)}
-                        className="block rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm"
+                        className="block rounded-md border-gray-300 shadow-sm focus:border-violet-500 focus:ring-violet-500 text-sm"
                     />
                     {hasData && (
                         <button
@@ -257,16 +257,16 @@ export default function TagQuality({
 
             {/* No Data State */}
             {!hasData && (
-                <div className="rounded-md bg-blue-50 p-4">
+                <div className="rounded-md bg-violet-50 p-4">
                     <div className="flex">
                         <div className="flex-shrink-0">
-                            <InformationCircleIcon className="h-5 w-5 text-blue-400" />
+                            <InformationCircleIcon className="h-5 w-5 text-violet-500" />
                         </div>
                         <div className="ml-3">
-                            <h3 className="text-sm font-medium text-blue-800">
+                            <h3 className="text-sm font-medium text-violet-900">
                                 No AI tagging data for {timeRange}
                             </h3>
-                            <p className="mt-1 text-sm text-blue-700">
+                            <p className="mt-1 text-sm text-violet-800">
                                 Quality metrics will appear here once AI has generated tag suggestions for assets.
                             </p>
                         </div>
@@ -335,7 +335,7 @@ export default function TagQuality({
                             <div className="p-5">
                                 <div className="flex items-center">
                                     <div className="flex-shrink-0">
-                                        <SparklesIcon className="h-6 w-6 text-indigo-400" />
+                                        <SparklesIcon className="h-6 w-6 text-violet-400" />
                                     </div>
                                     <div className="ml-5 w-0 flex-1">
                                         <dl>
@@ -600,7 +600,7 @@ export default function TagQuality({
                                                 </span>
                                                 <div className="w-24 bg-gray-200 rounded-full h-2">
                                                     <div
-                                                        className="bg-indigo-600 h-2 rounded-full"
+                                                        className="bg-violet-600 h-2 rounded-full"
                                                         style={{ 
                                                             width: `${band.total_candidates > 0 ? (band.acceptance_rate * 100) : 0}%` 
                                                         }}

@@ -12,7 +12,7 @@ const NAV = [
 
 /**
  * Dark marketing shell: ambient gradients, grain, nav, footer.
- * Stripe / Laravel product-page inspired: soft rings, minimal borders, indigo + violet accents.
+ * Stripe / Laravel product-page inspired: soft rings, minimal borders, violet family accents.
  *
  * @param {{ children: import('react').ReactNode, cinematicBackdrop?: boolean }} props
  * When `cinematicBackdrop` is true (legal pages), use the same site-primary radial stack as Brand Overview
@@ -55,7 +55,7 @@ export default function MarketingLayout({ children, cinematicBackdrop = false })
                     </>
                 ) : (
                     <>
-                        <div className="absolute -top-[40%] -left-[20%] w-[80%] h-[80%] rounded-full bg-[#6366f1]/[0.12] blur-[160px]" />
+                        <div className="absolute -top-[40%] -left-[20%] w-[80%] h-[80%] rounded-full bg-[#7c3aed]/[0.12] blur-[160px]" />
                         <div className="absolute -bottom-[30%] -right-[15%] w-[60%] h-[70%] rounded-full bg-[#8b5cf6]/[0.10] blur-[140px]" />
                         <div className="absolute top-[25%] right-[5%] w-[40%] h-[45%] rounded-full bg-[#06b6d4]/[0.04] blur-[100px]" />
                         <div className="absolute inset-0 bg-gradient-to-b from-[#0B0B0D] via-transparent to-[#0B0B0D]/90" />

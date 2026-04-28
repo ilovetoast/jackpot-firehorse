@@ -103,6 +103,8 @@ export const CompositionScene = forwardRef<HTMLDivElement, CompositionSceneProps
                     }
                     const isSelected = layer.id === selectedLayerId
                     const showMemberRing = mode === 'editor' && Boolean(isSelected && !selectedGroupId)
+                    const isExtractedRaster =
+                        isImageLayer(layer) && Boolean(layer.studioLayerExtraction)
                     const isGroupMate =
                         mode === 'editor' &&
                         Boolean(selectedGroupId && !isSelected && layer.groupId === selectedGroupId)
@@ -118,7 +120,9 @@ export const CompositionScene = forwardRef<HTMLDivElement, CompositionSceneProps
                                 showMemberRing
                                     ? isTextLayer(layer)
                                         ? 'ring-2 ring-indigo-500 ring-offset-0 outline outline-1 outline-dashed outline-indigo-400/90 dark:ring-indigo-400 dark:outline-indigo-500/80'
-                                        : 'ring-2 ring-indigo-500 ring-offset-0 dark:ring-indigo-400'
+                                        : isExtractedRaster
+                                          ? 'ring-2 ring-white/50 ring-offset-0 shadow-[0_0_0_1px_rgba(255,255,255,0.2)] dark:ring-white/45'
+                                          : 'ring-2 ring-indigo-500 ring-offset-0 dark:ring-indigo-400'
                                     : isGroupMate
                                       ? 'outline outline-1 outline-dashed outline-teal-400/70'
                                       : ''
@@ -215,7 +219,11 @@ export const CompositionScene = forwardRef<HTMLDivElement, CompositionSceneProps
                                         type="button"
                                         data-jp-export-capture-exclude
                                         aria-label={`Resize ${corner}`}
-                                        className="absolute z-10 h-2.5 w-2.5 rounded-sm border border-white bg-indigo-500 shadow dark:bg-indigo-400"
+                                        className={`absolute z-10 h-2.5 w-2.5 rounded-sm border border-white shadow ${
+                                            isExtractedRaster
+                                                ? 'bg-zinc-200 dark:bg-zinc-300'
+                                                : 'bg-indigo-500 dark:bg-indigo-400'
+                                        }`}
                                         style={{
                                             cursor: `${corner}-resize`,
                                             ...(corner === 'nw' ? { top: -4, left: -4 } : {}),

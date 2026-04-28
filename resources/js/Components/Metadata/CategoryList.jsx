@@ -54,11 +54,10 @@ function mergeWithRenumberedSortOrder(visible, hidden) {
 const CATALOG_COMPACT_THRESHOLD = 5
 
 const CATALOG_HELP =
-    'Platform folders not on this brand yet. Add one to configure fields; new folders may start hidden in the library until you show them.'
-const CATALOG_HELP_VIEW_ONLY =
-    ' You can view this list; adding folders requires brand category management permission.'
+    'Add a platform folder to this brand. New ones may start hidden until you show them in the library.'
+const CATALOG_HELP_VIEW_ONLY = ' View only — adding folders needs the category management permission.'
 const HIDDEN_SECTION_HELP =
-    'These folders stay out of the sidebar, uploader, and default grid. Open one here to edit field settings, or use the eye icon on a visible folder to show it again.'
+    'Not shown in the library sidebar, uploader, or default grid. Unhide with the eye icon on a visible folder, or show from here.'
 
 async function persistCategoryReorder(brandId, assetType, mergedList, getCsrfToken) {
     const payload = {
@@ -119,9 +118,11 @@ function SortableCategoryRow({
         <div
             ref={setNodeRef}
             style={style}
-            className={`group flex items-center justify-between gap-2 py-2 px-2 rounded-lg text-sm transition-all duration-200 ease-out cursor-default ${
-                isSelected ? 'bg-indigo-50/80 text-indigo-700 font-medium' : 'text-gray-700 hover:bg-gray-50/80'
-            } ${isDragging ? 'opacity-90 shadow-md z-10 bg-white rounded-lg' : ''}`}
+            className={`group flex items-center justify-between gap-1.5 py-1.5 px-1.5 rounded-md text-sm transition-colors cursor-default ${
+                isSelected
+                    ? 'bg-violet-50/95 font-medium text-violet-900 ring-1 ring-inset ring-violet-200/80'
+                    : 'text-slate-700 hover:bg-slate-50/90'
+            } ${isDragging ? 'z-10 rounded-md bg-white opacity-90 shadow-md' : ''}`}
         >
             {canManageVisibility && (
                 <button
@@ -150,7 +151,7 @@ function SortableCategoryRow({
                             if (e.key === 'Enter') onSaveRename(category, editName)
                             if (e.key === 'Escape') onCancelRename()
                         }}
-                        className="w-full rounded border border-gray-300 px-2 py-0.5 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                        className="w-full rounded border border-slate-200 px-2 py-0.5 text-sm focus:border-violet-500 focus:ring-1 focus:ring-violet-500"
                         autoFocus
                         onClick={(e) => e.stopPropagation()}
                     />
@@ -193,7 +194,7 @@ function SortableCategoryRow({
                     {category.is_system && onRevert && (
                         <button
                             type="button"
-                            className="p-1 -m-1 rounded hover:text-indigo-600 hover:bg-indigo-50 flex-shrink-0"
+                            className="p-1 -m-1 flex-shrink-0 rounded hover:bg-violet-50 hover:text-violet-700"
                             onClick={(e) => {
                                 e.stopPropagation()
                                 onRevert(category)
@@ -254,8 +255,10 @@ function HiddenCategoryRow({
 }) {
     return (
         <div
-            className={`group flex items-center justify-between gap-2 py-2 px-2 rounded-lg text-sm transition-all duration-200 ease-out cursor-default text-gray-500 ${
-                isSelected ? 'bg-indigo-50/80 text-indigo-800 font-medium' : 'hover:bg-gray-100/80'
+            className={`group flex items-center justify-between gap-1.5 py-1.5 px-1.5 rounded-md text-sm transition-colors cursor-default text-slate-500 ${
+                isSelected
+                    ? 'bg-violet-50/95 font-medium text-violet-900 ring-1 ring-inset ring-violet-200/80'
+                    : 'hover:bg-slate-100/80'
             }`}
         >
             <span className="w-5 flex-shrink-0" aria-hidden />
@@ -274,7 +277,7 @@ function HiddenCategoryRow({
                             if (e.key === 'Enter') onSaveRename(category, editName)
                             if (e.key === 'Escape') onCancelRename()
                         }}
-                        className="w-full rounded border border-gray-300 px-2 py-0.5 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                        className="w-full rounded border border-slate-200 px-2 py-0.5 text-sm focus:border-violet-500 focus:ring-1 focus:ring-violet-500"
                         autoFocus
                         onClick={(e) => e.stopPropagation()}
                     />
@@ -317,7 +320,7 @@ function HiddenCategoryRow({
                     {category.is_system && onRevert && (
                         <button
                             type="button"
-                            className="p-1 -m-1 rounded hover:text-indigo-600 hover:bg-indigo-50 flex-shrink-0"
+                            className="p-1 -m-1 flex-shrink-0 rounded hover:bg-violet-50 hover:text-violet-700"
                             onClick={(e) => {
                                 e.stopPropagation()
                                 onRevert(category)
@@ -666,15 +669,18 @@ export default function CategoryList({
                         'This folder would start visible, but the brand is at the visible folder limit. Hide another folder first, or choose a catalog template that starts hidden.'
 
                     catalogBlock = (
-                        <div className="px-2.5 pb-2.5 pt-1">
-                            <div className="rounded-md border border-indigo-100 bg-indigo-50/70 px-2.5 py-2">
-                                <div className="flex items-center justify-between gap-2">
-                                    <p className="text-[11px] font-semibold uppercase tracking-wide text-indigo-900/90">
-                                        Available from catalog
-                                    </p>
+                        <div className="px-2 pb-2 pt-1.5">
+                            <div className="rounded-lg border border-violet-200/70 bg-violet-50/50 px-3 py-2.5">
+                                <div className="flex items-start justify-between gap-2">
+                                    <div className="min-w-0">
+                                        <p className="text-xs font-semibold text-violet-950">From catalog</p>
+                                        <p className="mt-0.5 text-[11px] leading-snug text-violet-800/85">
+                                            Add a platform folder to this brand.
+                                        </p>
+                                    </div>
                                     <button
                                         type="button"
-                                        className="flex-shrink-0 rounded p-0.5 text-indigo-700/70 hover:bg-indigo-100/80 hover:text-indigo-900 focus:outline-none focus:ring-2 focus:ring-indigo-400/50"
+                                        className="shrink-0 rounded p-0.5 text-violet-600 hover:bg-violet-100/80 hover:text-violet-900 focus:outline-none focus:ring-2 focus:ring-violet-400/50"
                                         title={catalogTooltip}
                                         aria-label={catalogTooltip}
                                     >
@@ -682,7 +688,7 @@ export default function CategoryList({
                                     </button>
                                 </div>
                                 {slotsLine ? (
-                                    <p className="mt-1.5 text-[11px] leading-snug text-indigo-900/75">{slotsLine}</p>
+                                    <p className="mt-2 text-[11px] leading-snug text-violet-900/75">{slotsLine}</p>
                                 ) : null}
                                 {useCompact ? (
                                     <div className="mt-2 space-y-2">
@@ -696,7 +702,7 @@ export default function CategoryList({
                                                 }))
                                             }
                                             placeholder="Filter catalog…"
-                                            className="block w-full rounded-md border-0 py-1.5 pl-2 pr-2 text-sm text-gray-900 shadow-sm ring-1 ring-inset ring-indigo-200/80 placeholder:text-gray-400 focus:ring-2 focus:ring-indigo-400/40"
+                                            className="block w-full rounded-md border-0 py-1.5 pl-2 pr-2 text-sm text-slate-900 shadow-sm ring-1 ring-inset ring-violet-200/80 placeholder:text-slate-400 focus:ring-2 focus:ring-violet-400/40"
                                             aria-label="Filter platform catalog folders"
                                         />
                                         <div className="flex flex-col gap-2 sm:flex-row sm:items-stretch">
@@ -708,7 +714,7 @@ export default function CategoryList({
                                                         [assetTypeKey]: e.target.value,
                                                     }))
                                                 }
-                                                className="block w-full min-w-0 flex-1 rounded-md border-0 py-1.5 pl-2 pr-8 text-sm text-gray-900 shadow-sm ring-1 ring-inset ring-indigo-200/80 focus:ring-2 focus:ring-indigo-400/40"
+                                                className="block w-full min-w-0 flex-1 rounded-md border-0 py-1.5 pl-2 pr-8 text-sm text-slate-900 shadow-sm ring-1 ring-inset ring-violet-200/80 focus:ring-2 focus:ring-violet-400/40"
                                                 aria-label="Choose a catalog folder to add"
                                             >
                                                 <option value="">Select a catalog folder…</option>
@@ -738,7 +744,7 @@ export default function CategoryList({
                                                     title={
                                                         selectedTemplate?.visible_cap_blocks_add ? capTitle : undefined
                                                     }
-                                                    className="inline-flex flex-shrink-0 items-center justify-center gap-0.5 rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-indigo-500 disabled:pointer-events-none disabled:opacity-50 sm:w-auto"
+                                                    className="inline-flex min-w-[4.75rem] flex-shrink-0 items-center justify-center gap-1 whitespace-nowrap rounded-md bg-violet-600 px-3.5 py-2 text-xs font-semibold text-white shadow-sm hover:bg-violet-500 disabled:pointer-events-none disabled:opacity-50 sm:w-auto"
                                                 >
                                                     <PlusIcon className="h-3.5 w-3.5" aria-hidden />
                                                     Add
@@ -751,7 +757,7 @@ export default function CategoryList({
                                         {templates.map((t) => (
                                             <li
                                                 key={t.system_category_id}
-                                                className="flex items-center justify-between gap-2 rounded-md bg-white/80 px-2 py-1.5 text-sm text-gray-800 ring-1 ring-inset ring-indigo-100/80"
+                                                className="flex items-center justify-between gap-2 rounded-md bg-white/90 px-2 py-1.5 text-sm text-slate-800 ring-1 ring-inset ring-violet-100/80"
                                             >
                                                 <span className="flex min-w-0 items-center gap-2">
                                                     <CategoryIcon
@@ -769,7 +775,7 @@ export default function CategoryList({
                                                             addingTemplateId === t.system_category_id
                                                         }
                                                         title={t.visible_cap_blocks_add ? capTitle : undefined}
-                                                        className="inline-flex flex-shrink-0 items-center gap-0.5 rounded-md bg-indigo-600 px-2 py-1 text-xs font-semibold text-white shadow-sm hover:bg-indigo-500 disabled:pointer-events-none disabled:opacity-50"
+                                                        className="inline-flex min-w-[4.5rem] flex-shrink-0 items-center justify-center gap-1 whitespace-nowrap rounded-md bg-violet-600 px-2.5 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-violet-500 disabled:pointer-events-none disabled:opacity-50"
                                                     >
                                                         <PlusIcon className="h-3.5 w-3.5" aria-hidden />
                                                         Add

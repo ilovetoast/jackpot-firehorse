@@ -4,6 +4,8 @@ import AppNav from '../../Components/AppNav'
 import AppHead from '../../Components/AppHead'
 import AppFooter from '../../Components/AppFooter'
 import CompanyTabs from '../../Components/Company/CompanyTabs'
+import ScopeBanner from '../../Components/Company/ScopeBanner'
+import { CompanyAdminTopBar } from '../../Components/Company/CompanyControlCenterShell'
 import UserRow from '../../Components/Company/UserRow'
 import PlanLimitCallout from '../../Components/PlanLimitCallout'
 import BrandRoleSelector from '../../Components/BrandRoleSelector'
@@ -318,30 +320,31 @@ export default function Team({ tenant, brands = [], tenant_roles = [], invite_lo
     }
 
     return (
-        <div className="min-h-screen flex flex-col bg-gray-50">
-            <AppHead title="Team" />
-            <AppNav />
-            <main className="flex-1 mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8 w-full">
-                <div className="mb-6">
-                    <h1 className="text-3xl font-bold text-gray-900">Team Members</h1>
-                    <p className="mt-2 text-sm text-gray-600">
-                        Manage members and invitations for {tenant.name} ({displayCount} of {maxDisplay} users)
-                    </p>
+        <div className="min-h-screen flex flex-col bg-slate-50">
+            <AppHead title="People" />
+            <AppNav brand={auth.activeBrand} tenant={tenant} />
+            <CompanyAdminTopBar
+                title="People"
+                subtitle={`Members, invites, and brand roles for ${tenant.name} (${displayCount} of ${maxDisplay} users).`}
+            />
+            <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-6 sm:px-6 sm:py-7 lg:px-8">
+                <div className="mb-4">
+                    <ScopeBanner scope="company" name={tenant.name} />
                 </div>
 
                 <CompanyTabs />
 
                 {linkedAgencies.length > 0 && (
-                    <div className="mb-4 rounded-lg border border-indigo-100 bg-indigo-50/80 px-4 py-3 text-sm text-indigo-950">
+                    <div className="mb-4 rounded-lg border border-violet-200/80 bg-violet-50/90 px-4 py-3.5 text-sm text-violet-950">
                         <p>
                             <span className="font-medium">Agency partnerships</span>
                             {' — '}
                             Agency-managed members are controlled through the agency partnership. Use{' '}
                             <Link
                                 href="/app/companies/settings#agencies"
-                                className="font-medium text-indigo-700 underline decoration-indigo-300 underline-offset-2 hover:text-indigo-900"
+                                className="font-medium text-violet-700 underline decoration-violet-300 underline-offset-2 hover:text-violet-900"
                             >
-                                Company settings → Agencies
+                                Company admin → Agencies
                             </Link>{' '}
                             to change agency access, or the Agency Dashboard to manage agency staff. Direct invites here
                             are for <span className="font-medium">Admin</span> or <span className="font-medium">Member</span>{' '}
@@ -356,7 +359,7 @@ export default function Team({ tenant, brands = [], tenant_roles = [], invite_lo
                         type="button"
                         onClick={openInviteModal}
                         disabled={user_limit_reached}
-                        className="inline-flex items-center rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="inline-flex items-center rounded-md bg-violet-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-violet-500 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                         <svg className="mr-2 h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z" />
@@ -371,7 +374,7 @@ export default function Team({ tenant, brands = [], tenant_roles = [], invite_lo
                             placeholder="Search users..."
                             value={search}
                             onChange={(e) => setSearch(e.target.value)}
-                            className="rounded-md border-gray-300 text-sm py-1.5 px-3 w-48 focus:ring-indigo-500 focus:border-indigo-500"
+                            className="rounded-md border-gray-300 text-sm py-1.5 px-3 w-48 focus:ring-violet-500 focus:border-violet-500"
                         />
                         <select
                             value={filterBrand}
@@ -462,9 +465,9 @@ export default function Team({ tenant, brands = [], tenant_roles = [], invite_lo
                                                     and brand scope are set in{' '}
                                                     <Link
                                                         href="/app/companies/settings#agencies"
-                                                        className="font-medium text-indigo-700 underline decoration-indigo-300 underline-offset-2 hover:text-indigo-900"
+                                                        className="font-medium text-violet-700 underline decoration-violet-300 underline-offset-2 hover:text-violet-900"
                                                     >
-                                                        Company settings → Agencies
+                                                        Company admin → Agencies
                                                     </Link>
                                                     .
                                                 </p>
@@ -550,7 +553,7 @@ export default function Team({ tenant, brands = [], tenant_roles = [], invite_lo
                                             id="email"
                                             value={data.email}
                                             onChange={(e) => setData('email', e.target.value)}
-                                            className="block w-full rounded-md border-0 py-1.5 px-3 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm"
+                                            className="block w-full rounded-md border-0 py-1.5 px-3 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-violet-600 sm:text-sm"
                                             placeholder="colleague@example.com"
                                             required
                                         />
@@ -563,7 +566,7 @@ export default function Team({ tenant, brands = [], tenant_roles = [], invite_lo
                                             value={data.role}
                                             onChange={(e) => setData('role', e.target.value)}
                                             disabled={invite_lock_company_role}
-                                            className="block w-full rounded-md border-0 py-1.5 px-3 text-sm text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 focus:ring-2 focus:ring-inset focus:ring-indigo-600 disabled:cursor-not-allowed disabled:bg-gray-50 disabled:text-gray-600"
+                                            className="block w-full rounded-md border-0 py-1.5 px-3 text-sm text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 focus:ring-2 focus:ring-inset focus:ring-violet-600 disabled:cursor-not-allowed disabled:bg-gray-50 disabled:text-gray-600"
                                         >
                                             {(tenant_roles || []).map((r) => (
                                                 <option key={r.value} value={r.value}>
@@ -583,7 +586,7 @@ export default function Team({ tenant, brands = [], tenant_roles = [], invite_lo
                                                 Invites from agency staff on this client company are created as{' '}
                                                 <span className="font-medium">Member</span> only. Client owners and company
                                                 admins can also invite <span className="font-medium">Admin</span>. Agency
-                                                partnership access is managed in Company settings → Agencies.
+                                                partnership access is managed in Company admin → Agencies.
                                             </p>
                                         )}
                                     </div>
@@ -598,7 +601,7 @@ export default function Team({ tenant, brands = [], tenant_roles = [], invite_lo
                                         />
                                     </div>
                                     <div className="mt-5 sm:mt-6 sm:grid sm:grid-flow-row-dense sm:grid-cols-2 sm:gap-3">
-                                        <button type="submit" disabled={processing || user_limit_reached || !data.brands?.length} className="inline-flex w-full justify-center rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-500 disabled:opacity-50 sm:col-start-2">
+                                        <button type="submit" disabled={processing || user_limit_reached || !data.brands?.length} className="inline-flex w-full justify-center rounded-md bg-violet-600 px-3 py-2 text-sm font-semibold text-white hover:bg-violet-500 disabled:opacity-50 sm:col-start-2">
                                             {processing ? 'Sending...' : 'Send Invitation'}
                                         </button>
                                         <button
@@ -626,10 +629,10 @@ export default function Team({ tenant, brands = [], tenant_roles = [], invite_lo
                             <div className="relative transform overflow-hidden rounded-lg bg-white px-4 pb-4 pt-5 text-left shadow-xl transition-all sm:my-8 sm:w-full sm:max-w-lg sm:p-6">
                                 <h3 className="text-base font-semibold leading-6 text-gray-900">Ownership Transfer Required</h3>
                                 <p className="mt-2 text-sm text-gray-500">
-                                    Please use the ownership transfer process in <Link href={ownershipTransferSettingsLink || '/app/companies/settings#ownership-transfer'} className="text-indigo-600 hover:text-indigo-500 underline">Company settings</Link>.
+                                    Please use the ownership transfer process in <Link href={ownershipTransferSettingsLink || '/app/companies/settings#ownership-transfer'} className="text-violet-600 hover:text-violet-500 underline">Company admin</Link>.
                                 </p>
                                 <div className="mt-4">
-                                    <button type="button" onClick={() => setShowOwnershipTransferModal(false)} className="rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-500">
+                                    <button type="button" onClick={() => setShowOwnershipTransferModal(false)} className="rounded-md bg-violet-600 px-3 py-2 text-sm font-semibold text-white hover:bg-violet-500">
                                         OK
                                     </button>
                                 </div>
@@ -658,7 +661,7 @@ export default function Team({ tenant, brands = [], tenant_roles = [], invite_lo
                 title="Remove agency from this company?"
                 message={
                     detachAgencyDialog.link
-                        ? `This removes the partnership with "${detachAgencyDialog.link.agency_tenant?.name || 'this agency'}" and revokes company access for everyone that agency added to ${tenant.name}. If that includes you, you will lose access here. Brand scopes can be adjusted later by linking the agency again from Company settings.`
+                        ? `This removes the partnership with "${detachAgencyDialog.link.agency_tenant?.name || 'this agency'}" and revokes company access for everyone that agency added to ${tenant.name}. If that includes you, you will lose access here. Brand scopes can be adjusted later by linking the agency again from Company admin.`
                         : ''
                 }
                 confirmText="Remove agency"
@@ -712,9 +715,9 @@ export default function Team({ tenant, brands = [], tenant_roles = [], invite_lo
                                         — Company role and brand permissions come from{' '}
                                         <Link
                                             href="/app/companies/settings#agencies"
-                                            className="font-medium text-indigo-600 underline decoration-indigo-200 underline-offset-2 hover:text-indigo-800"
+                                            className="font-medium text-violet-600 underline decoration-violet-200 underline-offset-2 hover:text-violet-800"
                                         >
-                                            Company settings → Agencies
+                                            Company admin → Agencies
                                         </Link>{' '}
                                         for that partnership, not from individual edits on this Team page.
                                     </li>

@@ -83,6 +83,12 @@ if ($schedulerEnabled) {
         ->withoutOverlapping()
         ->description('Cleanup expired upload sessions and orphaned multipart uploads');
 
+    // Studio: staged layer-extraction masks/previews (expired review sessions)
+    Schedule::command('studio:cleanup-layer-extraction-sessions')
+        ->hourly()
+        ->withoutOverlapping()
+        ->description('Delete expired Studio layer extraction sessions and ephemeral mask files');
+
     // Pending upload approvals: one digest per approver per brand per day (plan-gated notifications)
     Schedule::command('approvals:send-pending-digests')
         ->dailyAt('08:00')

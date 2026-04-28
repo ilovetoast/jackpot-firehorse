@@ -94,7 +94,7 @@ export default function BrandSelector({ brands, tenant, tenantMemberWithoutBrand
             {!isEmpty && (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 {list.map((brand) => {
-                    const color = brand.primary_color || theme?.colors?.primary || '#6366f1'
+                    const color = brand.primary_color || theme?.colors?.primary || '#7c3aed'
                     const hasLogo = !!(brand.logo_path || brand.logo_dark_path)
                     const isDisabled = brand.is_disabled
 

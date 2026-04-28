@@ -169,10 +169,10 @@ export default function AssetImagePickerField({
           theme === 'dark'
             ? (hasValue
                 ? 'border-white/20 bg-transparent hover:border-white/30'
-                : 'border-white/20 bg-transparent hover:border-indigo-400/40')
+                : 'border-white/20 bg-transparent hover:border-violet-400/40')
             : (hasValue
                 ? 'border-gray-200/80 bg-gray-50/30 hover:border-gray-300 hover:bg-gray-50/50'
-                : 'border-gray-300/80 bg-gray-50/40 hover:border-indigo-300/60 hover:bg-indigo-50/20')
+                : 'border-gray-300/80 bg-gray-50/40 hover:border-violet-300/60 hover:bg-violet-50/20')
         } ${disabled || uploading ? 'opacity-60 cursor-not-allowed' : ''}`}
       >
         {hasValue ? (
@@ -187,13 +187,13 @@ export default function AssetImagePickerField({
                   <button
                     type="button"
                     onClick={handleCropClick}
-                    className={`text-xs font-medium flex items-center gap-1 ${theme === 'dark' ? 'text-indigo-400 hover:text-indigo-300' : 'text-indigo-600 hover:text-indigo-800'}`}
+                    className={`text-xs font-medium flex items-center gap-1 ${theme === 'dark' ? 'text-violet-400 hover:text-violet-300' : 'text-violet-600 hover:text-violet-800'}`}
                   >
                     <ScissorsIcon className="w-3.5 h-3.5" />
                     Crop
                   </button>
                 )}
-                <span className={`text-xs font-medium ${theme === 'dark' ? 'text-indigo-400 hover:text-indigo-300' : 'text-indigo-600 hover:text-indigo-800'}`}>
+                <span className={`text-xs font-medium ${theme === 'dark' ? 'text-violet-400 hover:text-violet-300' : 'text-violet-600 hover:text-violet-800'}`}>
                   Change
                 </span>
                 <button
@@ -231,7 +231,7 @@ export default function AssetImagePickerField({
               )}
               {uploading && (
                 <div className="absolute inset-0 flex items-center justify-center rounded-lg bg-white/70">
-                  <div className="animate-spin rounded-full h-6 w-6 border-2 border-indigo-600 border-t-transparent" />
+                  <div className="animate-spin rounded-full h-6 w-6 border-2 border-violet-600 border-t-transparent" />
                 </div>
               )}
             </div>

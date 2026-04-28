@@ -126,6 +126,7 @@ class AnalyticsOverviewController extends Controller
             'actor_id' => $request->filled('actor_id') ? max(0, (int) $request->input('actor_id')) : null,
             'event_type' => $request->filled('event_type') ? trim((string) $request->input('event_type')) : null,
             'subject_id' => $request->filled('subject_id') ? trim((string) $request->input('subject_id')) : null,
+            'q' => $request->filled('q') ? trim((string) $request->input('q')) : null,
         ];
         if (($filters['actor_id'] ?? 0) <= 0) {
             $filters['actor_id'] = null;
@@ -139,19 +140,38 @@ class AnalyticsOverviewController extends Controller
         if (($filters['subject_id'] ?? '') === '') {
             $filters['subject_id'] = null;
         }
+        if (($filters['q'] ?? '') !== '' && strlen((string) $filters['q']) > 200) {
+            $filters['q'] = substr((string) $filters['q'], 0, 200);
+        }
+        if (($filters['q'] ?? '') === '') {
+            $filters['q'] = null;
+        }
+
+        $perPage = min(100, max(5, (int) $request->input('per_page', 25)));
+        $page = max(1, (int) $request->input('page', 1));
 
         $service = app(BrandActivityFeedService::class);
-        $feed = $service->getRecentActivity($tenant, $brand, $user, 200, array_filter($filters, fn ($v) => $v !== null && $v !== ''));
+        $feedFilter = array_filter($filters, fn ($v) => $v !== null && $v !== '');
+        $paginator = $service->paginateInsightsActivity($tenant, $brand, $user, $perPage, $page, $feedFilter);
 
         return Inertia::render('Insights/Activity', [
-            'activity' => $feed?->values()->all() ?? [],
-            'can_view_activity_logs' => $feed !== null,
+            'activity' => $paginator?->items() ?? [],
+            'can_view_activity_logs' => $paginator !== null,
+            'pagination' => $paginator !== null ? [
+                'current_page' => $paginator->currentPage(),
+                'last_page' => $paginator->lastPage(),
+                'per_page' => $paginator->perPage(),
+                'total' => $paginator->total(),
+                'from' => $paginator->firstItem(),
+                'to' => $paginator->lastItem(),
+            ] : null,
             'filters' => [
                 'actor_id' => $filters['actor_id'],
                 'event_type' => $filters['event_type'],
                 'subject_id' => $filters['subject_id'],
+                'q' => $filters['q'],
             ],
-            'filter_options' => $feed !== null ? $service->getFilterOptions($tenant, $brand, $user) : ['actors' => [], 'event_types' => []],
+            'filter_options' => $paginator !== null ? $service->getFilterOptions($tenant, $brand, $user) : ['actors' => [], 'event_types' => []],
         ]);
     }
 

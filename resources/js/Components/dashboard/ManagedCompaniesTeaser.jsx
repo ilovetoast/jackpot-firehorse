@@ -7,7 +7,7 @@ import { ArrowRightIcon, BuildingOffice2Icon } from '@heroicons/react/24/outline
  */
 export default function ManagedCompaniesTeaser({
     count = 0,
-    brandColor = '#6366f1',
+    brandColor = '#71717a',
 }) {
     if (count < 1) {
         return null

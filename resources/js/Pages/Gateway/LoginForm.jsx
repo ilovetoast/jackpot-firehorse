@@ -37,7 +37,7 @@ export default function LoginForm({ context, onToggleRegister, inviteToken = nul
         })
     }
 
-    const primary = theme?.colors?.primary || '#6366f1'
+    const primary = theme?.colors?.primary || '#7c3aed'
 
     const inputBorder = (field) =>
         focusedField === field

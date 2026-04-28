@@ -1,4 +1,5 @@
-import { usePage, router } from '@inertiajs/react'
+import { router } from '@inertiajs/react'
+import { usePermission } from '../../hooks/usePermission'
 import { Link } from '@inertiajs/react'
 import { switchCompanyWorkspace } from '../../utils/workspaceCompanySwitch'
 import { useState, useRef, useEffect } from 'react'
@@ -8,6 +9,11 @@ import AppNav from '../../Components/AppNav'
 import BrandAvatar from '../../Components/BrandAvatar'
 import ConfirmDialog from '../../Components/ConfirmDialog'
 import CompanyTabs from '../../Components/Company/CompanyTabs'
+import ScopeBanner from '../../Components/Company/ScopeBanner'
+import {
+    CompanyCommandHero,
+    CompanyControlPrimaryCta,
+} from '../../Components/Company/CompanyControlCenterShell'
 import { isUnlimitedCount, isUnlimitedStorageMB } from '../../utils/planLimitDisplay'
 import {
     formatAiCreditsSubtext,
@@ -16,12 +22,6 @@ import {
 } from '../../utils/aiCreditsUsageDisplay'
 import DashboardLinksRow from '../../Components/DashboardLinksRow'
 import {
-    FolderIcon,
-    CloudArrowDownIcon,
-    ServerIcon,
-    ArrowUpIcon,
-    ArrowDownIcon,
-    SparklesIcon,
     ChevronRightIcon,
     PencilSquareIcon,
     TrashIcon,
@@ -46,7 +46,7 @@ export default function CompanyOverview({
     const [deleteConfirm, setDeleteConfirm] = useState({ open: false, brandId: null, brandName: '' })
     const [actionsOpen, setActionsOpen] = useState(null)
     const actionsRef = useRef(null)
-    const { auth } = usePage().props
+    const { can } = usePermission()
     const dashLinks = dashboard_links && typeof dashboard_links === 'object' ? dashboard_links : {}
 
     useEffect(() => {
@@ -129,46 +129,70 @@ export default function CompanyOverview({
         }
     }
 
-    const StatCard = ({ icon: Icon, title, value, change, subtext, formatValue = (v) => v }) => (
-        <div className="rounded-lg bg-white p-5 border border-gray-200 shadow-sm">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-indigo-50">
-                <Icon className="h-5 w-5 text-indigo-600" aria-hidden="true" />
-            </div>
-            <dt className="mt-3 text-sm font-medium text-gray-500 truncate">{title}</dt>
-            <dd className="mt-1 flex items-baseline gap-2">
-                <span className="text-3xl font-semibold tracking-tight text-gray-900">
-                    {formatValue(value)}
-                </span>
-                {change !== undefined && change !== 0 && (
-                    <span className="inline-flex items-center text-sm font-medium">
-                        {change >= 0 ? (
-                            <ArrowUpIcon className="h-3.5 w-3.5 text-green-500 mr-0.5" aria-hidden="true" />
-                        ) : (
-                            <ArrowDownIcon className="h-3.5 w-3.5 text-red-500 mr-0.5" aria-hidden="true" />
-                        )}
-                        <span className={change >= 0 ? 'text-green-600' : 'text-red-600'}>
-                            {change >= 0 ? '+' : ''}{change.toFixed(1)}%
-                        </span>
-                    </span>
-                )}
-            </dd>
-            {subtext && <p className="mt-1.5 text-xs text-gray-400">{subtext}</p>}
-        </div>
-    )
+    const companyName = tenant?.name ?? 'your company'
+    const canViewActivityLog = can('activity_logs.view')
 
-    const BrandRow = ({ brand, isCurrent, onSwitch, onOverview, isDisabled }) => (
+    // Hero stat rail: fixed set of 6 columns (shared border + hairline dividers in shell)
+    const hasAiPayload = ai_usage && isUnifiedAiCreditsPayload(ai_usage)
+    const heroStats = [
+        { id: 'brands', label: 'Brands', value: String(brands?.length ?? 0) },
+        {
+            id: 'assets',
+            label: 'Assets',
+            value: (companyStats?.total_assets?.value ?? 0).toLocaleString(),
+            sub:
+                companyStats?.total_assets?.change !== undefined && companyStats.total_assets.change !== 0
+                    ? `${companyStats.total_assets.change >= 0 ? '+' : ''}${companyStats.total_assets.change.toFixed(1)}% vs prior period`
+                    : undefined,
+        },
+        {
+            id: 'storage',
+            label: 'Storage',
+            value: formatStorage(companyStats?.storage_mb?.value ?? 0),
+            sub: companyStats?.storage_mb?.limit
+                ? formatStorageWithLimit(companyStats.storage_mb.value, companyStats.storage_mb.limit)
+                : 'In library',
+        },
+        {
+            id: 'downloads',
+            label: 'Downloads',
+            value: (companyStats?.download_links?.value ?? 0).toLocaleString(),
+            sub: companyStats?.download_links?.limit
+                ? formatDownloadsWithLimit(companyStats.download_links.value, companyStats.download_links.limit)
+                : 'This month',
+        },
+        {
+            id: 'ai',
+            label: 'AI credits',
+            value: hasAiPayload ? (ai_usage.credits_used ?? 0).toLocaleString() : '—',
+            sub: hasAiPayload ? formatAiCreditsSubtext(ai_usage) : 'Open Company admin → Usage',
+        },
+        {
+            id: 'studio',
+            label: 'Studio runs',
+            value:
+                hasAiPayload && ai_usage.thumbnail_enhancement
+                    ? (ai_usage.thumbnail_enhancement.count ?? 0).toLocaleString()
+                    : '—',
+            sub:
+                hasAiPayload && ai_usage.thumbnail_enhancement
+                    ? formatThumbnailEnhancementSubtext(ai_usage.thumbnail_enhancement)
+                    : 'When Studio is used',
+        },
+    ]
+
+    const BrandRow = ({ brand, isCurrent, onSwitch, onOpenBrand, isDisabled }) => (
         <div
-            className={`rounded-lg bg-white border transition-colors ${
+            className={`rounded-lg border bg-white transition-colors ${
                 isDisabled
-                    ? 'border-gray-200 opacity-50'
+                    ? 'border-slate-200 opacity-50'
                     : isCurrent
-                    ? 'border-gray-200 ring-1 ring-indigo-100'
-                    : 'border-gray-200 hover:border-gray-300'
+                    ? 'border-slate-200/90 ring-1 ring-violet-200/60 shadow-sm'
+                    : 'border-slate-200/90 hover:border-slate-300/90'
             }`}
-            style={isCurrent && !isDisabled ? { borderLeftWidth: 3, borderLeftColor: brand.primary_color || '#6366f1' } : undefined}
         >
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 px-5 py-4 sm:px-6">
-                <div className="flex items-center gap-4 min-w-0">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-4 py-3.5 sm:px-5">
+                <div className="flex items-center gap-3.5 min-w-0 sm:gap-4">
                     <div className="flex-shrink-0">
                         <BrandAvatar
                             logoPath={brand.logo_path}
@@ -180,26 +204,26 @@ export default function CompanyOverview({
                     </div>
                     <div className="min-w-0">
                         <div className="flex items-center gap-2">
-                            <h3 className={`text-base font-semibold truncate ${isDisabled ? 'text-gray-400' : 'text-gray-900'}`}>
+                            <h3 className={`text-base font-semibold truncate ${isDisabled ? 'text-slate-400' : 'text-slate-900'}`}>
                                 {brand.name}
                             </h3>
                             {brand.is_default && (
-                                <span className="inline-flex rounded-full bg-indigo-50 px-2 py-0.5 text-[11px] font-medium text-indigo-700">
-                                    Default
+                                <span className="inline-flex rounded-full border border-slate-200/80 bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-700">
+                                    Default brand
                                 </span>
                             )}
                             {isCurrent && !isDisabled && (
-                                <span className="inline-flex rounded-full bg-green-50 px-2 py-0.5 text-[11px] font-medium text-green-700">
-                                    Current
+                                <span className="inline-flex rounded-full bg-violet-50 px-2 py-0.5 text-[11px] font-medium text-violet-900">
+                                    Current workspace
                                 </span>
                             )}
                             {isDisabled && (
-                                <span className="inline-flex rounded-full bg-yellow-50 px-2 py-0.5 text-[11px] font-medium text-yellow-700">
+                                <span className="inline-flex rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-800">
                                     Paused
                                 </span>
                             )}
                         </div>
-                        <div className="mt-1 flex flex-wrap items-center gap-x-1 text-sm text-gray-400">
+                        <div className="mt-1 flex flex-wrap items-center gap-x-1 text-sm text-slate-500">
                             <span>{brand.stats?.total_assets?.value?.toLocaleString() ?? 0} assets</span>
                             <span aria-hidden="true">&middot;</span>
                             <span>{formatStorage(brand.stats?.storage_mb?.value ?? 0)}</span>
@@ -208,24 +232,24 @@ export default function CompanyOverview({
                         </div>
                     </div>
                 </div>
-                <div className="flex items-center gap-2 flex-shrink-0 flex-wrap">
+                <div className="flex items-center gap-2 flex-shrink-0 flex-wrap pl-[52px] sm:pl-0">
                     {!isDisabled && (
                         <>
                             {!isCurrent && (
                                 <button
                                     type="button"
                                     onClick={() => onSwitch(brand.id)}
-                                    className="inline-flex items-center rounded-md bg-white px-3.5 py-2 text-sm font-medium text-gray-700 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50"
+                                    className="inline-flex items-center rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-800 shadow-sm hover:bg-slate-50"
                                 >
                                     Switch
                                 </button>
                             )}
                             <button
                                 type="button"
-                                onClick={() => onOverview(brand.id)}
-                                className="inline-flex items-center rounded-md bg-indigo-600 px-3.5 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500"
+                                onClick={() => onOpenBrand(brand.id)}
+                                className="inline-flex items-center rounded-md bg-violet-600 px-3.5 py-2 text-sm font-semibold text-white shadow-sm ring-1 ring-inset ring-violet-300/20 hover:bg-violet-500"
                             >
-                                Overview
+                                Open brand
                                 <ChevronRightIcon className="ml-1 h-4 w-4" />
                             </button>
                         </>
@@ -238,19 +262,19 @@ export default function CompanyOverview({
                             <button
                                 type="button"
                                 onClick={() => setActionsOpen(actionsOpen === brand.id ? null : brand.id)}
-                                className="inline-flex items-center justify-center rounded-md p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+                                className="inline-flex items-center justify-center rounded-md p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
                                 title="More actions"
                                 aria-expanded={actionsOpen === brand.id}
                             >
                                 <EllipsisVerticalIcon className="h-5 w-5" />
                             </button>
                             {actionsOpen === brand.id && (
-                                <div className="absolute right-0 top-full z-10 mt-1 w-48 rounded-md bg-white py-1 shadow-lg ring-1 ring-black ring-opacity-5">
+                                <div className="absolute right-0 top-full z-10 mt-1 w-48 rounded-md bg-white py-1 shadow-lg ring-1 ring-slate-900/5">
                                     {!isDisabled && (
                                         <button
                                             type="button"
                                             onClick={() => handleEditBrand(brand.id)}
-                                            className="flex w-full items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 text-left"
+                                            className="flex w-full items-center gap-2 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 text-left"
                                         >
                                             <PencilSquareIcon className="h-4 w-4" />
                                             Edit brand
@@ -279,147 +303,119 @@ export default function CompanyOverview({
     )
 
     return (
-        <div className="min-h-screen flex flex-col bg-gray-50">
-            <AppHead title="Company" />
+        <div className="min-h-screen flex flex-col bg-slate-50">
+            <AppHead title="Company dashboard" />
             <AppNav brand={activeBrand} tenant={tenant} />
 
-            <main className="flex-1">
-                <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
-                    <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                        <div className="min-w-0 flex-1">
-                            <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-                                <h1 className="text-3xl font-bold text-gray-900">Company Overview</h1>
-                                {plan?.name && (
-                                    <span className="inline-flex items-center rounded-full bg-indigo-50 px-2.5 py-0.5 text-xs font-semibold text-indigo-700 ring-1 ring-indigo-100">
-                                        {plan.name}
-                                    </span>
-                                )}
-                            </div>
-                            <p className="mt-2 text-sm text-gray-600">
-                                Company-wide metrics and brands for {tenant?.name ?? 'your company'}.
-                            </p>
+            <CompanyCommandHero
+                companyName={companyName}
+                planLabel={plan?.name}
+                title="Company dashboard"
+                description="Open a brand workspace, jump to people and billing, or add another brand. Your company and every brand are organized here."
+                stats={heroStats}
+                actions={(
+                    <div className="flex w-full flex-col items-stretch gap-3 sm:max-w-sm sm:items-end">
+                        <div className="w-full sm:flex sm:max-w-sm sm:justify-end">
+                            <DashboardLinksRow links={dashLinks} variant="dark" className="text-right sm:text-left" />
                         </div>
-                        <div className="flex flex-shrink-0 flex-wrap items-center gap-3 sm:pt-0">
-                            <DashboardLinksRow
-                                links={dashLinks}
-                                variant="light"
-                            />
+                        <div className="flex w-full flex-col gap-2 min-[400px]:flex-row min-[400px]:flex-wrap min-[400px]:justify-end">
                             {show_agency_incubate && (
                                 <Link
                                     href="/app/agency/dashboard?tab=clients"
-                                    className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-3.5 py-2 text-sm font-semibold text-gray-800 shadow-sm hover:bg-gray-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gray-400"
+                                    className="inline-flex w-full min-[400px]:w-auto items-center justify-center gap-1.5 rounded-md border border-white/20 bg-white/5 px-3.5 py-2.5 text-sm font-semibold text-white/95 shadow-sm transition hover:bg-white/10"
                                     title="Start a new client company from your agency dashboard"
                                 >
-                                    <BuildingOffice2Icon className="h-4 w-4 shrink-0 text-gray-500" aria-hidden />
+                                    <BuildingOffice2Icon className="h-4 w-4 shrink-0" aria-hidden />
                                     Incubate
                                 </Link>
                             )}
                             {canCreateBrand && (
+                                <CompanyControlPrimaryCta href="/app/brands/create" title="Add a brand to this company">
+                                    <PlusIcon className="h-4 w-4" aria-hidden />
+                                    <span className="ml-1.5">Create brand</span>
+                                </CompanyControlPrimaryCta>
+                            )}
+                        </div>
+                    </div>
+                )}
+            />
+
+            <main className="flex-1">
+                <div className="mx-auto max-w-7xl space-y-6 px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
+                    <div className="space-y-5">
+                        <ScopeBanner scope="company" name={companyName} className="shadow-sm" />
+                        <CompanyTabs showAgencyTab={false} />
+                    </div>
+
+                    <section className="space-y-2.5 pt-1">
+                        <h2 className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">Quick actions</h2>
+                        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                            <Link
+                                href="/app/companies/settings#plan-billing"
+                                className="group flex items-center justify-between gap-2 rounded-lg border border-slate-200/90 bg-white px-4 py-3.5 text-sm shadow-sm ring-1 ring-slate-200/50 transition hover:border-violet-200/90 hover:shadow"
+                            >
+                                <span className="font-medium text-slate-900">Plan &amp; subscription</span>
+                                <span className="text-xs font-medium text-violet-700 group-hover:underline">Manage</span>
+                            </Link>
+                            <Link
+                                href="/app/companies/team"
+                                className="group flex items-center justify-between gap-2 rounded-lg border border-slate-200/90 bg-white px-4 py-3.5 text-sm shadow-sm ring-1 ring-slate-200/50 transition hover:border-violet-200/90 hover:shadow"
+                            >
+                                <span className="font-medium text-slate-900">People &amp; invites</span>
+                                <span className="text-xs font-medium text-violet-700 group-hover:underline">Open</span>
+                            </Link>
+                            {canViewActivityLog ? (
                                 <Link
-                                    href="/app/brands/create"
-                                    className="inline-flex items-center gap-1.5 rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
-                                    title="Add a brand to this company"
+                                    href="/app/companies/activity"
+                                    className="group flex items-center justify-between gap-2 rounded-lg border border-slate-200/90 bg-white px-4 py-3.5 text-sm shadow-sm ring-1 ring-slate-200/50 transition hover:border-violet-200/90 hover:shadow"
                                 >
-                                    <PlusIcon className="h-4 w-4" />
-                                    Create Brand
+                                    <span className="font-medium text-slate-900">Activity log</span>
+                                    <span className="text-xs font-medium text-violet-700 group-hover:underline">View</span>
                                 </Link>
-                            )}
+                            ) : null}
                         </div>
-                    </div>
+                        {ai_usage && isUnifiedAiCreditsPayload(ai_usage) && (ai_usage.is_exceeded || ai_usage.warning_level === 'critical') && (
+                            <p className="pt-1 text-xs font-medium text-amber-800/95">
+                                AI usage needs attention — open Company admin → Usage to review.
+                            </p>
+                        )}
+                    </section>
 
-                    <CompanyTabs showAgencyTab={false} />
-
-                    {/* Metrics grid */}
-                    <div className="mb-6">
-                        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                            <StatCard
-                                icon={FolderIcon}
-                                title="Total Assets"
-                                value={companyStats?.total_assets?.value ?? 0}
-                                change={companyStats?.total_assets?.change}
-                                formatValue={(v) => v.toLocaleString()}
-                            />
-                            <StatCard
-                                icon={ServerIcon}
-                                title="Storage"
-                                value={companyStats?.storage_mb?.value ?? 0}
-                                change={companyStats?.storage_mb?.change}
-                                subtext={companyStats?.storage_mb?.limit
-                                    ? formatStorageWithLimit(companyStats.storage_mb.value, companyStats.storage_mb.limit)
-                                    : formatStorage(companyStats?.storage_mb?.value ?? 0) + ' used'}
-                                formatValue={formatStorage}
-                            />
-                            <StatCard
-                                icon={CloudArrowDownIcon}
-                                title="Downloads this month"
-                                value={companyStats?.download_links?.value ?? 0}
-                                change={companyStats?.download_links?.change}
-                                subtext={companyStats?.download_links?.limit
-                                    ? formatDownloadsWithLimit(companyStats.download_links.value, companyStats.download_links.limit)
-                                    : null}
-                                formatValue={(v) => v.toLocaleString()}
-                            />
-                            {ai_usage && isUnifiedAiCreditsPayload(ai_usage) && (
-                                <>
-                                    <StatCard
-                                        icon={SparklesIcon}
-                                        title="AI credits"
-                                        value={ai_usage.credits_used ?? 0}
-                                        subtext={formatAiCreditsSubtext(ai_usage)}
-                                        formatValue={(v) => v.toLocaleString()}
-                                    />
-                                    {ai_usage.thumbnail_enhancement && (
-                                        <StatCard
-                                            icon={SparklesIcon}
-                                            title="Studio enhanced"
-                                            value={ai_usage.thumbnail_enhancement.count ?? 0}
-                                            subtext={formatThumbnailEnhancementSubtext(ai_usage.thumbnail_enhancement)}
-                                            formatValue={(v) => v.toLocaleString()}
-                                        />
-                                    )}
-                                </>
-                            )}
-                        </div>
-                    </div>
-
-                    {/* Brands */}
-                    <div className="border-t border-gray-200 pt-6">
-                        <p className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-4">
-                            Select a brand to switch context or view its overview
+                    <section className="border-t border-slate-200/90 pt-7">
+                        <h2 className="text-lg font-semibold text-slate-900">Brand directory</h2>
+                        <p className="mt-1.5 text-sm text-slate-600">
+                            Switch into a brand workspace or open that brand&rsquo;s overview.
                         </p>
-                        <div className="space-y-3">
+                        <ul className="mt-4 space-y-2.5" role="list">
                             {brands?.map((brand) => (
-                                <BrandRow
-                                    key={brand.id}
-                                    brand={brand}
-                                    isCurrent={activeBrand?.id === brand.id}
-                                    isDisabled={brand.is_disabled}
-                                    onSwitch={handleSwitchBrand}
-                                    onOverview={handleBrandOverview}
-                                />
+                                <li key={brand.id}>
+                                    <BrandRow
+                                        brand={brand}
+                                        isCurrent={activeBrand?.id === brand.id}
+                                        isDisabled={brand.is_disabled}
+                                        onSwitch={handleSwitchBrand}
+                                        onOpenBrand={handleBrandOverview}
+                                    />
+                                </li>
                             ))}
-                        </div>
-                    </div>
+                        </ul>
+                    </section>
 
                     {agency_managed_brands?.length > 0 && (
-                        <div className="mt-8 border-t border-gray-200 pt-6">
-                            <p className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-1">
-                                Agency managed brands
-                            </p>
-                            <p className="text-xs text-gray-400 mb-4">
+                        <section className="border-t border-slate-200/90 pt-7">
+                            <h2 className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">Agency managed</h2>
+                            <p className="mt-2 text-sm text-slate-600">
                                 Brands at client companies linked to your agency.
                             </p>
-                            <div className="space-y-3">
+                            <ul className="mt-3 space-y-2.5" role="list">
                                 {agency_managed_brands.map((row) => {
                                     const brand = row.brand
                                     const key = `${row.client_tenant_id}-${brand.id}`
                                     return (
-                                        <div
-                                            key={key}
-                                            className="rounded-lg bg-white border border-gray-200 transition-colors hover:border-gray-300"
-                                        >
-                                            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 px-5 py-4 sm:px-6">
-                                                <div className="flex items-center gap-4 min-w-0">
+                                        <li key={key}>
+                                        <div className="rounded-lg border border-slate-200/90 bg-white transition hover:border-slate-300/90">
+                                            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-4 py-3.5 sm:px-5">
+                                                <div className="flex items-center gap-3.5 min-w-0 sm:gap-4">
                                                     <div className="flex-shrink-0">
                                                         <BrandAvatar
                                                             logoPath={brand.logo_path}
@@ -431,11 +427,11 @@ export default function CompanyOverview({
                                                     </div>
                                                     <div className="min-w-0">
                                                         <div className="flex flex-wrap items-center gap-2">
-                                                            <h3 className="text-base font-semibold text-gray-900 truncate">
+                                                            <h3 className="text-base font-semibold text-slate-900 truncate">
                                                                 {brand.name}
                                                             </h3>
                                                             {brand.is_default && (
-                                                                <span className="inline-flex rounded-full bg-indigo-50 px-2 py-0.5 text-[11px] font-medium text-indigo-700">
+                                                                <span className="inline-flex rounded-full border border-slate-200/80 bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-700">
                                                                     Default
                                                                 </span>
                                                             )}
@@ -443,7 +439,7 @@ export default function CompanyOverview({
                                                                 {row.client_name}
                                                             </span>
                                                         </div>
-                                                        <div className="mt-1 flex flex-wrap items-center gap-x-1 text-sm text-gray-400">
+                                                        <div className="mt-1 flex flex-wrap items-center gap-x-1 text-sm text-slate-500">
                                                             <span>{brand.stats?.total_assets?.value?.toLocaleString() ?? 0} assets</span>
                                                             <span aria-hidden="true">&middot;</span>
                                                             <span>{formatStorage(brand.stats?.storage_mb?.value ?? 0)}</span>
@@ -452,29 +448,30 @@ export default function CompanyOverview({
                                                         </div>
                                                     </div>
                                                 </div>
-                                                <div className="flex items-center gap-2 flex-shrink-0 flex-wrap">
+                                                <div className="flex items-center gap-2 flex-shrink-0 flex-wrap pl-[52px] sm:pl-0">
                                                     <button
                                                         type="button"
                                                         onClick={() => handleOpenClientManagedBrand(row.client_tenant_id, brand.id)}
-                                                        className="inline-flex items-center rounded-md bg-white px-3.5 py-2 text-sm font-medium text-gray-700 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50"
+                                                        className="inline-flex items-center rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-800 shadow-sm hover:bg-slate-50"
                                                     >
                                                         Switch
                                                     </button>
                                                     <button
                                                         type="button"
                                                         onClick={() => handleOpenClientManagedBrand(row.client_tenant_id, brand.id)}
-                                                        className="inline-flex items-center rounded-md bg-indigo-600 px-3.5 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500"
+                                                        className="inline-flex items-center rounded-md bg-violet-600 px-3.5 py-2 text-sm font-semibold text-white shadow-sm ring-1 ring-inset ring-violet-300/20 hover:bg-violet-500"
                                                     >
-                                                        Overview
+                                                        Open brand
                                                         <ChevronRightIcon className="ml-1 h-4 w-4" />
                                                     </button>
                                                 </div>
                                             </div>
                                         </div>
+                                        </li>
                                     )
                                 })}
-                            </div>
-                        </div>
+                            </ul>
+                        </section>
                     )}
                 </div>
             </main>
@@ -484,7 +481,7 @@ export default function CompanyOverview({
                 open={deleteConfirm.open}
                 onClose={() => setDeleteConfirm({ open: false, brandId: null, brandName: '' })}
                 onConfirm={confirmDelete}
-                title="Delete Brand"
+                title="Delete brand"
                 message={`Are you sure you want to delete "${deleteConfirm.brandName}"?`}
                 variant="danger"
                 confirmText="Delete"

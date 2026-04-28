@@ -139,7 +139,7 @@ export default function InsightAiSuggestionReviewModal({
                         style={{ borderBottomColor: `${accentHex}22` }}
                     >
                         <div className="flex items-center gap-2 min-w-0">
-                            <SparklesIcon className="h-6 w-6 shrink-0 text-indigo-500" aria-hidden />
+                            <SparklesIcon className="h-6 w-6 shrink-0 text-violet-500" aria-hidden />
                             <div className="min-w-0">
                                 <DialogTitle className="text-lg font-semibold text-slate-900 truncate">
                                     Quick review
@@ -180,8 +180,8 @@ export default function InsightAiSuggestionReviewModal({
                                     className="space-y-5"
                                 >
                                     {headline ? (
-                                        <div className="rounded-xl border border-indigo-100 bg-gradient-to-br from-indigo-50/90 to-white px-4 py-4">
-                                            <p className="text-[10px] font-semibold uppercase tracking-wide text-indigo-600">
+                                        <div className="rounded-xl border border-violet-100 bg-gradient-to-br from-violet-50/90 to-white px-4 py-4">
+                                            <p className="text-[10px] font-semibold uppercase tracking-wide text-violet-600">
                                                 {headline.kicker}
                                             </p>
                                             <p className="mt-1 break-words text-2xl font-semibold tracking-tight text-slate-900 sm:text-3xl">
@@ -202,7 +202,7 @@ export default function InsightAiSuggestionReviewModal({
                                         </p>
                                         <button
                                             type="button"
-                                            className="relative mx-auto flex max-h-[min(48vh,440px)] w-full max-w-lg items-center justify-center overflow-hidden rounded-xl border border-slate-200 bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2"
+                                            className="relative mx-auto flex max-h-[min(48vh,440px)] w-full max-w-lg items-center justify-center overflow-hidden rounded-xl border border-slate-200 bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-2"
                                             aria-label="Enlarged thumbnail"
                                         >
                                             {current.thumbnail_url ? (
@@ -226,7 +226,7 @@ export default function InsightAiSuggestionReviewModal({
                                             ) : null}
                                             <Link
                                                 href={`/app/assets?q=${encodeURIComponent(current.asset_id)}&asset=${encodeURIComponent(current.asset_id)}`}
-                                                className="ml-auto inline-flex items-center gap-1 text-xs font-medium text-indigo-600 hover:text-indigo-800"
+                                                className="ml-auto inline-flex items-center gap-1 text-xs font-medium text-violet-600 hover:text-violet-800"
                                                 onClick={() => onClose()}
                                             >
                                                 Open in grid

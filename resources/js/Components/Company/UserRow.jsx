@@ -11,12 +11,12 @@ import ConfirmDialog from '../ConfirmDialog'
 
 const ROLE_COLORS = {
     owner: 'bg-orange-100 text-orange-800 border-orange-200',
-    admin: 'bg-purple-100 text-purple-800 border-purple-200',
+    admin: 'bg-violet-200/80 text-violet-950 border-violet-300',
     member: 'bg-gray-100 text-gray-800 border-gray-200',
     agency_admin: 'bg-violet-100 text-violet-900 border-violet-200',
     agency_partner: 'bg-violet-50 text-violet-900 border-violet-200',
-    brand_manager: 'bg-blue-100 text-blue-800 border-blue-200',
-    contributor: 'bg-indigo-100 text-indigo-800 border-indigo-200',
+    brand_manager: 'bg-violet-100 text-violet-900 border-violet-200',
+    contributor: 'bg-slate-200 text-slate-800 border-slate-300',
     viewer: 'bg-gray-100 text-gray-800 border-gray-200',
 }
 
@@ -144,7 +144,7 @@ export default function UserRow({
                     <span className="font-medium text-gray-900">{user.name || user.email}</span>
                     {isAgencyManaged && !groupedUnderAgencySection && (
                         <span
-                            className="ml-2 inline-flex items-center rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-indigo-800"
+                            className="ml-2 inline-flex items-center rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-violet-900"
                             title={user.agency_tenant_name ? `Managed via agency: ${user.agency_tenant_name}` : 'Managed via agency link'}
                         >
                             Agency{user.agency_tenant_name ? ` · ${user.agency_tenant_name}` : ''}
@@ -161,7 +161,7 @@ export default function UserRow({
                         }}
                         onClick={(e) => e.stopPropagation()}
                         disabled={updatingKeys[`tenant_${user.id}`]}
-                        className={`inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-medium cursor-pointer focus:ring-indigo-500 focus:outline-none disabled:opacity-50 ${getRoleColor(user.company_role)}`}
+                        className={`inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-medium cursor-pointer focus:ring-violet-500 focus:outline-none disabled:opacity-50 ${getRoleColor(user.company_role)}`}
                     >
                         <option value="admin">Admin</option>
                         <option value="member">Member</option>
@@ -175,7 +175,7 @@ export default function UserRow({
                 {isAgencyManaged && (
                     <a
                         href={manageAgencyAccessHref}
-                        className="shrink-0 text-xs font-medium text-indigo-600 hover:text-indigo-800 underline decoration-indigo-200 underline-offset-2"
+                        className="shrink-0 text-xs font-medium text-violet-600 hover:text-violet-800 underline decoration-violet-200 underline-offset-2"
                     >
                         Manage agency access
                     </a>
@@ -246,7 +246,7 @@ export default function UserRow({
                                         value={br.role}
                                         onChange={(e) => onBrandRoleChange?.(user.id, br.brand_id, e.target.value)}
                                         disabled={isUpdating || isAgencyManaged}
-                                        className={`rounded-md border px-2 py-1 text-xs font-medium ${getRoleColor(br.role)} focus:ring-indigo-500 disabled:opacity-50`}
+                                        className={`rounded-md border px-2 py-1 text-xs font-medium ${getRoleColor(br.role)} focus:ring-violet-500 disabled:opacity-50`}
                                         onClick={(e) => e.stopPropagation()}
                                         title={isAgencyManaged ? 'Managed via agency link' : undefined}
                                     >
@@ -275,7 +275,7 @@ export default function UserRow({
                                     <button
                                         type="button"
                                         onClick={(e) => { e.stopPropagation(); setAddBrandOpen(true) }}
-                                        className="inline-flex items-center gap-1 text-sm text-indigo-600 hover:text-indigo-800 font-medium"
+                                        className="inline-flex items-center gap-1 text-sm text-violet-600 hover:text-violet-800 font-medium"
                                     >
                                         <PlusIcon className="h-4 w-4" />
                                         Add Brand Access
@@ -305,7 +305,7 @@ export default function UserRow({
                                             type="button"
                                             onClick={handleAddBrandAccess}
                                             disabled={addBrandSubmitting || !addBrandBrandId}
-                                            className="rounded-md bg-indigo-600 px-2 py-1 text-xs text-white hover:bg-indigo-500 disabled:opacity-50"
+                                            className="rounded-md bg-violet-600 px-2 py-1 text-xs text-white hover:bg-violet-500 disabled:opacity-50"
                                         >
                                             {addBrandSubmitting ? 'Adding...' : 'Add'}
                                         </button>

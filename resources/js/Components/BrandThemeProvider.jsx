@@ -53,7 +53,7 @@ export default function BrandThemeProvider({ children, initialPage }) {
     // Function to update CSS variables for brand colors
     const updateBrandColors = (brand, currentUrl) => {
         const root = document.documentElement
-        const defaultPrimary = '#6366f1'
+        const defaultPrimary = '#7c3aed'
         const defaultSecondary = '#8b5cf6'
         const defaultAccent = '#ec4899'
         const isSettings = isSettingsPage(currentUrl)
@@ -96,10 +96,10 @@ export default function BrandThemeProvider({ children, initialPage }) {
         // Cleanup: reset to default on unmount
         return () => {
             const root = document.documentElement
-            root.style.setProperty('--primary', '#6366f1')
+            root.style.setProperty('--primary', '#7c3aed')
             root.style.setProperty('--secondary', '#8b5cf6')
             root.style.setProperty('--accent', '#ec4899')
-            root.style.setProperty('--primary-rgb', '99, 102, 241')
+            root.style.setProperty('--primary-rgb', '124, 58, 217')
         }
     }, [activeBrand])
 

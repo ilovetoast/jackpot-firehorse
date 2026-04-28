@@ -4,7 +4,8 @@ import InsightsLayout from '../../layouts/InsightsLayout'
 import {
     CheckCircleIcon,
     ExclamationTriangleIcon,
-    InformationCircleIcon,
+    SparklesIcon,
+    QuestionMarkCircleIcon,
     ClockIcon,
     ShieldCheckIcon,
 } from '@heroicons/react/24/outline'
@@ -37,6 +38,16 @@ function getActivePresetId(startDate, endDate) {
         return days === 7 ? '7d' : days === 30 ? '30d' : '90d'
     }
     return null // custom range
+}
+
+/** Workbench: product violet fills — same Jackpot accent as nav/filters, not brand lime or traffic-light reds. */
+function coverageBarFillClass(percentage) {
+    const n = Math.min(100, Math.max(0, Number(percentage) || 0))
+    if (n >= 85) return 'bg-violet-500'
+    if (n >= 60) return 'bg-violet-600'
+    if (n >= 40) return 'bg-violet-600/85'
+    if (n >= 20) return 'bg-violet-600/60'
+    return 'bg-violet-600/45'
 }
 
 export default function MetadataAnalytics({ analytics, filters, is_admin }) {
@@ -93,14 +104,16 @@ export default function MetadataAnalytics({ analytics, filters, is_admin }) {
     return (
         <InsightsLayout title="Metadata" activeSection="metadata">
             <div className="space-y-8">
-                {/* Filters */}
-                <div className="mb-6 bg-white rounded-lg shadow p-4 border border-gray-200">
-                    <div className="flex flex-wrap items-center gap-4">
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">
-                                Time range
-                            </label>
-                            <div className="flex flex-wrap gap-2">
+                {/* Filters — compact workbench toolbar (violet = active, not brand primary) */}
+                <div className="rounded-xl border border-slate-200/90 bg-white px-3 py-2.5 shadow-sm">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+                        <div className="min-w-0 flex-1">
+                            <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Time range</p>
+                            <div
+                                className="mt-1.5 inline-flex max-w-full flex-wrap gap-0.5 rounded-lg border border-slate-200 bg-slate-50 p-0.5"
+                                role="group"
+                                aria-label="Time range"
+                            >
                                 {DATE_PRESETS.map((preset) => {
                                     const isActive = activePresetId === preset.id
                                     return (
@@ -108,10 +121,10 @@ export default function MetadataAnalytics({ analytics, filters, is_admin }) {
                                             key={preset.id}
                                             type="button"
                                             onClick={() => handlePresetClick(preset)}
-                                            className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
+                                            className={`whitespace-nowrap rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors sm:text-sm ${
                                                 isActive
-                                                    ? 'bg-primary text-white'
-                                                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                                    ? 'bg-violet-600 text-white shadow-sm'
+                                                    : 'text-slate-600 hover:bg-white/90 hover:text-slate-900'
                                             }`}
                                         >
                                             {preset.label}
@@ -120,36 +133,33 @@ export default function MetadataAnalytics({ analytics, filters, is_admin }) {
                                 })}
                             </div>
                         </div>
-                        {is_admin && (
-                            <div className="flex items-end">
-                                <label className="flex items-center">
-                                    <input
-                                        type="checkbox"
-                                        checked={localFilters.include_internal}
-                                        onChange={(e) => handleFilterChange('include_internal', e.target.checked)}
-                                        className="rounded border-gray-300 text-primary focus:ring-primary"
-                                    />
-                                    <span className="ml-2 text-sm text-gray-700">
-                                        Include internal fields
-                                    </span>
-                                </label>
-                            </div>
-                        )}
+                        {is_admin ? (
+                            <label className="flex cursor-pointer items-center gap-2 border-slate-200 sm:border-l sm:pl-4">
+                                <input
+                                    type="checkbox"
+                                    checked={localFilters.include_internal}
+                                    onChange={(e) => handleFilterChange('include_internal', e.target.checked)}
+                                    className="h-4 w-4 rounded border-slate-300 text-violet-600 focus:ring-violet-500"
+                                />
+                                <span className="text-sm text-slate-700">Include internal fields</span>
+                            </label>
+                        ) : null}
                     </div>
                 </div>
 
                 {/* Coverage */}
                 <div className="mb-8">
-                    <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
-                        <CheckCircleIcon className="h-5 w-5 mr-2 text-gray-400" />
-                        Metadata Coverage
+                    <h3 className="text-lg font-semibold text-slate-900 mb-1 flex items-center">
+                        <CheckCircleIcon className="h-5 w-5 mr-2 text-slate-400" />
+                        Metadata coverage
                     </h3>
-                    <div className="bg-white rounded-lg shadow border border-gray-200 p-6">
+                    <p className="mb-4 text-sm text-slate-500">Per-field fill rates for the selected time range.</p>
+                    <div className="rounded-xl border border-slate-200/90 bg-white p-4 shadow-sm sm:p-5">
                         {fieldCoverageRaw.length > 0 ? (
-                            <div className="space-y-4">
+                            <div className="space-y-5">
                                 {groupTypeFamilySection ? (
                                     <>
-                                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
                                             {otherCoverageFields.map((field) => (
                                                 <CoverageFieldCard
                                                     key={field.field_id}
@@ -158,27 +168,37 @@ export default function MetadataAnalytics({ analytics, filters, is_admin }) {
                                                 />
                                             ))}
                                         </div>
-                                        <div className="rounded-lg border border-gray-200 bg-gray-50/90 p-4">
-                                            <div className="mb-3">
-                                                <h4 className="text-sm font-semibold text-gray-900">Type</h4>
-                                                <p className="mt-0.5 text-xs text-gray-500">
-                                                    Each library category has its own type field (for example Photo Type,
-                                                    Logo Type). Coverage is per field, not a single shared value.
+                                        <div className="overflow-hidden rounded-lg border border-slate-200 bg-slate-50/50">
+                                            <div className="border-b border-slate-200 bg-slate-50/80 px-3 py-2.5 sm:px-4">
+                                                <h4 className="text-sm font-semibold text-slate-900">Type fields</h4>
+                                                <p className="mt-0.5 text-xs text-slate-500">
+                                                    Each category has its own type field. Coverage is per field.
                                                 </p>
                                             </div>
-                                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                                                {typeFamilyFields.map((field) => (
-                                                    <CoverageFieldCard
-                                                        key={field.field_id}
-                                                        field={field}
-                                                        totalAssets={coverage.total_assets}
-                                                    />
-                                                ))}
+                                            <div className="overflow-x-auto">
+                                                <table className="min-w-full text-left text-sm">
+                                                    <thead>
+                                                        <tr className="border-b border-slate-200 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                                                            <th className="px-3 py-2 pl-4 sm:px-4">Field</th>
+                                                            <th className="px-2 py-2 text-right">%</th>
+                                                            <th className="min-w-[8rem] px-3 py-2 pr-4 sm:pr-4">Coverage</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody className="divide-y divide-slate-100">
+                                                        {typeFamilyFields.map((field) => (
+                                                            <TypeCoverageTableRow
+                                                                key={field.field_id}
+                                                                field={field}
+                                                                totalAssets={coverage.total_assets}
+                                                            />
+                                                        ))}
+                                                    </tbody>
+                                                </table>
                                             </div>
                                         </div>
                                     </>
                                 ) : (
-                                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
                                         {fieldCoverageRaw.map((field) => (
                                             <CoverageFieldCard
                                                 key={field.field_id}
@@ -212,16 +232,16 @@ export default function MetadataAnalytics({ analytics, filters, is_admin }) {
                         ) : (
                             <p className="text-sm text-gray-500">No coverage data available</p>
                         )}
-                        <div className="mt-6 pt-6 border-t border-gray-200 flex flex-wrap gap-4">
+                        <div className="mt-6 flex flex-wrap gap-4 border-t border-slate-200 pt-5">
                             <Link
                                 href={route('manage.categories', { filter: 'low_coverage' })}
-                                className="inline-flex items-center text-sm font-medium text-indigo-600 hover:text-indigo-500"
+                                className="inline-flex items-center text-sm font-medium text-violet-600 hover:text-violet-500"
                             >
                                 View low coverage fields
                             </Link>
                             <Link
                                 href={route('manage.tags', { filter: 'missing' })}
-                                className="inline-flex items-center text-sm font-medium text-indigo-600 hover:text-indigo-500"
+                                className="inline-flex items-center text-sm font-medium text-violet-600 hover:text-violet-500"
                             >
                                 Fix missing tags
                             </Link>
@@ -231,11 +251,11 @@ export default function MetadataAnalytics({ analytics, filters, is_admin }) {
 
                 {/* AI Effectiveness */}
                 <div className="mb-8">
-                    <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
-                        <InformationCircleIcon className="h-5 w-5 mr-2 text-gray-400" />
-                        AI Suggestion Effectiveness
+                    <h3 className="text-lg font-semibold text-slate-900 mb-4 flex items-center">
+                        <SparklesIcon className="h-5 w-5 mr-2 text-violet-500" />
+                        AI suggestion effectiveness
                     </h3>
-                    <div className="bg-white rounded-lg shadow border border-gray-200 p-6">
+                    <div className="rounded-xl border border-slate-200/90 bg-white p-4 shadow-sm sm:p-5">
                         {aiEffectiveness.total_suggestions > 0 ? (
                             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                                 <MetricCard
@@ -271,11 +291,11 @@ export default function MetadataAnalytics({ analytics, filters, is_admin }) {
 
                 {/* Rights & Risk */}
                 <div className="mb-8">
-                    <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
-                        <ExclamationTriangleIcon className="h-5 w-5 mr-2 text-yellow-500" />
-                        Rights & Risk Indicators
+                    <h3 className="text-lg font-semibold text-slate-900 mb-4 flex items-center">
+                        <ExclamationTriangleIcon className="h-5 w-5 mr-2 text-amber-500" />
+                        Rights &amp; risk indicators
                     </h3>
-                    <div className="bg-white rounded-lg shadow border border-gray-200 p-6">
+                    <div className="rounded-xl border border-slate-200/90 bg-white p-4 shadow-sm sm:p-5">
                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                             <MetricCard
                                 label="Expired Assets"
@@ -326,11 +346,11 @@ export default function MetadataAnalytics({ analytics, filters, is_admin }) {
 
                 {/* Freshness */}
                 <div className="mb-8">
-                    <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
-                        <ClockIcon className="h-5 w-5 mr-2 text-gray-400" />
-                        Metadata Freshness
+                    <h3 className="text-lg font-semibold text-slate-900 mb-4 flex items-center">
+                        <ClockIcon className="h-5 w-5 mr-2 text-slate-400" />
+                        Metadata freshness
                     </h3>
-                    <div className="bg-white rounded-lg shadow border border-gray-200 p-6">
+                    <div className="rounded-xl border border-slate-200/90 bg-white p-4 shadow-sm sm:p-5">
                         <div className="mb-4">
                             <MetricCard
                                 label="Assets with Stale Metadata"
@@ -372,11 +392,11 @@ export default function MetadataAnalytics({ analytics, filters, is_admin }) {
                 {/* Governance Gaps */}
                 {is_admin && (
                     <div className="mb-8">
-                        <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
-                            <ShieldCheckIcon className="h-5 w-5 mr-2 text-gray-400" />
-                            Governance & Permission Gaps
+                        <h3 className="text-lg font-semibold text-slate-900 mb-4 flex items-center">
+                            <ShieldCheckIcon className="h-5 w-5 mr-2 text-slate-400" />
+                            Governance &amp; permission gaps
                         </h3>
-                        <div className="bg-white rounded-lg shadow border border-gray-200 p-6">
+                        <div className="rounded-xl border border-slate-200/90 bg-white p-4 shadow-sm sm:p-5">
                             <p className="text-sm text-gray-500">
                                 Governance gap analysis requires permission logging (future enhancement)
                             </p>
@@ -388,20 +408,40 @@ export default function MetadataAnalytics({ analytics, filters, is_admin }) {
     )
 }
 
-function CoverageFieldCard({ field, totalAssets }) {
+function TypeCoverageTableRow({ field, totalAssets }) {
+    const pct = field.coverage_percentage
+    const fill = coverageBarFillClass(pct)
     return (
-        <div className="border border-gray-200 rounded-lg bg-white p-4">
-            <div className="mb-2 flex items-center justify-between">
-                <span className="text-sm font-medium text-gray-900">{field.field_label}</span>
-                <span className="text-sm text-gray-500">{field.coverage_percentage}%</span>
+        <tr>
+            <td className="max-w-[12rem] px-3 py-2.5 pl-4 align-middle text-slate-900 sm:max-w-none sm:px-4">
+                {field.field_label}
+            </td>
+            <td className="w-12 whitespace-nowrap px-2 py-2.5 text-right tabular-nums text-slate-600">{pct}%</td>
+            <td className="px-3 py-2 pr-4 align-middle">
+                <div className="h-1.5 w-full min-w-[6rem] overflow-hidden rounded-full bg-slate-200/90">
+                    <div className={`h-1.5 rounded-full transition-all ${fill}`} style={{ width: `${pct}%` }} />
+                </div>
+                <p className="mt-1 text-[11px] text-slate-500">
+                    {field.assets_with_value} of {totalAssets} assets
+                </p>
+            </td>
+        </tr>
+    )
+}
+
+function CoverageFieldCard({ field, totalAssets }) {
+    const pct = field.coverage_percentage
+    const fill = coverageBarFillClass(pct)
+    return (
+        <div className="flex flex-col rounded-lg border border-slate-200/90 bg-white p-3 shadow-sm">
+            <div className="flex items-start justify-between gap-2">
+                <span className="text-sm font-medium leading-snug text-slate-900">{field.field_label}</span>
+                <span className="shrink-0 text-sm font-semibold tabular-nums text-slate-700">{pct}%</span>
             </div>
-            <div className="h-2 w-full rounded-full bg-gray-200">
-                <div
-                    className="bg-primary h-2 rounded-full transition-all"
-                    style={{ width: `${field.coverage_percentage}%` }}
-                />
+            <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-slate-200/90">
+                <div className={`h-1.5 rounded-full transition-all ${fill}`} style={{ width: `${pct}%` }} />
             </div>
-            <p className="mt-1 text-xs text-gray-500">
+            <p className="mt-1.5 text-[11px] leading-relaxed text-slate-500">
                 {field.assets_with_value} of {totalAssets} assets
             </p>
         </div>
@@ -410,21 +450,18 @@ function CoverageFieldCard({ field, totalAssets }) {
 
 function MetricCard({ label, value, tooltip, variant = 'default' }) {
     const variantClasses = {
-        default: 'text-gray-900',
+        default: 'text-slate-900',
         danger: 'text-red-600',
-        warning: 'text-yellow-600',
+        warning: 'text-amber-600',
     }
 
     return (
-        <div className="border border-gray-200 rounded-lg p-4">
-            <div className="flex items-center justify-between mb-1">
-                <span className="text-sm font-medium text-gray-500">{label}</span>
+        <div className="rounded-lg border border-slate-200/90 bg-slate-50/30 p-3 sm:p-4">
+            <div className="mb-1 flex items-center justify-between">
+                <span className="text-sm font-medium text-slate-500">{label}</span>
                 {tooltip && (
-                    <span
-                        className="text-xs text-gray-400 cursor-help"
-                        title={tooltip}
-                    >
-                        ℹ️
+                    <span className="inline-flex cursor-help text-violet-500/90" title={tooltip}>
+                        <QuestionMarkCircleIcon className="h-4 w-4 shrink-0" aria-hidden="true" />
                     </span>
                 )}
             </div>

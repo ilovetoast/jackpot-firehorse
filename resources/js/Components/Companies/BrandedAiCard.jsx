@@ -8,9 +8,8 @@
  * AI settings cards don't drift from the pattern.
  *
  * Variants:
- *  - 'violet' : Studio (matches existing Video AI treatment across the app).
- *  - 'indigo' : Asset Field Intelligence (matches existing indigo treatment in the
- *               AiTaggingSettings "Asset fields" section).
+ *  - 'violet' : Primary / AI accent (app-wide; matches Video AI, company shell).
+ *  - 'indigo' : Legacy alias; resolves to the same tokens as 'violet'.
  *  - 'brand'  : Brand Alignment. Uses the tenant's primary brand color (supply via
  *               `brandPrimary`, and ideally the WCAG-safe `brandPrimaryOnWhite`
  *               variant from colorUtils.ensureAccentContrastOnWhite for text/icons
@@ -23,27 +22,20 @@
 
 import { SparklesIcon } from '@heroicons/react/24/outline'
 
+const VIOLET_TOKENS = {
+    panelBorder: 'border-violet-200/90',
+    panelBg: 'bg-violet-50/35',
+    divider: 'border-violet-100/90',
+    badgeBg: 'bg-violet-600',
+    badgeText: 'text-white',
+    iconTileBg: 'bg-violet-100',
+    iconFg: 'text-violet-700',
+    headingFg: 'text-violet-900/80',
+}
+
 const VARIANT_TOKENS = {
-    violet: {
-        panelBorder: 'border-violet-200/90',
-        panelBg: 'bg-violet-50/35',
-        divider: 'border-violet-100/90',
-        badgeBg: 'bg-violet-600',
-        badgeText: 'text-white',
-        iconTileBg: 'bg-violet-100',
-        iconFg: 'text-violet-700',
-        headingFg: 'text-violet-900/80',
-    },
-    indigo: {
-        panelBorder: 'border-indigo-100',
-        panelBg: 'bg-indigo-50/30',
-        divider: 'border-indigo-100/80',
-        badgeBg: 'bg-indigo-600',
-        badgeText: 'text-white',
-        iconTileBg: 'bg-indigo-100',
-        iconFg: 'text-indigo-700',
-        headingFg: 'text-indigo-900/70',
-    },
+    violet: VIOLET_TOKENS,
+    indigo: VIOLET_TOKENS,
 }
 
 export default function BrandedAiCard({
@@ -63,23 +55,23 @@ export default function BrandedAiCard({
 
     const panelStyle = isBrand
         ? {
-              borderColor: brandPrimaryOnWhite || brandPrimary || '#6366f1',
+              borderColor: brandPrimaryOnWhite || brandPrimary || '#7c3aed',
               backgroundColor: 'rgba(255,255,255,0.6)',
           }
         : undefined
     const badgeStyle = isBrand
-        ? { backgroundColor: brandPrimaryOnWhite || brandPrimary || '#6366f1', color: '#fff' }
+        ? { backgroundColor: brandPrimaryOnWhite || brandPrimary || '#7c3aed', color: '#fff' }
         : undefined
     const iconTileStyle = isBrand
         ? {
-              backgroundColor: (brandPrimaryOnWhite || brandPrimary || '#6366f1') + '22',
+              backgroundColor: (brandPrimaryOnWhite || brandPrimary || '#7c3aed') + '22',
           }
         : undefined
     const iconFgStyle = isBrand
-        ? { color: brandPrimaryOnWhite || brandPrimary || '#6366f1' }
+        ? { color: brandPrimaryOnWhite || brandPrimary || '#7c3aed' }
         : undefined
     const dividerStyle = isBrand
-        ? { borderColor: (brandPrimaryOnWhite || brandPrimary || '#6366f1') + '33' }
+        ? { borderColor: (brandPrimaryOnWhite || brandPrimary || '#7c3aed') + '33' }
         : undefined
 
     return (

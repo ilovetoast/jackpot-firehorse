@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
 import { useSidebarEditor } from './SidebarEditorContext'
+import { IDENTITY_LOGO_BLOCK_IDS, IDENTITY_LOGO_BLOCK_LABELS } from './brandGuidelinesPresentationModel'
 import ToggleControl from './controls/ToggleControl'
 import BackgroundControl from './controls/BackgroundControl'
 import SelectControl from './controls/SelectControl'
@@ -220,6 +221,38 @@ function IdentityColorOverrides({ ctx, sectionId }) {
     )
 }
 
+function IdentityLogoBlockList({ ctx }) {
+    const blocks = Object.values(IDENTITY_LOGO_BLOCK_IDS)
+    const slotFor = (id) => {
+        if (id === 'primary_hero') return 'hero'
+        if (id === 'min_size') return 'mini'
+        return 'sm'
+    }
+    return (
+        <div className="space-y-1.5 pt-1">
+            <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Logo cards</div>
+            <p className="text-[10px] text-gray-500 leading-snug">Select a card to change source, size, and background. Guidelines only — Identity is unchanged.</p>
+            <ul className="space-y-1">
+                {blocks.map((id) => (
+                    <li key={id}>
+                        <button
+                            type="button"
+                            onClick={() => {
+                                ctx.setCustomizeTarget?.({ level: 'block', sectionId: 'sec-logo', blockId: id, slot: slotFor(id) })
+                                const el = document.getElementById('sec-logo')
+                                if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                            }}
+                            className="w-full text-left rounded-md border border-gray-200 bg-white px-2 py-1.5 text-[11px] text-gray-800 hover:border-violet-300 hover:bg-violet-50/40 transition"
+                        >
+                            {IDENTITY_LOGO_BLOCK_LABELS[id] || id}
+                        </button>
+                    </li>
+                ))}
+            </ul>
+        </div>
+    )
+}
+
 /** Link to the brand settings page so users can edit Logo Standards copy in one place. */
 function LogoStandardsLinks({ ctx }) {
     if (!ctx.brandId) return null
@@ -316,7 +349,12 @@ const SECTION_CONFIGS = {
             { key: 'show_secondary_marks', label: 'Show Secondary Marks', default: true },
             { key: 'show_small_variants', label: 'Show Small Variants Row', default: true },
         ],
-        extraControls: (ctx, sectionId) => <IdentityColorOverrides ctx={ctx} sectionId={sectionId} />,
+        extraControls: (ctx, sectionId) => (
+            <>
+                <IdentityLogoBlockList ctx={ctx} />
+                <IdentityColorOverrides ctx={ctx} sectionId={sectionId} />
+            </>
+        ),
         editableFields: [],
     },
     'sec-logo-standards': {

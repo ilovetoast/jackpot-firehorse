@@ -130,7 +130,7 @@ export default function CreatorInsights({ insights }) {
                         <div>
                             <Link
                                 href={assetViewHref(mostDl.asset_id)}
-                                className="font-semibold text-indigo-600 hover:text-indigo-500"
+                                className="font-semibold text-violet-600 hover:text-violet-500"
                             >
                                 {mostDl.title || 'Untitled'}
                             </Link>
@@ -148,7 +148,7 @@ export default function CreatorInsights({ insights }) {
                         <div>
                             <Link
                                 href={assetViewHref(topRated.asset_id)}
-                                className="font-semibold text-indigo-600 hover:text-indigo-500"
+                                className="font-semibold text-violet-600 hover:text-violet-500"
                             >
                                 {topRated.title || 'Untitled'}
                             </Link>
@@ -193,8 +193,8 @@ export default function CreatorInsights({ insights }) {
                 </div>
                 <div className="overflow-hidden rounded-lg border border-gray-200 bg-white px-4 py-5 shadow sm:p-6">
                     <div className="flex items-center gap-4">
-                        <div className="flex-shrink-0 rounded-lg bg-emerald-50 p-3">
-                            <ChartBarIcon className="h-6 w-6 text-emerald-700" aria-hidden="true" />
+                        <div className="flex-shrink-0 rounded-lg bg-violet-50 p-3 ring-1 ring-violet-100/80">
+                            <ChartBarIcon className="h-6 w-6 text-violet-700" aria-hidden="true" />
                         </div>
                         <div>
                             <p className="text-sm font-medium text-gray-500">On Track %</p>

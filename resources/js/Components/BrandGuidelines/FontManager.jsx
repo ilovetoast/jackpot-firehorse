@@ -85,9 +85,16 @@ const ROLES = [
 
 const SOURCE_BADGES = {
     google: { label: 'Google', className: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30' },
-    system: { label: 'System', className: 'bg-blue-500/15 text-blue-300 border-blue-500/30' },
+    system: { label: 'System', className: 'bg-slate-500/15 text-slate-200 border-slate-500/30' },
     custom: { label: 'Licensed', className: 'bg-amber-500/15 text-amber-300 border-amber-500/30' },
     unknown: { label: 'Placeholder', className: 'bg-white/10 text-white/50 border-white/20' },
+}
+
+const SOURCE_BADGES_WORKBENCH = {
+    google: { label: 'Google', className: 'bg-emerald-50 text-emerald-800 border border-emerald-200' },
+    system: { label: 'System', className: 'bg-slate-100 text-slate-700 border border-slate-200' },
+    custom: { label: 'Licensed', className: 'bg-amber-50 text-amber-900 border border-amber-200' },
+    unknown: { label: 'Placeholder', className: 'bg-slate-100 text-slate-600 border border-slate-200' },
 }
 
 function emptyFont() {
@@ -401,7 +408,7 @@ function FontEditModal({ open, onClose, font, onSave, brandId = null }) {
                                 !brandId
                                     ? 'border-white/10 bg-white/[0.02] opacity-60'
                                     : dragActive
-                                      ? 'border-indigo-400/70 bg-indigo-500/10'
+                                      ? 'border-violet-400/70 bg-violet-500/10'
                                       : 'border-white/20 bg-white/[0.03] hover:border-white/30'
                             }`}
                         >
@@ -561,7 +568,7 @@ function FontEditModal({ open, onClose, font, onSave, brandId = null }) {
 
                     <div className="flex justify-end gap-3 px-5 py-4 border-t border-white/10">
                         <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg text-sm text-white/60 hover:text-white hover:bg-white/10 transition-colors">Cancel</button>
-                        <button type="button" onClick={handleSave} disabled={!draft.name.trim()} className="px-5 py-2 rounded-lg text-sm font-medium bg-indigo-500 text-white hover:bg-indigo-400 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+                        <button type="button" onClick={handleSave} disabled={!draft.name.trim()} className="px-5 py-2 rounded-lg text-sm font-medium bg-violet-600 text-white hover:bg-violet-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
                             {font ? 'Save Changes' : 'Add Font'}
                         </button>
                     </div>
@@ -572,18 +579,29 @@ function FontEditModal({ open, onClose, font, onSave, brandId = null }) {
 }
 
 // ——— Role Picker Popover ———
-function RolePickerInline({ value, onChange }) {
+function RolePickerInline({ value, onChange, workbenchSurface = false }) {
     const [open, setOpen] = useState(false)
     const label = ROLES.find((r) => r.value === value)?.label || value
+    const btn = workbenchSurface
+        ? 'text-[11px] text-slate-500 hover:text-violet-800 underline decoration-dotted underline-offset-2'
+        : 'text-[11px] text-white/40 hover:text-white/60 underline decoration-dotted underline-offset-2'
+    const menu = workbenchSurface
+        ? 'absolute z-20 mt-1 left-0 rounded-lg border border-slate-200 bg-white shadow-xl py-1 min-w-[160px]'
+        : 'absolute z-20 mt-1 left-0 rounded-lg border border-white/20 bg-[#1a1920] shadow-xl py-1 min-w-[160px]'
+    const item = (active) =>
+        workbenchSurface
+            ? `w-full text-left px-3 py-1.5 text-xs transition-colors ${active ? 'text-violet-900 bg-violet-50' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'}`
+            : `w-full text-left px-3 py-1.5 text-xs transition-colors ${active ? 'text-white bg-white/10' : 'text-white/60 hover:bg-white/5 hover:text-white/80'}`
+
     return (
         <div className="relative">
-            <button type="button" onClick={() => setOpen(!open)} className="text-[11px] text-white/40 hover:text-white/60 underline decoration-dotted underline-offset-2 transition-colors">
+            <button type="button" onClick={() => setOpen(!open)} className={btn}>
                 {label}
             </button>
             {open && (
-                <div className="absolute z-20 mt-1 left-0 rounded-lg border border-white/20 bg-[#1a1920] shadow-xl py-1 min-w-[160px]">
+                <div className={menu}>
                     {ROLES.map((r) => (
-                        <button key={r.value} type="button" onClick={() => { onChange(r.value); setOpen(false) }} className={`w-full text-left px-3 py-1.5 text-xs transition-colors ${value === r.value ? 'text-white bg-white/10' : 'text-white/60 hover:bg-white/5 hover:text-white/80'}`}>
+                        <button key={r.value} type="button" onClick={() => { onChange(r.value); setOpen(false) }} className={item(value === r.value)}>
                             {r.label}
                         </button>
                     ))}
@@ -594,7 +612,15 @@ function RolePickerInline({ value, onChange }) {
 }
 
 // ——— Main FontManager ———
-export default function FontManager({ fonts = [], onChange, suggestions = [], onApplySuggestion, brandId = null }) {
+export default function FontManager({
+    fonts = [],
+    onChange,
+    suggestions = [],
+    onApplySuggestion,
+    brandId = null,
+    /** Light, workbench-aligned surface for Brand Settings (vs dark builder preview) */
+    workbenchSurface = false,
+}) {
     const [editingIdx, setEditingIdx] = useState(null)
     const [isAdding, setIsAdding] = useState(false)
     const [showGooglePicker, setShowGooglePicker] = useState(false)
@@ -662,7 +688,25 @@ export default function FontManager({ fonts = [], onChange, suggestions = [], on
     }, [fontsList, onChange])
 
     const roleLabel = (role) => ROLES.find((r) => r.value === role)?.label || role
-    const sourceBadge = (source) => SOURCE_BADGES[source] || SOURCE_BADGES.unknown
+    const badgeMap = workbenchSurface ? SOURCE_BADGES_WORKBENCH : SOURCE_BADGES
+    const sourceBadge = (source) => badgeMap[source] || badgeMap.unknown
+    const rowShell = workbenchSurface
+        ? 'group rounded-xl border border-slate-200 bg-white shadow-sm hover:border-slate-300'
+        : 'group rounded-xl border border-white/15 bg-white/[0.03] hover:bg-white/[0.06]'
+    const nameCls = workbenchSurface ? 'text-sm font-semibold text-slate-900 truncate' : 'text-sm font-semibold text-white truncate'
+    const styleChip = workbenchSurface
+        ? 'text-[10px] text-slate-600 bg-slate-100 rounded px-1.5 py-0.5 border border-slate-200'
+        : 'text-[10px] text-white/40 bg-white/5 rounded px-1.5 py-0.5 border border-white/10'
+    const noteCls = workbenchSurface ? 'text-xs text-slate-500 mt-1.5 leading-relaxed' : 'text-xs text-white/35 mt-1.5 leading-relaxed'
+    const licCls = workbenchSurface
+        ? 'inline-flex items-center gap-1 text-[11px] text-violet-700 hover:text-violet-900 mt-1'
+        : 'inline-flex items-center gap-1 text-[11px] text-violet-400/90 hover:text-violet-300 mt-1'
+    const iconBtn = workbenchSurface
+        ? 'p-1.5 rounded-lg text-slate-400 hover:text-slate-900 hover:bg-slate-100'
+        : 'p-1.5 rounded-lg text-white/40 hover:text-white hover:bg-white/10'
+    const delBtn = workbenchSurface
+        ? 'p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50'
+        : 'p-1.5 rounded-lg text-white/40 hover:text-red-400 hover:bg-red-500/10'
 
     return (
         <div>
@@ -674,29 +718,29 @@ export default function FontManager({ fonts = [], onChange, suggestions = [], on
                         const fontName = typeof font === 'string' ? font : (font?.name || 'Unnamed')
                         const fontObj = typeof font === 'string' ? { ...emptyFont(), name: font, role: idx === 0 ? 'primary' : 'secondary' } : font
                         return (
-                            <div key={idx} className="group rounded-xl border border-white/15 bg-white/[0.03] hover:bg-white/[0.06] transition-colors">
+                            <div key={idx} className={`${rowShell} transition-colors`}>
                                 <div className="flex items-start gap-3 p-3.5">
                                     <div className="flex-1 min-w-0">
                                         <div className="flex items-center gap-2 mb-0.5">
-                                            <span className="text-sm font-semibold text-white truncate" style={{ fontFamily: `'${fontName}', system-ui, sans-serif` }}>{fontName}</span>
-                                            <span className={`inline-flex items-center rounded-md border px-1.5 py-0.5 text-[10px] font-medium ${badge.className}`}>{badge.label}</span>
+                                            <span className={nameCls} style={{ fontFamily: `'${fontName}', system-ui, sans-serif` }}>{fontName}</span>
+                                            <span className={`inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] font-medium ${badge.className}`}>{badge.label}</span>
                                         </div>
-                                        <RolePickerInline value={fontObj.role} onChange={(newRole) => handleRoleChange(idx, newRole)} />
+                                        <RolePickerInline workbenchSurface={workbenchSurface} value={fontObj.role} onChange={(newRole) => handleRoleChange(idx, newRole)} />
                                         {fontObj.styles?.length > 0 && (
                                             <div className="flex flex-wrap gap-1 mt-1.5">
-                                                {fontObj.styles.map((s) => <span key={s} className="text-[10px] text-white/40 bg-white/5 rounded px-1.5 py-0.5 border border-white/10">{s}</span>)}
+                                                {fontObj.styles.map((s) => <span key={s} className={styleChip}>{s}</span>)}
                                             </div>
                                         )}
-                                        {fontObj.usage_notes && <p className="text-xs text-white/35 mt-1.5 leading-relaxed">{fontObj.usage_notes}</p>}
+                                        {fontObj.usage_notes && <p className={noteCls}>{fontObj.usage_notes}</p>}
                                         {fontObj.purchase_url && (
-                                            <a href={fontObj.purchase_url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-[11px] text-indigo-400/80 hover:text-indigo-300 mt-1">
+                                            <a href={fontObj.purchase_url} target="_blank" rel="noopener noreferrer" className={licCls}>
                                                 <ArrowTopRightOnSquareIcon className="w-3 h-3" />License
                                             </a>
                                         )}
                                     </div>
-                                    <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                        <button type="button" onClick={() => setEditingIdx(idx)} className="p-1.5 rounded-lg text-white/40 hover:text-white hover:bg-white/10 transition-colors"><PencilSquareIcon className="w-4 h-4" /></button>
-                                        <button type="button" onClick={() => handleDelete(idx)} className="p-1.5 rounded-lg text-white/40 hover:text-red-400 hover:bg-red-500/10 transition-colors"><TrashIcon className="w-4 h-4" /></button>
+                                    <div className={`flex gap-1 transition-opacity ${workbenchSurface ? 'opacity-100 sm:opacity-0 sm:group-hover:opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
+                                        <button type="button" onClick={() => setEditingIdx(idx)} className={iconBtn}><PencilSquareIcon className="w-4 h-4" /></button>
+                                        <button type="button" onClick={() => handleDelete(idx)} className={delBtn}><TrashIcon className="w-4 h-4" /></button>
                                     </div>
                                 </div>
                             </div>
@@ -707,34 +751,60 @@ export default function FontManager({ fonts = [], onChange, suggestions = [], on
 
             {/* Suggestion banner */}
             {suggestions.length > 0 && fontsList.length === 0 && (
-                <div className="mb-4 rounded-xl border border-indigo-500/30 bg-indigo-500/10 p-4">
+                <div
+                    className={
+                        workbenchSurface
+                            ? 'mb-4 rounded-xl border border-violet-200 bg-violet-50/80 p-4'
+                            : 'mb-4 rounded-xl border border-violet-500/30 bg-violet-500/10 p-4'
+                    }
+                >
                     <div className="flex items-start justify-between gap-3">
                         <div>
-                            <p className="text-sm font-medium text-indigo-300">{suggestions.length} font{suggestions.length !== 1 ? 's' : ''} detected from Brand Guidelines</p>
+                            <p className={workbenchSurface ? 'text-sm font-medium text-violet-900' : 'text-sm font-medium text-violet-200'}>
+                                {suggestions.length} font{suggestions.length !== 1 ? 's' : ''} detected from Brand Guidelines
+                            </p>
                             <div className="mt-2 space-y-1">
                                 {suggestions.map((f, i) => (
-                                    <p key={i} className="text-xs text-white/50">
-                                        <span className="text-white/70 font-medium">{f.name}</span> — {f.role}
+                                    <p key={i} className={workbenchSurface ? 'text-xs text-slate-600' : 'text-xs text-white/50'}>
+                                        <span className={workbenchSurface ? 'font-medium text-slate-800' : 'text-white/70 font-medium'}>{f.name}</span> — {f.role}
                                         {f.styles?.length > 0 && ` (${f.styles.slice(0, 3).join(', ')}${f.styles.length > 3 ? '...' : ''})`}
                                     </p>
                                 ))}
                             </div>
                         </div>
-                        <button type="button" onClick={handleApplySuggestion} className="flex-shrink-0 px-3 py-1.5 rounded-lg bg-indigo-500/30 border border-indigo-500/40 text-indigo-300 hover:bg-indigo-500/40 text-xs font-medium transition-colors">Apply</button>
+                        <button
+                            type="button"
+                            onClick={handleApplySuggestion}
+                            className={
+                                workbenchSurface
+                                    ? 'flex-shrink-0 px-3 py-1.5 rounded-lg border border-violet-300 bg-white text-violet-800 hover:bg-violet-50 text-xs font-medium'
+                                    : 'flex-shrink-0 px-3 py-1.5 rounded-lg bg-violet-500/30 border border-violet-500/40 text-violet-200 hover:bg-violet-500/40 text-xs font-medium'
+                            }
+                        >
+                            Apply
+                        </button>
                     </div>
                 </div>
             )}
 
             {/* Google Fonts picker toggle */}
-            <div className="border-t border-white/10 pt-4 mt-2">
+            <div className={`border-t pt-4 mt-2 ${workbenchSurface ? 'border-slate-200' : 'border-white/10'}`}>
                 <button
                     type="button"
                     onClick={() => setShowGooglePicker(!showGooglePicker)}
-                    className={`w-full flex items-center justify-between rounded-xl border px-4 py-3 text-sm transition-all ${
-                        showGooglePicker
-                            ? 'border-emerald-500/30 bg-emerald-500/[0.06] text-emerald-300'
-                            : 'border-white/15 bg-white/[0.02] text-white/60 hover:bg-white/[0.05] hover:text-white/80'
-                    }`}
+                    className={
+                        workbenchSurface
+                            ? `w-full flex items-center justify-between rounded-xl border px-4 py-3 text-sm transition-all ${
+                                  showGooglePicker
+                                      ? 'border-emerald-300 bg-emerald-50 text-emerald-900'
+                                      : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-900'
+                              }`
+                            : `w-full flex items-center justify-between rounded-xl border px-4 py-3 text-sm transition-all ${
+                                  showGooglePicker
+                                      ? 'border-emerald-500/30 bg-emerald-500/[0.06] text-emerald-300'
+                                      : 'border-white/15 bg-white/[0.02] text-white/60 hover:bg-white/[0.05] hover:text-white/80'
+                              }`
+                    }
                 >
                     <span className="flex items-center gap-2">
                         <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none">
@@ -756,14 +826,18 @@ export default function FontManager({ fonts = [], onChange, suggestions = [], on
             <button
                 type="button"
                 onClick={() => setIsAdding(true)}
-                className="mt-3 w-full flex items-center justify-center gap-2 rounded-xl border-2 border-dashed border-white/15 hover:border-white/30 py-3 text-sm text-white/40 hover:text-white/60 hover:bg-white/[0.02] transition-all"
+                className={
+                    workbenchSurface
+                        ? 'mt-3 w-full flex items-center justify-center gap-2 rounded-xl border-2 border-dashed border-slate-200 hover:border-violet-300 py-3 text-sm text-slate-500 hover:text-violet-800 hover:bg-slate-50/80 transition-all'
+                        : 'mt-3 w-full flex items-center justify-center gap-2 rounded-xl border-2 border-dashed border-white/15 hover:border-white/30 py-3 text-sm text-white/40 hover:text-white/60 hover:bg-white/[0.02] transition-all'
+                }
             >
                 <PlusIcon className="w-4 h-4" />
-                Add Custom Font
+                Add custom font
             </button>
 
             {fontsList.length === 0 && suggestions.length === 0 && !showGooglePicker && (
-                <p className="mt-2 text-[11px] text-white/30 text-center">
+                <p className={workbenchSurface ? 'mt-2 text-[11px] text-slate-500 text-center' : 'mt-2 text-[11px] text-white/30 text-center'}>
                     Pick from Google Fonts, add custom/licensed fonts, or paste a font CSS URL below.
                 </p>
             )}

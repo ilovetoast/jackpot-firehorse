@@ -145,7 +145,7 @@ function ActionCardLink({ href, Icon, title, description, brandColor, iconFill, 
 export default function PrimaryActions({
     permissions = {},
     brand = null,
-    brandColor = '#6366f1',
+    brandColor = '#71717a',
     iconAccentColor = null,
     authUserId = null,
 }) {

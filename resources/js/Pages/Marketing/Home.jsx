@@ -11,7 +11,7 @@ const CAPABILITIES = [
         title: 'AI-powered tagging & metadata',
         description: 'Auto-tag uploads, generate descriptions, and surface insights — governed by your brand rules.',
         iconPath: 'M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z',
-        color: 'indigo',
+        color: 'violet',
     },
     {
         title: 'Brand guidelines built in',
@@ -35,7 +35,7 @@ const CAPABILITIES = [
         title: 'Collections & brand portal',
         description: 'Package curated sets of assets for campaigns, partners, or clients — permissioned and on-brand.',
         iconPath: 'M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z',
-        color: 'indigo',
+        color: 'violet',
     },
     {
         title: 'Agency & multi-brand',
@@ -46,7 +46,6 @@ const CAPABILITIES = [
 ]
 
 const COLOR_MAP = {
-    indigo: { bg: 'from-indigo-500/20 to-violet-500/10', ring: 'ring-indigo-500/20', icon: 'text-indigo-300' },
     violet: { bg: 'from-violet-500/20 to-purple-500/10', ring: 'ring-violet-500/20', icon: 'text-violet-300' },
     emerald: { bg: 'from-emerald-500/20 to-teal-500/10', ring: 'ring-emerald-500/20', icon: 'text-emerald-300' },
     amber: { bg: 'from-amber-500/20 to-orange-500/10', ring: 'ring-amber-500/20', icon: 'text-amber-300' },
@@ -106,15 +105,15 @@ export default function MarketingHome() {
                     <div className="mx-auto mt-16 max-w-3xl rounded-2xl bg-white/[0.02] p-10 ring-1 ring-white/[0.06]">
                         <ul className="space-y-4 text-lg text-white/55">
                             <li className="flex gap-3">
-                                <span className="text-indigo-400/80">—</span>
+                                <span className="text-violet-400/80">—</span>
                                 <span>Version sprawl and unclear "what's approved" slow every launch.</span>
                             </li>
                             <li className="flex gap-3">
-                                <span className="text-indigo-400/80">—</span>
+                                <span className="text-violet-400/80">—</span>
                                 <span>Agencies and in-house teams redo work because signals don't reach creators.</span>
                             </li>
                             <li className="flex gap-3">
-                                <span className="text-indigo-400/80">—</span>
+                                <span className="text-violet-400/80">—</span>
                                 <span>Brand safety becomes a bottleneck instead of a guardrail.</span>
                             </li>
                         </ul>
@@ -158,7 +157,7 @@ export default function MarketingHome() {
                     />
                     <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 lg:gap-8">
                         {CAPABILITIES.map((cap) => {
-                            const c = COLOR_MAP[cap.color] || COLOR_MAP.indigo
+                            const c = COLOR_MAP[cap.color] || COLOR_MAP.violet
                             return (
                                 <div
                                     key={cap.title}
@@ -204,7 +203,7 @@ export default function MarketingHome() {
                                 ))}
                             </ul>
                         </div>
-                        <div className="rounded-2xl overflow-hidden ring-1 ring-white/[0.08] bg-gradient-to-br from-white/[0.04] to-indigo-950/20 aspect-[4/3] flex items-center justify-center p-10">
+                        <div className="rounded-2xl overflow-hidden ring-1 ring-white/[0.08] bg-gradient-to-br from-white/[0.04] to-violet-950/20 aspect-[4/3] flex items-center justify-center p-10">
                             <p className="text-center text-sm text-white/40 max-w-xs leading-relaxed">
                                 Intelligence layered across assets, workflows, and approvals — always under your rules.
                             </p>
@@ -228,12 +227,12 @@ export default function MarketingHome() {
                                 key={plan.name}
                                 className={`rounded-2xl p-6 text-center ${
                                     plan.popular
-                                        ? 'bg-gradient-to-b from-indigo-500/[0.12] to-violet-500/[0.06] ring-1 ring-indigo-400/30 shadow-lg shadow-indigo-900/30'
+                                        ? 'bg-gradient-to-b from-violet-500/[0.12] to-violet-500/[0.06] ring-1 ring-violet-400/30 shadow-lg shadow-violet-900/30'
                                         : 'bg-white/[0.03] ring-1 ring-white/[0.06]'
                                 }`}
                             >
                                 {plan.popular && (
-                                    <span className="inline-block mb-3 rounded-full bg-indigo-500/20 px-2.5 py-0.5 text-xs font-semibold text-indigo-300">
+                                    <span className="inline-block mb-3 rounded-full bg-violet-500/20 px-2.5 py-0.5 text-xs font-semibold text-violet-300">
                                         Most popular
                                     </span>
                                 )}
@@ -247,7 +246,7 @@ export default function MarketingHome() {
                     <div className="mt-8 text-center">
                         <Link
                             href="/pricing"
-                            className="inline-flex items-center gap-1 text-sm font-semibold text-indigo-400 hover:text-indigo-300 transition-colors"
+                            className="inline-flex items-center gap-1 text-sm font-semibold text-violet-400 hover:text-violet-300 transition-colors"
                         >
                             See full plan comparison <span aria-hidden>→</span>
                         </Link>

@@ -42,6 +42,14 @@ final class ImageFocalPointAiService
             return false;
         }
 
+        if (config('ai.photography_focal_point.enabled', true) === false) {
+            return false;
+        }
+        if (config('ai.photography_focal_point.require_preferred_thumbnails', false)
+            && ! config('assets.thumbnail.preferred.enabled', false)) {
+            return false;
+        }
+
         if (! $force && ($tenant->settings['ai_auto_focal_point_photography'] ?? false) !== true) {
             return false;
         }

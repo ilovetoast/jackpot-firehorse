@@ -5,7 +5,7 @@ import { refreshCsrfTokenFromServer } from '../../utils/csrf'
 
 export default function InviteAccept({ invitation, isAuthenticated, token }) {
     const { theme } = usePage().props
-    const primary = theme?.colors?.primary || '#6366f1'
+    const primary = theme?.colors?.primary || '#7c3aed'
     const portalInvite = theme?.portal?.invite || {}
     const [focusedField, setFocusedField] = useState(null)
 

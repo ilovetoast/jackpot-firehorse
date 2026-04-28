@@ -18,12 +18,12 @@ export default function ComparisonBlock({ leftTitle, rightTitle, leftItems, righ
                         ))}
                     </ul>
                 </div>
-                <div className="rounded-2xl bg-gradient-to-br from-indigo-500/[0.08] to-violet-600/[0.06] p-8 sm:p-10 ring-1 ring-indigo-400/25 shadow-lg shadow-indigo-950/40 lg:scale-[1.02]">
-                    <h3 className="text-xs font-semibold uppercase tracking-wider text-indigo-300">{rightTitle}</h3>
+                <div className="rounded-2xl bg-gradient-to-br from-violet-500/[0.08] to-violet-600/[0.06] p-8 sm:p-10 ring-1 ring-violet-400/25 shadow-lg shadow-violet-950/40 lg:scale-[1.02]">
+                    <h3 className="text-xs font-semibold uppercase tracking-wider text-violet-300">{rightTitle}</h3>
                     <ul className="mt-8 space-y-5">
                         {rightItems.map((line, i) => (
                             <li key={i} className="flex gap-3 text-base leading-relaxed text-white/70">
-                                <span className="mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-indigo-500/25 text-indigo-300 text-xs font-bold">
+                                <span className="mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-violet-500/25 text-violet-300 text-xs font-bold">
                                     ✓
                                 </span>
                                 <span>{line}</span>

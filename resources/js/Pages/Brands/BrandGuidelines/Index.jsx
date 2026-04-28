@@ -8,6 +8,16 @@ import HeadlineAppearanceShowcase from '../../../Components/BrandGuidelines/Head
 import { SidebarEditorProvider, useSidebarEditor } from '../../../Components/BrandGuidelines/SidebarEditorContext'
 import SidebarEditor from '../../../Components/BrandGuidelines/SidebarEditor'
 import { guidelinesFocalPointStyle } from '../../../utils/guidelinesFocalPoint'
+import {
+    IDENTITY_LOGO_BLOCK_IDS,
+    logoSizeToClassName,
+    logoAlignmentToContainerClass,
+    resolveLogoUrlFromSource,
+    resolveIdentityCardBackground,
+    buildAssetUrlMap,
+    pageThemeToMainStyle,
+    isLogoBlockOverridden,
+} from '../../../Components/BrandGuidelines/brandGuidelinesPresentationModel'
 
 function unwrapValue(field) {
     if (field && typeof field === 'object' && !Array.isArray(field) && 'value' in field) return field.value
@@ -407,6 +417,17 @@ function BrandGuidelinesIndexInner({
     const globalOverrides = sidebarCtx?.draftOverrides?.global ?? {}
     const globalSpacing = globalOverrides.spacing || 'default'
     const globalCorners = globalOverrides.corner_radius || 'md'
+    const pageThemeMain = pageThemeToMainStyle(globalOverrides, { logoAssets })
+    const pageThemeConfig = pageThemeMain.theme || {}
+    const pageMuted = pageThemeConfig.muted_text_color
+    /** Section eyebrows (not bold title pills) — use page theme muted when set. */
+    const sectionEyebrow = (texturedColor, cleanFallback) => {
+        if (isBold) return isTextured ? texturedColor : cleanFallback
+        if (pageMuted) return pageMuted
+        return isTextured ? texturedColor : cleanFallback
+    }
+    const usePageThemeLayer = !showCallout && (pageThemeMain.hasBackgroundLayer || pageThemeMain.hasOverlayLayer)
+    const hasCustomPageBackground = usePageThemeLayer
     const isSectionVisible = (id) => sectionOverrides[id]?.visible !== false
     const sectionBgOverride = (id) => sectionOverrides[id]?.background ?? null
     const sectionContentToggle = (id, key, defaultVal = true) => sectionOverrides[id]?.content?.[key] ?? defaultVal
@@ -550,10 +571,26 @@ function BrandGuidelinesIndexInner({
 
     return (
         <div
-            className={showCallout ? 'h-screen overflow-hidden flex flex-col bg-[#0B0B0D]' : 'min-h-full bg-white'}
+            className={showCallout ? 'h-screen overflow-hidden flex flex-col bg-[#0B0B0D]' : `min-h-full ${!usePageThemeLayer ? 'bg-white' : ''}`}
             data-gl-spacing={globalSpacing}
             data-gl-corners={globalCorners}
         >
+            {usePageThemeLayer && (
+                <>
+                    <div
+                        className="fixed inset-0 z-0 pointer-events-none"
+                        style={pageThemeMain.hasBackgroundLayer ? pageThemeMain.backgroundStyle : { backgroundColor: '#ffffff' }}
+                        aria-hidden
+                    />
+                    {pageThemeMain.hasOverlayLayer && (
+                        <div
+                            className="fixed inset-0 z-[1] pointer-events-none"
+                            style={pageThemeMain.overlayStyle}
+                            aria-hidden
+                        />
+                    )}
+                </>
+            )}
             <AppHead title={`Brand Guidelines — ${brand.name}`} />
             {/* Global overrides: spacing scale + corner radius override. Applied via attribute selectors with !important so they beat Tailwind utilities on existing sections. */}
             <style>{`
@@ -651,7 +688,14 @@ function BrandGuidelinesIndexInner({
                     </div>
                 </div>
             )}
-            <main className={showCallout ? 'relative flex-1 min-h-0 flex flex-col' : 'relative'} style={sidebarCtx?.isEditing ? { marginRight: 340, transition: 'margin-right 0.3s ease-out' } : { transition: 'margin-right 0.3s ease-out' }}>
+            <main
+                className={showCallout ? 'relative flex-1 min-h-0 flex flex-col' : 'relative z-[2] gl-guidelines-main'}
+                style={{
+                    ...(sidebarCtx?.isEditing ? { marginRight: 340, transition: 'margin-right 0.3s ease-out' } : { transition: 'margin-right 0.3s ease-out' }),
+                    ...(!showCallout && pageThemeMain.theme?.text_color ? { color: pageThemeMain.theme.text_color } : {}),
+                    ...(!showCallout && pageThemeConfig.muted_text_color ? { '--gl-page-muted': pageThemeConfig.muted_text_color } : {}),
+                }}
+            >
                 {/* Floating Section Nav — desktop only */}
                 {!showCallout && (
                     <nav
@@ -873,7 +917,7 @@ function BrandGuidelinesIndexInner({
                                 <div className="mx-auto max-w-6xl px-6 lg:px-8 relative">
                                     <div className="grid grid-cols-1 lg:grid-cols-12 gap-20">
                                         <div className="lg:col-span-7">
-                                            <SectionLabel color={isTextured ? hexToRgba(primaryColor, 0.8) : secondaryColor} bold={isBold} textured={isTextured}>Purpose</SectionLabel>
+                                            <SectionLabel color={sectionEyebrow(hexToRgba(primaryColor, 0.8), secondaryColor)} bold={isBold} textured={isTextured}>Purpose</SectionLabel>
                                             {identity.mission && (() => {
                                                 const missionHtml = getContentOverride('sec-purpose', 'mission_html')
                                                 const missionText = identity.mission
@@ -952,7 +996,7 @@ function BrandGuidelinesIndexInner({
                                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-20">
                                         {hasValues && (
                                             <div>
-                                                <SectionLabel color={isTextured ? hexToRgba(primaryColor, 0.8) : secondaryColor} bold={isBold} textured={isTextured}>Core Values</SectionLabel>
+                                                <SectionLabel color={sectionEyebrow(hexToRgba(primaryColor, 0.8), secondaryColor)} bold={isBold} textured={isTextured}>Core Values</SectionLabel>
                                                 <div className={isBold ? 'space-y-4' : isTextured ? 'space-y-3' : 'space-y-0'}>
                                                     {identity.values.map((v, i) => (
                                                         isTextured ? (
@@ -991,7 +1035,7 @@ function BrandGuidelinesIndexInner({
                                         )}
                                         {hasBeliefs && (
                                             <div>
-                                                <SectionLabel color={isTextured ? hexToRgba(primaryColor, 0.8) : secondaryColor} bold={isBold} textured={isTextured}>What We Believe</SectionLabel>
+                                                <SectionLabel color={sectionEyebrow(hexToRgba(primaryColor, 0.8), secondaryColor)} bold={isBold} textured={isTextured}>What We Believe</SectionLabel>
                                                 <div className={isBold ? 'space-y-4' : isTextured ? 'space-y-3' : 'space-y-6'}>
                                                     {identity.beliefs.map((b, i) => (
                                                         isTextured ? (
@@ -1039,7 +1083,7 @@ function BrandGuidelinesIndexInner({
                                 <div className="mx-auto max-w-6xl px-6 lg:px-8 relative">
                                     <div className="grid grid-cols-1 lg:grid-cols-12 gap-20">
                                         <div className="lg:col-span-7">
-                                            <SectionLabel color={isTextured ? hexToRgba(secondaryColor, 0.7) : secondaryColor} bold={isBold} textured={isTextured}>Brand Voice</SectionLabel>
+                                            <SectionLabel color={sectionEyebrow(hexToRgba(secondaryColor, 0.7), secondaryColor)} bold={isBold} textured={isTextured}>Brand Voice</SectionLabel>
                                             {personality.voice_description && (() => {
                                                 const voiceHtml = getContentOverride('sec-voice', 'voice_html')
                                                 return <p className={`text-xl md:text-2xl leading-relaxed whitespace-pre-wrap ${isTextured ? 'text-white/85 font-light' : isBold ? 'text-gray-800 font-medium' : 'text-gray-800 font-light'}`}>
@@ -1164,7 +1208,7 @@ function BrandGuidelinesIndexInner({
                                     </>
                                 )}
                                 <div className="mx-auto max-w-6xl px-6 lg:px-8 relative">
-                                    <SectionLabel color={isTextured ? hexToRgba(secondaryColor, 0.7) : secondaryColor} bold={isBold} textured={isTextured}>Visual Style</SectionLabel>
+                                    <SectionLabel color={sectionEyebrow(hexToRgba(secondaryColor, 0.7), secondaryColor)} bold={isBold} textured={isTextured}>Visual Style</SectionLabel>
 
                                     <div className="grid grid-cols-1 lg:grid-cols-12 gap-16 mt-4">
                                         <div className="lg:col-span-7">
@@ -1222,7 +1266,7 @@ function BrandGuidelinesIndexInner({
                                     <div className="absolute inset-0 opacity-[0.04]" style={{ backgroundImage: `url("${grainSvg}")` }} />
                                 )}
                                 <div className="mx-auto max-w-7xl px-6 lg:px-8 relative">
-                                    <SectionLabel color={isTextured ? hexToRgba(secondaryColor, 0.7) : secondaryColor} bold={isBold} textured={isTextured}>Visual References</SectionLabel>
+                                    <SectionLabel color={sectionEyebrow(hexToRgba(secondaryColor, 0.7), secondaryColor)} bold={isBold} textured={isTextured}>Visual References</SectionLabel>
                                     <h2 className={`text-3xl md:text-4xl font-bold mt-2 mb-4 ${isTextured ? 'text-white' : 'text-gray-900'}`}>Photography &amp; Visual Language</h2>
                                     <p className={`text-lg max-w-2xl mb-12 ${isTextured ? 'text-white/50' : 'text-gray-500'}`}>
                                         {visual.photography_style || 'Reference imagery that defines the visual direction of the brand.'}
@@ -1288,7 +1332,7 @@ function BrandGuidelinesIndexInner({
                                 <div className="absolute inset-0 opacity-[0.04]" style={{ backgroundImage: `url("${grainSvg}")` }} />
                             )}
                             <div className="mx-auto max-w-6xl px-6 lg:px-8 relative">
-                                <SectionLabel color={isTextured ? hexToRgba(secondaryColor, 0.7) : secondaryColor} bold={isBold} textured={isTextured}>Color System</SectionLabel>
+                                <SectionLabel color={sectionEyebrow(hexToRgba(secondaryColor, 0.7), secondaryColor)} bold={isBold} textured={isTextured}>Color System</SectionLabel>
                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-4">
                                     {[
                                         { color: primaryColor, label: 'Primary' },
@@ -1369,7 +1413,7 @@ function BrandGuidelinesIndexInner({
                                     </>
                                 )}
                                 <div className="mx-auto max-w-6xl px-6 lg:px-8 relative">
-                                    <SectionLabel color={isTextured ? hexToRgba(secondaryColor, 0.7) : secondaryColor} bold={isBold} textured={isTextured}>Typography</SectionLabel>
+                                    <SectionLabel color={sectionEyebrow(hexToRgba(secondaryColor, 0.7), secondaryColor)} bold={isBold} textured={isTextured}>Typography</SectionLabel>
 
                                     {hasFonts && typography.fonts.length > 0 ? (
                                         <div className="space-y-16 mt-4">
@@ -1454,13 +1498,19 @@ function BrandGuidelinesIndexInner({
                                         <div className={`mt-10 pt-10 grid grid-cols-1 md:grid-cols-2 gap-8 ${isTextured ? 'border-t border-white/10' : 'border-t border-gray-200/60'}`}>
                                             {typography.heading_style && (
                                                 <div>
-                                                    <span className={`text-xs font-semibold uppercase tracking-wider ${isTextured ? 'text-white/40' : 'text-gray-400'}`}>Heading Style</span>
+                                                    <span
+                                                        className={`text-xs font-semibold uppercase tracking-wider ${isTextured ? 'text-white/40' : pageMuted ? '' : 'text-gray-400'}`}
+                                                        style={!isTextured && pageMuted ? { color: pageMuted } : undefined}
+                                                    >Heading Style</span>
                                                     <p className={`mt-2 text-base ${isTextured ? 'text-white/70' : 'text-gray-700'}`}>{typography.heading_style}</p>
                                                 </div>
                                             )}
                                             {typography.body_style && (
                                                 <div>
-                                                    <span className={`text-xs font-semibold uppercase tracking-wider ${isTextured ? 'text-white/40' : 'text-gray-400'}`}>Body Style</span>
+                                                    <span
+                                                        className={`text-xs font-semibold uppercase tracking-wider ${isTextured ? 'text-white/40' : pageMuted ? '' : 'text-gray-400'}`}
+                                                        style={!isTextured && pageMuted ? { color: pageMuted } : undefined}
+                                                    >Body Style</span>
                                                     <p className={`mt-2 text-base ${isTextured ? 'text-white/70' : 'text-gray-700'}`}>{typography.body_style}</p>
                                                 </div>
                                             )}
@@ -1478,6 +1528,57 @@ function BrandGuidelinesIndexInner({
                             const identityAccentBg = logoContentOverrides.accent_bg || accentColor
                             const showSecondaryMarks = logoContentOverrides.show_secondary_marks !== false
                             const showSmallVariants = logoContentOverrides.show_small_variants !== false
+                            const lb = logoContentOverrides.logo_blocks || {}
+                            const am = buildAssetUrlMap(logoAssets)
+                            const brandU = { ...brand, logo_url: logoUrl, logo_dark_url: logoDarkUrl, logo_on_light_url: logoOnLightUrl, logo_horizontal_url: brand.logo_horizontal_url }
+                            const srcFor = (blockId, fallbackUrl) => {
+                                const b = lb[blockId]
+                                if (b?.source) {
+                                    const u = resolveLogoUrlFromSource(b.source, brandU, am)
+                                    if (u) return u
+                                }
+                                return fallbackUrl
+                            }
+                            const cardBg = (blockId, defaultStyle) => resolveIdentityCardBackground(lb[blockId], defaultStyle, brand, logoAssets)
+                            const isSel = (id) => canCustomize && sidebarCtx?.isEditing && sidebarCtx?.customizeTarget?.level === 'block' && sidebarCtx?.customizeTarget?.sectionId === 'sec-logo' && sidebarCtx?.customizeTarget?.blockId === id
+                            const onCard = (id, slot) => (e) => {
+                                if (canCustomize && sidebarCtx?.isEditing) {
+                                    e.stopPropagation()
+                                    sidebarCtx.setCustomizeTarget({ level: 'block', sectionId: 'sec-logo', blockId: id, slot })
+                                }
+                            }
+                            const blockIsCustom = (id) => isLogoBlockOverridden(sidebarCtx?.draftOverrides?.sections, 'sec-logo', id)
+                            const editRing = (id) => {
+                                const sel = isSel(id) ? 'ring-2 ring-violet-500 ring-offset-2' : ''
+                                const ovr = canCustomize && sidebarCtx?.isEditing && !isSel(id) && blockIsCustom(id) ? 'ring-1 ring-amber-200/60' : ''
+                                const hov = canCustomize && sidebarCtx?.isEditing ? 'cursor-pointer transition hover:ring-1 hover:ring-violet-300' : ''
+                                return `${sel} ${ovr} ${hov}`.trim()
+                            }
+                            const renderBlockLabel = (blockId, defaultText, positionClasses, defaultColorClass, textSizeClass = 'text-[10px]') => {
+                                if (lb[blockId]?.label?.visible === false) return null
+                                const text = (lb[blockId]?.label?.text && String(lb[blockId].label.text).trim()) ? lb[blockId].label.text : defaultText
+                                const c = lb[blockId]?.appearance?.label_color
+                                const usePageMuted = !c && pageMuted
+                                return (
+                                    <span
+                                        className={`${positionClasses} ${textSizeClass} font-semibold uppercase ${!c && !usePageMuted ? defaultColorClass : ''}`}
+                                        style={c ? { color: c } : usePageMuted ? { color: pageMuted } : undefined}
+                                    >{text}</span>
+                                )
+                            }
+                            const imgFilt = (block, defStyle) => {
+                                const v = block?.appearance?.logo_variant
+                                if (v === 'white') return { filter: 'brightness(0) invert(1)' }
+                                if (v === 'dark') return { filter: 'brightness(0.2)' }
+                                if (v === 'original') return {}
+                                if (v && v !== 'auto') return defStyle || {}
+                                return defStyle || {}
+                            }
+                            const op = (id) => (typeof lb[id]?.appearance?.opacity === 'number' ? lb[id].appearance.opacity : 1)
+                            const spHero = (id) => logoSizeToClassName(lb[id]?.layout?.size_preset || 'lg', 'hero')
+                            const spSm = (id) => logoSizeToClassName(lb[id]?.layout?.size_preset || 'md', 'sm')
+                            const spMini = (id) => logoSizeToClassName(lb[id]?.layout?.size_preset || 'md', 'mini')
+                            const al = (id) => logoAlignmentToContainerClass(lb[id]?.layout?.align || 'center')
                             return (
                             <section id="sec-logo" className={`py-28 md:py-36 relative overflow-hidden ${isTextured ? '' : 'bg-white'}`}
                                 style={resolveBgStyle('sec-logo', isTextured ? { background: `linear-gradient(180deg, ${primaryDark} 0%, ${primaryDeep} 100%)` } : {})}
@@ -1493,67 +1594,182 @@ function BrandGuidelinesIndexInner({
                                         <div className="absolute inset-0 opacity-[0.04]" style={{ backgroundImage: `url("${grainSvg}")` }} />
                                     </>
                                 )}
-                                <div className="mx-auto max-w-6xl px-6 lg:px-8 relative">
-                                    <SectionLabel color={isTextured ? hexToRgba(secondaryColor, 0.7) : secondaryColor} bold={isBold} textured={isTextured}>Brand Identity</SectionLabel>
+                                <div className="mx-auto max-w-6xl px-6 lg:px-8 relative z-[2]">
+                                    <SectionLabel color={sectionEyebrow(hexToRgba(secondaryColor, 0.7), secondaryColor)} bold={isBold} textured={isTextured}>Brand Identity</SectionLabel>
 
                                     <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 lg:gap-20 mt-4">
+                                        {lb[IDENTITY_LOGO_BLOCK_IDS.PRIMARY_HERO]?.visible === false ? null : (
                                         <div className="lg:col-span-7">
                                             <div
-                                                className={`relative p-12 md:p-16 flex items-center justify-center min-h-[320px] md:min-h-[400px] ${isTextured ? 'rounded-none border border-white/10' : isBold ? 'rounded-none' : 'rounded-2xl'}`}
-                                                style={{ backgroundColor: identityPrimaryBg }}
+                                                className={`relative p-12 md:p-16 flex min-h-[320px] md:min-h-[400px] ${al(IDENTITY_LOGO_BLOCK_IDS.PRIMARY_HERO)} ${isTextured ? 'rounded-none border border-white/10' : isBold ? 'rounded-none' : 'rounded-2xl'} ${editRing(IDENTITY_LOGO_BLOCK_IDS.PRIMARY_HERO)}`}
+                                                style={cardBg(IDENTITY_LOGO_BLOCK_IDS.PRIMARY_HERO, { backgroundColor: identityPrimaryBg })}
+                                                onClick={onCard(IDENTITY_LOGO_BLOCK_IDS.PRIMARY_HERO, 'hero')}
+                                                onKeyDown={(e) => { if (e.key === 'Enter') onCard(IDENTITY_LOGO_BLOCK_IDS.PRIMARY_HERO, 'hero')(e) }}
+                                                role={canCustomize && sidebarCtx?.isEditing ? 'button' : undefined}
+                                                tabIndex={canCustomize && sidebarCtx?.isEditing ? 0 : undefined}
                                             >
-                                                <img src={logoUrl} alt={`${brand.name} — Primary Brandmark`} className="max-h-32 md:max-h-44 w-auto max-w-[min(100%,26rem)] object-contain object-center drop-shadow-lg" />
-                                                <span className={`absolute bottom-4 left-5 text-[10px] font-semibold uppercase text-white/40 ${isTextured ? 'tracking-[0.2em]' : isBold ? 'tracking-widest font-black' : 'tracking-[0.15em]'}`}>Primary Brandmark</span>
+                                                <img
+                                                    src={srcFor(IDENTITY_LOGO_BLOCK_IDS.PRIMARY_HERO, logoUrl)}
+                                                    alt={`${brand.name} — Primary Brandmark`}
+                                                    className={`${spHero(IDENTITY_LOGO_BLOCK_IDS.PRIMARY_HERO)} w-auto max-w-[min(100%,26rem)] object-contain object-center drop-shadow-lg`}
+                                                    style={{ ...imgFilt(lb[IDENTITY_LOGO_BLOCK_IDS.PRIMARY_HERO], null), opacity: op(IDENTITY_LOGO_BLOCK_IDS.PRIMARY_HERO) }}
+                                                />
+                                                {renderBlockLabel(
+                                                    IDENTITY_LOGO_BLOCK_IDS.PRIMARY_HERO,
+                                                    'Primary Brandmark',
+                                                    `absolute bottom-4 left-5 ${isTextured ? 'tracking-[0.2em]' : isBold ? 'tracking-widest font-black' : 'tracking-[0.15em]'}`,
+                                                    isTextured ? 'text-white/40' : isBold ? 'text-white/50' : 'text-white/40',
+                                                )}
                                             </div>
                                         </div>
+                                        )}
                                         <div className="lg:col-span-5 grid grid-rows-2 gap-6">
-                                            <div className={`relative p-8 flex items-center justify-center ${isTextured ? 'rounded-none border border-white/10' : isBold ? 'rounded-none border-2 border-gray-300' : 'rounded-2xl'}`} style={isTextured ? { backgroundColor: 'rgba(255,255,255,0.05)' } : isBold ? { backgroundColor: '#ffffff' } : { backgroundColor: '#ffffff', border: '1px solid #e5e7eb' }}>
+                                            {lb[IDENTITY_LOGO_BLOCK_IDS.ON_LIGHT]?.visible === false ? null : (
+                                            <div
+                                                className={`relative p-8 flex ${al(IDENTITY_LOGO_BLOCK_IDS.ON_LIGHT)} ${isTextured ? 'rounded-none border border-white/10' : isBold ? 'rounded-none border-2 border-gray-300' : 'rounded-2xl'} ${editRing(IDENTITY_LOGO_BLOCK_IDS.ON_LIGHT)}`}
+                                                style={cardBg(IDENTITY_LOGO_BLOCK_IDS.ON_LIGHT, isTextured ? { backgroundColor: 'rgba(255,255,255,0.05)' } : isBold ? { backgroundColor: '#ffffff' } : { backgroundColor: '#ffffff', border: '1px solid #e5e7eb' })}
+                                                onClick={onCard(IDENTITY_LOGO_BLOCK_IDS.ON_LIGHT, 'sm')}
+                                                role={canCustomize && sidebarCtx?.isEditing ? 'button' : undefined}
+                                                tabIndex={canCustomize && sidebarCtx?.isEditing ? 0 : undefined}
+                                            >
                                                 <img
-                                                    src={logoUrl}
+                                                    src={srcFor(IDENTITY_LOGO_BLOCK_IDS.ON_LIGHT, logoUrl)}
                                                     alt={`${brand.name} — On White`}
-                                                    className="max-h-16 md:max-h-20 w-auto object-contain"
-                                                    style={logoIsTransparent ? {} : { filter: 'brightness(0.2)' }}
+                                                    className={`${spSm(IDENTITY_LOGO_BLOCK_IDS.ON_LIGHT)} w-auto object-contain`}
+                                                    style={{ ...imgFilt(lb[IDENTITY_LOGO_BLOCK_IDS.ON_LIGHT], logoIsTransparent ? {} : { filter: 'brightness(0.2)' }), opacity: op(IDENTITY_LOGO_BLOCK_IDS.ON_LIGHT) }}
                                                 />
-                                                <span className={`absolute bottom-3 left-4 text-[10px] font-semibold uppercase ${isTextured ? 'text-white/30 tracking-[0.2em]' : isBold ? 'text-gray-300 tracking-widest' : 'text-gray-300 tracking-[0.15em]'}`}>On Light Background</span>
+                                                {renderBlockLabel(
+                                                    IDENTITY_LOGO_BLOCK_IDS.ON_LIGHT,
+                                                    'On Light Background',
+                                                    'absolute bottom-3 left-4',
+                                                    isTextured ? 'text-white/30 tracking-[0.2em]' : isBold ? 'text-gray-300 tracking-widest' : 'text-gray-300 tracking-[0.15em]',
+                                                )}
                                             </div>
-                                            <div className={`relative p-8 flex items-center justify-center ${isTextured ? 'rounded-none border border-white/10' : isBold ? 'rounded-none' : 'rounded-2xl'}`} style={{ backgroundColor: identityReversedBg }}>
+                                            )}
+                                            {lb[IDENTITY_LOGO_BLOCK_IDS.REVERSED]?.visible === false ? null : (
+                                            <div
+                                                className={`relative p-8 flex ${al(IDENTITY_LOGO_BLOCK_IDS.REVERSED)} ${isTextured ? 'rounded-none border border-white/10' : isBold ? 'rounded-none' : 'rounded-2xl'} ${editRing(IDENTITY_LOGO_BLOCK_IDS.REVERSED)}`}
+                                                style={cardBg(IDENTITY_LOGO_BLOCK_IDS.REVERSED, { backgroundColor: identityReversedBg })}
+                                                onClick={onCard(IDENTITY_LOGO_BLOCK_IDS.REVERSED, 'sm')}
+                                                role={canCustomize && sidebarCtx?.isEditing ? 'button' : undefined}
+                                                tabIndex={canCustomize && sidebarCtx?.isEditing ? 0 : undefined}
+                                            >
                                                 <img
-                                                    src={logoDarkUrl || logoUrl}
+                                                    src={srcFor(IDENTITY_LOGO_BLOCK_IDS.REVERSED, logoDarkUrl || logoUrl)}
                                                     alt={`${brand.name} — Reversed`}
-                                                    className={`max-h-16 md:max-h-20 w-auto object-contain${!logoDarkUrl && logoIsTransparent ? '' : !logoDarkUrl ? ' brightness-0 invert' : ''}`}
+                                                    className={`${spSm(IDENTITY_LOGO_BLOCK_IDS.REVERSED)} w-auto object-contain`}
+                                                    style={{
+                                                        ...imgFilt(
+                                                            lb[IDENTITY_LOGO_BLOCK_IDS.REVERSED],
+                                                            !logoDarkUrl && !logoIsTransparent ? { filter: 'brightness(0) invert(1)' } : {},
+                                                        ),
+                                                        opacity: op(IDENTITY_LOGO_BLOCK_IDS.REVERSED),
+                                                    }}
                                                 />
-                                                <span className={`absolute bottom-3 left-4 text-[10px] font-semibold uppercase text-white/40 ${isBold ? 'tracking-widest' : 'tracking-[0.15em]'}`}>Reversed / On Color</span>
+                                                {renderBlockLabel(
+                                                    IDENTITY_LOGO_BLOCK_IDS.REVERSED,
+                                                    'Reversed / On Color',
+                                                    'absolute bottom-3 left-4',
+                                                    isTextured ? 'text-white/40' : isBold ? 'text-white/50' : 'text-white/40',
+                                                )}
                                             </div>
+                                            )}
                                         </div>
                                     </div>
 
                                     {showSmallVariants && (
                                     <div className="mt-8 grid grid-cols-2 md:grid-cols-4 gap-6">
-                                        <div className={`relative p-6 flex items-center justify-center min-h-[120px] ${isTextured ? 'rounded-none border border-white/10' : isBold ? 'rounded-none' : 'rounded-xl'}`} style={{ backgroundColor: identityAccentBg }}>
+                                        {lb[IDENTITY_LOGO_BLOCK_IDS.ON_ACCENT]?.visible === false ? null : (
+                                        <div
+                                            className={`relative p-6 flex min-h-[120px] ${al(IDENTITY_LOGO_BLOCK_IDS.ON_ACCENT)} ${isTextured ? 'rounded-none border border-white/10' : isBold ? 'rounded-none' : 'rounded-xl'} ${editRing(IDENTITY_LOGO_BLOCK_IDS.ON_ACCENT)}`}
+                                            style={cardBg(IDENTITY_LOGO_BLOCK_IDS.ON_ACCENT, { backgroundColor: identityAccentBg })}
+                                            onClick={onCard(IDENTITY_LOGO_BLOCK_IDS.ON_ACCENT, 'sm')}
+                                            role={canCustomize && sidebarCtx?.isEditing ? 'button' : undefined}
+                                            tabIndex={canCustomize && sidebarCtx?.isEditing ? 0 : undefined}
+                                        >
                                             <img
-                                                src={logoUrl}
+                                                src={srcFor(IDENTITY_LOGO_BLOCK_IDS.ON_ACCENT, logoUrl)}
                                                 alt={`${brand.name} — On Accent`}
-                                                className="max-h-12 w-auto object-contain"
-                                                style={logoIsTransparent ? {} : { filter: 'brightness(0) saturate(100%) invert(8%) sepia(50%) saturate(4000%) hue-rotate(180deg)' }}
+                                                className={`${spSm(IDENTITY_LOGO_BLOCK_IDS.ON_ACCENT)} w-auto object-contain`}
+                                                style={{ ...imgFilt(lb[IDENTITY_LOGO_BLOCK_IDS.ON_ACCENT], logoIsTransparent ? {} : { filter: 'brightness(0) saturate(100%) invert(8%) sepia(50%) saturate(4000%) hue-rotate(180deg)' }), opacity: op(IDENTITY_LOGO_BLOCK_IDS.ON_ACCENT) }}
                                             />
-                                            <span className={`absolute bottom-2 left-3 text-[9px] font-semibold uppercase text-black/25 ${isTextured ? 'tracking-[0.15em]' : 'tracking-wider'}`}>On Accent</span>
+                                            {renderBlockLabel(
+                                                IDENTITY_LOGO_BLOCK_IDS.ON_ACCENT,
+                                                'On Accent',
+                                                'absolute bottom-2 left-3',
+                                                isTextured ? 'text-black/25 tracking-[0.15em]' : 'text-black/25 tracking-wider',
+                                                'text-[9px]',
+                                            )}
                                         </div>
-                                        <div className={`relative p-6 flex items-center justify-center min-h-[120px] ${isTextured ? 'rounded-none border border-white/10' : isBold ? 'rounded-none' : 'rounded-xl'}`} style={{ backgroundColor: '#111827' }}>
+                                        )}
+                                        {lb[IDENTITY_LOGO_BLOCK_IDS.ON_DARK]?.visible === false ? null : (
+                                        <div
+                                            className={`relative p-6 flex min-h-[120px] ${al(IDENTITY_LOGO_BLOCK_IDS.ON_DARK)} ${isTextured ? 'rounded-none border border-white/10' : isBold ? 'rounded-none' : 'rounded-xl'} ${editRing(IDENTITY_LOGO_BLOCK_IDS.ON_DARK)}`}
+                                            style={cardBg(IDENTITY_LOGO_BLOCK_IDS.ON_DARK, { backgroundColor: '#111827' })}
+                                            onClick={onCard(IDENTITY_LOGO_BLOCK_IDS.ON_DARK, 'sm')}
+                                            role={canCustomize && sidebarCtx?.isEditing ? 'button' : undefined}
+                                            tabIndex={canCustomize && sidebarCtx?.isEditing ? 0 : undefined}
+                                        >
                                             <img
-                                                src={logoDarkUrl || logoUrl}
+                                                src={srcFor(IDENTITY_LOGO_BLOCK_IDS.ON_DARK, logoDarkUrl || logoUrl)}
                                                 alt={`${brand.name} — On Dark`}
-                                                className={`max-h-12 w-auto object-contain${!logoDarkUrl && logoIsTransparent ? '' : !logoDarkUrl ? ' brightness-0 invert' : ''}`}
+                                                className={`${spSm(IDENTITY_LOGO_BLOCK_IDS.ON_DARK)} w-auto object-contain`}
+                                                style={{ ...imgFilt(lb[IDENTITY_LOGO_BLOCK_IDS.ON_DARK], !logoDarkUrl && logoIsTransparent ? {} : { filter: 'brightness(0) invert(1)' }), opacity: op(IDENTITY_LOGO_BLOCK_IDS.ON_DARK) }}
                                             />
-                                            <span className={`absolute bottom-2 left-3 text-[9px] font-semibold uppercase text-white/30 ${isTextured ? 'tracking-[0.15em]' : 'tracking-wider'}`}>On Dark</span>
+                                            {renderBlockLabel(
+                                                IDENTITY_LOGO_BLOCK_IDS.ON_DARK,
+                                                'On Dark',
+                                                'absolute bottom-2 left-3',
+                                                isTextured ? 'text-white/40' : 'text-white/30 tracking-wider',
+                                                'text-[9px]',
+                                            )}
                                         </div>
-                                        <div className={`relative p-6 flex items-center justify-center min-h-[120px] ${isTextured ? 'rounded-none border border-white/10' : isBold ? 'rounded-none' : 'rounded-xl'}`} style={{ backgroundColor: identityPrimaryBg, opacity: 0.7 }}>
-                                            <img src={logoUrl} alt={`${brand.name} — Reduced`} className="max-h-12 w-auto object-contain" />
-                                            <span className={`absolute bottom-2 left-3 text-[9px] font-semibold uppercase text-white/30 ${isTextured ? 'tracking-[0.15em]' : 'tracking-wider'}`}>Reduced Opacity</span>
+                                        )}
+                                        {lb[IDENTITY_LOGO_BLOCK_IDS.REDUCED_OPACITY]?.visible === false ? null : (
+                                        <div
+                                            className={`relative p-6 flex min-h-[120px] ${al(IDENTITY_LOGO_BLOCK_IDS.REDUCED_OPACITY)} ${isTextured ? 'rounded-none border border-white/10' : isBold ? 'rounded-none' : 'rounded-xl'} ${editRing(IDENTITY_LOGO_BLOCK_IDS.REDUCED_OPACITY)}`}
+                                            style={cardBg(IDENTITY_LOGO_BLOCK_IDS.REDUCED_OPACITY, { backgroundColor: identityPrimaryBg })}
+                                            onClick={onCard(IDENTITY_LOGO_BLOCK_IDS.REDUCED_OPACITY, 'sm')}
+                                            role={canCustomize && sidebarCtx?.isEditing ? 'button' : undefined}
+                                            tabIndex={canCustomize && sidebarCtx?.isEditing ? 0 : undefined}
+                                        >
+                                            <img
+                                                src={srcFor(IDENTITY_LOGO_BLOCK_IDS.REDUCED_OPACITY, logoUrl)}
+                                                alt={`${brand.name} — Reduced`}
+                                                className={`${spSm(IDENTITY_LOGO_BLOCK_IDS.REDUCED_OPACITY)} w-auto object-contain`}
+                                                style={{
+                                                    opacity: typeof lb[IDENTITY_LOGO_BLOCK_IDS.REDUCED_OPACITY]?.appearance?.opacity === 'number'
+                                                        ? lb[IDENTITY_LOGO_BLOCK_IDS.REDUCED_OPACITY].appearance.opacity
+                                                        : 0.45,
+                                                }}
+                                            />
+                                            {renderBlockLabel(
+                                                IDENTITY_LOGO_BLOCK_IDS.REDUCED_OPACITY,
+                                                'Reduced Opacity',
+                                                'absolute bottom-2 left-3',
+                                                isTextured ? 'text-white/40' : 'text-white/30 tracking-wider',
+                                                'text-[9px]',
+                                            )}
                                         </div>
-                                        <div className={`relative p-6 flex items-center justify-center min-h-[120px] ${isTextured ? 'rounded-none border border-white/10 bg-white/[0.04]' : isBold ? 'rounded-none border-2 border-gray-300 bg-gray-50' : 'rounded-xl bg-gradient-to-br from-gray-50 to-gray-100 border border-gray-200'}`}>
-                                            <img src={logoUrl} alt={`${brand.name} — Minimum Size`} className="max-h-6 w-auto object-contain" />
-                                            <span className={`absolute bottom-2 left-3 text-[9px] font-semibold uppercase ${isTextured ? 'text-white/30 tracking-[0.15em]' : 'text-gray-300 tracking-wider'}`}>Minimum Size</span>
+                                        )}
+                                        {lb[IDENTITY_LOGO_BLOCK_IDS.MIN_SIZE]?.visible === false ? null : (
+                                        <div
+                                            className={`relative p-6 flex min-h-[120px] ${al(IDENTITY_LOGO_BLOCK_IDS.MIN_SIZE)} ${isTextured ? 'rounded-none border border-white/10 bg-white/[0.04]' : isBold ? 'rounded-none border-2 border-gray-300 bg-gray-50' : 'rounded-xl bg-gradient-to-br from-gray-50 to-gray-100 border border-gray-200'} ${editRing(IDENTITY_LOGO_BLOCK_IDS.MIN_SIZE)}`}
+                                            style={cardBg(IDENTITY_LOGO_BLOCK_IDS.MIN_SIZE, { backgroundColor: isTextured ? 'transparent' : undefined })}
+                                            onClick={onCard(IDENTITY_LOGO_BLOCK_IDS.MIN_SIZE, 'mini')}
+                                            role={canCustomize && sidebarCtx?.isEditing ? 'button' : undefined}
+                                            tabIndex={canCustomize && sidebarCtx?.isEditing ? 0 : undefined}
+                                        >
+                                            <img src={srcFor(IDENTITY_LOGO_BLOCK_IDS.MIN_SIZE, logoUrl)} alt={`${brand.name} — Minimum Size`} className={`${spMini(IDENTITY_LOGO_BLOCK_IDS.MIN_SIZE)} w-auto object-contain`} style={{ opacity: op(IDENTITY_LOGO_BLOCK_IDS.MIN_SIZE) }} />
+                                            {renderBlockLabel(
+                                                IDENTITY_LOGO_BLOCK_IDS.MIN_SIZE,
+                                                'Minimum Size',
+                                                'absolute bottom-2 left-3',
+                                                isTextured ? 'text-white/30' : 'text-gray-300 tracking-wider',
+                                                'text-[9px]',
+                                            )}
                                         </div>
+                                        )}
                                     </div>
                                     )}
 
@@ -1561,7 +1777,10 @@ function BrandGuidelinesIndexInner({
                                         <div className="mt-20">
                                             <div className="flex items-center gap-4 mb-8">
                                                 <div className="w-8 h-px bg-gray-300" />
-                                                <span className="text-xs font-semibold uppercase tracking-[0.2em] text-gray-400">Secondary Marks</span>
+                                                <span
+                                                    className={`text-xs font-semibold uppercase tracking-[0.2em] ${pageMuted ? '' : 'text-gray-400'}`}
+                                                    style={pageMuted ? { color: pageMuted } : undefined}
+                                                >Secondary Marks</span>
                                             </div>
                                             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
                                                 {logoAssets.filter(a => a.role === 'secondary').map((asset) => (
@@ -1655,7 +1874,7 @@ function BrandGuidelinesIndexInner({
                                 <div className={`absolute inset-0 ${isTextured ? 'opacity-[0.05]' : 'opacity-[0.03]'}`} style={{ backgroundImage: isTextured ? `url("${grainSvg}")` : `radial-gradient(circle at 2px 2px, white 1px, transparent 0)`, backgroundSize: isTextured ? undefined : '30px 30px' }} />
 
                                 <div className="relative mx-auto max-w-6xl px-6 lg:px-8">
-                                    <SectionLabel color={isTextured ? hexToRgba(secondaryColor, 0.7) : isBold ? secondaryColor : hexToRgba(secondaryColor, 0.7)} bold={isBold} textured={isTextured}>Logo Standards</SectionLabel>
+                                    <SectionLabel color={sectionEyebrow(hexToRgba(secondaryColor, 0.7), isBold ? secondaryColor : hexToRgba(secondaryColor, 0.7))} bold={isBold} textured={isTextured}>Logo Standards</SectionLabel>
 
                                     {loadingAnalysis && logoUrl && (
                                         <p className="text-center text-[10px] text-white/35 mb-4">Checking logo contrast on white…</p>
@@ -1746,6 +1965,7 @@ export default function BrandGuidelinesIndex(props) {
                 brand={props.brand}
                 canCustomize={true}
                 visualReferences={props.visualReferences}
+                logoAssets={props.logoAssets}
             >
                 <BrandGuidelinesIndexInner {...props} />
             </SidebarEditorProvider>

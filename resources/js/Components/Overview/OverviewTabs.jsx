@@ -36,7 +36,7 @@ export default function OverviewTabs({ children }) {
                                 href={href}
                                 className={`pb-3 text-sm font-medium border-b-2 -mb-px transition-colors ${
                                     active
-                                        ? 'border-indigo-500 text-indigo-600'
+                                        ? 'border-slate-900 text-slate-900'
                                         : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
                                 }`}
                             >

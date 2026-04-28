@@ -88,9 +88,9 @@ export default function PublicPageTheme({
   const heroBackgroundUrl = displayAssets.length > 0 ? getThumbnailUrl(displayAssets[0]) : null
 
   return (
-    <div className="mt-10 grid grid-cols-1 lg:grid-cols-2 gap-12">
+    <div className="mt-10 grid grid-cols-1 gap-10 lg:grid-cols-2 lg:gap-12 lg:items-start">
       {/* Left: Theme configuration */}
-      <div className="space-y-10">
+      <div className="min-w-0 space-y-10">
         {/* Enable branding — must be on for logo/colors to appear on public download pages */}
         <div className="flex items-center justify-between rounded-lg border border-gray-200 bg-gray-50/50 px-4 py-3">
           <div>
@@ -108,8 +108,8 @@ export default function PublicPageTheme({
               setData('download_landing_settings', newSettings)
               onSave?.({ download_landing_settings: newSettings })
             }}
-            className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:ring-offset-2 ${
-              (data.download_landing_settings?.enabled !== false) ? 'bg-indigo-600' : 'bg-gray-200'
+            className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-violet-600 focus:ring-offset-2 ${
+              (data.download_landing_settings?.enabled !== false) ? 'bg-violet-600' : 'bg-gray-200'
             }`}
             role="switch"
             aria-checked={data.download_landing_settings?.enabled !== false}
@@ -179,10 +179,10 @@ export default function PublicPageTheme({
         />
       </div>
       {/* Right: Theme preview panel */}
-      <div>
+      <div className="min-w-0 lg:sticky lg:top-6">
         <h4 className="text-sm font-medium text-gray-900 mb-1">Preview</h4>
-        <p className="text-sm text-gray-500 mb-4">
-          Simulated public page layout.
+        <p className="text-sm text-gray-500 mb-4 max-w-sm">
+            Approximate layout for shared links and download pages — updates as you change theme options.
         </p>
         <PublicPageThemePreview
           logoUrl={(() => {

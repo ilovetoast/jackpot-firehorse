@@ -14,7 +14,7 @@ const SYSTEMS = [
             { label: 'Collections', text: 'Curate campaign sets, partner kits, and deliverables without duplicating files' },
             { label: 'Sharing', text: 'Download links with expiration, passwords, access restrictions, and revocation' },
         ],
-        color: 'indigo',
+        color: 'violet',
     },
     {
         title: 'Brand System',
@@ -55,7 +55,6 @@ const SYSTEMS = [
 ]
 
 const COLOR_ACCENTS = {
-    indigo: { eyebrow: 'text-indigo-400/80', dot: 'bg-indigo-400/60', ring: 'ring-indigo-500/15', label: 'text-indigo-300' },
     violet: { eyebrow: 'text-violet-400/80', dot: 'bg-violet-400/60', ring: 'ring-violet-500/15', label: 'text-violet-300' },
     emerald: { eyebrow: 'text-emerald-400/80', dot: 'bg-emerald-400/60', ring: 'ring-emerald-500/15', label: 'text-emerald-300' },
     amber: { eyebrow: 'text-amber-400/80', dot: 'bg-amber-400/60', ring: 'ring-amber-500/15', label: 'text-amber-300' },
@@ -70,7 +69,7 @@ export default function MarketingProduct() {
         <MarketingLayout>
             <section className="px-6 pt-16 pb-8 lg:px-8">
                 <div className="mx-auto max-w-3xl text-center">
-                    <p className="text-sm font-semibold uppercase tracking-[0.2em] text-indigo-400/90">Product</p>
+                    <p className="text-sm font-semibold uppercase tracking-[0.2em] text-violet-400/90">Product</p>
                     <h1 className="mt-3 font-display text-4xl font-bold tracking-tight text-white sm:text-5xl lg:text-6xl text-balance">
                         How Jackpot works
                     </h1>

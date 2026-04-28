@@ -24,20 +24,31 @@ export function useSidebarEditor() {
     return useContext(SidebarEditorContext)
 }
 
-export function SidebarEditorProvider({ children, modelPayload, brand, canCustomize, visualReferences }) {
+export function SidebarEditorProvider({ children, modelPayload, brand, canCustomize, visualReferences, logoAssets = [] }) {
     const [isEditing, setIsEditing] = useState(false)
     const [editMode, setEditMode] = useState('layout')
     const [showDnaConfirm, setShowDnaConfirm] = useState(false)
+    /** @type {[{ level: 'page' } | { level: 'section', sectionId: string } | { level: 'block', sectionId: string, blockId: string, blockType?: string } | null, function]} */
+    const [customizeTarget, setCustomizeTarget] = useState(null)
 
     const overridesApi = usePresentationOverrides({ modelPayload, brand, canCustomize })
     const backgroundImagePresets = useMemo(() => buildBackgroundImagePresets(visualReferences), [visualReferences])
 
-    const openEditor = useCallback(() => setIsEditing(true), [])
+    const openEditor = useCallback(() => {
+        overridesApi.beginEditSession()
+        setIsEditing(true)
+    }, [overridesApi])
+
     const closeEditor = useCallback(() => {
         if (overridesApi.hasUnsavedChanges) {
-            overridesApi.saveNow()
+            const ok = typeof window !== 'undefined'
+                ? window.confirm('You have unsaved changes. Close and discard them?')
+                : true
+            if (!ok) return
+            overridesApi.discardChanges()
         }
         setIsEditing(false)
+        setCustomizeTarget(null)
     }, [overridesApi])
 
     const requestContentMode = useCallback(() => {
@@ -57,6 +68,8 @@ export function SidebarEditorProvider({ children, modelPayload, brand, canCustom
         setEditMode('layout')
     }, [])
 
+    const clearCustomizeTarget = useCallback(() => setCustomizeTarget(null), [])
+
     const value = {
         isEditing,
         editMode,
@@ -71,6 +84,10 @@ export function SidebarEditorProvider({ children, modelPayload, brand, canCustom
         backgroundImagePresets,
         brandId: brand?.id,
         brand,
+        logoAssets,
+        customizeTarget,
+        setCustomizeTarget,
+        clearCustomizeTarget,
         ...overridesApi,
     }
 

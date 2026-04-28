@@ -544,7 +544,7 @@ export default function SalesInquiryForm({ planInterest = 'default' }) {
                                         type="checkbox"
                                         checked={data.consent_marketing}
                                         onChange={(e) => setData('consent_marketing', e.target.checked)}
-                                        className="mt-0.5 h-3.5 w-3.5 rounded border-white/20 bg-white/[0.03] text-indigo-500 focus:ring-indigo-400/60"
+                                        className="mt-0.5 h-3.5 w-3.5 rounded border-white/20 bg-white/[0.03] text-violet-500 focus:ring-violet-400/60"
                                     />
                                     <span>
                                         I&apos;d also like to receive occasional product updates. (Optional — we&apos;ll follow up
@@ -605,7 +605,7 @@ export default function SalesInquiryForm({ planInterest = 'default' }) {
 }
 
 const inputClass =
-    'w-full rounded-xl bg-white/[0.03] px-4 py-3 text-sm text-white placeholder:text-white/30 ring-1 ring-inset ring-white/[0.08] focus:ring-2 focus:ring-indigo-400/60 focus:outline-none transition-shadow'
+    'w-full rounded-xl bg-white/[0.03] px-4 py-3 text-sm text-white placeholder:text-white/30 ring-1 ring-inset ring-white/[0.08] focus:ring-2 focus:ring-violet-400/60 focus:outline-none transition-shadow'
 
 function Field({ label, required, error, hint, children }) {
     return (

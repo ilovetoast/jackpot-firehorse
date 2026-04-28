@@ -13,6 +13,7 @@ use App\Support\AssetVariant;
 use App\Support\DeliveryContext;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Collection;
 
 /**
@@ -21,7 +22,7 @@ use Illuminate\Support\Collection;
 class BrandActivityFeedService
 {
     /**
-     * @param  array{actor_id?: int|null, event_type?: string|null, subject_id?: string|null}  $filters
+     * @param  array{actor_id?: int|null, event_type?: string|null, subject_id?: string|null, q?: string|null}  $filters
      * @return Collection<int, array<string, mixed>>|null null if user lacks activity_logs.view
      */
     public function getRecentActivity(Tenant $tenant, Brand $brand, User $user, int $limit = 5, array $filters = []): ?Collection
@@ -32,12 +33,56 @@ class BrandActivityFeedService
 
         $activityQuery = $this->scopedActivityQuery($tenant, $brand);
         $this->applyActivityFilters($activityQuery, $filters);
+        $this->applyActivitySearch($activityQuery, $filters['q'] ?? null);
 
         $activityEvents = $activityQuery->orderBy('created_at', 'desc')
             ->limit($limit)
             ->with(['brand'])
             ->get();
 
+        return $this->mapEventsToFeedItems($activityEvents, $tenant);
+    }
+
+    /**
+     * Brand Insights → Activity (paginated list + same payload shape as {@see getRecentActivity}).
+     *
+     * @param  array{actor_id?: int|null, event_type?: string|null, subject_id?: string|null, q?: string|null}  $filters
+     */
+    public function paginateInsightsActivity(
+        Tenant $tenant,
+        Brand $brand,
+        User $user,
+        int $perPage,
+        int $page,
+        array $filters
+    ): ?LengthAwarePaginator {
+        if (! $user->hasPermissionForTenant($tenant, 'activity_logs.view')) {
+            return null;
+        }
+
+        $per = max(5, min(100, $perPage));
+        $page = max(1, $page);
+
+        $activityQuery = $this->scopedActivityQuery($tenant, $brand);
+        $this->applyActivityFilters($activityQuery, $filters);
+        $this->applyActivitySearch($activityQuery, $filters['q'] ?? null);
+
+        $paginator = $activityQuery->orderBy('created_at', 'desc')
+            ->with(['brand'])
+            ->paginate($per, ['*'], 'page', $page);
+
+        $mapped = $this->mapEventsToFeedItems($paginator->getCollection(), $tenant);
+        $paginator->setCollection($mapped);
+
+        return $paginator;
+    }
+
+    /**
+     * @param  Collection<int, ActivityEvent>  $activityEvents
+     * @return Collection<int, array<string, mixed>>
+     */
+    protected function mapEventsToFeedItems(Collection $activityEvents, Tenant $tenant): Collection
+    {
         $this->batchLoadActivityEventSubjects($activityEvents);
 
         $activityEvents->each(function (ActivityEvent $event) {
@@ -56,96 +101,102 @@ class BrandActivityFeedService
             ? collect()
             : User::whereIn('id', $actorUserIds)->get()->keyBy('id');
 
-        return $activityEvents->map(function ($event) use ($tenant, $actorsById) {
-            $eventTypeLabel = $this->formatEventTypeLabel($event->event_type);
+        return $activityEvents->map(fn (ActivityEvent $event) => $this->mapEventToFeedItem($event, $tenant, $actorsById));
+    }
 
-            $actorName = 'System';
-            $actorAvatarUrl = null;
-            $actorFirstName = null;
-            $actorLastName = null;
-            $actorEmail = null;
-            $companyName = null;
-            $actor = $event->getActorModel($actorsById);
-            if ($actor) {
-                $actorName = $actor->name;
-                $actorAvatarUrl = $actor->avatar_url ?? null;
-                $actorFirstName = $actor->first_name ?? null;
-                $actorLastName = $actor->last_name ?? null;
-                $actorEmail = $actor->email ?? null;
-            } elseif (! empty($event->metadata['actor_name'])) {
-                $actorName = $event->metadata['actor_name'];
-            }
-            if (in_array($event->actor_type, ['system', 'api', 'guest'], true)) {
-                $companyName = $tenant->name ?? 'System';
-            }
+    /**
+     * @param  Collection<string|int, \App\Models\User>  $actorsById
+     * @return array<string, mixed>
+     */
+    protected function mapEventToFeedItem(ActivityEvent $event, Tenant $tenant, Collection $actorsById): array
+    {
+        $eventTypeLabel = $this->formatEventTypeLabel($event->event_type);
 
-            $subjectName = 'Unknown';
-            $subjectThumbnailUrl = null;
-            $subject = $event->getRelation('subject');
-            if ($subject instanceof Model) {
-                // Use attributes / accessors — not method_exists('title'), which is false for normal Eloquent columns.
-                $subjectName = $this->resolveSubjectDisplayName($subject);
-                if ($subject instanceof Asset) {
-                    $meta = $subject->metadata ?? [];
-                    $thumbStatus = $subject->thumbnail_status instanceof \App\Enums\ThumbnailStatus
-                        ? $subject->thumbnail_status->value
-                        : ($subject->thumbnail_status ?? 'pending');
-                    if ($thumbStatus === 'completed') {
-                        $version = $meta['thumbnails_generated_at'] ?? null;
-                        $subjectThumbnailUrl = $subject->deliveryUrl(AssetVariant::THUMB_SMALL, DeliveryContext::AUTHENTICATED);
-                        if ($subjectThumbnailUrl && $version) {
-                            $subjectThumbnailUrl .= (str_contains($subjectThumbnailUrl, '?') ? '&' : '?').'v='.urlencode($version);
-                        }
+        $actorName = 'System';
+        $actorAvatarUrl = null;
+        $actorFirstName = null;
+        $actorLastName = null;
+        $actorEmail = null;
+        $companyName = null;
+        $actor = $event->getActorModel($actorsById);
+        if ($actor) {
+            $actorName = $actor->name;
+            $actorAvatarUrl = $actor->avatar_url ?? null;
+            $actorFirstName = $actor->first_name ?? null;
+            $actorLastName = $actor->last_name ?? null;
+            $actorEmail = $actor->email ?? null;
+        } elseif (! empty($event->metadata['actor_name'])) {
+            $actorName = $event->metadata['actor_name'];
+        }
+        if (in_array($event->actor_type, ['system', 'api', 'guest'], true)) {
+            $companyName = $tenant->name ?? 'System';
+        }
+
+        $subjectName = 'Unknown';
+        $subjectThumbnailUrl = null;
+        $subject = $event->getRelation('subject');
+        if ($subject instanceof Model) {
+            $subjectName = $this->resolveSubjectDisplayName($subject);
+            if ($subject instanceof Asset) {
+                $meta = $subject->metadata ?? [];
+                $thumbStatus = $subject->thumbnail_status instanceof \App\Enums\ThumbnailStatus
+                    ? $subject->thumbnail_status->value
+                    : ($subject->thumbnail_status ?? 'pending');
+                if ($thumbStatus === 'completed') {
+                    $version = $meta['thumbnails_generated_at'] ?? null;
+                    $subjectThumbnailUrl = $subject->deliveryUrl(AssetVariant::THUMB_SMALL, DeliveryContext::AUTHENTICATED);
+                    if ($subjectThumbnailUrl && $version) {
+                        $subjectThumbnailUrl .= (str_contains($subjectThumbnailUrl, '?') ? '&' : '?').'v='.urlencode($version);
                     }
                 }
-            } elseif (! empty($event->metadata['subject_name'])) {
-                $subjectName = $event->metadata['subject_name'];
-            } elseif (! empty($event->metadata['asset_title'])) {
-                $subjectName = $event->metadata['asset_title'];
-            } elseif (! empty($event->metadata['asset_filename'])) {
-                $subjectName = $event->metadata['asset_filename'];
             }
+        } elseif (! empty($event->metadata['subject_name'])) {
+            $subjectName = $event->metadata['subject_name'];
+        } elseif (! empty($event->metadata['asset_title'])) {
+            $subjectName = $event->metadata['asset_title'];
+        } elseif (! empty($event->metadata['asset_filename'])) {
+            $subjectName = $event->metadata['asset_filename'];
+        }
 
-            $brandPayload = null;
-            if ($event->brand) {
-                $b = $event->brand;
-                $brandPayload = [
-                    'id' => $b->id,
-                    'name' => $b->name,
-                    'logo_path' => $b->logo_path,
-                    'icon_bg_color' => $b->icon_bg_color,
-                    'icon_style' => $b->icon_style ?? 'subtle',
-                    'primary_color' => $b->primary_color ?? '#4f46e5',
-                ];
-            }
-
-            return [
-                'id' => $event->id,
-                'event_type' => $event->event_type,
-                'event_type_label' => $eventTypeLabel,
-                'description' => $event->metadata['description'] ?? null,
-                'actor' => [
-                    'type' => $event->actor_type,
-                    'id' => $event->actor_type === 'user' && $event->actor_id ? (int) $event->actor_id : null,
-                    'name' => $actorName,
-                    'avatar_url' => $actorAvatarUrl,
-                    'first_name' => $actorFirstName,
-                    'last_name' => $actorLastName,
-                    'email' => $actorEmail,
-                ],
-                'company_name' => $companyName,
-                'subject' => [
-                    'type' => $event->subject_type,
-                    'name' => $subjectName,
-                    'id' => $event->subject_id !== null && $event->subject_id !== '' ? (string) $event->subject_id : null,
-                    'thumbnail_url' => $subjectThumbnailUrl,
-                ],
-                'brand' => $brandPayload,
-                'metadata' => $event->metadata,
-                'created_at' => $event->created_at->toISOString(),
-                'created_at_human' => $event->created_at->diffForHumans(),
+        $brandPayload = null;
+        if ($event->brand) {
+            $b = $event->brand;
+            $brandPayload = [
+                'id' => $b->id,
+                'name' => $b->name,
+                'logo_path' => $b->logo_path,
+                'icon_bg_color' => $b->icon_bg_color,
+                'icon_style' => $b->icon_style ?? 'subtle',
+                'primary_color' => $b->primary_color ?? '#7c3aed',
             ];
-        });
+        }
+
+        return [
+            'id' => $event->id,
+            'event_type' => $event->event_type,
+            'event_type_label' => $eventTypeLabel,
+            'description' => $event->metadata['description'] ?? null,
+            'actor' => [
+                'type' => $event->actor_type,
+                'id' => $event->actor_type === 'user' && $event->actor_id ? (int) $event->actor_id : null,
+                'name' => $actorName,
+                'avatar_url' => $actorAvatarUrl,
+                'first_name' => $actorFirstName,
+                'last_name' => $actorLastName,
+                'email' => $actorEmail,
+            ],
+            'company_name' => $companyName,
+            'subject' => [
+                'type' => $event->subject_type,
+                'name' => $subjectName,
+                'id' => $event->subject_id !== null && $event->subject_id !== '' ? (string) $event->subject_id : null,
+                'thumbnail_url' => $subjectThumbnailUrl,
+            ],
+            'brand' => $brandPayload,
+            'metadata' => $event->metadata,
+            'created_at' => $event->created_at->toISOString(),
+            'created_at_human' => $event->created_at->diffForHumans(),
+        ];
     }
 
     /**
@@ -236,7 +287,29 @@ class BrandActivityFeedService
     }
 
     /**
-     * @param  array{actor_id?: int|null, event_type?: string|null, subject_id?: string|null}  $filters
+     * Free-text search: event type, subject id, optional description in metadata.
+     */
+    protected function applyActivitySearch(Builder $query, ?string $q): void
+    {
+        if ($q === null) {
+            return;
+        }
+        $q = trim($q);
+        if ($q === '' || strlen($q) > 200) {
+            return;
+        }
+        $like = '%'.addcslashes($q, '%_\\').'%';
+        $query->where(function (Builder $w) use ($like, $q) {
+            $w->where('event_type', 'like', $like);
+            if (strlen($q) >= 2) {
+                $w->orWhere('subject_id', 'like', $like);
+            }
+            $w->orWhere('metadata->description', 'like', $like);
+        });
+    }
+
+    /**
+     * @param  array{actor_id?: int|null, event_type?: string|null, subject_id?: string|null, q?: string|null}  $filters
      */
     protected function applyActivityFilters(Builder $query, array $filters): void
     {

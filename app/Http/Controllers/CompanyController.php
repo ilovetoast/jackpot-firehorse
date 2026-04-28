@@ -414,6 +414,11 @@ class CompanyController extends Controller
                 'settings' => $tenant->settings ?? [],
                 'default_brand_name' => $defaultBrand?->name ?? null,
             ],
+            'focal_point_ai' => [
+                'feature_enabled' => (bool) config('ai.photography_focal_point.enabled', true),
+                'require_preferred_thumbs' => (bool) config('ai.photography_focal_point.require_preferred_thumbnails', false),
+                'preferred_thumbnails_enabled' => (bool) config('assets.thumbnail.preferred.enabled', false),
+            ],
             'company_url_domain' => $companyUrlDomain,
             'billing' => [
                 'current_plan' => $currentPlan,

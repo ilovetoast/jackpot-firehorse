@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Enums\AITaskType;
 use App\Exceptions\PlanLimitExceededException;
 use App\Models\AIAgentRun;
+use App\Models\StudioLayerExtractionSession;
 use App\Models\Tenant;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -62,6 +63,130 @@ class AiUsageService
             'call_count' => $callCount,
             'credit_weight' => $this->getCreditWeight($feature),
             'date' => $today,
+        ]);
+    }
+
+    /**
+     * Bill successful remote Studio layer extraction once per session (row lock + metadata flag).
+     * Skips if already recorded (idempotent for retries, duplicate jobs).
+     */
+    public function tryBillStudioLayerExtraction(
+        Tenant $tenant,
+        StudioLayerExtractionSession $session,
+        string $model,
+        string $remoteProvider,
+    ): void {
+        DB::transaction(function () use ($tenant, $session, $model, $remoteProvider): void {
+            $s = StudioLayerExtractionSession::query()
+                ->whereKey($session->id)
+                ->lockForUpdate()
+                ->first();
+            if ($s === null) {
+                return;
+            }
+            $m = is_array($s->metadata) ? $s->metadata : [];
+            if (! empty($m['billed_studio_layer_extraction'])) {
+                return;
+            }
+            $this->trackUsage($tenant, 'studio_layer_extraction', 1);
+            $this->createStudioLayerProviderAgentRun(
+                $tenant,
+                (int) $s->brand_id,
+                $s->user_id,
+                AITaskType::STUDIO_LAYER_EXTRACTION,
+                'studio_layer_extraction',
+                'Studio layer extraction (remote segmentation)',
+                (string) $s->id,
+                $model,
+                $remoteProvider,
+                'studio_layer_extraction',
+            );
+            $m['billed_studio_layer_extraction'] = true;
+            $s->update(['metadata' => $m]);
+        });
+    }
+
+    /**
+     * Bill successful background fill (e.g. Clipdrop) once per session.
+     * Call only after a non-empty fill image and persisted background asset; idempotent.
+     */
+    public function tryBillStudioLayerBackgroundFill(
+        Tenant $tenant,
+        StudioLayerExtractionSession $session,
+        string $inpaintProvider,
+    ): void {
+        if (! (bool) config('studio_layer_extraction.background_fill_credits_enabled', true)) {
+            return;
+        }
+        DB::transaction(function () use ($tenant, $session, $inpaintProvider): void {
+            $s = StudioLayerExtractionSession::query()
+                ->whereKey($session->id)
+                ->lockForUpdate()
+                ->first();
+            if ($s === null) {
+                return;
+            }
+            $m = is_array($s->metadata) ? $s->metadata : [];
+            if (! empty($m['billed_studio_layer_background_fill'])) {
+                return;
+            }
+            $this->trackUsage($tenant, 'studio_layer_background_fill', 1);
+            $this->createStudioLayerProviderAgentRun(
+                $tenant,
+                (int) $s->brand_id,
+                $s->user_id,
+                AITaskType::STUDIO_LAYER_BACKGROUND_FILL,
+                'studio_layer_background_fill',
+                'Studio layer background fill (inpaint)',
+                (string) $s->id,
+                'background_inpaint',
+                $inpaintProvider,
+                'studio_layer_background_fill',
+            );
+            $m['billed_studio_layer_background_fill'] = true;
+            $s->update(['metadata' => $m]);
+        });
+    }
+
+    private function createStudioLayerProviderAgentRun(
+        Tenant $tenant,
+        int $brandId,
+        ?int $userId,
+        string $taskType,
+        string $agentId,
+        string $agentName,
+        string $extractionSessionId,
+        string $modelUsed,
+        string $remoteProvider,
+        string $featureKey,
+    ): void {
+        $meta = [
+            'tenant_id' => $tenant->id,
+            'brand_id' => $brandId,
+            'user_id' => $userId,
+            'provider' => $remoteProvider,
+            'model' => $modelUsed,
+            'feature' => $featureKey,
+            'extraction_session_id' => $extractionSessionId,
+        ];
+        AIAgentRun::query()->create([
+            'agent_id' => $agentId,
+            'agent_name' => $agentName,
+            'triggering_context' => 'user',
+            'environment' => app()->environment(),
+            'tenant_id' => $tenant->id,
+            'user_id' => $userId,
+            'task_type' => $taskType,
+            'entity_type' => StudioLayerExtractionSession::class,
+            'entity_id' => $extractionSessionId,
+            'model_used' => $modelUsed !== '' ? $modelUsed : 'n/a',
+            'tokens_in' => 0,
+            'tokens_out' => 0,
+            'estimated_cost' => 0,
+            'status' => 'success',
+            'started_at' => now(),
+            'completed_at' => now(),
+            'metadata' => $meta,
         ]);
     }
 
@@ -366,7 +491,7 @@ class AiUsageService
      */
     public function getUsageStatus(Tenant $tenant): array
     {
-        $features = ['tagging', 'suggestions', 'photography_focal_point', 'brand_research', 'insights', 'generative_editor_images', 'generative_editor_edits', 'video_insights', 'pdf_extraction', 'presentation_preview', 'studio_animation'];
+        $features = ['tagging', 'suggestions', 'photography_focal_point', 'brand_research', 'insights', 'generative_editor_images', 'generative_editor_edits', 'video_insights', 'pdf_extraction', 'presentation_preview', 'studio_animation', 'studio_layer_extraction', 'studio_layer_background_fill'];
         $perFeature = [];
         $totalCreditsUsed = 0;
 
@@ -404,7 +529,7 @@ class AiUsageService
      */
     public function getUsageStatusForPeriod(Tenant $tenant, int $year, int $month): array
     {
-        $features = ['tagging', 'suggestions', 'photography_focal_point', 'brand_research', 'insights', 'generative_editor_images', 'generative_editor_edits', 'video_insights', 'pdf_extraction', 'presentation_preview', 'studio_animation'];
+        $features = ['tagging', 'suggestions', 'photography_focal_point', 'brand_research', 'insights', 'generative_editor_images', 'generative_editor_edits', 'video_insights', 'pdf_extraction', 'presentation_preview', 'studio_animation', 'studio_layer_extraction', 'studio_layer_background_fill'];
         $perFeature = [];
         $totalCreditsUsed = 0;
 

@@ -32,6 +32,10 @@ return [
         'generative_editor_layout' => 8,
         /** Studio composition animation (Kling i2v, etc.): per-call units = credits from {@see AiUsageService::getStudioAnimationCreditCost()}; weight is 1. */
         'studio_animation' => 1,
+        /** Studio “Extract layers” — charged once per extraction request (not per candidate). Local floodfill is free unless STUDIO_LAYER_EXTRACTION_BILL_FLOODFILL=true. */
+        'studio_layer_extraction' => 8,
+        /** Filled background layer (inpainting) — once per confirm when “Create filled background” is used. */
+        'studio_layer_background_fill' => 6,
         /*
          * Intentionally no weight for `thumbnail_enhancement` (Studio View enhanced mode):
          * GenerateEnhancedPreviewJob composites locally via TemplateRenderer + GD/ImageMagick — no LLM/provider API.

@@ -43,7 +43,7 @@ export default function EnterTransition({ suppressAutoRedirect = false }) {
         }
     }, [isInstant, destination, suppressAutoRedirect])
 
-    const primary = theme?.colors?.primary || '#6366f1'
+    const primary = theme?.colors?.primary || '#7c3aed'
     const isJackpotDefault = theme?.mode === 'default'
     const singleBrand = Boolean(theme?.single_brand_tenant)
     /** Entry screen is always a dark surface — match {@link LogoMark}: prefer dark variant, then primary. */

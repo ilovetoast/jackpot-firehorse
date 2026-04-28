@@ -17,8 +17,8 @@ export default function FeatureGrid({ items, columns = 3, className = '' }) {
                     className="rounded-2xl bg-white/[0.03] p-8 ring-1 ring-white/[0.06] hover:ring-white/[0.1] transition-[box-shadow,ring-color] shadow-sm shadow-black/20"
                 >
                     {item.iconPath && (
-                        <div className="mb-5 flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500/20 to-violet-500/10 ring-1 ring-indigo-500/20">
-                            <svg className="h-5 w-5 text-indigo-300" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
+                        <div className="mb-5 flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500/20 to-violet-500/10 ring-1 ring-violet-500/20">
+                            <svg className="h-5 w-5 text-violet-300" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
                                 <path strokeLinecap="round" strokeLinejoin="round" d={item.iconPath} />
                             </svg>
                         </div>

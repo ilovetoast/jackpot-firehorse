@@ -107,7 +107,7 @@ function UserInviteForm({ brandId, defaultRole = 'viewer', brandRoles }) {
                         value={data.email}
                         onChange={(e) => setData('email', e.target.value)}
                         placeholder="Enter email address"
-                        className="block w-full rounded-md border-0 py-2 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm"
+                        className="block w-full rounded-md border-0 py-2 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-violet-600 sm:text-sm"
                         required
                     />
                     {errors.email && <p className="mt-1 text-xs text-red-600">{errors.email}</p>}
@@ -116,7 +116,7 @@ function UserInviteForm({ brandId, defaultRole = 'viewer', brandRoles }) {
                     <select
                         value={data.role}
                         onChange={(e) => setData('role', e.target.value)}
-                        className="block rounded-md border-0 py-2 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm"
+                        className="block rounded-md border-0 py-2 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 focus:ring-2 focus:ring-inset focus:ring-violet-600 sm:text-sm"
                     >
                         {roles.map((r) => (
                             <option key={r} value={r}>{r.replace('_', ' ')}</option>
@@ -126,7 +126,7 @@ function UserInviteForm({ brandId, defaultRole = 'viewer', brandRoles }) {
                 <button
                     type="submit"
                     disabled={processing}
-                    className="flex-shrink-0 rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:opacity-50"
+                    className="flex-shrink-0 rounded-md bg-violet-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-violet-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-600 disabled:opacity-50"
                 >
                     {processing ? 'Sending…' : 'Send invite'}
                 </button>
@@ -149,7 +149,7 @@ function RecommendedUserCard({ user, brandId, brandRoles }) {
     const roles = brandRoles && brandRoles.length > 0 ? brandRoles : ['viewer', 'contributor', 'brand_manager', 'admin']
 
     return (
-        <div className="flex items-center gap-3 p-3 bg-white rounded-lg border border-gray-200 hover:border-indigo-200 transition-colors">
+        <div className="flex items-center gap-3 p-3 bg-white rounded-lg border border-gray-200 hover:border-violet-200 transition-colors">
             <Avatar
                 avatarUrl={user.avatar_url}
                 firstName={user.first_name}
@@ -165,7 +165,7 @@ function RecommendedUserCard({ user, brandId, brandRoles }) {
                 <select
                     value={role}
                     onChange={(e) => setRole(e.target.value)}
-                    className="text-xs rounded-md border-0 py-1.5 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 focus:ring-2 focus:ring-inset focus:ring-indigo-600"
+                    className="text-xs rounded-md border-0 py-1.5 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 focus:ring-2 focus:ring-inset focus:ring-violet-600"
                     onClick={(e) => e.stopPropagation()}
                 >
                     {roles.map((r) => (
@@ -176,7 +176,7 @@ function RecommendedUserCard({ user, brandId, brandRoles }) {
                     type="button"
                     onClick={handleAdd}
                     disabled={processing}
-                    className="flex-shrink-0 rounded-full bg-indigo-600 p-1.5 text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:opacity-50"
+                    className="flex-shrink-0 rounded-full bg-violet-600 p-1.5 text-white shadow-sm hover:bg-violet-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-600 disabled:opacity-50"
                     title="Add to brand"
                 >
                     <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor">
@@ -244,7 +244,7 @@ function PendingInvitationCard({ invitation, brandId }) {
                         type="button"
                         onClick={handleResend}
                         disabled={resending || revoking}
-                        className="text-sm font-medium text-indigo-600 hover:text-indigo-800 disabled:opacity-50"
+                        className="text-sm font-medium text-violet-600 hover:text-violet-800 disabled:opacity-50"
                     >
                         {resending ? 'Resending…' : 'Resend'}
                     </button>
@@ -331,7 +331,7 @@ function UserManagementCard({ user, brandId, brandRoles, canRemoveUserFromCompan
                             <select
                                 value={role}
                                 onChange={(e) => setRole(e.target.value)}
-                                className="text-sm rounded-md border-0 py-1.5 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 focus:ring-2 focus:ring-inset focus:ring-indigo-600"
+                                className="text-sm rounded-md border-0 py-1.5 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 focus:ring-2 focus:ring-inset focus:ring-violet-600"
                             >
                                 {roles.map((r) => (
                                     <option key={r} value={r}>{r.replace('_', ' ')}</option>
@@ -341,7 +341,7 @@ function UserManagementCard({ user, brandId, brandRoles, canRemoveUserFromCompan
                                 type="button"
                                 onClick={handleRoleUpdate}
                                 disabled={updatingRole}
-                                className="text-sm font-medium text-indigo-600 hover:text-indigo-800 disabled:opacity-50"
+                                className="text-sm font-medium text-violet-600 hover:text-violet-800 disabled:opacity-50"
                             >
                                 {updatingRole ? 'Saving…' : 'Save'}
                             </button>
@@ -376,7 +376,7 @@ function UserManagementCard({ user, brandId, brandRoles, canRemoveUserFromCompan
                             <button
                                 type="button"
                                 onClick={() => setIsEditing(true)}
-                                className="text-sm font-medium text-indigo-600 hover:text-indigo-800"
+                                className="text-sm font-medium text-violet-600 hover:text-violet-800"
                             >
                                 Edit role
                             </button>

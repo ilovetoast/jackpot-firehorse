@@ -131,7 +131,7 @@ export default function AnalyticsUsage({
                             <p className="mt-1 flex flex-wrap items-center gap-2 text-sm text-gray-600">
                                 <span>{range.label}</span>
                                 {range.preset === 'custom' && (
-                                    <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-800">
+                                    <span className="rounded-full bg-violet-50 px-2 py-0.5 text-xs font-medium text-violet-800">
                                         Custom range
                                     </span>
                                 )}
@@ -152,7 +152,7 @@ export default function AnalyticsUsage({
                                             onClick={() => applyPreset(p.id)}
                                             className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
                                                 range.preset === p.id
-                                                    ? 'bg-indigo-600 text-white shadow'
+                                                    ? 'bg-violet-600 text-white shadow'
                                                     : 'text-gray-700 hover:bg-gray-50'
                                             }`}
                                         >
@@ -190,7 +190,7 @@ export default function AnalyticsUsage({
                                 <button
                                     type="button"
                                     onClick={applyCustomRange}
-                                    className="rounded-md bg-white px-3 py-2 text-sm font-medium text-indigo-700 ring-1 ring-inset ring-indigo-200 hover:bg-indigo-50"
+                                    className="rounded-md bg-white px-3 py-2 text-sm font-medium text-violet-700 ring-1 ring-inset ring-violet-200 hover:bg-violet-50"
                                 >
                                     Apply range
                                 </button>
@@ -263,7 +263,7 @@ export default function AnalyticsUsage({
                                             <div className="min-w-0 flex-1">
                                                 <Link
                                                     href={row.asset_url}
-                                                    className="truncate font-medium text-indigo-700 hover:text-indigo-600 text-sm"
+                                                    className="truncate font-medium text-violet-700 hover:text-violet-600 text-sm"
                                                 >
                                                     {row.title}
                                                 </Link>
@@ -332,7 +332,7 @@ export default function AnalyticsUsage({
                                                         ? 'bg-red-500'
                                                         : getStorageUsagePercent(stats.storage_mb, stats.storage_limit_mb) >= 75
                                                           ? 'bg-amber-500'
-                                                          : 'bg-indigo-600'
+                                                          : 'bg-violet-600'
                                                 }`}
                                                 style={{
                                                     width: `${getStorageUsagePercent(stats.storage_mb, stats.storage_limit_mb)}%`,
@@ -361,7 +361,7 @@ export default function AnalyticsUsage({
                                                         ? 'bg-red-500'
                                                         : getDownloadUsagePercent(stats.downloads, stats.downloads_limit) >= 75
                                                           ? 'bg-amber-500'
-                                                          : 'bg-indigo-600'
+                                                          : 'bg-violet-600'
                                                 }`}
                                                 style={{
                                                     width: `${getDownloadUsagePercent(stats.downloads, stats.downloads_limit)}%`,
@@ -407,7 +407,7 @@ export default function AnalyticsUsage({
                                                       ? 'bg-orange-500'
                                                       : (ai_usage.warning_level ?? 0) >= 80
                                                         ? 'bg-amber-500'
-                                                        : 'bg-indigo-600'
+                                                        : 'bg-violet-600'
                                             }`}
                                             style={{
                                                 width: `${Math.min(100, ai_usage.credits_percentage ?? 0)}%`,
@@ -450,7 +450,7 @@ export default function AnalyticsUsage({
                             <div className="mt-4">
                                 <Link
                                     href="/app/company"
-                                    className="inline-flex items-center gap-1.5 text-sm font-medium text-indigo-600 hover:text-indigo-500"
+                                    className="inline-flex items-center gap-1.5 text-sm font-medium text-violet-600 hover:text-violet-500"
                                 >
                                     Manage plan & usage
                                     <ArrowRightIcon className="h-4 w-4" />

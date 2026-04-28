@@ -107,7 +107,7 @@ export default function ManageCategoriesHub({
     )
 
     return (
-        <div className="flex flex-col gap-6">
+        <div className="mx-auto flex w-full max-w-7xl flex-col gap-6">
             {pageNotice ? (
                 <div
                     role="status"
@@ -127,8 +127,8 @@ export default function ManageCategoriesHub({
                 </div>
             ) : null}
 
-            <div className="flex flex-col gap-8 lg:flex-row lg:items-start lg:gap-6">
-                <div className="shrink-0 lg:w-[min(100%,22rem)] xl:w-96 lg:sticky lg:top-4 lg:max-h-[calc(100vh-5rem)] lg:overflow-y-auto">
+            <div className="flex flex-col gap-8 lg:flex-row lg:items-start lg:gap-10 xl:gap-12">
+                <div className="min-h-0 w-full shrink-0 lg:sticky lg:top-4 lg:w-[min(100%,25rem)] lg:max-h-[calc(100vh-5rem)] lg:overflow-y-auto xl:w-[25rem]">
                     <ManageStructureWorkspace
                         brand={brand}
                         categories={categories}
@@ -143,7 +143,7 @@ export default function ManageCategoriesHub({
                         onSaveNotice={showPageNotice}
                     />
                 </div>
-                <div className="min-w-0 flex-1">
+                <div className="min-w-0 w-full flex-1 lg:min-w-0 lg:max-w-[42rem] xl:max-w-[44rem]">
                     <ManageFieldsWorkspace
                         brand={brand}
                         categories={categories}

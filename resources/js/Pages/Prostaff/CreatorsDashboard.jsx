@@ -10,7 +10,7 @@ import CreatorStatsCards from '../../Components/prostaff/CreatorStatsCards'
 import CreatorsTable from '../../Components/prostaff/CreatorsTable'
 import PendingCreatorInvitesTable from '../../Components/prostaff/PendingCreatorInvitesTable'
 import { parseProstaffDashboardResponse } from '../../utils/parseProstaffDashboardResponse'
-import { workspaceOverviewBackdropCss } from '../../utils/colorUtils'
+import { hexToRgba, workspaceOverviewBackdropCss } from '../../utils/colorUtils'
 
 function tenantNavFromAuth(auth) {
     const c = auth?.activeCompany
@@ -37,7 +37,7 @@ export default function CreatorsDashboard({
     const activeBrand = auth?.activeBrand
     const tenant = tenantNavFromAuth(auth)
 
-    const brandColor = brand?.primary_color || activeBrand?.primary_color || '#6366f1'
+    const brandColor = brand?.primary_color || activeBrand?.primary_color || '#71717a'
     const secondaryForBackdrop =
         brand?.secondary_color || activeBrand?.secondary_color || activeBrand?.accent_color || brandColor
     const accentForBackdrop = brand?.accent_color || activeBrand?.accent_color || null
@@ -198,16 +198,20 @@ export default function CreatorsDashboard({
                 creatorModuleEnabled &&
                 canManageCreators &&
                 !creatorApproversConfigured ? (
-                    <div className="mb-6 rounded-2xl border border-amber-400/30 bg-amber-500/[0.12] px-4 py-3 text-sm text-amber-50 backdrop-blur-md">
-                        <p className="font-semibold text-amber-100">Approvers required to activate creator workflow</p>
-                        <p className="mt-1 text-xs text-amber-100/85">
+                    <div
+                        className="mb-6 rounded-2xl border border-white/12 bg-zinc-950/45 px-4 py-3 text-sm text-white/90 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.06)] backdrop-blur-md"
+                        style={{ borderColor: hexToRgba(brandColor, 0.32) }}
+                        role="status"
+                    >
+                        <p className="font-semibold text-white/95">Approvers required to activate creator workflow</p>
+                        <p className="mt-1 text-xs text-white/60">
                             Choose at least one creator approver in Brand Settings → Creators before you can add creators
                             or run approvals. This avoids blocked uploads and surprise errors later.
                         </p>
                         <div className="mt-3">
                             <Link
                                 href={settingsUrl}
-                                className="inline-flex text-xs font-semibold text-amber-100 underline decoration-amber-300/50 underline-offset-2 hover:text-white"
+                                className="inline-flex text-xs font-semibold text-white/75 underline decoration-white/30 underline-offset-2 hover:text-white"
                             >
                                 Configure approvers
                             </Link>

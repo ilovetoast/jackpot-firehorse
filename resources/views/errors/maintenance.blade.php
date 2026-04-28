@@ -158,22 +158,24 @@
             100% { box-shadow: 0 0 0 0 rgba(129, 140, 248, 0); }
         }
 
-        /* Footer */
-        .footer {
+        /* Footer — same “product mark” as Gateway (frontend) login: muted, wide tracking, uppercase */
+        .legal-foot {
             position: absolute;
             bottom: 1.5rem;
             left: 0;
             right: 0;
-            text-align: center;
-            font-size: 0.75rem;
-            color: rgba(255, 255, 255, 0.3);
             z-index: 10;
         }
-        .footer a {
-            color: rgba(255, 255, 255, 0.45);
-            text-decoration: none;
+        .legal-mark {
+            margin: 0;
+            text-align: center;
+            font-size: 0.6875rem; /* 11px, matches text-[11px] */
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.1em; /* ~tracking-widest */
+            color: rgba(255, 255, 255, 0.25);
         }
-        .footer a:hover { color: rgba(255, 255, 255, 0.7); }
+        .legal-mark .sep { color: rgba(255, 255, 255, 0.2); }
 
         /* Reduced motion — respect user preferences */
         @media (prefers-reduced-motion: reduce) {
@@ -201,8 +203,8 @@
         </div>
     </div>
 
-    <footer class="footer">
-        Jackpot — Velvetysoft
+    <footer class="legal-foot">
+        <p class="legal-mark">Jackpot<span class="sep" aria-hidden="true"> · </span>Brand asset manager</p>
     </footer>
 </body>
 </html>

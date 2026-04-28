@@ -18,7 +18,7 @@ export default function ForgotPassword({ status }) {
 
     const [focusedField, setFocusedField] = useState(null)
 
-    const primary = theme?.colors?.primary || '#6366f1'
+    const primary = theme?.colors?.primary || '#7c3aed'
 
     const inputBorder = (field) =>
         focusedField === field

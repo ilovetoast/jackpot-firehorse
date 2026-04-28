@@ -7,7 +7,8 @@ use App\Models\Tenant;
 
 class BrandThemeBuilder
 {
-    private const DEFAULT_PRIMARY = '#6366f1';
+    /** Align with app default accent (violet-600), not legacy indigo. */
+    private const DEFAULT_PRIMARY = '#7c3aed';
 
     private const DEFAULT_SECONDARY = '#8b5cf6';
 

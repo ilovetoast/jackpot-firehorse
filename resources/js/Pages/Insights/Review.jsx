@@ -22,8 +22,8 @@ import { getContrastTextColor, hexToRgba } from '../../utils/colorUtils'
 
 const VALID_TABS = ['tags', 'categories', 'values', 'fields']
 
-/** Jackpot app UI accent (Tailwind `indigo-600` / Insights badges) — not tenant workspace colors */
-const JACKPOT_UI_ACCENT_HEX = '#4f46e5'
+/** Jackpot product violet — not tenant brand colors */
+const JACKPOT_UI_ACCENT_HEX = '#7c3aed'
 
 /** Sunken well + segmented pills (matches CollectionFiltersBar / PrimaryFilterToolbarControls). */
 const reviewWellClass =
@@ -222,13 +222,13 @@ function ReviewInsightStructuralEmptyState({ variant, onLibraryScanQueued }) {
                 />
                 <div className="relative grid gap-8 p-8 sm:grid-cols-[minmax(0,7.5rem)_1fr] sm:items-center sm:gap-10 sm:p-10">
                     <div
-                        className="mx-auto flex aspect-square w-28 shrink-0 items-center justify-center rounded-2xl border border-indigo-100/90 bg-gradient-to-br from-indigo-50 to-white shadow-[inset_0_1px_0_0_rgba(255,255,255,0.95)] sm:mx-0 sm:w-full"
+                        className="mx-auto flex aspect-square w-28 shrink-0 items-center justify-center rounded-2xl border border-violet-100/90 bg-gradient-to-br from-violet-50 to-white shadow-[inset_0_1px_0_0_rgba(255,255,255,0.95)] sm:mx-0 sm:w-full"
                         aria-hidden
                     >
-                        <MainIcon className="h-12 w-12 text-indigo-600" />
+                        <MainIcon className="h-12 w-12 text-violet-600" />
                     </div>
                     <div className="text-center sm:text-left">
-                        <p className="text-[10px] font-semibold uppercase tracking-wide text-indigo-600/90">
+                        <p className="text-[10px] font-semibold uppercase tracking-wide text-violet-600/90">
                             {isValues ? 'Dropdown options' : 'New metadata fields'}
                         </p>
                         <h3 className="mt-1 text-xl font-semibold tracking-tight text-gray-900">
@@ -242,7 +242,7 @@ function ReviewInsightStructuralEmptyState({ variant, onLibraryScanQueued }) {
                         <ul className="mx-auto mt-5 max-w-xl space-y-2.5 text-left text-sm text-slate-700 sm:mx-0">
                             <li className="flex gap-2.5">
                                 <span
-                                    className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-indigo-500"
+                                    className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-violet-500"
                                     aria-hidden
                                 />
                                 <span>
@@ -252,7 +252,7 @@ function ReviewInsightStructuralEmptyState({ variant, onLibraryScanQueued }) {
                             </li>
                             <li className="flex gap-2.5">
                                 <span
-                                    className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-indigo-500"
+                                    className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-violet-500"
                                     aria-hidden
                                 />
                                 <span>
@@ -262,7 +262,7 @@ function ReviewInsightStructuralEmptyState({ variant, onLibraryScanQueued }) {
                             </li>
                             <li className="flex gap-2.5">
                                 <span
-                                    className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-indigo-500"
+                                    className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-violet-500"
                                     aria-hidden
                                 />
                                 <span>
@@ -342,7 +342,7 @@ function ReviewInsightStructuralEmptyState({ variant, onLibraryScanQueued }) {
                                     type="button"
                                     disabled={scanButtonDisabled}
                                     onClick={() => void runLibraryScan()}
-                                    className="inline-flex items-center justify-center rounded-lg border border-indigo-200 bg-white px-4 py-2 text-sm font-medium text-indigo-700 shadow-sm hover:bg-indigo-50 disabled:cursor-not-allowed disabled:opacity-60"
+                                    className="inline-flex items-center justify-center rounded-lg border border-violet-200 bg-white px-4 py-2 text-sm font-medium text-violet-700 shadow-sm hover:bg-violet-50 disabled:cursor-not-allowed disabled:opacity-60"
                                 >
                                     {!insightsStatusLoaded
                                         ? 'Loading…'
@@ -365,7 +365,7 @@ function ReviewInsightStructuralEmptyState({ variant, onLibraryScanQueued }) {
                                     In{' '}
                                     <Link
                                         href="/app/companies/settings#ai-settings"
-                                        className="font-medium text-indigo-600 hover:text-indigo-800 hover:underline"
+                                        className="font-medium text-violet-600 hover:text-violet-800 hover:underline"
                                     >
                                         AI settings
                                     </Link>
@@ -377,7 +377,7 @@ function ReviewInsightStructuralEmptyState({ variant, onLibraryScanQueued }) {
                                         {scanError}{' '}
                                         <Link
                                             href="/app/companies/settings#ai-settings"
-                                            className="font-medium text-indigo-600 hover:text-indigo-800 hover:underline"
+                                            className="font-medium text-violet-600 hover:text-violet-800 hover:underline"
                                         >
                                             Company → AI settings
                                         </Link>
@@ -389,7 +389,7 @@ function ReviewInsightStructuralEmptyState({ variant, onLibraryScanQueued }) {
                 </div>
             </div>
             <div className="flex items-start gap-3 border-t border-slate-100 bg-slate-50/90 px-6 py-4 sm:px-10">
-                <SparklesIcon className="mt-0.5 h-5 w-5 shrink-0 text-indigo-500" aria-hidden />
+                <SparklesIcon className="mt-0.5 h-5 w-5 shrink-0 text-violet-500" aria-hidden />
                 <p className="text-xs leading-relaxed text-slate-600">
                     These ideas come from the same scheduled “library pattern” job that powers this tab. If you never see rows, your categories may still be
                     building up volume, or insights may need to be enabled under Company → AI settings (depending on your plan).
@@ -474,7 +474,7 @@ function SectionBulkBar({
                     checked={sectionKeys.length > 0 && allSelected}
                     onChange={onToggleSelectAll}
                     disabled={sectionKeys.length === 0 || someBusy}
-                    className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                    className="h-4 w-4 rounded border-gray-300 text-violet-600 focus:ring-violet-500"
                 />
                 <span>
                     Select all ({sectionKeys.length})
@@ -487,7 +487,7 @@ function SectionBulkBar({
                         type="button"
                         disabled={selectedInSection.length === 0 || someBusy}
                         onClick={() => onBulkAccept(selectedInSection)}
-                        className="inline-flex items-center gap-1 rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
+                        className="inline-flex items-center gap-1 rounded-md bg-violet-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                         <CheckIcon className="h-4 w-4" />
                         Accept selected ({selectedInSection.length})
@@ -975,13 +975,13 @@ export default function AnalyticsReview({
                         checked={selected.has(pk)}
                         onChange={() => toggleSelected(pk)}
                         disabled={processing.has(pk)}
-                        className="mt-2 h-4 w-4 shrink-0 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                        className="mt-2 h-4 w-4 shrink-0 rounded border-gray-300 text-violet-600 focus:ring-violet-500"
                     />
                 )}
                 <button
                     type="button"
                     onClick={() => openInsightPreviewAt(itemIndex)}
-                    className="group relative h-16 w-16 shrink-0 overflow-hidden rounded-lg border border-gray-200 bg-gray-100 shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2"
+                    className="group relative h-16 w-16 shrink-0 overflow-hidden rounded-lg border border-gray-200 bg-gray-100 shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-2"
                     title="Larger preview & quick review"
                 >
                     {item.thumbnail_url ? (
@@ -996,7 +996,7 @@ export default function AnalyticsReview({
                     </span>
                 </button>
                 <div className="min-w-0 flex-1">
-                    <p className="text-[10px] font-semibold uppercase tracking-wide text-indigo-600">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-violet-600">
                         {isTag ? 'Suggested tag' : isCandidate ? 'Suggested field value' : 'Suggestion'}
                     </p>
                     <p className="mt-0.5 text-lg font-semibold leading-snug text-gray-900">{item.suggestion}</p>
@@ -1033,7 +1033,7 @@ export default function AnalyticsReview({
                                         type="button"
                                         onClick={() => handleApprove(item)}
                                         disabled={processing.has(pk)}
-                                        className="inline-flex items-center gap-1 rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+                                        className="inline-flex items-center gap-1 rounded-md bg-violet-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-violet-700 disabled:opacity-50"
                                     >
                                         <CheckIcon className="h-4 w-4" />
                                         Accept
@@ -1054,7 +1054,7 @@ export default function AnalyticsReview({
                         )}
                         <Link
                             href={`/app/assets?q=${encodeURIComponent(item.asset_id)}&asset=${encodeURIComponent(item.asset_id)}`}
-                            className="text-gray-400 hover:text-indigo-600"
+                            className="text-gray-400 hover:text-violet-600"
                             title="Open in grid"
                         >
                             <ArrowTopRightOnSquareIcon className="h-5 w-5" />
@@ -1264,7 +1264,7 @@ export default function AnalyticsReview({
                                 No items on this page.{' '}
                                 <button
                                     type="button"
-                                    className="font-medium text-indigo-600 hover:text-indigo-800 hover:underline"
+                                    className="font-medium text-violet-600 hover:text-violet-800 hover:underline"
                                     onClick={() => setPage(1)}
                                 >
                                     Go to first page
@@ -1288,8 +1288,8 @@ export default function AnalyticsReview({
                 ) : activeTab === 'tags' ? (
                     <div className="space-y-3">
                         <div className="overflow-hidden rounded-lg bg-white shadow">
-                            <div className="sticky top-0 z-20 border-b border-indigo-100 bg-white/95 px-4 py-3 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-white/90">
-                                <p className="text-[10px] font-semibold uppercase tracking-wide text-indigo-600">Tag suggestions</p>
+                            <div className="sticky top-0 z-20 border-b border-violet-100 bg-white/95 px-4 py-3 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-white/90">
+                                <p className="text-[10px] font-semibold uppercase tracking-wide text-violet-600">Tag suggestions</p>
                                 <p className="mt-0.5 text-sm text-slate-600">
                                     The highlighted label is the tag we want to add—click a thumbnail for a larger preview and fast Accept / Reject / Skip.
                                 </p>
@@ -1319,8 +1319,8 @@ export default function AnalyticsReview({
                                     key={section.fieldKey}
                                     className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm"
                                 >
-                                    <div className="sticky top-0 z-20 border-b-2 border-indigo-100 bg-gradient-to-b from-white via-white to-slate-50/95 px-4 py-3 shadow-md backdrop-blur supports-[backdrop-filter]:bg-white/90">
-                                        <p className="text-[10px] font-semibold uppercase tracking-wide text-indigo-600">
+                                    <div className="sticky top-0 z-20 border-b-2 border-violet-100 bg-gradient-to-b from-white via-white to-slate-50/95 px-4 py-3 shadow-md backdrop-blur supports-[backdrop-filter]:bg-white/90">
+                                        <p className="text-[10px] font-semibold uppercase tracking-wide text-violet-600">
                                             Metadata field group
                                         </p>
                                         <h3 className="mt-0.5 text-base font-semibold text-gray-900">
@@ -1364,8 +1364,8 @@ export default function AnalyticsReview({
                                     key={section.fieldKey}
                                     className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm"
                                 >
-                                    <div className="sticky top-0 z-20 border-b-2 border-indigo-100 bg-gradient-to-b from-white via-white to-slate-50/95 px-4 py-3 shadow-md backdrop-blur supports-[backdrop-filter]:bg-white/90">
-                                        <p className="text-[10px] font-semibold uppercase tracking-wide text-indigo-600">
+                                    <div className="sticky top-0 z-20 border-b-2 border-violet-100 bg-gradient-to-b from-white via-white to-slate-50/95 px-4 py-3 shadow-md backdrop-blur supports-[backdrop-filter]:bg-white/90">
+                                        <p className="text-[10px] font-semibold uppercase tracking-wide text-violet-600">
                                             Dropdown field
                                         </p>
                                         <h3 className="mt-0.5 text-base font-semibold text-gray-900">
@@ -1396,7 +1396,7 @@ export default function AnalyticsReview({
                                                             checked={selected.has(processingKey(item))}
                                                             onChange={() => toggleSelected(processingKey(item))}
                                                             disabled={processing.has(processingKey(item))}
-                                                            className="mt-1 h-4 w-4 shrink-0 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                                            className="mt-1 h-4 w-4 shrink-0 rounded border-gray-300 text-violet-600 focus:ring-violet-500"
                                                         />
                                                     )}
                                                     <div className="min-w-0 space-y-1">
@@ -1424,7 +1424,7 @@ export default function AnalyticsReview({
                                                             )}
                                                         </p>
                                                         {item.reason && (
-                                                            <p className="mt-2 border-l-2 border-indigo-200 pl-3 text-sm text-gray-600">
+                                                            <p className="mt-2 border-l-2 border-violet-200 pl-3 text-sm text-gray-600">
                                                                 {item.reason}
                                                             </p>
                                                         )}
@@ -1436,7 +1436,7 @@ export default function AnalyticsReview({
                                                             type="button"
                                                             onClick={() => handleApprove(item)}
                                                             disabled={processing.has(processingKey(item))}
-                                                            className="inline-flex items-center gap-1 rounded-md bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+                                                            className="inline-flex items-center gap-1 rounded-md bg-violet-600 px-3 py-2 text-sm font-medium text-white hover:bg-violet-700 disabled:opacity-50"
                                                         >
                                                             <CheckIcon className="h-4 w-4" />
                                                             Add to dropdown
@@ -1469,10 +1469,10 @@ export default function AnalyticsReview({
                             return (
                                 <div
                                     key={section.categorySlug}
-                                    className="overflow-hidden rounded-lg border border-indigo-100 bg-gradient-to-br from-white to-indigo-50/40 shadow-sm"
+                                    className="overflow-hidden rounded-lg border border-violet-100 bg-gradient-to-br from-white to-violet-50/40 shadow-sm"
                                 >
-                                    <div className="sticky top-0 z-20 border-b-2 border-indigo-200/80 bg-white/95 px-4 py-3 shadow-md backdrop-blur supports-[backdrop-filter]:bg-white/90">
-                                        <p className="text-[10px] font-semibold uppercase tracking-wide text-indigo-600">
+                                    <div className="sticky top-0 z-20 border-b-2 border-violet-200/80 bg-white/95 px-4 py-3 shadow-md backdrop-blur supports-[backdrop-filter]:bg-white/90">
+                                        <p className="text-[10px] font-semibold uppercase tracking-wide text-violet-600">
                                             Category · new field ideas
                                         </p>
                                         <h3 className="mt-0.5 text-base font-semibold text-gray-900">
@@ -1490,7 +1490,7 @@ export default function AnalyticsReview({
                                         canReject={canReject}
                                         processing={processing}
                                     />
-                                    <ul className="divide-y divide-indigo-100/80">
+                                    <ul className="divide-y divide-violet-100/80">
                                         {section.rows.map((item) => (
                                             <li key={processingKey(item)} className="p-5">
                                                 <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
@@ -1500,11 +1500,11 @@ export default function AnalyticsReview({
                                                             checked={selected.has(processingKey(item))}
                                                             onChange={() => toggleSelected(processingKey(item))}
                                                             disabled={processing.has(processingKey(item))}
-                                                            className="mt-1 h-4 w-4 shrink-0 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                                            className="mt-1 h-4 w-4 shrink-0 rounded border-gray-300 text-violet-600 focus:ring-violet-500"
                                                         />
                                                     )}
                                                     <div className="min-w-0 flex-1">
-                                                        <p className="text-xs font-semibold uppercase tracking-wide text-indigo-700">
+                                                        <p className="text-xs font-semibold uppercase tracking-wide text-violet-700">
                                                             Suggested new field
                                                         </p>
                                                         <p className="mt-2 text-sm text-gray-700">
@@ -1528,7 +1528,7 @@ export default function AnalyticsReview({
                                                             )}
                                                         </p>
                                                         {item.reason && (
-                                                            <p className="mt-2 border-l-2 border-indigo-200 pl-3 text-sm text-gray-600">
+                                                            <p className="mt-2 border-l-2 border-violet-200 pl-3 text-sm text-gray-600">
                                                                 {item.reason}
                                                             </p>
                                                         )}
@@ -1549,7 +1549,7 @@ export default function AnalyticsReview({
                                                                     type="button"
                                                                     onClick={() => handleApprove(item)}
                                                                     disabled={processing.has(processingKey(item))}
-                                                                    className="inline-flex items-center gap-1 rounded-md bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+                                                                    className="inline-flex items-center gap-1 rounded-md bg-violet-600 px-3 py-2 text-sm font-medium text-white hover:bg-violet-700 disabled:opacity-50"
                                                                 >
                                                                     <CheckIcon className="h-4 w-4" />
                                                                     Create field

@@ -34,7 +34,7 @@ function periodMomentumPill(status, completionPct, brandColor) {
     const pct = Number(completionPct)
     const pctRounded = Number.isFinite(pct) ? Math.min(100, Math.max(0, Math.round(pct))) : null
     const map = {
-        behind: 'border-indigo-400/35 bg-indigo-500/12 text-indigo-100',
+        behind: 'border-white/20 bg-zinc-950/35 text-white/80',
         on_track: 'border-sky-400/35 bg-sky-500/12 text-sky-100',
         complete: 'border-emerald-400/40 bg-emerald-500/15 text-emerald-100',
     }

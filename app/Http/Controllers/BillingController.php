@@ -141,7 +141,7 @@ class BillingController extends Controller
             ->all();
 
         // Use site-wide branding color (not tenant-specific)
-        $sitePrimaryColor = '#6366f1'; // Default Jackpot brand color
+        $sitePrimaryColor = '#7c3aed'; // Jackpot product violet (see brandWorkspaceTokens JACKPOT_VIOLET)
 
         // Check for incomplete payment and get payment URL if needed
         // Only check if subscription has a Stripe customer (stripe_id) - forced plans may not have one

@@ -5,7 +5,7 @@ import LogoMark from '../../Components/Brand/LogoMark'
 export default function GatewayLayout({ children, onSwitchOpen }) {
     const { theme, context } = usePage().props
 
-    const primary = theme?.colors?.primary || '#6366f1'
+    const primary = theme?.colors?.primary || '#7c3aed'
     const isDefault = theme?.mode === 'default'
     const isAuthenticated = context?.is_authenticated
     /** Show Jackpot attribution only after sign-in when workspace (tenant/brand) theme is active. */
@@ -37,7 +37,7 @@ export default function GatewayLayout({ children, onSwitchOpen }) {
             <div className="relative z-10 min-h-screen flex flex-col">
                 {/* Header */}
                 <div className="absolute top-6 left-6 right-6 flex justify-between items-center z-20">
-                    <LogoMark size="sm" />
+                    <LogoMark size="sm" href={isDefault ? '/' : null} />
 
                     {isAuthenticated && canSwitch && onSwitchOpen && (
                         <button

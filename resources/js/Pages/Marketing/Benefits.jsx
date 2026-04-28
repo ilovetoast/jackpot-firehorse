@@ -77,8 +77,8 @@ export default function MarketingBenefits() {
                                 className="rounded-2xl bg-white/[0.03] ring-1 ring-white/[0.06] hover:ring-white/[0.1] transition-[ring-color] p-8 sm:p-10 flex flex-col"
                             >
                                 <div className="flex items-start gap-4 mb-4">
-                                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500/20 to-violet-500/10 ring-1 ring-indigo-500/20">
-                                        <svg className="h-5 w-5 text-indigo-300" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
+                                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500/20 to-violet-500/10 ring-1 ring-violet-500/20">
+                                        <svg className="h-5 w-5 text-violet-300" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
                                             <path strokeLinecap="round" strokeLinejoin="round" d={b.iconPath} />
                                         </svg>
                                     </div>
@@ -88,7 +88,7 @@ export default function MarketingBenefits() {
                                 </div>
                                 <p className="text-sm text-white/45 leading-relaxed flex-1">{b.body}</p>
                                 <div className="mt-6 rounded-xl bg-white/[0.04] ring-1 ring-white/[0.06] px-5 py-4 flex items-center gap-4">
-                                    <span className="text-2xl font-bold text-indigo-300">{b.metric.value}</span>
+                                    <span className="text-2xl font-bold text-violet-300">{b.metric.value}</span>
                                     <span className="text-xs text-white/35 leading-tight">{b.metric.label}</span>
                                 </div>
                             </div>

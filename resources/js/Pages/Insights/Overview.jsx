@@ -12,11 +12,6 @@ import CreatorInsights from '../../Components/insights/CreatorInsights'
 import StorageInsightPanel from '../../Components/insights/StorageInsightPanel'
 import useLogoWhiteBgPreview from '../../utils/useLogoWhiteBgPreview'
 import {
-    FolderIcon,
-    ServerIcon,
-    CloudArrowDownIcon,
-    RectangleGroupIcon,
-    BoltIcon,
     SparklesIcon,
     ChartBarIcon,
     ExclamationTriangleIcon,
@@ -156,39 +151,16 @@ export default function AnalyticsOverview({
         return `${(current ?? 0).toLocaleString()} / ${limit.toLocaleString()}`
     }
 
-    const StatCard = ({ icon: Icon, title, value, subtext, formatValue = (v) => v, href }) => {
-        const content = (
-            <div className="flex items-center gap-4">
-                <div className="flex-shrink-0 rounded-lg bg-gray-100 p-3">
-                    <Icon className="h-6 w-6 text-gray-600" aria-hidden="true" />
-                </div>
-                <div className="min-w-0 flex-1">
-                    <dt className="text-sm font-medium text-gray-500 truncate">{title}</dt>
-                    <dd className="mt-0.5">
-                        <span className="text-2xl font-semibold tracking-tight text-gray-900">
-                            {formatValue(value)}
-                        </span>
-                    </dd>
-                    {subtext && <p className="mt-0.5 text-xs text-gray-500">{subtext}</p>}
-                </div>
-                {href && (
-                    <ArrowRightIcon className="h-5 w-5 text-gray-400 flex-shrink-0" aria-hidden="true" />
-                )}
-            </div>
-        )
-
-        const cardClass =
-            'overflow-hidden rounded-lg bg-white px-4 py-5 shadow sm:p-6 border border-gray-200 transition-all duration-200 hover:shadow-md hover:scale-[1.02]'
-
-        if (href) {
-            return (
-                <Link href={href} className={`block ${cardClass}`}>
-                    {content}
-                </Link>
-            )
-        }
-        return <div className={cardClass}>{content}</div>
-    }
+    /** Single rail cell — label / value / optional subline (workbench stats rail) */
+    const WorkbenchStatCell = ({ label, value, subline }) => (
+        <div className="flex min-h-[4.75rem] flex-col justify-center p-4 sm:min-h-[5rem] sm:px-5 sm:py-4">
+            <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">{label}</p>
+            <p className="mt-0.5 text-lg font-semibold tabular-nums tracking-tight text-slate-900 sm:text-[1.35rem] sm:leading-tight">
+                {value}
+            </p>
+            {subline ? <p className="mt-0.5 text-xs leading-snug text-slate-500">{subline}</p> : null}
+        </div>
+    )
 
     const metadataLoading = lazyMeta === null && !metadataLoadError
     const overview = lazyMeta?.metadata_overview ?? {}
@@ -208,6 +180,7 @@ export default function AnalyticsOverview({
     const dnaReady = Boolean(g.dna_ready)
     const hasPublished = Boolean(g.has_published_guidelines)
     const scoringOn = Boolean(g.scoring_enabled)
+    const showAiCredits = Boolean(ai_usage && isUnifiedAiCreditsPayload(ai_usage))
 
     return (
         <InsightsLayout title="Insights Overview" activeSection="overview">
@@ -234,12 +207,12 @@ export default function AnalyticsOverview({
                         </div>
                     </section>
                 )}
-                {/* Brand guidelines — always surface: scoring + generative AI depend on published DNA */}
+                {/* Brand guidelines — product intelligence module when active (violet); amber only when setup needed */}
                 <section
                     className={`rounded-xl border p-4 sm:p-5 ${
                         dnaReady
-                            ? 'border-emerald-200 bg-emerald-50/60'
-                            : 'border-amber-200 bg-amber-50/90'
+                            ? 'border-violet-200/90 bg-gradient-to-br from-violet-50/50 via-white to-slate-50/80 shadow-sm ring-1 ring-violet-500/[0.08]'
+                            : 'border-amber-200/90 bg-amber-50/90'
                     }`}
                     aria-labelledby="insights-brand-guidelines-heading"
                 >
@@ -247,35 +220,36 @@ export default function AnalyticsOverview({
                         <div className="flex gap-3 min-w-0">
                             <div
                                 className={`flex-shrink-0 rounded-lg p-2.5 ${
-                                    dnaReady ? 'bg-emerald-100' : 'bg-amber-100'
+                                    dnaReady ? 'bg-violet-100/90 ring-1 ring-violet-200/60' : 'bg-amber-100'
                                 }`}
                             >
                                 <DocumentTextIcon
-                                    className={`h-6 w-6 ${dnaReady ? 'text-emerald-700' : 'text-amber-800'}`}
+                                    className={`h-6 w-6 ${dnaReady ? 'text-violet-700' : 'text-amber-800'}`}
                                     aria-hidden
                                 />
                             </div>
                             <div className="min-w-0">
                                 <h2
                                     id="insights-brand-guidelines-heading"
-                                    className="text-base font-semibold text-gray-900"
+                                    className="text-base font-semibold text-slate-900"
                                 >
                                     {dnaReady ? 'Brand guidelines are active' : 'Set up brand guidelines for full Insights'}
                                 </h2>
-                                <p className="mt-1.5 text-sm text-gray-700 leading-relaxed">
+                                <p className="mt-1.5 text-sm text-slate-600 leading-relaxed">
                                     {dnaReady ? (
                                         <>
                                             Your published brand DNA powers{' '}
-                                            <span className="font-medium">brand scoring</span>,{' '}
-                                            <span className="font-medium">generative AI</span> (tagging &amp; suggestions),
-                                            and alignment features. Keep guidelines up to date as your brand evolves.
+                                            <span className="font-medium text-slate-800">brand scoring</span>,{' '}
+                                            <span className="font-medium text-slate-800">generative AI</span> (tagging
+                                            &amp; suggestions), and alignment features. Keep guidelines up to date as
+                                            your brand evolves.
                                         </>
                                     ) : (
                                         <>
                                             <span className="font-medium">Brand scoring</span> and{' '}
-                                            <span className="font-medium">generative AI</span> need a completed, published
-                                            brand guidelines model. Finish research → review → build → publish so we can
-                                            score assets and personalize AI to your brand.
+                                            <span className="font-medium">generative AI</span> need a completed,
+                                            published brand guidelines model. Finish research → review → build →
+                                            publish so we can score assets and personalize AI to your brand.
                                         </>
                                     )}
                                 </p>
@@ -292,7 +266,7 @@ export default function AnalyticsOverview({
                             {!dnaReady && (
                                 <Link
                                     href={g.research_url || '#'}
-                                    className="inline-flex justify-center items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
+                                    className="inline-flex justify-center items-center gap-2 rounded-lg bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-violet-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-600"
                                 >
                                     <SparklesIcon className="h-5 w-5" aria-hidden />
                                     {hasPublished ? 'Update brand guidelines' : 'Start brand guidelines'}
@@ -304,8 +278,8 @@ export default function AnalyticsOverview({
                                     href={g.guidelines_url}
                                     className={`inline-flex justify-center items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold shadow-sm ${
                                         dnaReady
-                                            ? 'bg-white text-indigo-700 ring-1 ring-inset ring-emerald-200 hover:bg-emerald-50'
-                                            : 'bg-white/80 text-gray-800 ring-1 ring-inset ring-amber-200 hover:bg-white'
+                                            ? 'bg-white text-violet-800 ring-1 ring-inset ring-violet-200 hover:bg-violet-50/80'
+                                            : 'bg-white/80 text-slate-800 ring-1 ring-inset ring-amber-200 hover:bg-white'
                                     }`}
                                 >
                                     View guidelines
@@ -379,61 +353,53 @@ export default function AnalyticsOverview({
                     </section>
                 )}
 
-                {/* Top metric cards */}
+                {/* Brand totals — single rail w/ dividers (editorial hierarchy, no floating icon tiles) */}
                 <section>
-                    <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-4">
-                        Brand Totals
-                    </h2>
-                    <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
-                        <StatCard
-                            icon={FolderIcon}
-                            title="Total Assets"
-                            value={stats.total_assets ?? 0}
-                            formatValue={(v) => v.toLocaleString()}
-                        />
-                        <StatCard
-                            icon={ServerIcon}
-                            title="Storage"
-                            value={stats.storage_mb ?? 0}
-                            subtext={
-                                stats.storage_limit_mb
-                                    ? formatStorageWithLimit(stats.storage_mb, stats.storage_limit_mb)
-                                    : formatStorage(stats.storage_mb ?? 0) + ' used'
-                            }
-                            formatValue={formatStorage}
-                        />
-                        <StatCard
-                            icon={CloudArrowDownIcon}
-                            title="Downloads (this month)"
-                            value={stats.downloads ?? 0}
-                            subtext={
-                                stats.downloads_limit
-                                    ? formatDownloadsWithLimit(stats.downloads, stats.downloads_limit)
-                                    : null
-                            }
-                            formatValue={(v) => v.toLocaleString()}
-                        />
-                        <StatCard
-                            icon={RectangleGroupIcon}
-                            title="Collections"
-                            value={stats.collections ?? 0}
-                            formatValue={(v) => v.toLocaleString()}
-                        />
-                        <StatCard
-                            icon={BoltIcon}
-                            title="Executions"
-                            value={stats.executions ?? 0}
-                            formatValue={(v) => v.toLocaleString()}
-                        />
-                        {ai_usage && isUnifiedAiCreditsPayload(ai_usage) && (
-                            <StatCard
-                                icon={SparklesIcon}
-                                title="AI credits"
-                                value={ai_usage.credits_used ?? 0}
-                                subtext={formatAiCreditsSubtext(ai_usage)}
-                                formatValue={(v) => v.toLocaleString()}
+                    <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-500">Brand totals</h2>
+                    <div className="overflow-hidden rounded-xl border border-slate-200/90 bg-white shadow-sm">
+                        <div
+                            className={`grid grid-cols-2 divide-x divide-y divide-slate-100 sm:grid-cols-3 ${
+                                showAiCredits ? 'lg:grid-cols-6' : 'lg:grid-cols-5'
+                            }`}
+                        >
+                            <WorkbenchStatCell
+                                label="Total assets"
+                                value={(stats.total_assets ?? 0).toLocaleString()}
                             />
-                        )}
+                            <WorkbenchStatCell
+                                label="Storage"
+                                value={formatStorage(stats.storage_mb ?? 0)}
+                                subline={
+                                    stats.storage_limit_mb
+                                        ? formatStorageWithLimit(stats.storage_mb, stats.storage_limit_mb)
+                                        : `${formatStorage(stats.storage_mb ?? 0)} used`
+                                }
+                            />
+                            <WorkbenchStatCell
+                                label="Downloads (mo.)"
+                                value={(stats.downloads ?? 0).toLocaleString()}
+                                subline={
+                                    stats.downloads_limit
+                                        ? formatDownloadsWithLimit(stats.downloads, stats.downloads_limit)
+                                        : null
+                                }
+                            />
+                            <WorkbenchStatCell
+                                label="Collections"
+                                value={(stats.collections ?? 0).toLocaleString()}
+                            />
+                            <WorkbenchStatCell
+                                label="Executions"
+                                value={(stats.executions ?? 0).toLocaleString()}
+                            />
+                            {showAiCredits ? (
+                                <WorkbenchStatCell
+                                    label="AI credits"
+                                    value={(ai_usage.credits_used ?? 0).toLocaleString()}
+                                    subline={formatAiCreditsSubtext(ai_usage)}
+                                />
+                            ) : null}
+                        </div>
                     </div>
                     <div className="mt-5">
                         <StorageInsightPanel storage_insight={storage_insight} formatStorage={formatStorage} />
@@ -446,9 +412,9 @@ export default function AnalyticsOverview({
 
                 {/* Metadata Health Summary — loaded after first paint */}
                 <section>
-                    <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-4 flex items-center">
-                        <ChartBarIcon className="h-5 w-5 mr-2 text-gray-400" />
-                        Metadata Health Summary
+                    <h2 className="mb-4 flex items-center text-xs font-semibold uppercase tracking-wider text-slate-500">
+                        <ChartBarIcon className="mr-2 h-4 w-4 text-slate-400" />
+                        Metadata health summary
                     </h2>
                     {metadataLoadError && (
                         <div
@@ -459,7 +425,7 @@ export default function AnalyticsOverview({
                             <button
                                 type="button"
                                 onClick={() => fetchMetadataAnalytics()}
-                                className="mt-2 text-sm font-semibold text-indigo-700 hover:text-indigo-600"
+                                className="mt-2 text-sm font-semibold text-violet-700 hover:text-violet-600"
                             >
                                 Try again
                             </button>
@@ -470,7 +436,7 @@ export default function AnalyticsOverview({
                     ) : (
                         !metadataLoadError && (
                             <>
-                                <div className="bg-white rounded-lg shadow border border-gray-200 p-6">
+                                <div className="rounded-xl border border-slate-200/90 bg-white p-6 shadow-sm">
                                     <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
                                         <div>
                                             <p className="text-sm font-medium text-gray-500">Completeness</p>
@@ -497,7 +463,7 @@ export default function AnalyticsOverview({
                                         <div>
                                             <Link
                                                 href="/app/insights/metadata"
-                                                className="inline-flex items-center gap-1.5 text-sm font-medium text-indigo-600 hover:text-indigo-500"
+                                                className="inline-flex items-center gap-1.5 text-sm font-medium text-violet-600 hover:text-violet-500"
                                             >
                                                 View full metadata insights
                                                 <ArrowRightIcon className="h-4 w-4" />
@@ -535,11 +501,11 @@ export default function AnalyticsOverview({
                     !metadataLoadError &&
                     (ai_effectiveness?.total_suggestions > 0 || ai_effectiveness?.approved_suggestions > 0) && (
                     <section>
-                        <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-4 flex items-center">
-                            <SparklesIcon className="h-5 w-5 mr-2 text-gray-400" />
-                            AI Suggestion Effectiveness
+                        <h2 className="mb-4 flex items-center text-xs font-semibold uppercase tracking-wider text-slate-500">
+                            <SparklesIcon className="mr-2 h-4 w-4 text-slate-400" />
+                            AI suggestion effectiveness
                         </h2>
-                        <div className="bg-white rounded-lg shadow border border-gray-200 p-6">
+                        <div className="rounded-xl border border-slate-200/90 bg-white p-6 shadow-sm">
                             <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
                                 <div>
                                     <p className="text-sm font-medium text-gray-500">Total Suggestions</p>
@@ -549,7 +515,7 @@ export default function AnalyticsOverview({
                                 </div>
                                 <div>
                                     <p className="text-sm font-medium text-gray-500">Approved</p>
-                                    <p className="mt-1 text-2xl font-semibold text-green-600">
+                                    <p className="mt-1 text-2xl font-semibold text-violet-700">
                                         {ai_effectiveness.approved_suggestions?.toLocaleString() ?? 0}
                                     </p>
                                 </div>
@@ -562,7 +528,7 @@ export default function AnalyticsOverview({
                                 <div>
                                     <Link
                                         href="/app/insights/metadata"
-                                        className="inline-flex items-center gap-1.5 text-sm font-medium text-indigo-600 hover:text-indigo-500"
+                                        className="inline-flex items-center gap-1.5 text-sm font-medium text-violet-600 hover:text-violet-500"
                                     >
                                         View details
                                         <ArrowRightIcon className="h-4 w-4" />
@@ -581,11 +547,11 @@ export default function AnalyticsOverview({
                     rights_risk?.expiring_60_days > 0 ||
                     rights_risk?.expiring_90_days > 0) && (
                     <section>
-                        <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-4 flex items-center">
-                            <ShieldCheckIcon className="h-5 w-5 mr-2 text-gray-400" />
-                            Rights & Risk Indicators
+                        <h2 className="mb-4 flex items-center text-xs font-semibold uppercase tracking-wider text-slate-500">
+                            <ShieldCheckIcon className="mr-2 h-4 w-4 text-slate-400" />
+                            Rights &amp; risk indicators
                         </h2>
-                        <div className="bg-white rounded-lg shadow border border-gray-200 p-6">
+                        <div className="rounded-xl border border-slate-200/90 bg-white p-6 shadow-sm">
                             <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
                                 {rights_risk.expired_count > 0 && (
                                     <div className="flex items-center gap-3">
@@ -629,7 +595,7 @@ export default function AnalyticsOverview({
                             <div className="mt-4">
                                 <Link
                                     href="/app/insights/metadata"
-                                    className="inline-flex items-center gap-1.5 text-sm font-medium text-indigo-600 hover:text-indigo-500"
+                                    className="inline-flex items-center gap-1.5 text-sm font-medium text-violet-600 hover:text-violet-500"
                                 >
                                     View rights details
                                     <ArrowRightIcon className="h-4 w-4" />

@@ -146,7 +146,7 @@ export default function MarketingPricing() {
         <MarketingLayout>
             <section className="px-6 pt-16 pb-4 lg:px-8">
                 <div className="mx-auto max-w-3xl text-center">
-                    <p className="text-sm font-semibold uppercase tracking-[0.2em] text-indigo-400/90">Pricing</p>
+                    <p className="text-sm font-semibold uppercase tracking-[0.2em] text-violet-400/90">Pricing</p>
                     <h1 className="mt-3 font-display text-4xl font-bold tracking-tight text-white sm:text-5xl lg:text-6xl text-balance">
                         Simple pricing. No surprises.
                     </h1>
@@ -165,12 +165,12 @@ export default function MarketingPricing() {
                                 key={plan.id}
                                 className={`relative flex flex-col rounded-2xl p-8 transition-all duration-300 ease-out hover:scale-[1.015] hover:-translate-y-0.5 motion-reduce:hover:scale-100 motion-reduce:hover:translate-y-0 ${
                                     plan.popular
-                                        ? 'bg-gradient-to-b from-indigo-500/[0.12] to-violet-500/[0.06] ring-1 ring-indigo-400/30 shadow-xl shadow-indigo-900/30 lg:scale-[1.03] hover:ring-indigo-400/50 hover:shadow-2xl hover:shadow-indigo-800/40'
-                                        : 'bg-white/[0.03] ring-1 ring-white/[0.06] hover:bg-white/[0.05] hover:ring-white/[0.12] hover:shadow-lg hover:shadow-indigo-900/20'
+                                        ? 'bg-gradient-to-b from-violet-500/[0.12] to-violet-500/[0.06] ring-1 ring-violet-400/30 shadow-xl shadow-violet-900/30 lg:scale-[1.03] hover:ring-violet-400/50 hover:shadow-2xl hover:shadow-violet-800/40'
+                                        : 'bg-white/[0.03] ring-1 ring-white/[0.06] hover:bg-white/[0.05] hover:ring-white/[0.12] hover:shadow-lg hover:shadow-violet-900/20'
                                 }`}
                             >
                                 {plan.popular && (
-                                    <span className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-indigo-500 px-3 py-1 text-xs font-semibold text-white shadow-lg">
+                                    <span className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-violet-500 px-3 py-1 text-xs font-semibold text-white shadow-lg">
                                         Most popular
                                     </span>
                                 )}
@@ -198,7 +198,7 @@ export default function MarketingPricing() {
                                 <ul className="space-y-2 mb-6 flex-1">
                                     {plan.features.map((f) => (
                                         <li key={f} className="flex items-start gap-2 text-sm text-white/60">
-                                            <svg className="h-4 w-4 mt-0.5 flex-shrink-0 text-indigo-400" fill="currentColor" viewBox="0 0 20 20">
+                                            <svg className="h-4 w-4 mt-0.5 flex-shrink-0 text-violet-400" fill="currentColor" viewBox="0 0 20 20">
                                                 <path fillRule="evenodd" d="M16.704 4.153a.75.75 0 01.143 1.052l-8 10.5a.75.75 0 01-1.127.075l-4.5-4.5a.75.75 0 011.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 011.05-.143z" clipRule="evenodd" />
                                             </svg>
                                             {f}

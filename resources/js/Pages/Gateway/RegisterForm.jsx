@@ -39,7 +39,7 @@ export default function RegisterForm({ context, onToggleLogin }) {
         })
     }
 
-    const primary = theme?.colors?.primary || '#6366f1'
+    const primary = theme?.colors?.primary || '#7c3aed'
 
     const inputBorder = (field) =>
         focusedField === field

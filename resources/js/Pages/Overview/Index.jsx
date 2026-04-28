@@ -18,7 +18,12 @@ import { SkeletonMetricPills, SkeletonPlanBadge } from '../../Components/Overvie
 import CreatorProgressCard from '../../Components/prostaff/CreatorProgressCard'
 import OverviewCreatorInsights from '../../Components/prostaff/OverviewCreatorInsights'
 import { summarizeMomentum } from '../../utils/summarizeMomentum'
-import { resolveOverviewIconColor, workspaceOverviewBackdropCss, resolveCinematicAccentColor } from '../../utils/colorUtils'
+import {
+    hexToRgba,
+    resolveOverviewIconColor,
+    workspaceOverviewBackdropCss,
+    resolveCinematicAccentColor,
+} from '../../utils/colorUtils'
 
 function formatStorage(mb) {
     if (!mb || mb === 0) return '0 MB'
@@ -133,7 +138,7 @@ export default function Overview() {
 
     // Theme from API wins when loaded; until then use Inertia auth.activeBrand so first paint matches brand (no indigo flash).
     const brandColor =
-        theme.colors?.primary || activeBrand?.primary_color || '#6366f1'
+        theme.colors?.primary || activeBrand?.primary_color || '#71717a'
     const secondaryForBackdrop =
         theme.colors?.secondary ||
         activeBrand?.secondary_color ||
@@ -590,22 +595,22 @@ export default function Overview() {
                                         className="mt-3 sm:mt-4"
                                     >
                                         <div
-                                            className="overflow-hidden rounded-xl border px-4 py-3.5 backdrop-blur-md"
+                                            className="overflow-hidden rounded-xl border border-white/15 bg-zinc-950/35 px-4 py-3.5 backdrop-blur-md"
                                             style={{
-                                                borderColor: 'rgba(99, 102, 241, 0.45)',
-                                                background: 'linear-gradient(to bottom right, rgba(99, 102, 241, 0.18), rgba(12, 12, 14, 0.42))',
-                                                boxShadow: '0 0 32px rgba(99, 102, 241, 0.12), inset 0 1px 0 rgba(99, 102, 241, 0.2)',
+                                                borderColor: hexToRgba(brandColor, 0.4),
+                                                background: `linear-gradient(to bottom right, ${hexToRgba(brandColor, 0.14)}, rgba(12, 12, 14, 0.5))`,
+                                                boxShadow: `0 0 28px ${hexToRgba(brandColor, 0.1)}, inset 0 1px 0 ${hexToRgba(brandColor, 0.18)}`,
                                             }}
                                         >
                                             <div className="flex items-start gap-3">
                                                 <div
                                                     className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl"
-                                                    style={{ backgroundColor: 'rgba(99, 102, 241, 0.2)' }}
+                                                    style={{ backgroundColor: hexToRgba(brandColor, 0.22) }}
                                                 >
-                                                    <EnvelopeIcon className="h-5 w-5 text-indigo-300" aria-hidden />
+                                                    <EnvelopeIcon className="h-5 w-5 text-white/90" aria-hidden />
                                                 </div>
                                                 <div className="min-w-0 flex-1">
-                                                    <p className="text-[11px] font-bold uppercase tracking-wider text-indigo-300/90">
+                                                    <p className="text-[11px] font-bold uppercase tracking-wider text-white/45">
                                                         Getting started
                                                     </p>
                                                     <p className="mt-1.5 text-[15px] font-semibold leading-snug text-white">
@@ -619,7 +624,7 @@ export default function Overview() {
                                                             type="button"
                                                             onClick={handleResendVerification}
                                                             disabled={resendingVerification}
-                                                            className="inline-flex items-center gap-1.5 text-sm font-semibold text-indigo-300 transition-colors hover:text-indigo-200 disabled:opacity-60 disabled:cursor-default"
+                                                            className="inline-flex items-center gap-1.5 text-sm font-semibold text-white/75 transition-colors hover:text-white disabled:opacity-60 disabled:cursor-default"
                                                         >
                                                             {resendingVerification ? 'Sending…' : 'Resend verification email'}
                                                         </button>

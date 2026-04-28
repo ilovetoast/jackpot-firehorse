@@ -168,7 +168,7 @@ export default function LogoVariantCard({
                         'inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-50',
                         isDark
                             ? 'bg-neutral-800 text-white ring-1 ring-neutral-700 hover:bg-neutral-700'
-                            : 'bg-white text-indigo-700 ring-1 ring-indigo-200 shadow-sm hover:bg-indigo-50',
+                            : 'bg-white text-violet-700 ring-1 ring-violet-200 shadow-sm hover:bg-violet-50',
                     ].join(' ')}
                 >
                     <span aria-hidden="true">✨</span>

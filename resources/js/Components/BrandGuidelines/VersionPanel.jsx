@@ -31,10 +31,10 @@ function LifecycleBadge({ version }) {
     const stageConfig = {
         research: {
             label: version.research_status === 'running' ? 'Research running' : version.research_status === 'complete' ? 'Research complete' : 'Research',
-            color: version.research_status === 'running' ? 'bg-amber-100 text-amber-800' : version.research_status === 'complete' ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-600',
+            color: version.research_status === 'running' ? 'bg-amber-100 text-amber-800' : version.research_status === 'complete' ? 'bg-violet-100 text-violet-800' : 'bg-gray-100 text-gray-600',
         },
         review: { label: 'In review', color: 'bg-purple-100 text-purple-800' },
-        build: { label: 'Building', color: 'bg-indigo-100 text-indigo-800' },
+        build: { label: 'Building', color: 'bg-violet-100 text-violet-800' },
         published: { label: 'Published', color: 'bg-green-100 text-green-800' },
     }
 
@@ -95,7 +95,7 @@ export default function VersionPanel({
                     <div
                         key={v.id}
                         className={`rounded-lg border p-3 transition-colors ${
-                            isSelected ? 'border-indigo-300 bg-indigo-50' : 'border-amber-200 bg-amber-50/50 hover:bg-amber-50'
+                            isSelected ? 'border-violet-300 bg-violet-50' : 'border-amber-200 bg-amber-50/50 hover:bg-amber-50'
                         }`}
                     >
                         <div className="flex items-center justify-between gap-3">
@@ -115,7 +115,7 @@ export default function VersionPanel({
                             ) : (
                                 <Link
                                     href={cta.href}
-                                    className="inline-flex items-center rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-500 transition-colors flex-shrink-0"
+                                    className="inline-flex items-center rounded-md bg-violet-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-violet-500 transition-colors flex-shrink-0"
                                 >
                                     {cta.label}
                                     <svg className="ml-1.5 h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.5}>
@@ -137,7 +137,7 @@ export default function VersionPanel({
                     <div
                         key={v.id}
                         className={`flex items-center justify-between gap-3 rounded-lg border p-3 cursor-pointer transition-colors ${
-                            isSelected ? 'border-indigo-300 bg-indigo-50' : 'border-gray-200 hover:bg-gray-50'
+                            isSelected ? 'border-violet-300 bg-violet-50' : 'border-gray-200 hover:bg-gray-50'
                         }`}
                         onClick={() => onSelect?.(v.id)}
                     >
@@ -153,7 +153,7 @@ export default function VersionPanel({
                         {isActive && (
                             <Link
                                 href={route('brands.guidelines.index', { brand: brandId })}
-                                className="inline-flex items-center rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-500 transition-colors flex-shrink-0"
+                                className="inline-flex items-center rounded-md bg-violet-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-violet-500 transition-colors flex-shrink-0"
                             >
                                 View Guidelines
                                 <svg className="ml-1.5 h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.5}>

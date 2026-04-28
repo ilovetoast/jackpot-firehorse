@@ -226,6 +226,7 @@ import {
     StudioAnimateCompositionModal,
     type SourceKind as StudioAnimateSourceKind,
 } from './components/StudioAnimateCompositionModal'
+import { StudioExtractLayersModal } from './components/StudioExtractLayersModal'
 import { StudioAnimationJobDetailDialog, type InsertAnimationVideoArgs } from './components/StudioAnimationJobDetailDialog'
 import {
     deleteStudioAnimationJob,
@@ -1808,6 +1809,24 @@ export default function AssetEditor() {
     const [studioGenerationPollJobId, setStudioGenerationPollJobId] = useState<string | null>(null)
     const [studioRetryGenerationItemBusy, setStudioRetryGenerationItemBusy] = useState<string | null>(null)
     const [studioAnimateModalOpen, setStudioAnimateModalOpen] = useState(false)
+    const [studioExtractLayersModalOpen, setStudioExtractLayersModalOpen] = useState(false)
+    const [studioExtractTargetLayerId, setStudioExtractTargetLayerId] = useState<string | null>(null)
+    const studioExtractSourceImageUrl = useMemo(() => {
+        if (!studioExtractTargetLayerId) {
+            return undefined
+        }
+        const layer = document.layers.find((l) => l.id === studioExtractTargetLayerId)
+        if (!layer) {
+            return undefined
+        }
+        if (layer.type === 'image') {
+            return layer.src
+        }
+        if (layer.type === 'generative_image') {
+            return layer.resultSrc ?? undefined
+        }
+        return undefined
+    }, [document.layers, studioExtractTargetLayerId])
     /** Initial modal source when opening from File, Add → AI Video, or a layer action (mount key resets form). */
     const [studioAnimateOpenContext, setStudioAnimateOpenContext] = useState<{
         sourceKind: StudioAnimateSourceKind
@@ -2302,6 +2321,19 @@ export default function AssetEditor() {
         [document.layers, selectedLayerId]
     )
 
+    const canExtractRasterLayers = useMemo(() => {
+        if (!selectedLayer) {
+            return false
+        }
+        if (isImageLayer(selectedLayer) && Boolean(selectedLayer.assetId?.trim())) {
+            return true
+        }
+        if (isGenerativeImageLayer(selectedLayer) && Boolean(selectedLayer.resultAssetId?.trim())) {
+            return true
+        }
+        return false
+    }, [selectedLayer])
+
     const showStudioActionsSection = useMemo(
         () =>
             Boolean(
@@ -2703,6 +2735,20 @@ export default function AssetEditor() {
             genUsageError !== null ||
             (genUsage !== null && !canGenerateFromUsage(genUsage)),
         [aiEnabled, genUsage, genUsageError]
+    )
+
+    /**
+     * Studio “Extract layers” uses unified AI credits (not generative editor monthly
+     * generations). Do not reuse `imageEditUsageBlocked` here or DAM stills would
+     * show Extract disabled when gen usage is exhausted but credits remain.
+     */
+    const studioLayerExtractionActionBlocked = useMemo(
+        () =>
+            !aiEnabled ||
+            (aiCreditStatus !== null &&
+                !aiCreditStatus.is_unlimited &&
+                aiCreditStatus.is_exceeded),
+        [aiEnabled, aiCreditStatus]
     )
 
     const damAssetById = useMemo(() => {
@@ -4667,6 +4713,35 @@ export default function AssetEditor() {
         [aiEnabled, compositionId, compositionIdFromUrl, compositionBootstrapping, editorConfirm],
     )
 
+    /** Same gating as {@link openStudioAnimateModal} — do not require a resolved id on the button; explain on click. */
+    const openStudioExtractLayersModal = useCallback(() => {
+        if (!aiEnabled) {
+            setActivityToast('AI features are disabled for this workspace.')
+            return
+        }
+        const cid = resolveNumericCompositionIdForStudioApi(compositionIdRef, compositionIdFromUrlRef)
+        if (!selectedLayerId) {
+            return
+        }
+        if (!cid) {
+            if (compositionIdFromUrl && compositionBootstrapping) {
+                setActivityToast('Still loading your composition…')
+                return
+            }
+            void editorConfirm({
+                title: 'Save your composition first',
+                message:
+                    'Save this design so we can run Extract layers on the server, then use this button again.',
+                confirmText: 'OK',
+                variant: 'info',
+                showCancel: false,
+            })
+            return
+        }
+        setStudioExtractTargetLayerId(selectedLayerId)
+        setStudioExtractLayersModalOpen(true)
+    }, [aiEnabled, compositionIdFromUrl, compositionBootstrapping, editorConfirm, selectedLayerId])
+
     const openStudioAnimateFromAddLayer = useCallback(() => {
         const doc = documentRef.current
         const selected =
@@ -5398,6 +5473,28 @@ export default function AssetEditor() {
         setSelectedLayerId(null)
         setEditingTextLayerId(null)
     }, [selectedLayerId])
+
+    useEffect(() => {
+        const isTypingTarget = () => {
+            const a = globalThis.document.activeElement
+            if (!a) return false
+            const tag = a.tagName
+            if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true
+            if ((a as HTMLElement).isContentEditable) return true
+            return false
+        }
+        const onKeyDown = (e: KeyboardEvent) => {
+            if (uiMode !== 'edit' || editingTextLayerId || isTypingTarget() || !selectedLayerId) {
+                return
+            }
+            if (e.key === 'Delete' || e.key === 'Backspace') {
+                e.preventDefault()
+                deleteSelectedLayer()
+            }
+        }
+        window.addEventListener('keydown', onKeyDown)
+        return () => window.removeEventListener('keydown', onKeyDown)
+    }, [deleteSelectedLayer, editingTextLayerId, selectedLayerId, uiMode])
 
     const bringSelectedToFront = useCallback(() => {
         if (!selectedLayerId) {
@@ -8091,6 +8188,9 @@ export default function AssetEditor() {
         return () => window.removeEventListener('keydown', onKey)
     }, [folderMenuOpen])
 
+    const studioExtractModalCompositionId =
+        resolveNumericCompositionIdForStudioApi(compositionIdRef, compositionIdFromUrlRef) ?? null
+
     return (
         // `dark` is forced so every `dark:*` rule inside the editor fires regardless of
         // the user's OS preference or the top-level html class. On staging the html root
@@ -8700,6 +8800,18 @@ export default function AssetEditor() {
                                             <div className="flex items-center justify-between">
                                                 <span className="text-gray-300">Deselect</span>
                                                 <kbd className="rounded bg-gray-700 px-1.5 py-0.5 text-[10px] font-medium text-gray-300 ring-1 ring-gray-600">Esc</kbd>
+                                            </div>
+                                            <div className="flex items-center justify-between gap-2">
+                                                <span className="text-gray-300">Delete selected layer</span>
+                                                <span className="flex shrink-0 items-center gap-1">
+                                                    <kbd className="rounded bg-gray-700 px-1.5 py-0.5 text-[10px] font-medium text-gray-300 ring-1 ring-gray-600">
+                                                        Delete
+                                                    </kbd>
+                                                    <span className="text-gray-500">/</span>
+                                                    <kbd className="rounded bg-gray-700 px-1.5 py-0.5 text-[10px] font-medium text-gray-300 ring-1 ring-gray-600">
+                                                        Backspace
+                                                    </kbd>
+                                                </span>
                                             </div>
                                         </div>
                                     </div>
@@ -10463,6 +10575,26 @@ export default function AssetEditor() {
                         }}
                     />
                 )}
+                {studioExtractLayersModalOpen && studioExtractModalCompositionId && studioExtractTargetLayerId && (
+                    <StudioExtractLayersModal
+                        open
+                        compositionId={studioExtractModalCompositionId}
+                        layerId={studioExtractTargetLayerId}
+                        sourceImageUrl={studioExtractSourceImageUrl}
+                        onClose={() => {
+                            setStudioExtractLayersModalOpen(false)
+                            setStudioExtractTargetLayerId(null)
+                        }}
+                        onDocumentApplied={(doc, { newLayerIds }) => {
+                            setDocument(doc)
+                            setLastSavedSerialized(JSON.stringify(doc))
+                            if (newLayerIds.length > 0) {
+                                setSelectedLayerId(newLayerIds[newLayerIds.length - 1] ?? null)
+                            }
+                        }}
+                        onCreditsMayHaveChanged={() => void refreshAiCreditStatus()}
+                    />
+                )}
                 {studioAnimationDetailJobId && (
                     <StudioAnimationJobDetailDialog
                         open
@@ -10748,6 +10880,79 @@ export default function AssetEditor() {
                                     railActive={studioPropertiesSectionActive === 'element'}
                                 >
                                     <div id="jp-element-panel" className="space-y-3">
+                                    {isGenerativeImageLayer(selectedLayer) && (
+                                        <div className="space-y-2">
+                                            <div
+                                                className={
+                                                    studioElementPanelNarrow
+                                                        ? 'flex flex-col gap-1.5'
+                                                        : canExtractRasterLayers
+                                                          ? 'grid grid-cols-2 gap-1.5 sm:grid-cols-3'
+                                                          : 'grid grid-cols-2 gap-1.5'
+                                                }
+                                            >
+                                                <button
+                                                    type="button"
+                                                    onClick={() =>
+                                                        window.requestAnimationFrame(() => {
+                                                            window.document
+                                                                .getElementById('jp-studio-actions-generative')
+                                                                ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                                                        })
+                                                    }
+                                                    className="flex min-h-[2.5rem] items-center justify-center gap-1.5 rounded-md border border-violet-500/35 bg-violet-950/30 px-2 py-2 text-[10px] font-semibold text-violet-100 transition-colors hover:border-violet-400/50 hover:bg-violet-900/30"
+                                                >
+                                                    <SparklesIcon className="h-3.5 w-3.5 shrink-0 text-violet-200" aria-hidden />
+                                                    Generate / Refine
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    disabled={selectedLayer.locked || !aiEnabled}
+                                                    onClick={() =>
+                                                        openStudioAnimateModal({
+                                                            sourceKind: 'layer_isolated',
+                                                            layerId: selectedLayer.id,
+                                                        })
+                                                    }
+                                                    className="flex min-h-[2.5rem] items-center justify-center gap-1.5 rounded-md border border-violet-700/50 bg-violet-950/30 px-2 py-2 text-[10px] font-semibold text-violet-100 transition-colors hover:border-violet-500/70 hover:bg-violet-900/40 disabled:cursor-not-allowed disabled:opacity-45"
+                                                    title={!aiEnabled ? 'AI is disabled for this workspace' : 'Queue still → video (AI)'}
+                                                >
+                                                    <span className="flex items-center gap-0.5" aria-hidden>
+                                                        <FilmIcon className="h-3.5 w-3.5" />
+                                                        <SparklesIcon className="h-3 w-3" />
+                                                    </span>
+                                                    Still to video
+                                                </button>
+                                                {canExtractRasterLayers && (
+                                                    <button
+                                                        type="button"
+                                                        disabled={
+                                                            selectedLayer.locked ||
+                                                            !aiEnabled ||
+                                                            studioExtractLayersModalOpen
+                                                        }
+                                                        onClick={() => void openStudioExtractLayersModal()}
+                                                        className="flex min-h-[2.5rem] items-center justify-center gap-1.5 rounded-md border border-violet-500/35 bg-violet-950/25 px-2 py-2 text-[10px] font-semibold text-violet-100/95 transition-colors hover:border-violet-400/45 hover:bg-violet-900/35 disabled:cursor-not-allowed disabled:opacity-50"
+                                                        title="Separate the subject into cutout layers (AI)"
+                                                    >
+                                                        <SparklesIcon className="h-3.5 w-3.5 shrink-0 text-violet-200" aria-hidden />
+                                                        Extract layers
+                                                    </button>
+                                                )}
+                                            </div>
+                                            {canExtractRasterLayers && (
+                                                <p className="text-[9px] leading-snug text-gray-500">
+                                                    Extract layers uses AI masks to split visible objects into cutouts. It
+                                                    does not recover original Photoshop layers.
+                                                </p>
+                                            )}
+                                            {canExtractRasterLayers && studioLayerExtractionActionBlocked && (
+                                                <p className="text-[9px] text-amber-300/90">
+                                                    AI is off for this workspace, or workspace AI credits are exhausted.
+                                                </p>
+                                            )}
+                                        </div>
+                                    )}
                                     {isImageLayer(selectedLayer) && (
                                         <>
                                         <div className="space-y-2">
@@ -10755,7 +10960,9 @@ export default function AssetEditor() {
                                                 className={
                                                     studioElementPanelNarrow
                                                         ? 'flex flex-col gap-1.5'
-                                                        : 'grid grid-cols-3 gap-1.5'
+                                                        : canExtractRasterLayers
+                                                          ? 'grid grid-cols-2 gap-1.5 sm:grid-cols-4'
+                                                          : 'grid grid-cols-3 gap-1.5'
                                                 }
                                             >
                                             <button
@@ -10800,8 +11007,34 @@ export default function AssetEditor() {
                                                 </span>
                                                 Still to video
                                             </button>
+                                            {canExtractRasterLayers && (
+                                                <button
+                                                    id="jp-element-extract-layers"
+                                                    type="button"
+                                                    disabled={
+                                                        selectedLayer.locked || !aiEnabled || studioExtractLayersModalOpen
+                                                    }
+                                                    onClick={() => void openStudioExtractLayersModal()}
+                                                    className="flex min-h-[2.5rem] items-center justify-center gap-1.5 rounded-md border border-violet-500/35 bg-violet-950/25 px-2 py-2 text-[10px] font-semibold text-violet-100/95 transition-colors hover:border-violet-400/45 hover:bg-violet-900/35 disabled:cursor-not-allowed disabled:opacity-50"
+                                                    title="Separate the subject into cutout layers (AI)"
+                                                >
+                                                    <SparklesIcon className="h-3.5 w-3.5 shrink-0 text-violet-200" aria-hidden />
+                                                    Extract layers
+                                                </button>
+                                            )}
                                             </div>
                                         </div>
+                                        {canExtractRasterLayers && (
+                                            <p className="text-[9px] leading-snug text-gray-500">
+                                                Extract layers uses AI masks to split visible objects into cutouts. It
+                                                does not recover original Photoshop layers.
+                                            </p>
+                                        )}
+                                        {canExtractRasterLayers && studioLayerExtractionActionBlocked && (
+                                            <p className="text-[9px] text-amber-300/90">
+                                                AI is off for this workspace, or workspace AI credits are exhausted.
+                                            </p>
+                                        )}
                                         <div id="jp-element-ai-image" className="scroll-mt-1">
                                         <StudioSmartActionCard
                                             title="AI image editing"
@@ -13211,6 +13444,7 @@ export default function AssetEditor() {
                                     )}
 
                                     {isGenerativeImageLayer(selectedLayer) && (
+                                        <div id="jp-studio-actions-generative" className="scroll-mt-1">
                                         <StudioSmartActionCard
                                             title="Generate / Refine"
                                             icon={<SparklesIcon className="h-5 w-5" aria-hidden />}
@@ -13791,6 +14025,7 @@ export default function AssetEditor() {
                                         )}
                                     </div>
                                         </StudioSmartActionCard>
+                                        </div>
                                     )}
                                     </div>
                                 </StudioPanelGroup>

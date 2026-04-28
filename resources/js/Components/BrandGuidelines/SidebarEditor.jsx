@@ -1,8 +1,11 @@
 import { useState, useCallback } from 'react'
-import { ChevronDownIcon } from '@heroicons/react/24/outline'
+import { ChevronDownIcon, ArrowUturnLeftIcon } from '@heroicons/react/24/outline'
 import { useSidebarEditor } from './SidebarEditorContext'
 import SectionEditor from './SectionEditor'
 import SelectControl from './controls/SelectControl'
+import PageThemeControls from './PageThemeControls'
+import GuidelinesLogoBlockPanel from './GuidelinesLogoBlockPanel'
+import { isSectionOverridden, hasPageThemeOverrides } from './brandGuidelinesPresentationModel'
 
 /** Shared accordion surface: collapsed vs expanded (indigo matches app primary actions). */
 function accordionSurface(expanded, muted) {
@@ -49,7 +52,67 @@ export default function SidebarEditor({ sections = [] }) {
         setOpenSections((prev) => ({ ...prev, [id]: !prev[id] }))
     }, [])
 
+    const confirmResetEntirePage = useCallback(() => {
+        if (typeof window === 'undefined') return
+        if (
+            window.confirm(
+                'Reset entire page to AI? This clears page theme, all sections, and all block overrides for these guidelines.',
+            )
+        ) {
+            ctx?.resetAll()
+        }
+    }, [ctx])
+
     if (!ctx?.isEditing) return null
+
+    const t = ctx.customizeTarget
+
+    if (t?.level === 'block' && t.sectionId && t.blockId) {
+        return (
+            <div
+                className="fixed top-0 right-0 bottom-0 w-[340px] max-w-[100vw] bg-white border-l border-gray-200 shadow-2xl z-[60] flex flex-col transform transition-transform duration-300 ease-out"
+                style={{ transform: ctx.isEditing ? 'translateX(0)' : 'translateX(100%)' }}
+            >
+                <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-100 bg-gray-50/80">
+                    <button
+                        type="button"
+                        onClick={() => ctx.clearCustomizeTarget?.()}
+                        className="p-1 text-gray-500 hover:text-gray-800 rounded-md hover:bg-gray-100"
+                        aria-label="Back to all settings"
+                    >
+                        <ArrowUturnLeftIcon className="h-4 w-4" />
+                    </button>
+                    <h2 className="text-sm font-semibold text-gray-900">Customize</h2>
+                </div>
+                <div className="flex-1 overflow-y-auto px-3 py-3">
+                    {t.sectionId === 'sec-logo' && (
+                        <GuidelinesLogoBlockPanel
+                            sectionId="sec-logo"
+                            blockId={t.blockId}
+                            slot={t.slot || 'sm'}
+                        />
+                    )}
+                </div>
+                <div className="border-t border-gray-100 px-4 py-3 flex items-center justify-between gap-2 bg-gray-50/80">
+                    <button
+                        type="button"
+                        onClick={ctx.discardChanges}
+                        disabled={!ctx.hasUnsavedChanges}
+                        className="px-2.5 py-1.5 text-xs font-medium text-gray-600 border border-gray-200 rounded-md hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                        Discard
+                    </button>
+                    <button
+                        type="button"
+                        onClick={ctx.saveNow}
+                        className="px-3 py-1.5 text-xs font-semibold text-white bg-violet-600 rounded-md hover:bg-violet-500"
+                    >
+                        Save now
+                    </button>
+                </div>
+            </div>
+        )
+    }
 
     const scrollToSection = (id) => {
         const el = document.getElementById(id)
@@ -57,7 +120,7 @@ export default function SidebarEditor({ sections = [] }) {
     }
 
     return (
-        <div className="fixed top-0 right-0 bottom-0 w-[340px] bg-white border-l border-gray-200 shadow-2xl z-[60] flex flex-col transform transition-transform duration-300 ease-out"
+        <div className="fixed top-0 right-0 bottom-0 w-[340px] max-w-[100vw] bg-white border-l border-gray-200 shadow-2xl z-[60] flex flex-col transform transition-transform duration-300 ease-out"
             style={{ transform: ctx.isEditing ? 'translateX(0)' : 'translateX(100%)' }}
         >
             {/* Header */}
@@ -85,10 +148,15 @@ export default function SidebarEditor({ sections = [] }) {
                         aria-expanded={globalOpen}
                         className="w-full flex items-center justify-between gap-2 px-3 py-2.5 text-left rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2"
                     >
-                        <span
-                            className={`text-xs font-semibold uppercase tracking-wider ${globalOpen ? 'text-indigo-900' : 'text-gray-600'}`}
-                        >
-                            Global Settings
+                        <span className="flex items-center gap-1.5 min-w-0">
+                            <span
+                                className={`text-xs font-semibold uppercase tracking-wider ${globalOpen ? 'text-indigo-900' : 'text-gray-600'}`}
+                            >
+                                Global Settings
+                            </span>
+                            {hasPageThemeOverrides(ctx.draftOverrides?.global) && (
+                                <span className="text-[8px] font-semibold uppercase tracking-wide text-amber-800/90 bg-amber-50 ring-1 ring-amber-200/80 rounded px-1 py-0.5 shrink-0">Theme</span>
+                            )}
                         </span>
                         <ChevronDownIcon
                             className={`h-4 w-4 flex-shrink-0 transition-transform duration-200 ${globalOpen ? 'rotate-180 text-indigo-600' : 'text-gray-400'}`}
@@ -97,6 +165,7 @@ export default function SidebarEditor({ sections = [] }) {
                     </button>
                     {globalOpen && (
                         <div className="px-3 pb-3 pt-3 space-y-3 border-t border-indigo-100/90">
+                            <PageThemeControls />
                             <SelectControl
                                 label="Style"
                                 value={ctx.draftPresentation?.style || 'clean'}
@@ -128,6 +197,7 @@ export default function SidebarEditor({ sections = [] }) {
                 {/* Section Editors */}
                 {sections.map((sec) => {
                     const sectionHidden = ctx.draftOverrides?.sections?.[sec.id]?.visible === false
+                    const sectionCustom = isSectionOverridden(ctx.draftOverrides?.sections, sec.id)
                     const isOpen = !!openSections[sec.id]
                     const surface = accordionSurface(isOpen, sectionHidden && !isOpen)
                     return (
@@ -147,6 +217,11 @@ export default function SidebarEditor({ sections = [] }) {
                                     >
                                         {sec.label}
                                     </span>
+                                    {sectionCustom && (
+                                        <span className="flex-shrink-0 text-[8px] font-semibold uppercase tracking-wide text-amber-800/90 bg-amber-50 ring-1 ring-amber-200/80 rounded px-1 py-0.5" title="Section has presentation overrides (AI default in page content is unchanged)">
+                                            Edited
+                                        </span>
+                                    )}
                                     {sectionHidden && (
                                         <span className="flex-shrink-0 rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-amber-800 bg-amber-100 ring-1 ring-amber-200/80">
                                             Hidden
@@ -168,15 +243,31 @@ export default function SidebarEditor({ sections = [] }) {
                 })}
             </div>
 
+            <p className="px-3 pb-1 text-[9px] text-gray-500 leading-relaxed max-w-full">
+                Preview updates as you edit. Nothing is stored in the brand until you click <strong>Save</strong>.
+                <strong> Discard</strong> reverts the draft to your last clean snapshot (when you opened Customize, or right after a successful Save).
+                <strong> Reset</strong> only changes the local draft until you save.
+            </p>
+
             {/* Footer */}
-            <div className="border-t border-gray-100 px-4 py-3 flex items-center justify-between bg-gray-50/80">
-                <button
-                    type="button"
-                    onClick={ctx.resetAll}
-                    className="text-xs text-gray-400 hover:text-red-500 font-medium"
-                >
-                    Reset All
-                </button>
+            <div className="border-t border-gray-100 px-4 py-3 flex flex-wrap items-center justify-between gap-2 bg-gray-50/80">
+                <div className="flex items-center gap-2 min-w-0">
+                    <button
+                        type="button"
+                        onClick={ctx.discardChanges}
+                        disabled={!ctx.hasUnsavedChanges}
+                        className="px-2.5 py-1.5 text-xs font-medium text-gray-600 border border-gray-200 rounded-md hover:bg-white disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                        Discard
+                    </button>
+                    <button
+                        type="button"
+                        onClick={confirmResetEntirePage}
+                        className="text-xs text-amber-800/90 hover:text-amber-950 font-medium"
+                    >
+                        Reset entire page
+                    </button>
+                </div>
                 <button
                     type="button"
                     onClick={ctx.saveNow}

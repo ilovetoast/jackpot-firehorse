@@ -51,7 +51,7 @@ export default function BrandSwitchModal({ onClose, context }) {
                         <div className="flex items-center gap-3 p-4 rounded-xl bg-white/[0.04] border border-white/[0.08]">
                             <div
                                 className="h-9 w-9 rounded-lg flex items-center justify-center text-sm font-semibold text-white"
-                                style={{ background: `linear-gradient(135deg, ${theme?.colors?.primary || '#6366f1'}CC, ${theme?.colors?.secondary || '#8b5cf6'}88)` }}
+                                style={{ background: `linear-gradient(135deg, ${theme?.colors?.primary || '#7c3aed'}CC, ${theme?.colors?.secondary || '#8b5cf6'}88)` }}
                             >
                                 {currentBrands.name?.charAt(0)?.toUpperCase()}
                             </div>

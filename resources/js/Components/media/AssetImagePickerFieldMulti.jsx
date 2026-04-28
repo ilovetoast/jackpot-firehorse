@@ -118,7 +118,7 @@ export default function AssetImagePickerFieldMulti({
           <button
             type="button"
             onClick={() => setPickerOpen(true)}
-            className="flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-gray-300 bg-gray-50/50 hover:border-indigo-300 hover:bg-indigo-50/30 aspect-square transition-colors"
+            className="flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-gray-300 bg-gray-50/50 hover:border-violet-300 hover:bg-violet-50/30 aspect-square transition-colors"
           >
             <PhotoIcon className="w-8 h-8 text-gray-400" />
             <span className="mt-1 text-xs font-medium text-gray-500">Add</span>

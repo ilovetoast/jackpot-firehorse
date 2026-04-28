@@ -3,11 +3,11 @@ import { createPortal } from 'react-dom'
 import { arrayMove } from '@dnd-kit/sortable'
 import { ArrowPathIcon, Bars3Icon, CheckIcon, ChevronDownIcon, CloudArrowUpIcon, FunnelIcon, Squares2X2Icon, SparklesIcon, TrashIcon, XMarkIcon } from '@heroicons/react/24/outline'
 
-/** Custom checkbox: hidden native input + styled box with checkmark. variant="ai" uses purple for AI branding. */
+/** Custom checkbox: hidden native input + styled box with checkmark. variant="ai" matches workbench (Jackpot violet). */
 function StyledCheckbox({ id, name, checked, onChange, disabled, variant = 'default' }) {
-    const isAi = variant === 'ai'
-    const checkedClasses = isAi ? 'peer-checked:border-purple-600 peer-checked:bg-purple-600' : 'peer-checked:border-indigo-600 peer-checked:bg-indigo-600'
-    const focusClasses = isAi ? 'peer-focus:ring-purple-500/40' : 'peer-focus:ring-indigo-500/40'
+    void variant
+    const checkedClasses = 'peer-checked:border-violet-600 peer-checked:bg-violet-600'
+    const focusClasses = 'peer-focus:ring-violet-500/40'
     return (
         <span className="relative flex h-4 w-4 shrink-0">
             <input
@@ -682,16 +682,16 @@ export default function MetadataFieldModal({
                 />
 
                 {/* Modal */}
-                <div className="relative transform overflow-hidden rounded-xl bg-white text-left shadow-xl transition-all sm:my-8 sm:w-full sm:max-w-2xl">
+                <div className="relative flex min-h-0 max-h-[min(90vh,100dvh-2rem)] w-full transform flex-col overflow-hidden rounded-xl bg-white text-left shadow-xl transition-all sm:my-8 sm:max-w-2xl">
                     {/* Compact Header */}
-                    <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3 sm:px-5">
+                    <div className="flex flex-shrink-0 items-center justify-between border-b border-gray-200 px-4 py-3 sm:px-5">
                         <div className="flex items-center gap-3 min-w-0">
                             <h3 className="text-base font-semibold text-gray-900 truncate">
                                 {isEditing ? 'Edit Metadata Field' : 'Create Custom Metadata Field'}
                             </h3>
                             {!isEditing && customFieldsLimit && customFieldsLimit.max > 0 && (
                                 <span className={`flex-shrink-0 text-xs px-2 py-0.5 rounded-full ${
-                                    customFieldsLimit.can_create ? 'bg-indigo-50 text-indigo-700' : 'bg-red-50 text-red-700'
+                                    customFieldsLimit.can_create ? 'bg-violet-50 text-violet-700' : 'bg-red-50 text-red-700'
                                 }`}>
                                     {customFieldsLimit.current}/{customFieldsLimit.max}
                                 </span>
@@ -707,23 +707,26 @@ export default function MetadataFieldModal({
                         </button>
                     </div>
                     {isSystemField && isEditing && (
-                        <p className="px-4 py-2 text-xs text-amber-600 bg-amber-50 border-b border-amber-100">
-                            System fields: Field key and type cannot change. You can update AI eligibility, category
-                            visibility, and for select fields the option list when it appears below.
+                        <p className="border-b border-slate-200 bg-slate-50 px-4 py-2 text-xs text-slate-600">
+                            System field: key and type are fixed. You can change categories, visibility, and options
+                            (when shown).
                         </p>
                     )}
 
-                    {/* Form */}
-                    <form onSubmit={handleSubmit} className="px-4 py-4 sm:px-5 sm:py-5 max-h-[calc(100vh-12rem)] overflow-y-auto">
+                    <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
+                        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-5 sm:py-5">
                         {errors.error && (
                             <div className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-800">
                                 {errors.error}
                             </div>
                         )}
 
-                        <div className="space-y-4">
-                            {/* Display Name first (primary input); Field Key auto-syncs from it until manually edited */}
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div className="space-y-5">
+                            <div>
+                            <h4 className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                                Field basics
+                            </h4>
+                            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                                 <div>
                                     <label htmlFor="system_label" className="block text-xs font-medium text-gray-700 mb-1">
                                         Display Name <span className="text-red-500">*</span>
@@ -741,7 +744,7 @@ export default function MetadataFieldModal({
                                                 ...(!isEditing && !keyManuallyEdited && { key: toSnakeCase(label) }),
                                             }))
                                         }}
-                                        className="block w-full rounded-md border border-gray-300 py-1.5 px-2.5 text-sm placeholder-gray-400 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                                        className="block w-full rounded-md border border-gray-300 py-1.5 px-2.5 text-sm placeholder-gray-400 focus:border-violet-500 focus:ring-1 focus:ring-violet-500"
                                         placeholder="My Custom Field"
                                     />
                                     {errors.system_label && <p className="mt-1 text-xs text-red-600">{errors.system_label}</p>}
@@ -760,7 +763,7 @@ export default function MetadataFieldModal({
                                             setKeyManuallyEdited(true)
                                             setFormData({ ...formData, key: e.target.value })
                                         }}
-                                        className="block w-full rounded-md border border-gray-300 py-1.5 px-2.5 text-sm placeholder-gray-400 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50"
+                                        className="block w-full rounded-md border border-gray-300 py-1.5 px-2.5 text-sm placeholder-gray-400 focus:border-violet-500 focus:ring-1 focus:ring-violet-500 disabled:bg-gray-50"
                                         placeholder={isEditing ? "—" : "my_field"}
                                     />
                                     {!isEditing && <p className="mt-1 text-xs text-gray-500">Prefixed with custom__</p>}
@@ -788,9 +791,9 @@ export default function MetadataFieldModal({
                                             type="button"
                                             disabled={isEditing}
                                             onClick={() => setFormData({ ...formData, type: value, options: ['select', 'multiselect'].includes(value) ? [] : formData.options })}
-                                            className={`px-3 py-1.5 text-xs font-medium rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-1 disabled:opacity-50 disabled:cursor-not-allowed ${
+                                            className={`px-3 py-1.5 text-xs font-medium rounded-md focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-1 disabled:opacity-50 disabled:cursor-not-allowed ${
                                                 formData.type === value
-                                                    ? 'bg-indigo-600 text-white'
+                                                    ? 'bg-violet-600 text-white'
                                                     : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                                             }`}
                                         >
@@ -809,20 +812,23 @@ export default function MetadataFieldModal({
                                 </div>
                                 {errors.type && <p className="mt-1 text-xs text-red-600">{errors.type}</p>}
                             </div>
+                            </div>
 
-                            {/* Categories — compact */}
                             <div>
-                                <label className="block text-xs font-medium text-gray-700 mb-1">
-                                    Categories <span className="text-red-500">*</span>
-                                </label>
+                                <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                                    Categories{' '}
+                                    <span className="text-red-500" aria-hidden>
+                                        *
+                                    </span>
+                                </h4>
                                 {!isEditing && preselectedCategoryId && (
-                                    <p className="text-xs text-indigo-600 mb-1">Pre-selected from current view</p>
+                                    <p className="mb-1 text-xs text-violet-600">Pre-selected from the category you are editing.</p>
                                 )}
                                 <div className="relative" ref={categoryDropdownRef}>
                                         <button
                                             type="button"
                                             onClick={() => setIsCategoryDropdownOpen(!isCategoryDropdownOpen)}
-                                            className="relative w-full cursor-default rounded-md border border-gray-300 bg-white py-1.5 pl-2.5 pr-8 text-left text-sm text-gray-900 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                                            className="relative w-full cursor-default rounded-md border border-gray-300 bg-white py-1.5 pl-2.5 pr-8 text-left text-sm text-gray-900 focus:border-violet-500 focus:ring-1 focus:ring-violet-500"
                                         >
                                             <span className="block truncate">
                                                 {formData.selectedCategories.length > 0 
@@ -855,7 +861,7 @@ export default function MetadataFieldModal({
                                                                             type="checkbox"
                                                                             checked={isSelected}
                                                                             onChange={() => toggleCategorySelection(category.id)}
-                                                                            className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                                                            className="h-4 w-4 rounded border-gray-300 text-violet-600 focus:ring-violet-500"
                                                                         />
                                                                     </div>
                                                                     <div className="ml-3 flex flex-col">
@@ -869,7 +875,7 @@ export default function MetadataFieldModal({
                                                                         )}
                                                                     </div>
                                                                     {isSelected && (
-                                                                        <span className="absolute inset-y-0 right-0 flex items-center pr-4 text-indigo-600">
+                                                                        <span className="absolute inset-y-0 right-0 flex items-center pr-4 text-violet-600">
                                                                             <CheckIcon className="h-5 w-5" aria-hidden="true" />
                                                                         </span>
                                                                     )}
@@ -897,7 +903,7 @@ export default function MetadataFieldModal({
                                                                             type="checkbox"
                                                                             checked={isSelected}
                                                                             onChange={() => toggleCategorySelection(category.id)}
-                                                                            className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                                                            className="h-4 w-4 rounded border-gray-300 text-violet-600 focus:ring-violet-500"
                                                                         />
                                                                     </div>
                                                                     <div className="ml-3 flex flex-col">
@@ -911,7 +917,7 @@ export default function MetadataFieldModal({
                                                                         )}
                                                                     </div>
                                                                     {isSelected && (
-                                                                        <span className="absolute inset-y-0 right-0 flex items-center pr-4 text-indigo-600">
+                                                                        <span className="absolute inset-y-0 right-0 flex items-center pr-4 text-violet-600">
                                                                             <CheckIcon className="h-5 w-5" aria-hidden="true" />
                                                                         </span>
                                                                     )}
@@ -938,13 +944,13 @@ export default function MetadataFieldModal({
                                                 .map(category => (
                                                     <span
                                                         key={category.id}
-                                                        className="inline-flex items-center gap-1 rounded-md bg-indigo-50 px-2 py-1 text-xs font-medium text-indigo-700"
+                                                        className="inline-flex items-center gap-1 rounded-md bg-violet-50 px-2 py-1 text-xs font-medium text-violet-700"
                                                     >
                                                         {category.name}
                                                         <button
                                                             type="button"
                                                             onClick={() => toggleCategorySelection(category.id)}
-                                                            className="text-indigo-600 hover:text-indigo-800"
+                                                            className="text-violet-600 hover:text-violet-800"
                                                         >
                                                             <span className="sr-only">Remove</span>
                                                             <svg className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor">
@@ -962,18 +968,23 @@ export default function MetadataFieldModal({
                                 {errors.selectedCategories && <p className="mt-1 text-xs text-red-600">{errors.selectedCategories}</p>}
                             </div>
 
-                            {/* Options (for select/multiselect) — hidden for system fields with custom rendering */}
-                            {requiresOptions && formData.option_editing_restricted && (
-                                <div className="rounded-md bg-amber-50 border border-amber-200 p-4">
-                                    <p className="text-sm text-amber-800">
-                                        This field uses a system-managed display and does not support manual options.
+                            {requiresOptions && (
+                            <div>
+                                <h4 className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                                    Options
+                                </h4>
+                            {formData.option_editing_restricted && (
+                                <div className="rounded-md border border-amber-200 bg-amber-50/80 p-3">
+                                    <p className="text-sm text-amber-900/90">
+                                        This field uses a system display; options are not edited here.
                                     </p>
                                 </div>
                             )}
-                            {requiresOptions && !formData.option_editing_restricted && (
-                                <div className="rounded-md border border-gray-200 bg-gray-50/50 p-3">
-                                    <p className="text-xs font-medium text-gray-700 mb-1">
-                                        {formData.type === 'multiselect' ? 'Multi-Select' : 'Single Select'} — add options (one per line)
+                            {!formData.option_editing_restricted && (
+                                <div className="rounded-md border border-slate-200 bg-slate-50/50 p-3">
+                                    <p className="mb-2 text-xs text-slate-600">
+                                        {formData.type === 'multiselect' ? 'Multi-select' : 'Single select'} — one value per
+                                        line, or add rows below.
                                     </p>
                                     <div className="flex gap-2 flex-wrap items-end">
                                         <textarea
@@ -984,21 +995,20 @@ export default function MetadataFieldModal({
                                             }}
                                             placeholder={'high_quality\nmedium_quality\nlow_quality'}
                                             rows={2}
-                                            className="flex-1 min-w-[120px] block rounded-md border border-gray-300 py-1.5 px-2 text-sm placeholder-gray-400 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                                            className="flex-1 min-w-[120px] block rounded-md border border-gray-300 py-1.5 px-2 text-sm placeholder-gray-400 focus:border-violet-500 focus:ring-1 focus:ring-violet-500"
                                         />
                                         <button
                                             type="button"
                                             onClick={processBulkAdd}
                                             disabled={!bulkAddText.trim()}
-                                            className="rounded-md bg-indigo-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                                            className="rounded-md bg-violet-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-violet-500 disabled:opacity-50 disabled:cursor-not-allowed"
                                         >
                                             Add options
                                         </button>
                                         {optionError && <span className="text-xs text-red-600 w-full">{optionError}</span>}
                                     </div>
-                                    <p className="mt-1.5 text-xs text-gray-500">
-                                        You can save without clicking Add options — lines in the box are applied when you
-                                        save the field.
+                                    <p className="mt-1.5 text-xs text-slate-500">
+                                        Lines in the box are also applied when you save.
                                     </p>
                                     <div className="mt-3">
                                         <div className="rounded border border-gray-200 overflow-hidden bg-white">
@@ -1073,7 +1083,7 @@ export default function MetadataFieldModal({
                                                 if (v) setNewOption((prev) => ({ ...prev, value: toSnakeCase(v) }))
                                             }}
                                             placeholder="Value (snake_case)"
-                                            className="block w-32 rounded-md border border-gray-300 py-1 px-2 text-xs placeholder-gray-400 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                                            className="block w-32 rounded-md border border-gray-300 py-1 px-2 text-xs placeholder-gray-400 focus:border-violet-500 focus:ring-1 focus:ring-violet-500"
                                         />
                                         <input
                                             type="text"
@@ -1083,7 +1093,7 @@ export default function MetadataFieldModal({
                                                 setOptionError(null)
                                             }}
                                             placeholder="Label"
-                                            className="block flex-1 min-w-[80px] rounded-md border border-gray-300 py-1 px-2 text-xs placeholder-gray-400 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                                            className="block flex-1 min-w-[80px] rounded-md border border-gray-300 py-1 px-2 text-xs placeholder-gray-400 focus:border-violet-500 focus:ring-1 focus:ring-violet-500"
                                         />
                                         <button
                                             type="button"
@@ -1097,10 +1107,14 @@ export default function MetadataFieldModal({
                                     {errors.options && <p className="mt-2 text-sm text-red-600">{errors.options}</p>}
                                 </div>
                             )}
+                            </div>
+                            )}
 
-                            {/* Visibility — compact 2-column grid */}
                             <div>
-                                <label className="text-xs font-medium text-gray-700 mb-2 block">Visibility</label>
+                                <h4 className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                                    Behavior
+                                </h4>
+                                <label className="mb-2 block text-xs font-medium text-slate-600">Visibility</label>
                                 <fieldset>
                                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2">
                                         {!isFilterOnlyField && (
@@ -1161,15 +1175,13 @@ export default function MetadataFieldModal({
                                         )}
                                     </div>
                                 </fieldset>
-                            </div>
-
-                            {/* AI Suggestions — always show; explain when unavailable. Uses purple for AI branding. */}
+                                <p className="mb-1.5 mt-4 text-xs font-medium text-slate-600">AI &amp; suggestions</p>
                             {(() => {
                                 const aiAvailable = requiresOptions && formData.options.length > 0 || isTagsField
                                 const aiChecked = formData.ai_eligible
                                 return (
-                                    <div className="rounded-md border border-gray-200 bg-gray-50/50 px-3 py-2">
-                                        <label className={`flex items-center gap-2 py-1 ${aiAvailable ? 'cursor-pointer' : 'cursor-default'}`}>
+                                    <div className="rounded-md border border-slate-200 bg-slate-50/60 px-3 py-2">
+                                        <label className={`flex items-center gap-2 py-0.5 ${aiAvailable ? 'cursor-pointer' : 'cursor-default'}`}>
                                             <StyledCheckbox
                                                 id="ai_eligible"
                                                 name="ai_eligible"
@@ -1178,25 +1190,26 @@ export default function MetadataFieldModal({
                                                 disabled={!aiAvailable}
                                                 variant="ai"
                                             />
-                                            <SparklesIcon className={`h-4 w-4 flex-shrink-0 ${aiChecked ? 'text-purple-600' : aiAvailable ? 'text-purple-400' : 'text-gray-300'}`} />
+                                            <SparklesIcon className={`h-4 w-4 flex-shrink-0 ${aiChecked ? 'text-violet-600' : aiAvailable ? 'text-violet-500/80' : 'text-gray-300'}`} />
                                             <span className={`text-sm ${aiAvailable ? 'text-gray-900' : 'text-gray-500'}`}>
-                                                Allow AI Classification & Suggestions
+                                                AI classification &amp; suggestions
                                             </span>
                                         </label>
                                         {!aiAvailable && (
-                                            <p className="mt-0.5 text-xs text-gray-500 pl-6">
+                                            <p className="mt-0.5 pl-6 text-xs text-gray-500">
                                                 {requiresOptions && formData.options.length === 0
-                                                    ? 'Add options above to enable AI suggestions.'
-                                                    : 'AI suggestions only work with Select or Multi-Select fields that have predefined options.'}
+                                                    ? 'Add options above to enable this.'
+                                                    : 'Not available for this field type without predefined options.'}
                                             </p>
                                         )}
                                     </div>
                                 )
                             })()}
+                            </div>
+                        </div>
                         </div>
 
-                        {/* Actions */}
-                        <div className="mt-6 flex items-center justify-end gap-3 border-t border-gray-200 pt-4">
+                        <div className="flex flex-shrink-0 items-center justify-end gap-3 border-t border-slate-200 bg-white px-4 py-3 sm:px-5">
                             <button
                                 type="button"
                                 onClick={onClose}
@@ -1207,7 +1220,7 @@ export default function MetadataFieldModal({
                             <button
                                 type="submit"
                                 disabled={submitting || (!isEditing && customFieldsLimit && !customFieldsLimit.can_create)}
-                                className="inline-flex items-center gap-2 rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                                className="inline-flex items-center gap-2 rounded-md bg-violet-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-violet-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-600 disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                                 {submitting && (
                                     <ArrowPathIcon className="h-4 w-4 animate-spin" aria-hidden />

@@ -51,6 +51,26 @@ return [
         'secret' => env('STRIPE_SECRET'),
     ],
 
+    /** fal.ai (Studio SAM2 — base URL and model id from env, not hardcoded in services). */
+    'fal' => [
+        'key' => env('FAL_KEY'),
+        'api_base' => rtrim((string) env('FAL_API_BASE', 'https://fal.run'), '/'),
+        /** Used when the sync endpoint returns a queue request_id (poll until COMPLETED). */
+        'queue_base' => rtrim((string) env('FAL_QUEUE_BASE', 'https://queue.fal.run'), '/'),
+        'sam2_endpoint' => env('FAL_SAM2_ENDPOINT', 'https://fal.run/fal-ai/sam2/image'),
+        /** Optional Fal /models or /api/pricing look-ups for studio SAM cost estimate. */
+        'sam2_pricing_model_id' => (string) env('FAL_SAM2_PRICING_MODEL_ID', 'fal-ai/sam2/image'),
+    ],
+
+    'replicate' => [
+        'api_token' => env('REPLICATE_API_TOKEN'),
+    ],
+
+    'clipdrop' => [
+        'key' => env('CLIPDROP_API_KEY'),
+        'cleanup_endpoint' => env('CLIPDROP_CLEANUP_ENDPOINT', 'https://clipdrop-api.co/cleanup/v1'),
+    ],
+
     /*
     | Sales / inbound lead routing. `notify_to` is the inbox that receives
     | new public contact form and newsletter submissions. Leave SALES_NOTIFY_EMAIL

@@ -60,6 +60,14 @@ return [
             'report' => false,
         ],
 
+        /** Staged masks/previews for Studio “Extract layers” (ephemeral; cleaned up with sessions). */
+        'studio_layer_extraction' => [
+            'driver' => 'local',
+            'root' => storage_path('app/studio_layer_extraction'),
+            'throw' => false,
+            'report' => false,
+        ],
+
     ],
 
     /*

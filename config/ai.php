@@ -29,6 +29,21 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Photography focal point (vision, gpt-4o-mini)
+    |--------------------------------------------------------------------------
+    |
+    | Kill-switch and optional coupling to preferred (second-pass) thumbnails. Standard
+    | grid thumbnails are enough for vision; set require_preferred_thumbnails when ops
+    | want the admin UI to reflect preferred-thumbnail availability only.
+    |
+    */
+    'photography_focal_point' => [
+        'enabled' => (bool) env('AI_PHOTOGRAPHY_FOCAL_POINT_ENABLED', true),
+        'require_preferred_thumbnails' => (bool) env('FOCAL_POINT_AI_REQUIRE_PREFERRED_THUMBS', false),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Asset metadata & AI tag inference (Vision)
     |--------------------------------------------------------------------------
     |

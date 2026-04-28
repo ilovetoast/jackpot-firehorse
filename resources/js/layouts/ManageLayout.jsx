@@ -1,7 +1,11 @@
-import { Link, usePage } from '@inertiajs/react'
+import { usePage } from '@inertiajs/react'
 import AppHead from '../Components/AppHead'
 import AppNav from '../Components/AppNav'
 import AppFooter from '../Components/AppFooter'
+import BrandWorkbenchMasthead from '../components/brand-workspace/BrandWorkbenchMasthead'
+import WorkbenchLocalNav from '../components/brand-workspace/WorkbenchLocalNav'
+import { BRAND_WORKBENCH_CONTENT, WORKBENCH_ASIDE_WIDTH, workbenchPageColumnsClass } from '../components/brand-workspace/brandWorkspaceTokens'
+import WorkbenchSegmentedNav from '../components/brand-workspace/WorkbenchSegmentedNav'
 import { Squares2X2Icon, TagIcon, ListBulletIcon, RectangleStackIcon } from '@heroicons/react/24/outline'
 
 const MANAGE_CATEGORIES_HREF =
@@ -19,50 +23,40 @@ const SIDEBAR_ITEMS = [
 
 export default function ManageLayout({ children, title = 'Manage', activeSection = 'categories' }) {
     const { auth, tenant } = usePage().props
+    const brand = auth?.activeBrand
+    const company = auth?.activeCompany
+    const brandColor = brand?.primary_color || company?.primary_color
+    const canLinkCompany =
+        Array.isArray(auth?.effective_permissions) && auth.effective_permissions.includes('company_settings.view')
 
     return (
-        <div className="min-h-screen flex flex-col bg-gray-50">
+        <div className="flex min-h-screen flex-col bg-slate-50">
             <AppHead title={title} />
             <AppNav brand={auth?.activeBrand} tenant={tenant} />
 
             <div className="flex-1">
-                <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
-                    <div className="mb-6">
-                        <h1 className="text-3xl font-bold text-gray-900">Manage</h1>
-                        <p className="mt-2 text-sm text-gray-600">
-                            Configure categories, fields, tags, and controlled values for your brand library. On
-                            Categories, folder order and field switches save as you change them; dialogs that edit
-                            definitions have their own Save. Tags and Values use confirm for removals.
-                        </p>
-                    </div>
+                <div className={BRAND_WORKBENCH_CONTENT}>
+                    <BrandWorkbenchMasthead
+                        companyName={company?.name}
+                        brandName={brand?.name}
+                        canLinkCompany={canLinkCompany}
+                        companyHref={typeof route === 'function' ? route('companies.settings') : '/app/companies/settings'}
+                        title="Manage"
+                        description="Configure the library structure, categories, fields, tags, and controlled values for this brand."
+                        brandColor={brandColor}
+                    />
 
-                    <div className="flex flex-col lg:flex-row gap-8">
-                        <aside className="lg:w-56 flex-shrink-0">
-                            <nav className="sticky top-8 space-y-1" aria-label="Manage sections">
-                                {SIDEBAR_ITEMS.map((item) => {
-                                    const Icon = item.icon
-                                    const isActive = activeSection === item.id
-                                    return (
-                                        <Link
-                                            key={item.id}
-                                            href={item.href}
-                                            className={`flex w-full items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors ${
-                                                isActive
-                                                    ? 'bg-indigo-50 text-indigo-700'
-                                                    : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
-                                            }`}
-                                        >
-                                            <Icon
-                                                className={`h-5 w-5 shrink-0 ${isActive ? 'text-indigo-600' : 'text-gray-400'}`}
-                                            />
-                                            <span className={isActive ? 'font-medium text-gray-900' : ''}>{item.label}</span>
-                                        </Link>
-                                    )
-                                })}
-                            </nav>
+                    <div className={workbenchPageColumnsClass}>
+                        <WorkbenchSegmentedNav
+                            items={SIDEBAR_ITEMS}
+                            activeId={activeSection}
+                            ariaLabel="Manage sections"
+                        />
+                        <aside className={`hidden shrink-0 ${WORKBENCH_ASIDE_WIDTH} lg:block`}>
+                            <WorkbenchLocalNav items={SIDEBAR_ITEMS} activeId={activeSection} ariaLabel="Manage sections" />
                         </aside>
 
-                        <main className="flex-1 min-w-0">{children}</main>
+                        <main className="min-w-0 flex-1">{children}</main>
                     </div>
                 </div>
             </div>

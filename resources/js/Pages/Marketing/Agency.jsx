@@ -64,9 +64,9 @@ const TIERS = [
         threshold: '15+ activated clients',
         incubation: '180-day incubation window',
         extensions: 'Up to 180 days extension',
-        color: 'from-indigo-300/20 to-violet-400/10',
-        ring: 'ring-indigo-300/20',
-        text: 'text-indigo-200',
+        color: 'from-violet-300/20 to-violet-400/10',
+        ring: 'ring-violet-300/20',
+        text: 'text-violet-200',
     },
 ]
 
@@ -132,15 +132,15 @@ export default function MarketingAgency() {
             <section className="border-t border-white/[0.06] py-24 sm:py-28">
                 <div className="mx-auto max-w-5xl px-6 lg:px-8">
                     <div className="text-center mb-14">
-                        <p className="text-sm font-semibold uppercase tracking-[0.2em] text-indigo-400/90">Incubation</p>
+                        <p className="text-sm font-semibold uppercase tracking-[0.2em] text-violet-400/90">Incubation</p>
                         <h2 className="mt-3 font-display text-3xl font-bold text-white sm:text-4xl text-balance">From setup to handoff</h2>
                         <p className="mt-4 text-base text-white/40">Build out client workspaces on their target plan, then transfer when they're ready.</p>
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
                         {FLOW_STEPS.map((s) => (
                             <div key={s.step} className="relative">
-                                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-indigo-500/20 ring-1 ring-indigo-400/30 mb-4">
-                                    <span className="text-sm font-bold text-indigo-300">{s.step}</span>
+                                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-violet-500/20 ring-1 ring-violet-400/30 mb-4">
+                                    <span className="text-sm font-bold text-violet-300">{s.step}</span>
                                 </div>
                                 <h3 className="text-base font-semibold text-white">{s.title}</h3>
                                 <p className="mt-2 text-sm text-white/40 leading-relaxed">{s.description}</p>

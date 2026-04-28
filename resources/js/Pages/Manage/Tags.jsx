@@ -1,6 +1,8 @@
 import { Link } from '@inertiajs/react'
 import ManageLayout from '../../layouts/ManageLayout'
 import ManageTagsWorkspace from '../../Components/Manage/ManageTagsWorkspace'
+import { WorkbenchPageIntro } from '../../components/brand-workspace/workbenchPatterns'
+import { productButtonPrimary } from '../../components/brand-workspace/brandWorkspaceTokens'
 
 export default function ManageTags({
     brand,
@@ -20,15 +22,14 @@ export default function ManageTags({
     return (
         <ManageLayout title="Tags — Manage" activeSection="tags">
             <div>
-                <h2 className="text-xl font-semibold text-gray-900">Tags</h2>
-                <p className="mt-1 text-sm text-gray-500">
-                    Canonical tags on assets in {brand?.name ?? 'this brand'}. Remove mistyped or retired tags from every
-                    asset at once.
-                </p>
+                <WorkbenchPageIntro
+                    title="Tags"
+                    description={`Canonical tags on assets in ${brand?.name ?? 'this brand'}. Remove a tag everywhere it appears when you retire or fix a label.`}
+                />
 
                 {tag_filter === 'missing' && (
                     <div className="mt-6 space-y-4">
-                        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+                        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
                             <p className="font-medium text-amber-950">Assets missing tags</p>
                             <p className="mt-1 text-amber-900/90">
                                 {assets_missing_tags_count !== null ? (
@@ -44,15 +45,12 @@ export default function ManageTags({
                         </div>
                         {can_view_assets ? (
                             <div className="flex flex-wrap items-center gap-3">
-                                <Link
-                                    href={libraryHref}
-                                    className="inline-flex items-center rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500"
-                                >
+                                <Link href={libraryHref} className={`${productButtonPrimary} no-underline`}>
                                     Open library — missing tags
                                 </Link>
                                 <Link
                                     href={clearFilterHref}
-                                    className="text-sm font-medium text-gray-600 hover:text-gray-900"
+                                    className="text-sm font-medium text-slate-600 hover:text-slate-900"
                                 >
                                     Clear filter
                                 </Link>

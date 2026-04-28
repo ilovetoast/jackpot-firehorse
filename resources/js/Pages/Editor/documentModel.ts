@@ -141,6 +141,33 @@ export type ImageLayer = BaseLayer & {
     naturalWidth?: number
     naturalHeight?: number
     fit?: 'cover' | 'contain' | 'fill'
+    /** Provenance when this image layer was created from Studio “Extract layers (AI)”. */
+    studioLayerExtraction?: {
+        created_by?: 'ai_layer_extraction'
+        provider?: string
+        model?: string
+        extraction_session_id?: string
+        candidate_id?: string
+        source_layer_id?: string
+        source_asset_id?: string
+        root_source_layer_id?: string
+        parent_extraction_layer_id?: string | null
+        extraction_generation?: number
+        method?: string | null
+        bbox?: { x: number; y: number; width: number; height: number }
+        confidence?: number | null
+    }
+    /** Full-canvas background from extraction inpaint (optional; below cutout layers, above the source). */
+    studioLayerExtractionBackgroundFill?: {
+        created_by?: 'ai_layer_extraction_background_fill'
+        extraction_session_id?: string
+        source_layer_id?: string
+        source_asset_id?: string
+        mask_candidate_ids?: string[]
+        provider?: string
+        model?: string
+        inpaint_provider?: string
+    }
     /** AI image edit (instructional edits — does not mutate DAM asset; new URLs only). */
     aiEdit?: {
         prompt?: string
@@ -856,7 +883,7 @@ export function migrateDocumentIfNeeded(doc: DocumentModel): DocumentModel {
         mutated = true
     }
 
-    const nextLayers = doc.layers.map((layer) => {
+    const afterFillMigrations = doc.layers.map((layer) => {
         if (isFillLayer(layer) && layer.kind === 'text_boost') {
             if (layer.textBoostStyle && typeof layer.textBoostOpacity === 'number' && layer.textBoostSource) {
                 return layer
@@ -875,6 +902,18 @@ export function migrateDocumentIfNeeded(doc: DocumentModel): DocumentModel {
             return { ...layer, fillRole: 'cta_button' as const }
         }
         return layer
+    })
+
+    const nextLayers = afterFillMigrations.map((layer) => {
+        const normalized = normalizeImageLayerSrcAfterApiLoad(layer)
+        if (
+            layer.type === 'image' &&
+            normalized.type === 'image' &&
+            layer.src !== normalized.src
+        ) {
+            mutated = true
+        }
+        return normalized
     })
 
     if (!mutated) return doc
@@ -1134,9 +1173,12 @@ export function editorBridgeFileUrlForAssetId(assetId: string): string {
 }
 
 /**
- * Older saves sometimes stored thumbnail URLs in `src`; canvas must use /file or decode fails / looks wrong.
+ * Ensure image layers use the same-origin editor bridge for pixels (GET /app/api/assets/{id}/file).
+ * - Older saves sometimes stored thumbnail URLs in `src`.
+ * - API responses may embed absolute `APP_URL` while the app runs on another host (Sail, proxy, www);
+ *   when the path is the editor /file route, rewrite to the current window origin.
  */
-function normalizeImageLayerSrcAfterApiLoad(layer: Layer): Layer {
+export function normalizeImageLayerSrcAfterApiLoad(layer: Layer): Layer {
     if (layer.type !== 'image') {
         return layer
     }
@@ -1144,9 +1186,22 @@ function normalizeImageLayerSrcAfterApiLoad(layer: Layer): Layer {
     if (!assetId || typeof layer.src !== 'string') {
         return layer
     }
+    const bridge = editorBridgeFileUrlForAssetId(assetId)
     const s = layer.src
     if (s.includes('/thumbnail') || s.includes('thumbnail?style')) {
-        return { ...layer, src: editorBridgeFileUrlForAssetId(assetId) }
+        return { ...layer, src: bridge }
+    }
+    if (typeof window !== 'undefined' && (s.startsWith('http://') || s.startsWith('https://'))) {
+        try {
+            const u = new URL(s)
+            if (u.pathname.includes('/api/assets/') && u.pathname.endsWith('/file')) {
+                if (u.origin !== window.location.origin) {
+                    return { ...layer, src: bridge }
+                }
+            }
+        } catch {
+            // ignore bad URL
+        }
     }
     return layer
 }

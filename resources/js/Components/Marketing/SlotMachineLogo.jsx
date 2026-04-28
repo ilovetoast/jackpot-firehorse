@@ -23,17 +23,17 @@ const pick = () => SYM_KEYS[Math.floor(Math.random() * SYM_KEYS.length)]
 const pickNoCherry = () => NON_CHERRY_KEYS[Math.floor(Math.random() * NON_CHERRY_KEYS.length)]
 
 // Site brand colors (hardcoded so tenant theming never overrides the logo animation).
-const SITE_PRIMARY = '#6366f1'
-const SITE_PRIMARY_RGB = '99,102,241'
+const SITE_PRIMARY = '#7c3aed'
+const SITE_PRIMARY_RGB = '124,58,217'
 
-const PARTICLE_PALETTE = ['#818cf8', '#a5b4fc', '#c7d2fe', '#6366f1', '#4f46e5', '#fff']
+const PARTICLE_PALETTE = ['#8b5cf6', '#a78bfa', '#c4b5fd', '#7c3aed', '#5b21b6', '#fff']
 
 /**
  * Cycle sequence on the homepage:
  *   cycle 0 (mod 0) → 'random'   : intentionally incorrect spin – centered in the middle,
  *                                   the reels come to rest staggered/offset.
  *   cycle 1 (mod 1) → 'cherries' : success state – all cherries centered vertically,
- *                                   cells blink site-primary indigo with fireworks.
+ *                                   cells blink site-primary (violet) with fireworks.
  *   cycle 2 (mod 2) → 'jackpot'  : final resting pose – JACKPOT text, reels perfectly aligned.
  *
  * The first three spins play automatically as an intro. After cycle 2 the reels stop

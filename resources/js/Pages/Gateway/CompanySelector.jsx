@@ -61,7 +61,7 @@ export default function CompanySelector({ companies }) {
                     </div>
                 )}
                 {companies.map((company) => {
-                    const color = company.primary_color || theme?.colors?.primary || '#6366f1'
+                    const color = company.primary_color || theme?.colors?.primary || '#7c3aed'
                     return (
                         <button
                             key={company.id}

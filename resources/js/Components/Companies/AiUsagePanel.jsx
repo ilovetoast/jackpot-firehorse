@@ -137,7 +137,7 @@ export default function AiUsagePanel({
             <div className={`${className}`}>
                 <div className="flex items-center justify-center py-8">
                     <div className="flex items-center space-x-3">
-                        <div className="animate-spin rounded-full h-5 w-5 border-2 border-gray-300 border-t-indigo-600" />
+                        <div className="animate-spin rounded-full h-5 w-5 border-2 border-gray-300 border-t-violet-600" />
                         <div className="text-sm text-gray-500">Loading usage data...</div>
                     </div>
                 </div>
@@ -260,7 +260,7 @@ export default function AiUsagePanel({
                     <button
                         type="button"
                         onClick={goPrevMonth}
-                        className="inline-flex items-center justify-center rounded-md p-1.5 text-gray-500 hover:bg-gray-200 hover:text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-1"
+                        className="inline-flex items-center justify-center rounded-md p-1.5 text-gray-500 hover:bg-gray-200 hover:text-gray-700 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-1"
                         title="Previous month"
                         aria-label="Previous month"
                     >
@@ -277,7 +277,7 @@ export default function AiUsagePanel({
                             <button
                                 type="button"
                                 onClick={goToCurrentMonth}
-                                className="mt-1 text-xs text-indigo-600 hover:text-indigo-800 focus:outline-none focus:underline"
+                                className="mt-1 text-xs text-violet-600 hover:text-violet-800 focus:outline-none focus:underline"
                             >
                                 Back to current month
                             </button>
@@ -287,7 +287,7 @@ export default function AiUsagePanel({
                         type="button"
                         onClick={goNextMonth}
                         disabled={isCurrentMonth}
-                        className="inline-flex items-center justify-center rounded-md p-1.5 text-gray-500 hover:bg-gray-200 hover:text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-1 disabled:opacity-40 disabled:pointer-events-none"
+                        className="inline-flex items-center justify-center rounded-md p-1.5 text-gray-500 hover:bg-gray-200 hover:text-gray-700 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-1 disabled:opacity-40 disabled:pointer-events-none"
                         title={isCurrentMonth ? 'Current month' : 'Next month'}
                         aria-label={isCurrentMonth ? 'Current month' : 'Next month'}
                     >
@@ -298,7 +298,7 @@ export default function AiUsagePanel({
 
             {/* Unified credit pool (from API) */}
             {usageData.status?.credits_used != null && (
-                <div className="rounded-md border border-indigo-100 bg-indigo-50/50 p-4">
+                <div className="rounded-md border border-violet-100 bg-violet-50/50 p-4">
                     <p className="text-sm font-medium text-gray-900">Unified AI credits (this period)</p>
                     <p className="mt-1 text-sm text-gray-600">
                         {usageData.status.credits_used.toLocaleString()}
@@ -328,7 +328,7 @@ export default function AiUsagePanel({
                         return (
                             <div key={featureKey} className="rounded-md border border-gray-200 p-4">
                                 <div className="flex items-center mb-2">
-                                    <SparklesIcon className="h-5 w-5 text-indigo-500 mr-2" />
+                                    <SparklesIcon className="h-5 w-5 text-violet-500 mr-2" />
                                     <h4 className="text-sm font-medium text-gray-900">
                                         {featureLabels[featureKey] || featureKey}
                                     </h4>
@@ -385,7 +385,7 @@ export default function AiUsagePanel({
                         <div key={featureKey} className="rounded-md border border-gray-200 p-4">
                             <div className="flex items-center justify-between mb-3">
                                 <div className="flex items-center">
-                                    <SparklesIcon className="h-5 w-5 text-indigo-500 mr-2" />
+                                    <SparklesIcon className="h-5 w-5 text-violet-500 mr-2" />
                                     <h4 className="text-sm font-medium text-gray-900">
                                         {featureLabels[featureKey] || featureKey}
                                     </h4>
@@ -453,13 +453,13 @@ export default function AiUsagePanel({
                 if (p) return (p.calls ?? 0) === 0
                 return (usageData.status?.[key]?.usage || 0) === 0
             }) && (
-                <div className="rounded-md bg-blue-50 p-4">
+                <div className="rounded-md bg-violet-50 p-4 ring-1 ring-violet-100/80">
                     <div className="flex">
                         <div className="flex-shrink-0">
-                            <InformationCircleIcon className="h-5 w-5 text-blue-400" />
+                            <InformationCircleIcon className="h-5 w-5 text-violet-500" />
                         </div>
                         <div className="ml-3">
-                            <p className="text-sm text-blue-700">
+                            <p className="text-sm text-violet-900/90">
                                 {isCurrentMonth
                                     ? 'No AI usage recorded this month. Usage will appear here once AI features are used.'
                                     : 'No AI usage recorded for this period.'}

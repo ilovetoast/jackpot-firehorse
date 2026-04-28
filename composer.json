@@ -85,6 +85,13 @@
         "test:sail": [
             "./vendor/bin/sail test"
         ],
+        "migrate:sail": [
+            "./vendor/bin/sail artisan migrate"
+        ],
+        "test:studio-layer-extraction:sail": [
+            "./vendor/bin/sail artisan config:clear --ansi",
+            "./vendor/bin/sail artisan test tests/Feature/StudioLayerExtractionTest.php"
+        ],
         "test:db-fresh": [
             "bash scripts/test-db-fresh.sh"
         ],
