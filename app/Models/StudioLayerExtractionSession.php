@@ -51,6 +51,11 @@ class StudioLayerExtractionSession extends Model
         return $this->belongsTo(Composition::class, 'composition_id');
     }
 
+    public function tenant(): BelongsTo
+    {
+        return $this->belongsTo(Tenant::class, 'tenant_id');
+    }
+
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class, 'user_id');

@@ -1709,7 +1709,7 @@ export default function AssetEditor() {
         if (typeof window === 'undefined') return
         window.localStorage.setItem(ASSET_EDITOR_CANVAS_SECTION_KEY, canvasSectionOpen ? '1' : '0')
     }, [canvasSectionOpen])
-    const [propertiesElementPositioningOpen, setPropertiesElementPositioningOpen] = useState(false)
+    const [propertiesElementPositioningOpen, setPropertiesElementPositioningOpen] = useState(true)
     /** Raster (image / generative): X/Y/W/H collapsed by default; fit, quadrant, and rotation stay visible. */
     const [propertiesRasterNumericTransformOpen, setPropertiesRasterNumericTransformOpen] = useState(false)
     const [propertiesImageEditModelOpen, setPropertiesImageEditModelOpen] = useState(false)

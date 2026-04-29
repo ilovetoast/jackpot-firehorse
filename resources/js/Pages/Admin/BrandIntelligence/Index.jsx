@@ -2,6 +2,7 @@ import { Link, router } from '@inertiajs/react'
 import AppHead from '../../../Components/AppHead'
 import AppNav from '../../../Components/AppNav'
 import AppFooter from '../../../Components/AppFooter'
+import AdminAiServicesNav from '../../../Components/Admin/AdminAiServicesNav'
 
 function levelBadgeClass(level) {
     const l = (level || '').toLowerCase()
@@ -20,11 +21,9 @@ export default function BrandIntelligenceIndex({ auth, rows }) {
             <AppNav brand={auth?.activeBrand} tenant={null} />
             <main className="bg-slate-50">
                 <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
+                    <AdminAiServicesNav />
                     <div className="mb-6">
-                        <Link href="/app/admin" className="text-sm font-medium text-slate-500 hover:text-slate-700">
-                            ← Admin
-                        </Link>
-                        <h1 className="mt-2 text-2xl font-bold text-slate-900">Brand Intelligence</h1>
+                        <h1 className="text-2xl font-bold text-slate-900">Brand Intelligence</h1>
                         <p className="mt-1 text-sm text-slate-600">
                             Recent assets with EBI scores (developer / tuning view).
                         </p>

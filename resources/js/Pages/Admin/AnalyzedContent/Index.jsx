@@ -3,25 +3,32 @@ import { Link, usePage } from '@inertiajs/react'
 import AppNav from '../../../Components/AppNav'
 import AppFooter from '../../../Components/AppFooter'
 import AppHead from '../../../Components/AppHead'
-import { FilmIcon, SparklesIcon, PhotoIcon } from '@heroicons/react/24/outline'
+import { FilmIcon, SparklesIcon, PhotoIcon, RectangleStackIcon } from '@heroicons/react/24/outline'
+import AdminAiServicesNav from '../../../Components/Admin/AdminAiServicesNav'
 import VideoInsightRunDetailPanel from './VideoInsightRunDetailPanel'
 
 const TILES = [
     {
         name: 'Brand Intelligence',
-        description: 'EBI scores, breakdown, simulate (dev)',
+        description: 'EBI scores, asset alignment, simulate (dev)',
         href: '/app/admin/brand-intelligence',
         icon: SparklesIcon,
     },
     {
-        name: 'Editor / Studio video audit',
-        description: 'Canvas, presentation preview, Studio composition video — prompts, credits',
+        name: 'Generative audit (Editor & Studio)',
+        description: 'Canvas, presentation preview, composition video — prompts, credits, request/output',
         href: '/app/admin/ai/editor-image-audit',
         icon: PhotoIcon,
     },
     {
-        name: 'AI video analysis',
-        description: 'Library video insights — status, agent runs, troubleshooting',
+        name: 'Studio layer extraction',
+        description: 'Extract layers sessions — floodfill, Fal SAM, errors, session JSON',
+        href: '/app/admin/ai/studio-layer-extraction',
+        icon: RectangleStackIcon,
+    },
+    {
+        name: 'Library video insights',
+        description: 'This page — status counts, library table, agent runs, troubleshooting',
         href: '/app/admin/ai/analyzed-content',
         icon: FilmIcon,
         self: true,
@@ -67,19 +74,31 @@ export default function AdminAnalyzedContentIndex({
 
     return (
         <div className="min-h-full">
-            <AppHead title="AI content & analysis" suffix="Admin" />
+            <AppHead title="AI services hub" suffix="Admin" />
             <AppNav brand={auth?.activeBrand} tenant={null} />
             <main className="bg-slate-50">
                 <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+                    <div className="mb-6">
+                        <AdminAiServicesNav />
+                    </div>
                     <div className="mb-8">
-                        <h1 className="text-3xl font-bold tracking-tight text-slate-900">AI content &amp; analysis</h1>
+                        <h1 className="text-3xl font-bold tracking-tight text-slate-900">AI services hub</h1>
                         <p className="mt-2 max-w-3xl text-sm text-slate-600">
-                            Control panel for analyzed and AI-generated outputs. Use the tiles to open Brand Intelligence,
-                            editor image audit, or stay on this page for video insights monitoring.
+                            One place to jump between <strong>brand alignment</strong> (EBI), <strong>generative Studio / Editor</strong>{' '}
+                            usage, <strong>composite layer extraction</strong> (local + SAM), and <strong>library video AI</strong>{' '}
+                            (this page). Operations / export failures live under{' '}
+                            <a href="/app/admin/operations-center?tab=studio-exports" className="text-indigo-600 hover:text-indigo-500">
+                                Studio video exports
+                            </a>
+                            . Cost and run volume for agents also live in the{' '}
+                            <a href="/app/admin/ai" className="text-indigo-600 hover:text-indigo-500">
+                                AI Dashboard
+                            </a>
+                            .
                         </p>
                     </div>
 
-                    <div className="mb-8 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                    <div className="mb-8 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                         {TILES.map((item) => {
                             const Icon = item.icon
                             const inner = (

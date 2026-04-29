@@ -190,9 +190,9 @@ export default function AdminIndex({ companies: initialCompanies, users: initial
             tools: [
                 { name: 'AI Agent Health', icon: BoltIcon, description: stats ? `Failures (24h): ${stats.ai_agent_failures_24h ?? 0}` : 'Agent runs, conclusions, escalation', href: '/app/admin/ai-agents' },
                 {
-                    name: 'AI content & analysis',
+                    name: 'AI services hub',
                     icon: Squares2X2Icon,
-                    description: 'Brand Intelligence, editor audit, video insights monitor',
+                    description: 'Brand Intelligence, generative audit, layer extraction, library video insights',
                     href: '/app/admin/ai/analyzed-content',
                 },
                 ...(canViewAIDashboard ? [{ name: 'AI Dashboard', icon: BoltIcon, description: 'Observe and manage AI operations, view cost reports, and manage budgets', href: '/app/admin/ai' }] : []),

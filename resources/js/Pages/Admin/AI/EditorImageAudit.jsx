@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import AppNav from '../../../Components/AppNav'
 import AppFooter from '../../../Components/AppFooter'
 import AppHead from '../../../Components/AppHead'
+import AdminAiServicesNav from '../../../Components/Admin/AdminAiServicesNav'
 import {
     CheckCircleIcon,
     XCircleIcon,
@@ -287,21 +288,16 @@ export default function EditorImageAudit({ runs, filters, filterOptions }) {
 
     return (
         <div className="min-h-full">
-            <AppHead title="Editor & Studio video AI audit" suffix="Admin" />
+            <AppHead title="Editor & Studio generative AI audit" suffix="Admin" />
             <AppNav brand={auth.activeBrand} tenant={null} />
             <main className="bg-gray-50">
                 <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
+                    <div className="mb-2">
+                        <AdminAiServicesNav />
+                    </div>
                     {/* Header */}
                     <div className="mb-6">
-                        <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm mb-4">
-                            <Link href="/app/admin/ai" className="font-medium text-gray-500 hover:text-gray-700">
-                                ← AI Dashboard
-                            </Link>
-                            <Link href="/app/admin/ai/activity" className="font-medium text-gray-500 hover:text-gray-700">
-                                All AI activity
-                            </Link>
-                        </div>
-                        <h1 className="text-3xl font-bold tracking-tight text-gray-900">Editor &amp; Studio video AI audit</h1>
+                        <h1 className="text-3xl font-bold tracking-tight text-gray-900">Editor &amp; Studio generative AI audit</h1>
                         <p className="mt-2 text-sm text-gray-700">
                             Canvas text-to-image, canvas image edit, DAM <strong>presentation preview</strong>, and{' '}
                             <strong>Studio composition video</strong> (Kling, direct API) completions. Structured fields for images live in{' '}

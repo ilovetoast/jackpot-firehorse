@@ -3,6 +3,7 @@ import { usePermission } from '../../../hooks/usePermission'
 import { useState, useEffect } from 'react'
 import AppNav from '../../../Components/AppNav'
 import AppFooter from '../../../Components/AppFooter'
+import AdminAiServicesNav from '../../../Components/Admin/AdminAiServicesNav'
 import BudgetStatusBadge from '../../../Components/AI/BudgetStatusBadge'
 import CostTrendIndicator from '../../../Components/AI/CostTrendIndicator'
 import {
@@ -109,6 +110,10 @@ export default function AIDashboardIndex({ stats, environment, canManage, budget
                                 Environment: <span className="font-medium text-gray-900">{environment}</span>
                             </div>
                         </div>
+                    </div>
+
+                    <div className="mb-6">
+                        <AdminAiServicesNav />
                     </div>
 
                     {/* Summary Stats */}

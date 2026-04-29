@@ -527,6 +527,10 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
     Route::get('/admin/ai/analyzed-content', [\App\Http\Controllers\Admin\AdminAnalyzedContentController::class, 'index'])->name('admin.ai.analyzed-content');
     Route::get('/admin/ai/analyzed-content/video-insights/runs/{run}', [\App\Http\Controllers\Admin\AdminAnalyzedContentController::class, 'videoInsightRunDetail'])->name('admin.ai.analyzed-content.video-insight-run');
     Route::get('/admin/ai/analyzed-content/video-insights/assets/{asset}/frames', [\App\Http\Controllers\Admin\AdminAnalyzedContentController::class, 'videoInsightFrames'])->name('admin.ai.analyzed-content.video-insight-frames');
+    Route::get('/admin/ai/studio-layer-extraction', [\App\Http\Controllers\Admin\AdminStudioLayerExtractionController::class, 'index'])->name('admin.ai.studio-layer-extraction');
+    Route::get('/admin/ai/studio-layer-extraction/{session}', [\App\Http\Controllers\Admin\AdminStudioLayerExtractionController::class, 'show'])
+        ->where('session', '[0-9a-fA-F-]{36}')
+        ->name('admin.ai.studio-layer-extraction.show');
     Route::get('/admin/ai/editor-image-audit', [\App\Http\Controllers\Admin\AIDashboardController::class, 'editorImageAudit'])->name('admin.ai.editor-image-audit');
     Route::get('/admin/ai/studio-usage', [\App\Http\Controllers\Admin\AIDashboardController::class, 'studioUsage'])->name('admin.ai.studio-usage');
     Route::get('/admin/ai/models', [\App\Http\Controllers\Admin\AIDashboardController::class, 'models'])->name('admin.ai.models');

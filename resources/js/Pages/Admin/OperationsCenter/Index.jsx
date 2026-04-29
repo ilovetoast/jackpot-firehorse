@@ -3,6 +3,7 @@ import { Fragment, useState, useRef, useEffect } from 'react'
 import axios from 'axios'
 import AppNav from '../../../Components/AppNav'
 import AppFooter from '../../../Components/AppFooter'
+import AdminAiServicesNav from '../../../Components/Admin/AdminAiServicesNav'
 import AssetDetailModal from '../../../Components/Admin/AssetDetailModal'
 import {
     CheckCircleIcon,
@@ -422,8 +423,14 @@ export default function OperationsCenterIndex({
                     <h1 className="text-3xl font-bold tracking-tight text-gray-900">Operations Center</h1>
                     <p className="mt-2 text-sm text-gray-700">
                         Unified view of incidents, application errors, Studio composition export failures, queue, scheduler, and failed jobs.
-                        Data from system_incidents, application_error_events, studio_composition_video_export_jobs, and failed_jobs.
+                        Data from system_incidents, application_error_events, studio_composition_video_export_jobs, and failed_jobs. For
+                        generative and layer-extraction debugging, use the AI services nav below; export failures are only one part of
+                        Studio reliability.
                     </p>
+
+                    <div className="mt-6 text-gray-600">
+                        <AdminAiServicesNav />
+                    </div>
 
                     {/* Tabs */}
                     <div className="mt-6 border-b border-gray-200">
