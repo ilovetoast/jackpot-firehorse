@@ -1344,13 +1344,18 @@ function buildInsertArgsForStudioAnimationJob(
         outputAssetId,
         durationMs: endMs,
     }
+    /** Full-composition snapshot only — see {@link StudioAnimateCompositionModal} (not layer context / isolated). */
+    const isFullCompositionAnimation = job.source_strategy === 'composition_snapshot'
     return {
         assetId: outputAssetId,
         fileUrl: String(url),
         name,
         endMs,
-        /** Always add the clip; {@link handleInsertStudioAnimationAsVideoLayer} keeps the still layer (hidden). */
-        mode: 'add_back',
+        /**
+         * Full composition: put the clip on top so the MP4 is visible over text and other layers.
+         * Layer-driven runs stay behind so type and logos from the snapshot remain on top (modal copy).
+         */
+        mode: isFullCompositionAnimation ? 'add_front' : 'add_back',
         replaceLayerId: job.source_layer_id ?? undefined,
         provenance: prov,
     }
@@ -1705,6 +1710,8 @@ export default function AssetEditor() {
         window.localStorage.setItem(ASSET_EDITOR_CANVAS_SECTION_KEY, canvasSectionOpen ? '1' : '0')
     }, [canvasSectionOpen])
     const [propertiesElementPositioningOpen, setPropertiesElementPositioningOpen] = useState(false)
+    /** Raster (image / generative): X/Y/W/H collapsed by default; fit, quadrant, and rotation stay visible. */
+    const [propertiesRasterNumericTransformOpen, setPropertiesRasterNumericTransformOpen] = useState(false)
     const [propertiesImageEditModelOpen, setPropertiesImageEditModelOpen] = useState(false)
     const [propertiesMaskDetailsOpen, setPropertiesMaskDetailsOpen] = useState(false)
     const [propertiesVideoDetailsOpen, setPropertiesVideoDetailsOpen] = useState(false)
@@ -11699,35 +11706,60 @@ export default function AssetEditor() {
                                     <StudioDisclosureSection
                                         id="jp-element-positioning"
                                         title="Positioning & sizing"
-                                        subtitle="Placement, fit, and transform"
+                                        subtitle="Object fit, quadrant, rotation — exact X/Y/W/H below"
                                         variant="default"
                                         open={propertiesElementPositioningOpen}
                                         onOpenChange={setPropertiesElementPositioningOpen}
                                     >
                                     <div className="space-y-3">
-                                        {isImageLayer(selectedLayer) && (
+                                        {(isImageLayer(selectedLayer) || isGenerativeImageLayer(selectedLayer)) && (
                                             <div className="space-y-2">
-                                                <p className="text-[9px] font-semibold uppercase tracking-wider text-gray-500">
-                                                    Object fit
-                                                </p>
-                                                <StudioSegmentedControl
-                                                    aria-label="Object fit within layer bounds"
-                                                    value={selectedLayer.fit ?? 'cover'}
-                                                    disabled={selectedLayer.locked}
-                                                    onChange={(v) =>
-                                                        updateLayer(selectedLayer.id, (l) => {
-                                                            if (!isImageLayer(l)) {
-                                                                return l
+                                                <div className="flex flex-col gap-2 min-[380px]:flex-row min-[380px]:items-end min-[380px]:gap-2">
+                                                    <div className="min-w-0 flex-1 space-y-1.5">
+                                                        <p className="text-[9px] font-semibold uppercase tracking-wider text-gray-500">
+                                                            Object fit
+                                                        </p>
+                                                        <StudioSegmentedControl
+                                                            aria-label="Object fit within layer bounds"
+                                                            value={selectedLayer.fit ?? 'cover'}
+                                                            disabled={selectedLayer.locked}
+                                                            onChange={(v) =>
+                                                                updateLayer(selectedLayer.id, (l) => {
+                                                                    if (!isImageLayer(l) && !isGenerativeImageLayer(l)) {
+                                                                        return l
+                                                                    }
+                                                                    return { ...l, fit: v }
+                                                                })
                                                             }
-                                                            return { ...l, fit: v }
-                                                        })
-                                                    }
-                                                    segments={OBJECT_FIT_CHOICES.map((opt) => ({
-                                                        value: opt.value,
-                                                        label: opt.short,
-                                                        title: opt.title,
-                                                    }))}
-                                                />
+                                                            segments={OBJECT_FIT_CHOICES.map((opt) => ({
+                                                                value: opt.value,
+                                                                label: opt.short,
+                                                                title: opt.title,
+                                                            }))}
+                                                        />
+                                                    </div>
+                                                    <button
+                                                        type="button"
+                                                        disabled={selectedLayer.locked}
+                                                        title="Set the layer frame to the full document (same as canvas size). Use Object fit to control how the image fills that frame — this is not the “fit layer to image shape” action."
+                                                        aria-label="Fit layer frame to full canvas"
+                                                        onClick={() =>
+                                                            updateLayer(selectedLayer.id, (l) => ({
+                                                                ...l,
+                                                                transform: {
+                                                                    ...l.transform,
+                                                                    x: 0,
+                                                                    y: 0,
+                                                                    width: document.width,
+                                                                    height: document.height,
+                                                                },
+                                                            }))
+                                                        }
+                                                        className="shrink-0 rounded-md border border-white/[0.1] bg-gray-900/80 px-2.5 py-1.5 text-center text-[10px] font-medium text-gray-200 transition-colors hover:border-violet-500/40 hover:bg-violet-950/30 hover:text-violet-100 disabled:cursor-not-allowed disabled:opacity-50 min-[380px]:self-end min-[380px]:py-1.5"
+                                                    >
+                                                        Fit to canvas
+                                                    </button>
+                                                </div>
                                                 {/*
                                                   * Snap the layer shape back to the asset's aspect ratio.
                                                   */}
@@ -11753,7 +11785,7 @@ export default function AssetEditor() {
                                                                 disabled={selectedLayer.locked}
                                                                 onClick={() =>
                                                                     updateLayer(selectedLayer.id, (l) => {
-                                                                        if (!isImageLayer(l)) {
+                                                                        if (!isImageLayer(l) && !isGenerativeImageLayer(l)) {
                                                                             return l
                                                                         }
                                                                         const inw = l.naturalWidth ?? 0
@@ -11837,27 +11869,6 @@ export default function AssetEditor() {
                                                 )
                                             })()}
                                         </div>
-                                    <div>
-                                        <button
-                                            type="button"
-                                            disabled={selectedLayer.locked}
-                                            onClick={centerSelectedLayerInDocument}
-                                            title={
-                                                selectedLayer.locked
-                                                    ? 'Unlock the layer to move it'
-                                                    : 'Center this layer in the document frame (keeps size)'
-                                            }
-                                            aria-label={
-                                                selectedLayer.locked
-                                                    ? 'Center on canvas (locked)'
-                                                    : 'Center layer on canvas'
-                                            }
-                                            className="inline-flex w-full items-center justify-center gap-1.5 rounded-md border border-white/[0.08] bg-gray-950/50 px-2 py-1 text-[10px] font-medium text-gray-300 transition-colors hover:border-white/[0.12] hover:bg-white/[0.04] hover:text-gray-100 disabled:cursor-not-allowed disabled:opacity-50"
-                                        >
-                                            <ViewfinderCircleIcon className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                                            Center
-                                        </button>
-                                    </div>
                                     {(() => {
                                         const raw = selectedLayer.transform.rotation ?? 0
                                         const norm = ((Math.round(raw) % 360) + 360) % 360
@@ -11887,21 +11898,64 @@ export default function AssetEditor() {
                                             />
                                         )
                                     })()}
-                                        <div>
-                                            <p className="mb-1.5 text-[9px] font-semibold uppercase tracking-wider text-gray-500">
-                                                Size &amp; position
-                                            </p>
-                                            <StudioPrecisionTransformControls
-                                                layer={selectedLayer}
-                                                disabled={selectedLayer.locked}
-                                                onChangeXYWH={(patch) =>
-                                                    updateLayer(selectedLayer.id, (l) => ({
-                                                        ...l,
-                                                        transform: { ...l.transform, ...patch },
-                                                    }))
-                                                }
-                                            />
-                                        </div>
+                                    <div>
+                                        <button
+                                            type="button"
+                                            disabled={selectedLayer.locked}
+                                            onClick={centerSelectedLayerInDocument}
+                                            title={
+                                                selectedLayer.locked
+                                                    ? 'Unlock the layer to move it'
+                                                    : 'Center this layer in the document frame (keeps size)'
+                                            }
+                                            aria-label={
+                                                selectedLayer.locked
+                                                    ? 'Center on canvas (locked)'
+                                                    : 'Center layer on canvas'
+                                            }
+                                            className="inline-flex w-full items-center justify-center gap-1.5 rounded-md border border-white/[0.08] bg-gray-950/50 px-2 py-1 text-[10px] font-medium text-gray-300 transition-colors hover:border-white/[0.12] hover:bg-white/[0.04] hover:text-gray-100 disabled:cursor-not-allowed disabled:opacity-50"
+                                        >
+                                            <ViewfinderCircleIcon className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                                            Center
+                                        </button>
+                                    </div>
+                                        {isImageLayer(selectedLayer) || isGenerativeImageLayer(selectedLayer) ? (
+                                            <StudioDisclosureSection
+                                                id="jp-raster-numeric-transform"
+                                                title="Exact size & position"
+                                                subtitle="X, Y, width, height (px)"
+                                                variant="muted"
+                                                open={propertiesRasterNumericTransformOpen}
+                                                onOpenChange={setPropertiesRasterNumericTransformOpen}
+                                            >
+                                                <StudioPrecisionTransformControls
+                                                    layer={selectedLayer}
+                                                    disabled={selectedLayer.locked}
+                                                    onChangeXYWH={(patch) =>
+                                                        updateLayer(selectedLayer.id, (l) => ({
+                                                            ...l,
+                                                            transform: { ...l.transform, ...patch },
+                                                        }))
+                                                    }
+                                                />
+                                            </StudioDisclosureSection>
+                                        ) : (
+                                            <div>
+                                                <p className="mb-1.5 text-[9px] font-semibold uppercase tracking-wider text-gray-500">
+                                                    Size &amp; position
+                                                </p>
+                                                <StudioPrecisionTransformControls
+                                                    layer={selectedLayer}
+                                                    disabled={selectedLayer.locked}
+                                                    onChangeXYWH={(patch) =>
+                                                        updateLayer(selectedLayer.id, (l) => ({
+                                                            ...l,
+                                                            transform: { ...l.transform, ...patch },
+                                                        }))
+                                                    }
+                                                />
+                                            </div>
+                                        )}
                                     </div>
                                     </StudioDisclosureSection>
                                     <div className="space-y-3 border-t border-gray-800/60 pt-3">

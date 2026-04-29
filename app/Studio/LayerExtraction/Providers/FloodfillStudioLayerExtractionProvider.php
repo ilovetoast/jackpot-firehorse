@@ -34,6 +34,373 @@ final class FloodfillStudioLayerExtractionProvider implements StudioLayerExtract
 
     private const NOTES_COPY = 'Local mask detection. Results are editable cutout layers, not original Photoshop layers.';
 
+    /**
+     * When the source bitmap exceeds the local analysis pixel budget, downscale (Imagick) to fit the
+     * budget; floodfill + masks use the working size, then cutouts are mapped back to source dimensions.
+     *
+     * @return array{0: string, 1: int, 2: int, 3: int, 4: int} working binary, workW, workH, sourceW, sourceH
+     */
+    private function prepareImageBinaryForLocalAnalysis(string $binary, int $maxAnalysisPx): array
+    {
+        $maxAnalysisPx = max(200_000, $maxAnalysisPx);
+        $downscaleOversized = (bool) config('studio_layer_extraction.local_floodfill.downscale_oversized', true);
+        $dims = @getimagesizefromstring($binary);
+        if (! is_array($dims) || ($dims[0] ?? 0) < 2 || ($dims[1] ?? 0) < 2) {
+            throw new InvalidArgumentException('Unsupported or unreadable image for extraction.');
+        }
+        $sourceW = (int) $dims[0];
+        $sourceH = (int) $dims[1];
+        if ($sourceW * $sourceH <= $maxAnalysisPx) {
+            return [$binary, $sourceW, $sourceH, $sourceW, $sourceH];
+        }
+        if (! $downscaleOversized) {
+            throw new LocalExtractionSourceTooLargeException(
+                'This image is too large for local extraction.'
+            );
+        }
+        if (! extension_loaded('imagick') || ! class_exists(\Imagick::class)) {
+            throw new LocalExtractionSourceTooLargeException(
+                'This image is too large for local extraction. Install and enable the Imagick PHP extension, set STUDIO_LAYER_EXTRACTION_LOCAL_DOWNSCALE_OVERSIZED=false and raise STUDIO_LAYER_EXTRACTION_LOCAL_MAX_PIXELS, or use AI segmentation.'
+            );
+        }
+        $ratio = sqrt(($sourceW * $sourceH) / $maxAnalysisPx);
+        $nw = max(2, (int) floor($sourceW / $ratio));
+        $nh = max(2, (int) floor($sourceH / $ratio));
+        while ($nw * $nh > $maxAnalysisPx && $nw > 2) {
+            $nw--;
+        }
+        while ($nw * $nh > $maxAnalysisPx && $nh > 2) {
+            $nh--;
+        }
+        if ($nw < 2 || $nh < 2) {
+            throw new LocalExtractionSourceTooLargeException(
+                'This image is too large for local extraction (could not downscale to a safe size).'
+            );
+        }
+        try {
+            $im = new \Imagick;
+            $im->readImageBlob($binary);
+            $im->setImageColorspace(\Imagick::COLORSPACE_SRGB);
+            $im->stripImage();
+            $im->resizeImage($nw, $nh, \Imagick::FILTER_LANCZOS, 1, true);
+            $im->setImageFormat('png');
+            $out = $im->getImageBlob();
+            $im->clear();
+            $im->destroy();
+        } catch (\Throwable) {
+            throw new LocalExtractionSourceTooLargeException(
+                'This image is too large for local extraction (downscale failed). Try AI segmentation or a smaller file.'
+            );
+        }
+        if (! is_string($out) || $out === '') {
+            throw new LocalExtractionSourceTooLargeException(
+                'This image is too large for local extraction (downscale failed).'
+            );
+        }
+        $vd = @getimagesizefromstring($out);
+        $workW = (is_array($vd) && ($vd[0] ?? 0) >= 2) ? (int) $vd[0] : $nw;
+        $workH = (is_array($vd) && ($vd[1] ?? 0) >= 2) ? (int) $vd[1] : $nh;
+
+        return [$out, $workW, $workH, $sourceW, $sourceH];
+    }
+
+    /**
+     * @param  list<LayerExtractionCandidateDto>  $candidates
+     * @return list<LayerExtractionCandidateDto>
+     */
+    private function mapLayerExtractionCandidatesToSourceImage(
+        array $candidates,
+        int $workW,
+        int $workH,
+        int $sourceW,
+        int $sourceH
+    ): array {
+        if ($workW === $sourceW && $workH === $sourceH) {
+            return $candidates;
+        }
+        $sx = $sourceW / max(1, $workW);
+        $sy = $sourceH / max(1, $workH);
+        $out = [];
+        foreach ($candidates as $c) {
+            if (! $c instanceof LayerExtractionCandidateDto) {
+                continue;
+            }
+            $b = $c->bbox;
+            $nb = [
+                'x' => max(0, (int) floor($b['x'] * $sx)),
+                'y' => max(0, (int) floor($b['y'] * $sy)),
+                'width' => max(1, (int) ceil($b['width'] * $sx)),
+                'height' => max(1, (int) ceil($b['height'] * $sy)),
+            ];
+            $nb['width'] = min($sourceW - $nb['x'], $nb['width']);
+            $nb['height'] = min($sourceH - $nb['y'], $nb['height']);
+            $nb['x'] = min($nb['x'], $sourceW - 1);
+            $nb['y'] = min($nb['y'], $sourceH - 1);
+            $newB64 = $c->maskBase64;
+            if (is_string($newB64) && $newB64 !== '') {
+                $u = $this->upscaleMaskPngBase64ToDimensions($newB64, $workW, $workH, $sourceW, $sourceH);
+                if ($u !== null) {
+                    $newB64 = $u;
+                }
+            }
+            $meta = is_array($c->metadata) ? $c->metadata : [];
+            $meta = $this->remapPixelMetadataBetweenSpaces(
+                $meta,
+                $workW,
+                $workH,
+                $sourceW,
+                $sourceH
+            );
+            $meta['local_mask_analysis_dimensions'] = ['w' => $workW, 'h' => $workH];
+            $meta['local_mask_output_dimensions'] = ['w' => $sourceW, 'h' => $sourceH];
+            $out[] = new LayerExtractionCandidateDto(
+                id: $c->id,
+                label: $c->label,
+                confidence: $c->confidence,
+                bbox: $nb,
+                maskPath: $c->maskPath,
+                maskBase64: $newB64,
+                previewPath: $c->previewPath,
+                selected: $c->selected,
+                notes: $c->notes,
+                metadata: $meta,
+            );
+        }
+
+        return $out;
+    }
+
+    private function upscaleMaskPngBase64ToDimensions(
+        string $b64,
+        int $fromW,
+        int $fromH,
+        int $toW,
+        int $toH
+    ): ?string {
+        if ($fromW === $toW && $fromH === $toH) {
+            return $b64;
+        }
+        $raw = base64_decode($b64, true);
+        if (! is_string($raw) || $raw === '') {
+            return null;
+        }
+        if (extension_loaded('imagick') && class_exists(\Imagick::class)) {
+            try {
+                $im = new \Imagick;
+                $im->readImageBlob($raw);
+                $im->setImageFormat('png');
+                $im->resizeImage($toW, $toH, \Imagick::FILTER_LANCZOS, 1, true);
+                $blob = $im->getImageBlob();
+                $im->clear();
+                $im->destroy();
+                if (is_string($blob) && $blob !== '') {
+                    return base64_encode($blob);
+                }
+            } catch (\Throwable) {
+                // fall through to GD
+            }
+        }
+        if (! function_exists('imagecreatefromstring')) {
+            return null;
+        }
+        $gd = @imagecreatefromstring($raw);
+        if ($gd === false) {
+            return null;
+        }
+        if (! imageistruecolor($gd)) {
+            imagepalettetotruecolor($gd);
+        }
+        $s = imagescale($gd, $toW, $toH, self::IMAGE_SCALE_BILINEAR_FIXED);
+        if ($s === false) {
+            $s = imagescale($gd, $toW, $toH, self::IMAGE_SCALE_NEAREST);
+        }
+        imagedestroy($gd);
+        if ($s === false) {
+            return null;
+        }
+        ob_start();
+        imagepng($s);
+        $png = ob_get_clean();
+        imagedestroy($s);
+        if (! is_string($png) || $png === '') {
+            return null;
+        }
+
+        return base64_encode($png);
+    }
+
+    /**
+     * @param  array<string, mixed>  $meta
+     * @return array<string, mixed>
+     */
+    private function remapPixelMetadataBetweenSpaces(
+        array $meta,
+        int $fromW,
+        int $fromH,
+        int $toW,
+        int $toH
+    ): array {
+        if ($fromW === $toW && $fromH === $toH) {
+            return $meta;
+        }
+        $sx = $toW / max(1, $fromW);
+        $sy = $toH / max(1, $fromH);
+        if (is_array($meta['box_pixels'] ?? null) && isset($meta['box_pixels']['x'], $meta['box_pixels']['y'], $meta['box_pixels']['width'], $meta['box_pixels']['height'])) {
+            $b = $meta['box_pixels'];
+            $nb = [
+                'x' => max(0, (int) floor((int) $b['x'] * $sx)),
+                'y' => max(0, (int) floor((int) $b['y'] * $sy)),
+                'width' => max(1, (int) ceil((int) $b['width'] * $sx)),
+                'height' => max(1, (int) ceil((int) $b['height'] * $sy)),
+            ];
+            $nb['width'] = min($toW - $nb['x'], $nb['width']);
+            $nb['height'] = min($toH - $nb['y'], $nb['height']);
+            $nb['x'] = min($nb['x'], $toW - 1);
+            $nb['y'] = min($nb['y'], $toH - 1);
+            $meta['box_pixels'] = $nb;
+        }
+        if (is_array($meta['seed_point_pixels'] ?? null) && isset($meta['seed_point_pixels']['x'], $meta['seed_point_pixels']['y'])) {
+            $p = $meta['seed_point_pixels'];
+            $meta['seed_point_pixels'] = [
+                'x' => (int) max(0, min($toW - 1, (int) round((int) $p['x'] * $sx))),
+                'y' => (int) max(0, min($toH - 1, (int) round((int) $p['y'] * $sy))),
+            ];
+        }
+        if (isset($meta['negative_points_pixels']) && is_array($meta['negative_points_pixels'])) {
+            $out = [];
+            foreach ($meta['negative_points_pixels'] as $pt) {
+                if (! is_array($pt) || ! isset($pt['x'], $pt['y'])) {
+                    continue;
+                }
+                $out[] = [
+                    'x' => (int) max(0, min($toW - 1, (int) round((float) $pt['x'] * $sx))),
+                    'y' => (int) max(0, min($toH - 1, (int) round((float) $pt['y'] * $sy))),
+                ];
+            }
+            $meta['negative_points_pixels'] = $out;
+        }
+
+        return $meta;
+    }
+
+    private function mapLayerExtractionCandidateToWork(
+        LayerExtractionCandidateDto $c,
+        int $sourceW,
+        int $sourceH,
+        int $workW,
+        int $workH
+    ): LayerExtractionCandidateDto {
+        if ($workW === $sourceW && $workH === $sourceH) {
+            return $c;
+        }
+        $b = $c->bbox;
+        $sxW = $workW / max(1, $sourceW);
+        $syW = $workH / max(1, $sourceH);
+        $nb = [
+            'x' => max(0, (int) floor($b['x'] * $sxW)),
+            'y' => max(0, (int) floor($b['y'] * $syW)),
+            'width' => max(1, (int) ceil($b['width'] * $sxW)),
+            'height' => max(1, (int) ceil($b['height'] * $syW)),
+        ];
+        $nb['width'] = min($workW - $nb['x'], $nb['width']);
+        $nb['height'] = min($workH - $nb['y'], $nb['height']);
+        $nb['x'] = min($nb['x'], $workW - 1);
+        $nb['y'] = min($nb['y'], $workH - 1);
+        $newB64 = $c->maskBase64;
+        if (is_string($newB64) && $newB64 !== '') {
+            $u = $this->upscaleMaskPngBase64ToDimensions($newB64, $sourceW, $sourceH, $workW, $workH);
+            if ($u !== null) {
+                $newB64 = $u;
+            }
+        }
+        $meta = is_array($c->metadata) ? $c->metadata : [];
+        $meta = $this->remapPixelMetadataBetweenSpaces($meta, $sourceW, $sourceH, $workW, $workH);
+
+        return new LayerExtractionCandidateDto(
+            id: $c->id,
+            label: $c->label,
+            confidence: $c->confidence,
+            bbox: $nb,
+            maskPath: $c->maskPath,
+            maskBase64: $newB64,
+            previewPath: $c->previewPath,
+            selected: $c->selected,
+            notes: $c->notes,
+            metadata: $meta,
+        );
+    }
+
+    private function finishSingleFloodfillCandidateToSource(
+        LayerExtractionCandidateDto $c,
+        int $workW,
+        int $workH,
+        int $sourceW,
+        int $sourceH
+    ): LayerExtractionCandidateDto {
+        if ($workW === $sourceW && $workH === $sourceH) {
+            return $c;
+        }
+        $m = $this->mapLayerExtractionCandidatesToSourceImage([$c], $workW, $workH, $sourceW, $sourceH);
+
+        return $m[0] ?? $c;
+    }
+
+    /**
+     * @param  array{x:int,y:int,width:int,height:int}  $box
+     * @return array{x:int,y:int,width:int,height:int}
+     */
+    private function mapBboxToSpace(
+        array $box,
+        int $fromW,
+        int $fromH,
+        int $toW,
+        int $toH
+    ): array {
+        if ($fromW === $toW && $fromH === $toH) {
+            return $box;
+        }
+        $sx = $toW / max(1, $fromW);
+        $sy = $toH / max(1, $fromH);
+
+        $nb = [
+            'x' => max(0, (int) floor($box['x'] * $sx)),
+            'y' => max(0, (int) floor($box['y'] * $sy)),
+            'width' => max(1, (int) ceil($box['width'] * $sx)),
+            'height' => max(1, (int) ceil($box['height'] * $sy)),
+        ];
+        $nb['width'] = min($toW - $nb['x'], $nb['width']);
+        $nb['height'] = min($toH - $nb['y'], $nb['height']);
+        $nb['x'] = min($nb['x'], $toW - 1);
+        $nb['y'] = min($nb['y'], $toH - 1);
+
+        return $nb;
+    }
+
+    /**
+     * @param  list<LayerExtractionCandidateDto>  $candidates
+     */
+    private function finishFloodfillCandidates(
+        Asset $asset,
+        string $model,
+        array $candidates,
+        int $workW,
+        int $workH,
+        int $sourceW,
+        int $sourceH
+    ): LayerExtractionResult {
+        if ($workW !== $sourceW || $workH !== $sourceH) {
+            $candidates = $this->mapLayerExtractionCandidatesToSourceImage(
+                $candidates,
+                $workW,
+                $workH,
+                $sourceW,
+                $sourceH
+            );
+        }
+
+        return $this->resultFromCandidates($asset, $model, $candidates);
+    }
+
     public function extractMasks(Asset $asset, array $options = []): LayerExtractionResult
     {
         $binary = $options['image_binary'] ?? null;
@@ -51,19 +418,10 @@ final class FloodfillStudioLayerExtractionProvider implements StudioLayerExtract
         $minAr = (float) ($cfgL['min_area_ratio'] ?? 0.01);
         $maxAr = (float) ($cfgL['max_area_ratio'] ?? 0.85);
         $mergeIou = (float) ($cfgL['merge_iou_threshold'] ?? 0.65);
-
-        $dims = @getimagesizefromstring($binary);
-        if (! is_array($dims) || ($dims[0] ?? 0) < 2 || ($dims[1] ?? 0) < 2) {
-            throw new InvalidArgumentException('Unsupported or unreadable image for extraction.');
-        }
-
-        $fullW = (int) $dims[0];
-        $fullH = (int) $dims[1];
-        if ($fullW * $fullH > $maxAnalysisPx) {
-            throw new LocalExtractionSourceTooLargeException(
-                'This image is too large for local extraction.'
-            );
-        }
+        [$binary, $fullW, $fullH, $sourceW, $sourceH] = $this->prepareImageBinaryForLocalAnalysis(
+            $binary,
+            $maxAnalysisPx
+        );
 
         $src = $this->decodeToTrueColorGd($binary);
 
@@ -112,7 +470,7 @@ final class FloodfillStudioLayerExtractionProvider implements StudioLayerExtract
         $model = (string) ($cfgF['model'] ?? 'gd_floodfill_v1');
 
         if (! $multi) {
-            return $this->resultFromCandidates(
+            return $this->finishFloodfillCandidates(
                 $asset,
                 $model,
                 [
@@ -126,7 +484,11 @@ final class FloodfillStudioLayerExtractionProvider implements StudioLayerExtract
                         $fullW,
                         $fullH
                     ),
-                ]
+                ],
+                $fullW,
+                $fullH,
+                $sourceW,
+                $sourceH
             );
         }
 
@@ -153,7 +515,7 @@ final class FloodfillStudioLayerExtractionProvider implements StudioLayerExtract
         $items = array_slice($items, 0, $maxCands);
 
         if ($items === []) {
-            return $this->resultFromCandidates(
+            return $this->finishFloodfillCandidates(
                 $asset,
                 $model,
                 [
@@ -167,7 +529,11 @@ final class FloodfillStudioLayerExtractionProvider implements StudioLayerExtract
                         $fullW,
                         $fullH
                     ),
-                ]
+                ],
+                $fullW,
+                $fullH,
+                $sourceW,
+                $sourceH
             );
         }
 
@@ -201,7 +567,15 @@ final class FloodfillStudioLayerExtractionProvider implements StudioLayerExtract
             );
         }
 
-        return $this->resultFromCandidates($asset, $model, $candidates);
+        return $this->finishFloodfillCandidates(
+            $asset,
+            $model,
+            $candidates,
+            $fullW,
+            $fullH,
+            $sourceW,
+            $sourceH
+        );
     }
 
     public function extractCandidateFromPoint(Asset $asset, float $xNorm, float $yNorm, array $options = []): ?LayerExtractionCandidateDto
@@ -227,12 +601,28 @@ final class FloodfillStudioLayerExtractionProvider implements StudioLayerExtract
         $scale = $state['scale'];
         $fullW = $state['fullW'];
         $fullH = $state['fullH'];
+        $sourceW = (int) $state['sourceW'];
+        $sourceH = (int) $state['sourceH'];
         $total = $segW * $segH;
         $minAr = $state['minAr'];
         $maxAr = $state['maxAr'];
         $mergeIou = $state['mergeIou'];
-        /** @var list<array{x:int,y:int,width:int,height:int}> $existingBboxes */
-        $existingBboxes = is_array($options['existing_bboxes'] ?? null) ? $options['existing_bboxes'] : [];
+        /** @var list<array{x:int,y:int,width:int,height:int}> $rawExistingBboxes */
+        $rawExistingBboxes = is_array($options['existing_bboxes'] ?? null) ? $options['existing_bboxes'] : [];
+        $existingBboxes = [];
+        foreach ($rawExistingBboxes as $eb) {
+            if (! is_array($eb) || ! isset($eb['x'], $eb['y'], $eb['width'], $eb['height'])) {
+                continue;
+            }
+            /** @var array{x:int,y:int,width:int,height:int} $ebox */
+            $ebox = [
+                'x' => (int) $eb['x'],
+                'y' => (int) $eb['y'],
+                'width' => (int) $eb['width'],
+                'height' => (int) $eb['height'],
+            ];
+            $existingBboxes[] = $this->mapBboxToSpace($ebox, $sourceW, $sourceH, $fullW, $fullH);
+        }
 
         $px = (int) max(0, min($fullW - 1, (int) round($xNorm * max(1, $fullW - 1))));
         $py = (int) max(0, min($fullH - 1, (int) round($yNorm * max(1, $fullH - 1))));
@@ -278,18 +668,24 @@ final class FloodfillStudioLayerExtractionProvider implements StudioLayerExtract
             'note' => 'Local mask detection',
         ];
 
-        return $this->buildCandidateFromBgMask(
-            $candidateId,
-            $label,
-            $compMask,
-            $segW,
-            $segH,
-            $scale,
+        return $this->finishSingleFloodfillCandidateToSource(
+            $this->buildCandidateFromBgMask(
+                $candidateId,
+                $label,
+                $compMask,
+                $segW,
+                $segH,
+                $scale,
+                $fullW,
+                $fullH,
+                $areaR,
+                0,
+                $metadata
+            ),
             $fullW,
             $fullH,
-            $areaR,
-            0,
-            $metadata
+            $sourceW,
+            $sourceH
         );
     }
 
@@ -352,12 +748,24 @@ final class FloodfillStudioLayerExtractionProvider implements StudioLayerExtract
         $scale = $state['scale'];
         $fullW = $state['fullW'];
         $fullH = $state['fullH'];
+        $sourceW = (int) $state['sourceW'];
+        $sourceH = (int) $state['sourceH'];
         $total = $segW * $segH;
         $minAr = $state['minAr'];
         $maxAr = $state['maxAr'];
         $cfgL = config('studio_layer_extraction.local_floodfill', []);
         $negRatio = (float) ($cfgL['negative_point_radius_ratio'] ?? 0.04);
         $r = max(1, (int) round($negRatio * max($segW, $segH)));
+
+        if ($sourceW !== $fullW || $sourceH !== $fullH) {
+            $candidate = $this->mapLayerExtractionCandidateToWork(
+                $candidate,
+                $sourceW,
+                $sourceH,
+                $fullW,
+                $fullH
+            );
+        }
 
         $p0 = $positivePoints[0];
         $xNorm = (float) $p0['x'];
@@ -563,18 +971,24 @@ final class FloodfillStudioLayerExtractionProvider implements StudioLayerExtract
             $label = $candidate->label ?? 'Box-selected element';
         }
 
-        return $this->buildCandidateFromBgMask(
-            $candidate->id,
-            $label,
-            $compMask,
-            $segW,
-            $segH,
-            $scale,
+        return $this->finishSingleFloodfillCandidateToSource(
+            $this->buildCandidateFromBgMask(
+                $candidate->id,
+                $label,
+                $compMask,
+                $segW,
+                $segH,
+                $scale,
+                $fullW,
+                $fullH,
+                $areaR,
+                0,
+                $metadata
+            ),
             $fullW,
             $fullH,
-            $areaR,
-            0,
-            $metadata
+            $sourceW,
+            $sourceH
         );
     }
 
@@ -783,6 +1197,8 @@ final class FloodfillStudioLayerExtractionProvider implements StudioLayerExtract
         $scale = $state['scale'];
         $fullW = $state['fullW'];
         $fullH = $state['fullH'];
+        $sourceW = (int) $state['sourceW'];
+        $sourceH = (int) $state['sourceH'];
         $total = $segW * $segH;
         if ($total < 1) {
             return null;
@@ -828,7 +1244,7 @@ final class FloodfillStudioLayerExtractionProvider implements StudioLayerExtract
         ];
         if ($mode === 'text_graphic' && (bool) ($cfgL['box_text_graphic_enabled'] ?? true)) {
             $textComp = $this->buildTextGraphicBoxComponentMask(
-                $binary,
+                $state['analysisBinary'],
                 $inBox,
                 $segW,
                 $segH,
@@ -860,18 +1276,24 @@ final class FloodfillStudioLayerExtractionProvider implements StudioLayerExtract
                         'area_ratio' => $arText,
                     ];
 
-                    return $this->buildCandidateFromBgMask(
-                        $candidateId,
-                        $label,
-                        $textComp,
-                        $segW,
-                        $segH,
-                        $scale,
+                    return $this->finishSingleFloodfillCandidateToSource(
+                        $this->buildCandidateFromBgMask(
+                            $candidateId,
+                            $label,
+                            $textComp,
+                            $segW,
+                            $segH,
+                            $scale,
+                            $fullW,
+                            $fullH,
+                            $arText,
+                            0,
+                            $metadataTg
+                        ),
                         $fullW,
                         $fullH,
-                        $arText,
-                        0,
-                        $metadataTg
+                        $sourceW,
+                        $sourceH
                     );
                 }
                 if (! $textFallback) {
@@ -927,18 +1349,24 @@ final class FloodfillStudioLayerExtractionProvider implements StudioLayerExtract
                 'area_ratio' => $areaR,
             ];
 
-            return $this->buildCandidateFromBgMask(
-                $candidateId,
-                $label,
-                $compMask,
-                $segW,
-                $segH,
-                $scale,
+            return $this->finishSingleFloodfillCandidateToSource(
+                $this->buildCandidateFromBgMask(
+                    $candidateId,
+                    $label,
+                    $compMask,
+                    $segW,
+                    $segH,
+                    $scale,
+                    $fullW,
+                    $fullH,
+                    $areaR,
+                    0,
+                    $metadata
+                ),
                 $fullW,
                 $fullH,
-                $areaR,
-                0,
-                $metadata
+                $sourceW,
+                $sourceH
             );
         }
 
@@ -970,18 +1398,24 @@ final class FloodfillStudioLayerExtractionProvider implements StudioLayerExtract
             'area_ratio' => $arRect,
         ];
 
-        return $this->buildCandidateFromBgMask(
-            $candidateId,
-            $label,
-            $rectMask,
-            $segW,
-            $segH,
-            $scale,
+        return $this->finishSingleFloodfillCandidateToSource(
+            $this->buildCandidateFromBgMask(
+                $candidateId,
+                $label,
+                $rectMask,
+                $segW,
+                $segH,
+                $scale,
+                $fullW,
+                $fullH,
+                $arRect,
+                0,
+                $rectMeta
+            ),
             $fullW,
             $fullH,
-            $arRect,
-            0,
-            $rectMeta
+            $sourceW,
+            $sourceH
         );
     }
 
@@ -1035,6 +1469,8 @@ final class FloodfillStudioLayerExtractionProvider implements StudioLayerExtract
      * @return array{
      *   fullW: int,
      *   fullH: int,
+     *   sourceW: int,
+     *   sourceH: int,
      *   segW: int,
      *   segH: int,
      *   scale: float,
@@ -1043,6 +1479,7 @@ final class FloodfillStudioLayerExtractionProvider implements StudioLayerExtract
      *   minAr: float,
      *   maxAr: float,
      *   mergeIou: float,
+     *   analysisBinary: string,
      * }
      */
     private function loadLocalSegmentationState(string $binary): array
@@ -1056,20 +1493,12 @@ final class FloodfillStudioLayerExtractionProvider implements StudioLayerExtract
         $maxAr = (float) ($cfgL['max_area_ratio'] ?? 0.85);
         $mergeIou = (float) ($cfgL['merge_iou_threshold'] ?? 0.65);
 
-        $dims = @getimagesizefromstring($binary);
-        if (! is_array($dims) || ($dims[0] ?? 0) < 2 || ($dims[1] ?? 0) < 2) {
-            throw new InvalidArgumentException('Unsupported or unreadable image for extraction.');
-        }
+        [$analysisBinary, $fullW, $fullH, $sourceW, $sourceH] = $this->prepareImageBinaryForLocalAnalysis(
+            $binary,
+            $maxAnalysisPx
+        );
 
-        $fullW = (int) $dims[0];
-        $fullH = (int) $dims[1];
-        if ($fullW * $fullH > $maxAnalysisPx) {
-            throw new LocalExtractionSourceTooLargeException(
-                'This image is too large for local extraction.'
-            );
-        }
-
-        $src = $this->decodeToTrueColorGd($binary);
+        $src = $this->decodeToTrueColorGd($analysisBinary);
         $scale = min(1.0, $maxEdge / max($fullW, $fullH));
         $segW = max(2, (int) round($fullW * $scale));
         $segH = max(2, (int) round($fullH * $scale));
@@ -1101,6 +1530,9 @@ final class FloodfillStudioLayerExtractionProvider implements StudioLayerExtract
         return [
             'fullW' => $fullW,
             'fullH' => $fullH,
+            'sourceW' => $sourceW,
+            'sourceH' => $sourceH,
+            'analysisBinary' => $analysisBinary,
             'segW' => $segW,
             'segH' => $segH,
             'scale' => $scale,

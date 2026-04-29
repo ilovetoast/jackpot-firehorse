@@ -68,6 +68,12 @@ return [
         'enable_multi_candidate' => (bool) env('STUDIO_LAYER_EXTRACTION_LOCAL_MULTI', true),
         /** Refuse very large sources before multi-pass analysis (pixels). */
         'max_analysis_pixels' => (int) env('STUDIO_LAYER_EXTRACTION_LOCAL_MAX_PIXELS', 3_000_000),
+        /**
+         * When true, images over max_analysis_pixels are downscaled (Imagick) to fit the cap before
+         * local floodfill; masks/bboxes are mapped back to full source resolution for cutout. When false
+         * or Imagick is missing, behavior matches the old hard reject (use AI segmentation or raise the cap).
+         */
+        'downscale_oversized' => (bool) env('STUDIO_LAYER_EXTRACTION_LOCAL_DOWNSCALE_OVERSIZED', true),
         /** Radius around each negative point in segmentation space ≈ ratio × max(segW, segH). */
         'negative_point_radius_ratio' => (float) env('STUDIO_LAYER_EXTRACTION_NEGATIVE_POINT_RADIUS_RATIO', 0.04),
         'max_negative_points' => (int) env('STUDIO_LAYER_EXTRACTION_MAX_NEGATIVE_POINTS', 8),

@@ -198,6 +198,13 @@ export function StudioExtractLayersModal(props: Props) {
     /** Card highlight: which candidate is the editing target (refine, etc.). Not the "create layer" checkboxes. */
     const [editingTargetId, setEditingTargetId] = useState<string | null>(null)
 
+    useEffect(() => {
+        if (providerCapabilities && !providerCapabilities.supports_background_fill) {
+            setCreateFilledBackground(false)
+            setHideOriginalAfterExtraction(false)
+        }
+    }, [providerCapabilities])
+
     const reset = useCallback(() => {
         setBusy(false)
         setErr(null)
@@ -714,12 +721,13 @@ export function StudioExtractLayersModal(props: Props) {
         setErr(null)
         setBusy(true)
         try {
+            const canBackgroundFill = providerCapabilities?.supports_background_fill === true
             const out = await postConfirmExtractLayers(compositionId, layerId, {
                 extraction_session_id: sessionId,
                 candidate_ids: selectedIds,
                 keep_original_visible: keepOriginalVisible,
-                create_filled_background: createFilledBackground,
-                hide_original_after_extraction: hideOriginalAfterExtraction,
+                create_filled_background: canBackgroundFill && createFilledBackground,
+                hide_original_after_extraction: canBackgroundFill && createFilledBackground && hideOriginalAfterExtraction,
             })
             const doc = migrateDocumentIfNeeded(out.document as unknown as DocumentModel)
             onDocumentApplied(doc, { newLayerIds: out.new_layer_ids ?? [] })
@@ -738,6 +746,7 @@ export function StudioExtractLayersModal(props: Props) {
         onClose,
         onDocumentApplied,
         selectedIds,
+        providerCapabilities,
         sessionId,
     ])
 
@@ -1416,50 +1425,38 @@ export function StudioExtractLayersModal(props: Props) {
                     )
                     })}
 
-                    <label
-                        className={`flex cursor-pointer items-start gap-2 text-xs text-gray-300 ${
-                            !providerCapabilities?.supports_background_fill ? 'cursor-not-allowed opacity-50' : ''
-                        }`}
-                    >
-                        <input
-                            type="checkbox"
-                            className="mt-0.5 h-4 w-4 rounded border-gray-600"
-                            checked={createFilledBackground}
-                            onChange={(e) => {
-                                setCreateFilledBackground(e.target.checked)
-                                if (!e.target.checked) {
-                                    setHideOriginalAfterExtraction(false)
-                                }
-                            }}
-                            disabled={
-                                busy || !providerCapabilities?.supports_background_fill || selectedIds.length === 0
-                            }
-                        />
-                        <span>
-                            {providerCapabilities?.supports_background_fill
-                                ? 'Create filled background layer — uses background fill credits.'
-                                : 'Create filled background layer'}
-                            {providerCapabilities && !providerCapabilities.supports_background_fill && (
-                                <span className="mt-0.5 block text-[10px] leading-relaxed text-gray-500">
-                                    Inpainting is not configured or is disabled. Enable
-                                    <code className="mx-0.5 text-[9px] text-gray-400">STUDIO_LAYER_INPAINT_ENABLED</code>{' '}
-                                    and set a provider and API key (e.g. Clipdrop) to use this. Separate from
-                                    AI segmentation: SAM finds masks; inpaint fills the plate behind the cutout.
+                    {providerCapabilities?.supports_background_fill && (
+                        <>
+                            <label className="flex cursor-pointer items-start gap-2 text-xs text-gray-300">
+                                <input
+                                    type="checkbox"
+                                    className="mt-0.5 h-4 w-4 rounded border-gray-600"
+                                    checked={createFilledBackground}
+                                    onChange={(e) => {
+                                        setCreateFilledBackground(e.target.checked)
+                                        if (!e.target.checked) {
+                                            setHideOriginalAfterExtraction(false)
+                                        }
+                                    }}
+                                    disabled={busy || selectedIds.length === 0}
+                                />
+                                <span>
+                                    Create filled background layer — uses background fill credits.
                                 </span>
+                            </label>
+                            {createFilledBackground && (
+                                <label className="ml-6 flex cursor-pointer items-center gap-2 text-xs text-gray-300">
+                                    <input
+                                        type="checkbox"
+                                        className="h-4 w-4 rounded border-gray-600"
+                                        checked={hideOriginalAfterExtraction}
+                                        onChange={(e) => setHideOriginalAfterExtraction(e.target.checked)}
+                                        disabled={busy}
+                                    />
+                                    Hide original layer after extraction
+                                </label>
                             )}
-                        </span>
-                    </label>
-                    {providerCapabilities?.supports_background_fill && createFilledBackground && (
-                        <label className="ml-6 flex cursor-pointer items-center gap-2 text-xs text-gray-300">
-                            <input
-                                type="checkbox"
-                                className="h-4 w-4 rounded border-gray-600"
-                                checked={hideOriginalAfterExtraction}
-                                onChange={(e) => setHideOriginalAfterExtraction(e.target.checked)}
-                                disabled={busy}
-                            />
-                            Hide original layer after extraction
-                        </label>
+                        </>
                     )}
                     <label className="flex cursor-pointer items-center gap-2 text-xs text-gray-300">
                         <input

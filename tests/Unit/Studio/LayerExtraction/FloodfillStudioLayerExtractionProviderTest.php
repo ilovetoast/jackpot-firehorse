@@ -80,13 +80,47 @@ class FloodfillStudioLayerExtractionProviderTest extends TestCase
             $this->markTestSkipped('GD required');
         }
         $cap = 200_000;
-        config(['studio_layer_extraction.local_floodfill.max_analysis_pixels' => $cap]);
+        config([
+            'studio_layer_extraction.local_floodfill.max_analysis_pixels' => $cap,
+            'studio_layer_extraction.local_floodfill.downscale_oversized' => false,
+        ]);
 
         $p = new FloodfillStudioLayerExtractionProvider;
         $png = $this->makeWhitePngExceedingPixelCap($cap);
         $a = $this->makeMockAsset();
         $this->expectException(LocalExtractionSourceTooLargeException::class);
         $p->extractMasks($a, ['image_binary' => $png]);
+    }
+
+    public function test_oversized_image_downscales_to_fit_cap_with_imagick(): void
+    {
+        if (! extension_loaded('gd')) {
+            $this->markTestSkipped('GD required');
+        }
+        if (! extension_loaded('imagick') || ! class_exists(\Imagick::class)) {
+            $this->markTestSkipped('Imagick required for downscale path');
+        }
+        $cap = 200_000;
+        $edge = (int) ceil(sqrt($cap + 5_000));
+        config([
+            'studio_layer_extraction.floodfill.max_segmentation_edge' => 256,
+            'studio_layer_extraction.floodfill.color_tolerance' => 50,
+            'studio_layer_extraction.local_floodfill.enable_multi_candidate' => true,
+            'studio_layer_extraction.local_floodfill.max_analysis_pixels' => $cap,
+            'studio_layer_extraction.local_floodfill.downscale_oversized' => true,
+        ]);
+        $p = new FloodfillStudioLayerExtractionProvider;
+        $png = $this->makeWhitePngWithBlackSquareExceedingPixelCap($cap);
+        $a = $this->makeMockAsset();
+        $r = $p->extractMasks($a, ['image_binary' => $png]);
+        $this->assertNotEmpty($r->candidates);
+        $b64 = (string) $r->candidates[0]->maskBase64;
+        $raw = base64_decode($b64, true);
+        $this->assertIsString($raw);
+        $d = @getimagesizefromstring($raw);
+        $this->assertIsArray($d);
+        $this->assertSame($edge, (int) $d[0]);
+        $this->assertSame($edge, (int) $d[1]);
     }
 
     public function test_supports_multiple_masks_tracks_config(): void
@@ -381,6 +415,39 @@ class FloodfillStudioLayerExtractionProviderTest extends TestCase
         }
         $wpx = imagecolorallocate($im, 255, 255, 255);
         imagefilledrectangle($im, 0, 0, $w - 1, $h - 1, $wpx);
+        ob_start();
+        imagepng($im);
+        $png = (string) ob_get_clean();
+        imagedestroy($im);
+
+        return $png;
+    }
+
+    /**
+     * White field with a central black square (foreground for flood fill), with width*height &gt; $maxPixels.
+     */
+    private function makeWhitePngWithBlackSquareExceedingPixelCap(int $maxPixels): string
+    {
+        $w = (int) ceil(sqrt($maxPixels + 5_000));
+        $h = $w;
+        $im = imagecreatetruecolor($w, $h);
+        if ($im === false) {
+            throw new \RuntimeException('GD');
+        }
+        $wpx = imagecolorallocate($im, 255, 255, 255);
+        $bpx = imagecolorallocate($im, 0, 0, 0);
+        imagefilledrectangle($im, 0, 0, $w - 1, $h - 1, $wpx);
+        $m = (int) max(8, min($w, $h) / 4);
+        $x0 = (int) max(0, (int) floor($w / 2 - $m / 2));
+        $y0 = (int) max(0, (int) floor($h / 2 - $m / 2));
+        imagefilledrectangle(
+            $im,
+            $x0,
+            $y0,
+            min($w - 1, $x0 + $m - 1),
+            min($h - 1, $y0 + $m - 1),
+            $bpx
+        );
         ob_start();
         imagepng($im);
         $png = (string) ob_get_clean();

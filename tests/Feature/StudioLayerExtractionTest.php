@@ -1497,6 +1497,7 @@ class StudioLayerExtractionTest extends TestCase
             'studio_layer_extraction.always_queue' => false,
             'studio_layer_extraction.async_pixel_threshold' => 1_000_000,
             'studio_layer_extraction.local_floodfill.max_analysis_pixels' => 200_000,
+            'studio_layer_extraction.local_floodfill.downscale_oversized' => false,
             'studio_layer_extraction.sam.enabled' => true,
             'services.fal.key' => 'test-fal-key',
         ]);
@@ -1524,6 +1525,7 @@ class StudioLayerExtractionTest extends TestCase
             'studio_layer_extraction.always_queue' => false,
             'studio_layer_extraction.async_pixel_threshold' => 1_000_000,
             'studio_layer_extraction.local_floodfill.max_analysis_pixels' => 200_000,
+            'studio_layer_extraction.local_floodfill.downscale_oversized' => false,
             'studio_layer_extraction.sam.enabled' => false,
             'services.fal.key' => '',
         ]);
