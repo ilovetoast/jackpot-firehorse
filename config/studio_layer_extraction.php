@@ -20,6 +20,12 @@ return [
     'allow_ai' => (bool) env('STUDIO_LAYER_EXTRACTION_ALLOW_AI', true),
 
     /**
+     * S3 object key prefix for disk `studio_layer_extraction` when driver is s3 (masks/previews).
+     * Local disk does not use this — paths stay `{session_id}/...` under storage_path.
+     */
+    's3_path_prefix' => env('STUDIO_LAYER_EXTRACTION_S3_PATH_PREFIX', 'studio_layer_extraction'),
+
+    /**
      * Optional background inpainting (separate from segmentation). none = disabled UI.
      * @see \App\Studio\LayerExtraction\Providers\HeuristicInpaintBackgroundProvider
      */

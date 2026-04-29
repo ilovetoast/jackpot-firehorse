@@ -132,6 +132,10 @@ class AdminStudioLayerExtractionController extends Controller
             'model' => $s->model,
             'error_message' => $s->error_message,
             'metadata' => $s->metadata,
+            'layer_artifacts_storage' => [
+                'disk' => (string) config('filesystems.disks.studio_layer_extraction.driver', 'local'),
+                's3_path_prefix' => (string) config('studio_layer_extraction.s3_path_prefix', 'studio_layer_extraction'),
+            ],
             'candidates' => $candidates,
             'composition_id' => $s->composition_id,
             'source_layer_id' => $s->source_layer_id,

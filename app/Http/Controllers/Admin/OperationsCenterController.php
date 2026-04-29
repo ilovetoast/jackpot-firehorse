@@ -182,6 +182,34 @@ class OperationsCenterController extends Controller
     }
 
     /**
+     * Remove all rows from `application_error_events` (Operations Center → Application errors).
+     * Only clears stored diagnostic history; it does not change tenant data or stop future errors.
+     */
+    public function clearApplicationErrorEvents(): JsonResponse
+    {
+        $this->authorizeAdmin();
+
+        if (! Schema::hasTable('application_error_events')) {
+            return response()->json([
+                'cleared' => 0,
+                'message' => 'Application error log table is not available on this environment.',
+            ], 200);
+        }
+
+        $before = (int) ApplicationErrorEvent::query()->count();
+        if ($before > 0) {
+            ApplicationErrorEvent::query()->delete();
+        }
+
+        return response()->json([
+            'cleared' => $before,
+            'message' => $before === 0
+                ? 'No application error records to remove.'
+                : "Removed {$before} application error record(s).",
+        ]);
+    }
+
+    /**
      * Remove a **failed** Studio composition video export job row (diagnostics / cleanup only).
      * Does not cancel queued work; completed or in-flight rows are rejected.
      */
@@ -205,6 +233,60 @@ class OperationsCenterController extends Controller
         return response()->json([
             'ok' => true,
             'message' => 'Failed export job record removed.',
+        ]);
+    }
+
+    /**
+     * Remove multiple **failed** Studio composition video export job rows (diagnostics / cleanup only).
+     * Id list is capped; only rows with status failed are removed.
+     */
+    public function bulkDestroyStudioVideoExportJobs(Request $request): JsonResponse
+    {
+        $this->authorizeAdmin();
+
+        $raw = $request->input('ids', []);
+        if (! is_array($raw) || $raw === []) {
+            return response()->json([
+                'ok' => false,
+                'message' => 'No job ids provided.',
+            ], 422);
+        }
+
+        $ids = [];
+        foreach ($raw as $v) {
+            $i = (int) $v;
+            if ($i > 0) {
+                $ids[] = $i;
+            }
+        }
+        $ids = array_values(array_unique($ids));
+        if ($ids === []) {
+            return response()->json([
+                'ok' => false,
+                'message' => 'No valid job ids provided.',
+            ], 422);
+        }
+        if (count($ids) > 200) {
+            return response()->json([
+                'ok' => false,
+                'message' => 'At most 200 ids per request.',
+            ], 422);
+        }
+
+        $deleted = StudioCompositionVideoExportJob::query()
+            ->whereIn('id', $ids)
+            ->where('status', StudioCompositionVideoExportJob::STATUS_FAILED)
+            ->delete();
+
+        $skipped = count($ids) - (int) $deleted;
+
+        return response()->json([
+            'ok' => true,
+            'deleted' => (int) $deleted,
+            'skipped' => max(0, $skipped),
+            'message' => (int) $deleted === 0
+                ? 'No matching failed export job rows were removed (wrong id or not failed status).'
+                : "Removed {$deleted} failed export job record(s).",
         ]);
     }
 

@@ -12,6 +12,8 @@ use Throwable;
 /**
  * Throttled email to site operators when an upstream provider reports quota/billing limits.
  * Cooldown is per environment + provider to avoid a flood of identical alerts (e.g. many queued jobs).
+ *
+ * Recipients: {@see config('mail.admin_recipients')}. Mailable: {@see AIProviderQuotaExceededMail} — {@see \App\Services\EmailGate::TYPE_OPERATIONS} (ignores `MAIL_AUTOMATIONS_ENABLED`, `NOTIFICATIONS_ENABLED`, and does not use plan `notifications.enabled`).
  */
 final class AIQuotaExceededNotifier
 {

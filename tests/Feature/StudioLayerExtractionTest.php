@@ -60,6 +60,7 @@ class StudioLayerExtractionTest extends TestCase
         $this->withoutMiddleware(\App\Http\Middleware\EnsureGatewayEntry::class);
 
         Storage::fake('s3');
+        Storage::fake('studio_layer_extraction');
 
         $this->tenant = Tenant::create([
             'name' => 'Ex Co',

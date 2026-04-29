@@ -20,6 +20,7 @@ use App\Studio\LayerExtraction\Dto\LayerExtractionCandidateDto;
 use App\Studio\LayerExtraction\Dto\LayerExtractionResult;
 use App\Studio\LayerExtraction\Exceptions\LocalExtractionSourceTooLargeException;
 use App\Support\EditorAssetOriginalBytesLoader;
+use App\Support\StudioLayerExtractionStoragePaths;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -126,7 +127,7 @@ final class AiLayerExtractionService
             $t = Tenant::query()->find($session->tenant_id);
             $b = Brand::query()->find($session->brand_id);
             if ($t === null || $b === null) {
-                $this->failSession($session, 'Invalid session context.', $started, null);
+                $this->failSession($session, 'Invalid session context.', $started, null, null, 'pre_check');
 
                 return;
             }
@@ -135,7 +136,9 @@ final class AiLayerExtractionService
                     $session,
                     'AI segmentation is not available. Check that STUDIO_LAYER_EXTRACTION_SAM_ENABLED is true and the Fal API key is set.',
                     $started,
-                    null
+                    null,
+                    null,
+                    'ai_runtime_unavailable'
                 );
 
                 return;
@@ -147,7 +150,7 @@ final class AiLayerExtractionService
             ->where('brand_id', $session->brand_id)
             ->first();
         if ($asset === null) {
-            $this->failSession($session, 'Source asset not found.', $started);
+            $this->failSession($session, 'Source asset not found.', $started, null, null, 'validate_asset');
 
             return;
         }
@@ -155,7 +158,7 @@ final class AiLayerExtractionService
         try {
             $binary = EditorAssetOriginalBytesLoader::loadFromStorage($asset);
         } catch (Throwable $e) {
-            $this->failSession($session, 'Could not read source image.', $started);
+            $this->failSession($session, 'Could not read source image.', $started, $e, null, 'load_source');
 
             return;
         }
@@ -204,7 +207,7 @@ final class AiLayerExtractionService
                         'extraction_error' => $extractionError,
                         'duration_ms' => (int) round((microtime(true) - $started) * 1000),
                     ]);
-                    $this->failSession($session, $userMsg, $started, $e, $extractionError);
+                    $this->failSession($session, $userMsg, $started, $e, $extractionError, 'extract_masks');
 
                     return;
                 }
@@ -227,7 +230,7 @@ final class AiLayerExtractionService
                 'error_class' => $e::class,
                 'failure_message' => $this->sanitizedLogFragment($e->getMessage()),
             ]);
-            $this->failSession($session, $userMsg, $started, $e);
+            $this->failSession($session, $userMsg, $started, $e, null, 'extract_masks');
 
             return;
         } catch (Throwable $e) {
@@ -249,15 +252,15 @@ final class AiLayerExtractionService
                 'error_class' => $e::class,
                 'failure_message' => $this->sanitizedLogFragment($e->getMessage()),
             ]);
-            $this->failSession($session, $userMsg, $started, $e);
+            $this->failSession($session, $userMsg, $started, $e, null, 'extract_masks');
 
             return;
         }
 
         try {
             $stored = $this->persistCandidateArtifacts($session->id, $result);
-        } catch (Throwable) {
-            $this->failSession($session, 'Failed to stage extraction files.', $started);
+        } catch (Throwable $e) {
+            $this->failSession($session, 'Failed to stage extraction files.', $started, $e, null, 'persist_artifacts');
 
             return;
         }
@@ -329,7 +332,8 @@ final class AiLayerExtractionService
     private function persistCandidateArtifacts(string $sessionId, LayerExtractionResult $result): array
     {
         $disk = Storage::disk('studio_layer_extraction');
-        $disk->makeDirectory($sessionId);
+        $sessionDir = StudioLayerExtractionStoragePaths::sessionDirectory($sessionId);
+        $disk->makeDirectory($sessionDir);
 
         $out = [];
         foreach ($result->candidates as $c) {
@@ -341,11 +345,11 @@ final class AiLayerExtractionService
                 continue;
             }
 
-            $maskRel = $sessionId.'/'.$c->id.'_mask.png';
+            $maskRel = StudioLayerExtractionStoragePaths::relative($sessionId, $c->id.'_mask.png');
             $disk->put($maskRel, $maskBinary);
 
             $previewBinary = $this->buildPreviewPng($maskBinary, 256);
-            $previewRel = $sessionId.'/'.$c->id.'_preview.png';
+            $previewRel = StudioLayerExtractionStoragePaths::relative($sessionId, $c->id.'_preview.png');
             $disk->put($previewRel, $previewBinary);
 
             $out[] = [
@@ -460,11 +464,22 @@ final class AiLayerExtractionService
         string $message,
         float $startedAt,
         ?Throwable $cause = null,
-        ?array $extractionError = null
+        ?array $extractionError = null,
+        ?string $failureStage = null,
     ): void {
         $m = is_array($session->metadata) ? $session->metadata : [];
         if ($extractionError !== null) {
             $m['extraction_error'] = $extractionError;
+        }
+        if ($failureStage !== null || $cause !== null) {
+            $m['failure_detail'] = array_filter([
+                'stage' => $failureStage,
+                'exception_class' => $cause ? $cause::class : null,
+                'exception_message' => $cause
+                    ? $this->sanitizedLogFragment($cause->getMessage(), 2000)
+                    : null,
+                'storage_disk' => (string) config('filesystems.disks.studio_layer_extraction.driver', 'local'),
+            ], fn ($v) => $v !== null && $v !== '');
         }
         $session->update([
             'status' => StudioLayerExtractionSession::STATUS_FAILED,
@@ -473,19 +488,25 @@ final class AiLayerExtractionService
         ]);
 
         $m2 = is_array($session->metadata) ? $session->metadata : [];
-        Log::info('[studio_layer_extraction]', [
+        Log::error('studio_layer_extraction.session_failed', [
             'session_id' => $session->id,
+            'failure_stage' => $failureStage,
             'method' => $m2['extraction_method'] ?? null,
             'document_id' => $session->composition_id,
             'layer_id' => $session->source_layer_id,
             'asset_id' => $session->source_asset_id,
             'provider' => $session->provider,
+            'tenant_id' => $session->tenant_id,
+            'user_id' => $session->user_id,
+            'storage_disk' => (string) config('filesystems.disks.studio_layer_extraction.driver', 'local'),
             'sam_enabled' => (bool) config('studio_layer_extraction.sam.enabled'),
             'fal_key_present' => filled((string) config('services.fal.key', '')),
             'candidate_count' => 0,
             'duration_ms' => (int) round((microtime(true) - $startedAt) * 1000),
             'status' => 'failed',
-            'failure_message' => $this->sanitizedLogFragment($cause?->getMessage() ?? $message),
+            'user_facing_message' => $this->sanitizedLogFragment($message, 2000),
+            'failure_message' => $this->sanitizedLogFragment($cause?->getMessage() ?? $message, 2000),
+            'exception_class' => $cause ? $cause::class : null,
         ]);
     }
 
@@ -509,11 +530,11 @@ final class AiLayerExtractionService
         ];
     }
 
-    private function sanitizedLogFragment(string $raw): string
+    private function sanitizedLogFragment(string $raw, int $maxLen = 400): string
     {
         $s = trim(preg_replace('/\s+/', ' ', $raw) ?? '');
-        if (strlen($s) > 400) {
-            $s = substr($s, 0, 400).'…';
+        if (strlen($s) > $maxLen) {
+            $s = substr($s, 0, $maxLen).'…';
         }
 
         return $s;
@@ -1544,10 +1565,12 @@ final class AiLayerExtractionService
             throw new \RuntimeException('Invalid mask for candidate.');
         }
         $disk = Storage::disk('studio_layer_extraction');
-        $maskRel = $sessionId.'/'.$c->id.'_mask.png';
+        $dir = StudioLayerExtractionStoragePaths::sessionDirectory($sessionId);
+        $disk->makeDirectory($dir);
+        $maskRel = StudioLayerExtractionStoragePaths::relative($sessionId, $c->id.'_mask.png');
         $disk->put($maskRel, $maskBinary);
         $previewBinary = $this->buildPreviewPng($maskBinary, 256);
-        $previewRel = $sessionId.'/'.$c->id.'_preview.png';
+        $previewRel = StudioLayerExtractionStoragePaths::relative($sessionId, $c->id.'_preview.png');
         $disk->put($previewRel, $previewBinary);
 
         return [

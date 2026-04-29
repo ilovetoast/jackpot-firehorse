@@ -416,6 +416,8 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
     Route::post('/admin/assets/{asset}/versions/{version}/restore', [\App\Http\Controllers\Admin\AdminAssetController::class, 'restoreVersion'])->name('admin.assets.versions.restore');
     Route::get('/admin/operations-center', [\App\Http\Controllers\Admin\OperationsCenterController::class, 'index'])->name('admin.operations-center.index');
     Route::post('/admin/operations-center/failed-jobs/flush', [\App\Http\Controllers\Admin\OperationsCenterController::class, 'flushFailedJobs'])->name('admin.operations-center.failed-jobs.flush');
+    Route::post('/admin/operations-center/application-errors/clear', [\App\Http\Controllers\Admin\OperationsCenterController::class, 'clearApplicationErrorEvents'])->name('admin.operations-center.application-errors.clear');
+    Route::post('/admin/studio-composition-video-export-jobs/bulk-delete', [\App\Http\Controllers\Admin\OperationsCenterController::class, 'bulkDestroyStudioVideoExportJobs'])->name('admin.studio-composition-video-export-jobs.bulk-delete');
     Route::delete('/admin/studio-composition-video-export-jobs/{id}', [\App\Http\Controllers\Admin\OperationsCenterController::class, 'destroyStudioVideoExportJob'])
         ->whereNumber('id')
         ->name('admin.studio-composition-video-export-jobs.destroy');

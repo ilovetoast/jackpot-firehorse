@@ -60,13 +60,31 @@ return [
             'report' => false,
         ],
 
-        /** Staged masks/previews for Studio “Extract layers” (ephemeral; cleaned up with sessions). */
-        'studio_layer_extraction' => [
-            'driver' => 'local',
-            'root' => storage_path('app/studio_layer_extraction'),
-            'throw' => false,
-            'report' => false,
-        ],
+        /**
+         * Staged masks/previews for Studio “Extract layers” (ephemeral; cleaned up with sessions).
+         * Use s3 in production so workers and web share the same store; set STUDIO_LAYER_EXTRACTION_FILESYSTEM_DRIVER=local for dev without AWS.
+         */
+        'studio_layer_extraction' => match ((string) env('STUDIO_LAYER_EXTRACTION_FILESYSTEM_DRIVER', 's3')) {
+            's3' => [
+                'driver' => 's3',
+                'key' => env('AWS_ACCESS_KEY_ID'),
+                'secret' => env('AWS_SECRET_ACCESS_KEY'),
+                'region' => env('AWS_DEFAULT_REGION', 'us-east-2'),
+                'bucket' => env('AWS_BUCKET'),
+                'url' => env('AWS_URL'),
+                'endpoint' => env('AWS_ENDPOINT'),
+                'use_path_style_endpoint' => filter_var(env('AWS_USE_PATH_STYLE_ENDPOINT', false), FILTER_VALIDATE_BOOLEAN),
+                'throw' => true,
+                'report' => true,
+                'visibility' => 'private',
+            ],
+            default => [
+                'driver' => 'local',
+                'root' => storage_path('app/studio_layer_extraction'),
+                'throw' => false,
+                'report' => false,
+            ],
+        },
 
     ],
 

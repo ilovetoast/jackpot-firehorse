@@ -110,4 +110,71 @@ class DestroyStudioCompositionVideoExportJobTest extends TestCase
 
         $this->assertDatabaseHas('studio_composition_video_export_jobs', ['id' => $job->id]);
     }
+
+    #[Test]
+    public function site_admin_can_bulk_delete_failed_studio_export_job_rows(): void
+    {
+        Role::firstOrCreate(['name' => 'site_admin', 'guard_name' => 'web']);
+        $admin = User::factory()->create();
+        $admin->assignRole('site_admin');
+
+        $tenant = Tenant::create([
+            'name' => 'T3',
+            'slug' => 't3-'.Str::random(6),
+            'uuid' => (string) Str::uuid(),
+        ]);
+        $brand = Brand::create([
+            'tenant_id' => $tenant->id,
+            'name' => 'B3',
+            'slug' => 'b3-'.Str::random(6),
+        ]);
+        $c1 = Composition::create([
+            'tenant_id' => $tenant->id,
+            'brand_id' => $brand->id,
+            'user_id' => $admin->id,
+            'visibility' => Composition::VISIBILITY_SHARED,
+            'name' => 'C3a',
+            'document_json' => ['width' => 640, 'height' => 480, 'layers' => []],
+        ]);
+        $c2 = Composition::create([
+            'tenant_id' => $tenant->id,
+            'brand_id' => $brand->id,
+            'user_id' => $admin->id,
+            'visibility' => Composition::VISIBILITY_SHARED,
+            'name' => 'C3b',
+            'document_json' => ['width' => 640, 'height' => 480, 'layers' => []],
+        ]);
+        $failed = StudioCompositionVideoExportJob::create([
+            'tenant_id' => $tenant->id,
+            'brand_id' => $brand->id,
+            'user_id' => $admin->id,
+            'composition_id' => $c1->id,
+            'render_mode' => 'ffmpeg_native',
+            'status' => StudioCompositionVideoExportJob::STATUS_FAILED,
+            'error_json' => ['code' => 'x', 'message' => 'a'],
+            'meta_json' => [],
+        ]);
+        $ok = StudioCompositionVideoExportJob::create([
+            'tenant_id' => $tenant->id,
+            'brand_id' => $brand->id,
+            'user_id' => $admin->id,
+            'composition_id' => $c2->id,
+            'render_mode' => 'ffmpeg_native',
+            'status' => StudioCompositionVideoExportJob::STATUS_COMPLETE,
+            'meta_json' => [],
+        ]);
+        $admin->tenants()->attach($tenant->id, ['role' => 'member']);
+
+        $this->actingAs($admin)
+            ->withSession(['tenant_id' => $tenant->id])
+            ->postJson(route('admin.studio-composition-video-export-jobs.bulk-delete'), [
+                'ids' => [(int) $failed->id, (int) $ok->id],
+            ])
+            ->assertOk()
+            ->assertJsonPath('deleted', 1)
+            ->assertJsonPath('skipped', 1);
+
+        $this->assertDatabaseMissing('studio_composition_video_export_jobs', ['id' => $failed->id]);
+        $this->assertDatabaseHas('studio_composition_video_export_jobs', ['id' => $ok->id]);
+    }
 }

@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Models\StudioLayerExtractionSession;
+use App\Support\StudioLayerExtractionStoragePaths;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Storage;
 
@@ -27,7 +28,7 @@ class CleanupStudioLayerExtractionSessionsCommand extends Command
         $n = 0;
         foreach ($rows as $row) {
             try {
-                $disk->deleteDirectory($row->id);
+                $disk->deleteDirectory(StudioLayerExtractionStoragePaths::sessionDirectory($row->id));
             } catch (\Throwable) {
                 // best-effort
             }

@@ -1,5 +1,5 @@
 import { Link, router } from '@inertiajs/react'
-import { Fragment, useState, useRef, useEffect } from 'react'
+import { Fragment, useState, useRef, useEffect, useMemo } from 'react'
 import axios from 'axios'
 import AppNav from '../../../Components/AppNav'
 import AppFooter from '../../../Components/AppFooter'
@@ -208,7 +208,11 @@ export default function OperationsCenterIndex({
     const [selectedIds, setSelectedIds] = useState(new Set())
     const [bulkLoading, setBulkLoading] = useState(null)
     const [flushFailedLoading, setFlushFailedLoading] = useState(false)
+    const [clearAppErrorsLoading, setClearAppErrorsLoading] = useState(false)
     const [studioExportDeleteId, setStudioExportDeleteId] = useState(null)
+    const [studioExportBulkLoading, setStudioExportBulkLoading] = useState(false)
+    const [selectedStudioExportIds, setSelectedStudioExportIds] = useState(() => new Set())
+    const studioExportSelectAllRef = useRef(null)
     const [quickViewData, setQuickViewData] = useState(null)
     const [quickViewLoading, setQuickViewLoading] = useState(false)
     const selectAllRef = useRef(null)
@@ -251,6 +255,10 @@ export default function OperationsCenterIndex({
 
     const incidentList = incidents || []
     const applicationErrorList = applicationErrors || []
+    const studioExportRows = useMemo(() => studioVideoExports?.rows ?? [], [studioVideoExports?.rows])
+    const allStudioExportsSelected =
+        studioExportRows.length > 0 && studioExportRows.every((r) => selectedStudioExportIds.has(r.id))
+    const someStudioExportsSelected = studioExportRows.some((r) => selectedStudioExportIds.has(r.id))
     const allSelected = incidentList.length > 0 && selectedIds.size === incidentList.length
     const someSelected = selectedIds.size > 0
 
@@ -259,6 +267,37 @@ export default function OperationsCenterIndex({
             selectAllRef.current.indeterminate = someSelected && !allSelected
         }
     }, [someSelected, allSelected])
+
+    useEffect(() => {
+        if (studioExportSelectAllRef.current) {
+            studioExportSelectAllRef.current.indeterminate = someStudioExportsSelected && !allStudioExportsSelected
+        }
+    }, [someStudioExportsSelected, allStudioExportsSelected])
+
+    useEffect(() => {
+        const valid = new Set(studioExportRows.map((r) => r.id))
+        setSelectedStudioExportIds((prev) => {
+            const next = new Set()
+            for (const id of prev) {
+                if (valid.has(id)) {
+                    next.add(id)
+                }
+            }
+            if (next.size === prev.size) {
+                let same = true
+                for (const id of prev) {
+                    if (!next.has(id)) {
+                        same = false
+                        break
+                    }
+                }
+                if (same) {
+                    return prev
+                }
+            }
+            return next
+        })
+    }, [studioExportRows])
 
     const setTab = (t) => router.get(route('admin.operations-center.index'), { tab: t }, { preserveState: true })
 
@@ -278,6 +317,76 @@ export default function OperationsCenterIndex({
             window.alert(e?.response?.data?.message || e?.message || 'Delete failed.')
         } finally {
             setStudioExportDeleteId(null)
+        }
+    }
+
+    const toggleSelectAllStudioExports = (checked) => {
+        const ids = studioExportRows.map((r) => r.id)
+        setSelectedStudioExportIds(checked ? new Set(ids) : new Set())
+    }
+
+    const toggleStudioExportRow = (id, checked) => {
+        setSelectedStudioExportIds((prev) => {
+            const next = new Set(prev)
+            if (checked) {
+                next.add(id)
+            } else {
+                next.delete(id)
+            }
+            return next
+        })
+    }
+
+    const bulkDeleteStudioExportJobRows = async (ids) => {
+        if (ids.length === 0) {
+            return
+        }
+        if (
+            !window.confirm(
+                `Remove ${ids.length} failed export job record(s) from the database? This only removes diagnostic rows (not the composition), same as the per-row Delete.`
+            )
+        ) {
+            return
+        }
+        setStudioExportBulkLoading(true)
+        try {
+            const res = await axios.post(route('admin.studio-composition-video-export-jobs.bulk-delete'), { ids })
+            const msg = res?.data?.message ?? 'Done.'
+            const skipped = res?.data?.skipped
+            if (typeof skipped === 'number' && skipped > 0) {
+                window.alert(`${msg} (${skipped} id(s) skipped — not found or not failed status.)`)
+            } else {
+                window.alert(msg)
+            }
+            setSelectedStudioExportIds(new Set())
+            router.reload({ only: ['studioVideoExports'] })
+        } catch (e) {
+            console.error(e)
+            window.alert(e?.response?.data?.message || e?.message || 'Bulk delete failed.')
+        } finally {
+            setStudioExportBulkLoading(false)
+        }
+    }
+
+    const clearApplicationErrorLog = async () => {
+        if (
+            !window.confirm(
+                'Remove all rows from the application error log? This only clears the Operations Center history; it does not change tenant or asset data, and new errors can still be recorded.'
+            )
+        ) {
+            return
+        }
+        setClearAppErrorsLoading(true)
+        try {
+            const res = await axios.post(route('admin.operations-center.application-errors.clear'))
+            const msg = res?.data?.message ?? 'Done.'
+            window.alert(msg)
+            router.reload({ only: ['applicationErrors'] })
+        } catch (e) {
+            console.error(e)
+            window.alert(e?.response?.data?.message || e?.message || 'Failed to clear application errors.')
+        } finally {
+            setClearAppErrorsLoading(false)
         }
     }
 
@@ -707,13 +816,27 @@ export default function OperationsCenterIndex({
 
                         {tab === 'application-errors' && (
                             <div className="overflow-hidden rounded-lg bg-white shadow ring-1 ring-gray-200">
-                                <div className="px-4 py-4 sm:px-6">
-                                    <h2 className="text-lg font-semibold text-gray-900">Application errors</h2>
-                                    <p className="mt-1 text-sm text-gray-500">
-                                        User-impacting errors that are not queue hard-failures (for example AI provider overload). Studio
-                                        canvas worker / Playwright dependency issues appear as category{' '}
-                                        <span className="font-mono text-gray-700">studio_worker_infra</span>. Newest first.
-                                    </p>
+                                <div className="px-4 py-4 sm:px-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                    <div>
+                                        <h2 className="text-lg font-semibold text-gray-900">Application errors</h2>
+                                        <p className="mt-1 text-sm text-gray-500">
+                                            User-impacting errors that are not queue hard-failures (for example AI provider overload). Studio
+                                            canvas worker / Playwright dependency issues appear as category{' '}
+                                            <span className="font-mono text-gray-700">studio_worker_infra</span>. Newest first.{' '}
+                                            <span className="text-gray-600">
+                                                The &ldquo;When&rdquo; column uses your browser&rsquo;s date and time and timezone; hover
+                                                a cell to see the same instant in UTC.
+                                            </span>
+                                        </p>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        disabled={clearAppErrorsLoading || applicationErrorList.length === 0}
+                                        onClick={() => void clearApplicationErrorLog()}
+                                        className="shrink-0 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-900 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+                                    >
+                                        {clearAppErrorsLoading ? 'Clearing…' : 'Clear application error log'}
+                                    </button>
                                 </div>
                                 <div className="border-t border-gray-200 overflow-x-auto">
                                     <table className="min-w-full divide-y divide-gray-300">
@@ -730,7 +853,10 @@ export default function OperationsCenterIndex({
                                         <tbody className="divide-y divide-gray-200">
                                             {applicationErrorList.map((row) => (
                                                 <tr key={row.id}>
-                                                    <td className="whitespace-nowrap py-3 pl-4 pr-3 text-sm text-gray-500">
+                                                    <td
+                                                        className="whitespace-nowrap py-3 pl-4 pr-3 text-sm text-gray-500"
+                                                        title={formatDateHoverUtc(row.created_at) || undefined}
+                                                    >
                                                         {formatDate(row.created_at)}
                                                     </td>
                                                     <td className="whitespace-nowrap py-3 px-3 text-sm text-gray-900">{row.category}</td>
@@ -795,22 +921,65 @@ export default function OperationsCenterIndex({
                                     </div>
                                 </div>
                                 <div className="overflow-hidden rounded-lg bg-white shadow ring-1 ring-gray-200">
-                                    <div className="px-4 py-4 sm:px-6">
-                                        <h2 className="text-lg font-semibold text-gray-900">Failed Studio export jobs</h2>
-                                        <p className="mt-1 text-sm text-gray-500">
-                                            This list is <span className="font-medium text-gray-800">failed rows only</span> (newest first, up to 100). Successful
-                                            exports are not shown here — use tenant tools or asset history for completed MP4s.{' '}
-                                            <span className="font-mono text-gray-700">blend</span> marks graphs that used{' '}
-                                            <span className="font-mono text-gray-700">blend=all_mode=…</span>. Full <span className="font-mono text-gray-700">filter_complex</span> lives in{' '}
-                                            <span className="font-mono text-gray-700">error_json</span> in the database. You may <span className="font-medium text-gray-800">delete</span> a row to
-                                            tidy diagnostics (optional); that does not fix the underlying composition.
-                                        </p>
+                                    <div className="px-4 py-4 sm:px-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                        <div>
+                                            <h2 className="text-lg font-semibold text-gray-900">Failed Studio export jobs</h2>
+                                            <p className="mt-1 text-sm text-gray-500">
+                                                This list is <span className="font-medium text-gray-800">failed rows only</span> (newest first, up to 100). Successful
+                                                exports are not shown here — use tenant tools or asset history for completed MP4s.{' '}
+                                                <span className="font-mono text-gray-700">blend</span> marks graphs that used{' '}
+                                                <span className="font-mono text-gray-700">blend=all_mode=…</span>. Full <span className="font-mono text-gray-700">filter_complex</span> lives in{' '}
+                                                <span className="font-mono text-gray-700">error_json</span> in the database. Use checkboxes to remove multiple rows, or delete all
+                                                shown in the table. That only tidies diagnostics; it does not fix the underlying composition.
+                                            </p>
+                                        </div>
+                                        <div className="flex flex-wrap items-center gap-2 shrink-0">
+                                            {someStudioExportsSelected && (
+                                                <span className="text-sm text-gray-600">{selectedStudioExportIds.size} selected</span>
+                                            )}
+                                            <button
+                                                type="button"
+                                                disabled={studioExportBulkLoading || !someStudioExportsSelected}
+                                                onClick={() =>
+                                                    void bulkDeleteStudioExportJobRows(
+                                                        studioExportRows.filter((r) => selectedStudioExportIds.has(r.id)).map((r) => r.id)
+                                                    )
+                                                }
+                                                className="inline-flex rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-900 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+                                            >
+                                                {studioExportBulkLoading
+                                                    ? 'Deleting…'
+                                                    : `Delete selected${someStudioExportsSelected ? ` (${selectedStudioExportIds.size})` : ''}`}
+                                            </button>
+                                            <button
+                                                type="button"
+                                                disabled={studioExportBulkLoading || studioExportRows.length === 0}
+                                                onClick={() =>
+                                                    void bulkDeleteStudioExportJobRows(studioExportRows.map((r) => r.id))
+                                                }
+                                                className="inline-flex rounded-lg border border-red-200 bg-red-100 px-3 py-2 text-sm font-medium text-red-900 hover:bg-red-200 disabled:cursor-not-allowed disabled:opacity-50"
+                                            >
+                                                {studioExportBulkLoading
+                                                    ? 'Deleting…'
+                                                    : `Delete all in list${studioExportRows.length > 0 ? ` (${studioExportRows.length})` : ''}`}
+                                            </button>
+                                        </div>
                                     </div>
                                     <div className="border-t border-gray-200 overflow-x-auto">
-                                        <table className="w-full min-w-[56rem] table-fixed divide-y divide-gray-300">
+                                        <table className="w-full min-w-[60rem] table-fixed divide-y divide-gray-300">
                                             <thead>
                                                 <tr>
-                                                    <th className="w-[11rem] py-3.5 pl-4 pr-2 text-left text-xs font-semibold uppercase tracking-wide text-gray-600">When (local)</th>
+                                                    <th className="w-10 py-3.5 pl-4 pr-0">
+                                                        <input
+                                                            type="checkbox"
+                                                            ref={studioExportSelectAllRef}
+                                                            checked={allStudioExportsSelected}
+                                                            onChange={(e) => toggleSelectAllStudioExports(e.target.checked)}
+                                                            className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                                            title="Select all in this list"
+                                                        />
+                                                    </th>
+                                                    <th className="w-[11rem] py-3.5 pl-2 pr-2 text-left text-xs font-semibold uppercase tracking-wide text-gray-600">When (local)</th>
                                                     <th className="w-[4.5rem] py-3.5 px-2 text-left text-xs font-semibold uppercase tracking-wide text-gray-600">Status</th>
                                                     <th className="w-[7.5rem] py-3.5 px-2 text-left text-xs font-semibold uppercase tracking-wide text-gray-600">Tenant</th>
                                                     <th className="w-[5rem] py-3.5 px-2 text-left text-xs font-semibold uppercase tracking-wide text-gray-600">Comp.</th>
@@ -824,8 +993,17 @@ export default function OperationsCenterIndex({
                                                 {(studioVideoExports?.rows ?? []).map((row) => (
                                                     <Fragment key={row.id}>
                                                         <tr className="align-top">
+                                                            <td className="w-10 py-2.5 pl-4 pr-0 align-top">
+                                                                <input
+                                                                    type="checkbox"
+                                                                    checked={selectedStudioExportIds.has(row.id)}
+                                                                    onChange={(e) => toggleStudioExportRow(row.id, e.target.checked)}
+                                                                    className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                                                    aria-label={`Select failed export job ${row.id}`}
+                                                                />
+                                                            </td>
                                                             <td
-                                                                className="py-2.5 pl-4 pr-2 align-top text-xs leading-snug text-gray-600"
+                                                                className="py-2.5 pl-2 pr-2 align-top text-xs leading-snug text-gray-600"
                                                                 title={formatDateHoverUtc(row.updated_at) || undefined}
                                                             >
                                                                 {formatStudioExportWhen(row.updated_at)}
@@ -874,7 +1052,7 @@ export default function OperationsCenterIndex({
                                                             </td>
                                                         </tr>
                                                         <tr className="bg-slate-50/90">
-                                                            <td colSpan={8} className="min-w-0 px-4 pb-4 pt-0">
+                                                            <td colSpan={9} className="min-w-0 px-4 pb-4 pt-0">
                                                                 {row.stderr_preview ? (
                                                                     <>
                                                                         <div className="pt-2 text-xs font-semibold uppercase tracking-wide text-slate-600">

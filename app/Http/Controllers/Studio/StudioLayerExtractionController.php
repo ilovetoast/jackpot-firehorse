@@ -17,6 +17,7 @@ use App\Services\Fal\FalModelPricingService;
 use App\Services\Studio\AiLayerExtractionService;
 use App\Services\Studio\StudioLayerExtractionConfirmService;
 use App\Services\Studio\StudioLayerExtractionMethodService;
+use App\Support\StudioLayerExtractionStoragePaths;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
@@ -449,7 +450,7 @@ class StudioLayerExtractionController extends Controller
             ->get();
         foreach ($rows as $row) {
             try {
-                $disk->deleteDirectory($row->id);
+                $disk->deleteDirectory(StudioLayerExtractionStoragePaths::sessionDirectory($row->id));
             } catch (\Throwable) {
             }
             $row->delete();

@@ -7,7 +7,28 @@
 
 ## Overview
 
-Outgoing mail is classified into two categories:
+Outgoing mail is classified into three `EmailGate` types (see `App\Services\EmailGate`):
+
+1. **User-initiated** (`emailType === 'user'`) — Always sent (unless mail driver fails).
+2. **System / automated** (`'system'`) — Blocked when `MAIL_AUTOMATIONS_ENABLED=false` (default in many environments).
+3. **Site operator / operations** (`'operations'`) — **Always sent**, independent of `MAIL_AUTOMATIONS_ENABLED`. Use for throttled admin alerts to `config('mail.admin_recipients')` (from `ADMIN_EMAIL`).
+
+**Plan feature** `notifications.enabled` (see `FeatureGate::notificationsEnabled`) and **`NOTIFICATIONS_ENABLED`** (in-app / orchestrated notification pipeline) apply to product notification features (approvals, digests, in-app, etc.) — they do **not** gate mailables unless a listener explicitly checks them. Admin AI operator mailables below do **not** use those flags.
+
+## AI & upstream API — admin (operations mail)
+
+The following are sent to `mail.admin_recipients` and use **`operations`** so they are **not** suppressed by `MAIL_AUTOMATIONS_ENABLED`:
+
+- **Upstream provider quota / billing (429, org limit)** — `AIProviderQuotaExceededMail` via `App\Services\AI\AIQuotaExceededNotifier` (on `AIQuotaExceededException` report path).
+- **Platform-wide monthly AI spend cap** — `SystemAiBudgetWarningMail` / `SystemAiBudgetCapReachedMail` via `App\Services\AI\AIBudgetSystemAdminNotifier`.
+
+Configure recipients with `ADMIN_EMAIL` in `.env` (comma-separated).
+
+---
+
+## Legacy two-category summary (still accurate for user vs system)
+
+Outgoing mail is often described as two categories for product planning:
 
 1. **User-initiated** — Triggered by an explicit user action in the product (invite teammate, share download link, password reset, etc.). These messages are **always allowed** so staging and QA can exercise real flows through Mailtrap without extra toggles.
 
@@ -49,11 +70,15 @@ Implement as:
 protected string $emailType = 'system';
 ```
 
+### Site operator (operations)
+
+Throttled alerts to `ADMIN_EMAIL` / `mail.admin_recipients` (e.g. AI provider quota, platform AI budget). **Not** subject to `MAIL_AUTOMATIONS_ENABLED`. Implement as `protected string $emailType = 'operations';` (see `AIProviderQuotaExceededMail`, `SystemAiBudgetWarningMail`, `SystemAiBudgetCapReachedMail`).
+
 ## Environment controls
 
 | Variable | Default | Meaning |
 |----------|---------|---------|
-| `MAIL_AUTOMATIONS_ENABLED` | `false` | When `false`, mailables with `emailType === 'system'` are not sent (early exit + log line). When `true`, system emails are allowed. |
+| `MAIL_AUTOMATIONS_ENABLED` | `false` | When `false`, mailables with `emailType === 'system'` are not sent (early exit + log line). When `true`, system emails are allowed. `operations` mailables are **always** allowed. |
 
 Configured in `config/mail.php` as `mail.automations_enabled` (boolean).
 
@@ -62,10 +87,11 @@ Configured in `config/mail.php` as `mail.automations_enabled` (boolean).
 1. **All application mailables MUST extend `App\Mail\BaseMailable`.** Do not extend `Illuminate\Mail\Mailable` directly.
 2. **Every new system/automated email MUST set** `protected string $emailType = 'system';`.
 3. **Do not change mail drivers** for gating — use `BaseMailable` + `EmailGate` only.
+4. **Admin / operator alerts** that must always send when the mailer is configured use `'operations'`; do not add `FeatureGate::notificationsEnabled` or `NOTIFICATIONS_ENABLED` checks to these mailables unless product explicitly requires it.
 
 ## Implementation
 
-- `App\Services\EmailGate` — `canSend('user'|'system')`.
+- `App\Services\EmailGate` — `canSend('user' | 'system' | 'operations')` (`operations` and `user` are always allowed).
 - `App\Mail\BaseMailable` — default `emailType = 'user'`; overrides `send()` to respect the gate and log blocked system mail.
 
 ## Safety design

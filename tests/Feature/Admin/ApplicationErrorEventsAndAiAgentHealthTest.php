@@ -218,4 +218,38 @@ class ApplicationErrorEventsAndAiAgentHealthTest extends TestCase
         $this->assertSame('Acme', $props['applicationErrors'][0]['tenant_name']);
         $this->assertSame('acme-3', $props['applicationErrors'][0]['tenant_slug']);
     }
+
+    #[Test]
+    public function site_admin_can_clear_application_error_log(): void
+    {
+        $tenant = Tenant::create([
+            'name' => 'ClearCo',
+            'slug' => 'clearco',
+        ]);
+
+        $admin = User::factory()->create();
+        $admin->assignRole('site_admin');
+        $admin->tenants()->attach($tenant->id, ['role' => 'member']);
+
+        ApplicationErrorEvent::create([
+            'source_type' => 'ai_agent_run',
+            'source_id' => '1',
+            'tenant_id' => $tenant->id,
+            'user_id' => null,
+            'category' => 'ai_agent',
+            'code' => 'test',
+            'message' => 'x',
+            'context' => [],
+        ]);
+
+        $this->assertSame(1, ApplicationErrorEvent::query()->count());
+
+        $res = $this->actingAs($admin)
+            ->withSession(['tenant_id' => $tenant->id])
+            ->postJson(route('admin.operations-center.application-errors.clear'));
+
+        $res->assertOk();
+        $res->assertJsonPath('cleared', 1);
+        $this->assertSame(0, ApplicationErrorEvent::query()->count());
+    }
 }

@@ -13,6 +13,7 @@ use App\Services\AiUsageService;
 use App\Studio\LayerExtraction\Contracts\StudioLayerExtractionInpaintBackgroundInterface;
 use App\Studio\LayerExtraction\Contracts\StudioLayerExtractionProviderInterface;
 use App\Support\EditorAssetOriginalBytesLoader;
+use App\Support\StudioLayerExtractionStoragePaths;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
@@ -147,7 +148,7 @@ final class StudioLayerExtractionConfirmService
                 $maskBinaries[] = $disk->get($rel);
             }
             $combinedMaskPng = $this->mergeUnionForegroundMasksPng($nw, $nh, $maskBinaries);
-            $combinedRel = $session->id.'/combined_mask.png';
+            $combinedRel = StudioLayerExtractionStoragePaths::relative($session->id, 'combined_mask.png');
             $disk->put($combinedRel, $combinedMaskPng);
             try {
                 $fillBinary = $this->inpaint->buildFilledBackground($sourceAsset, $origBinary, $combinedMaskPng, $session);
@@ -588,7 +589,7 @@ final class StudioLayerExtractionConfirmService
     private function deleteSessionFiles(string $sessionId): void
     {
         $disk = Storage::disk('studio_layer_extraction');
-        $disk->deleteDirectory($sessionId);
+        $disk->deleteDirectory(StudioLayerExtractionStoragePaths::sessionDirectory($sessionId));
     }
 
     /**

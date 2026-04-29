@@ -13,6 +13,8 @@ use Throwable;
 /**
  * Throttled email to site operators for the system-wide (platform) monthly AI budget only.
  * Tenant credits / plan limits are separate and do not use this notifier.
+ *
+ * Recipients: {@see config('mail.admin_recipients')}. Mailables use {@see \App\Services\EmailGate::TYPE_OPERATIONS} (ignores `MAIL_AUTOMATIONS_ENABLED` and is not behind plan `notifications.enabled`).
  */
 final class AIBudgetSystemAdminNotifier
 {
