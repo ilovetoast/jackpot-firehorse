@@ -46,7 +46,8 @@ class AdminStudioLayerExtractionController extends Controller
         $q = StudioLayerExtractionSession::query()
             ->with([
                 'tenant:id,name',
-                'user:id,name',
+                // users table has first_name/last_name; `name` is an accessor, not a column
+                'user:id,first_name,last_name,email',
             ])
             ->orderByDesc('updated_at');
 
@@ -62,6 +63,12 @@ class AdminStudioLayerExtractionController extends Controller
             if (isset($meta['extraction_method']) && is_string($meta['extraction_method'])) {
                 $method = $meta['extraction_method'];
             }
+            $serviceKind = 'unknown';
+            if ($method === 'ai') {
+                $serviceKind = 'ai';
+            } elseif ($method === 'local') {
+                $serviceKind = 'local';
+            }
 
             return [
                 'id' => $s->id,
@@ -69,6 +76,7 @@ class AdminStudioLayerExtractionController extends Controller
                 'provider' => $s->provider,
                 'model' => $s->model,
                 'extraction_method' => $method,
+                'service_kind' => $serviceKind,
                 'candidates_count' => $n,
                 'error_message' => $s->error_message !== null && $s->error_message !== ''
                     ? mb_substr((string) $s->error_message, 0, 240)
@@ -107,7 +115,10 @@ class AdminStudioLayerExtractionController extends Controller
         $this->authorizeAdmin();
 
         $s = StudioLayerExtractionSession::query()
-            ->with(['tenant:id,name', 'user:id,name'])
+            ->with([
+                'tenant:id,name',
+                'user:id,first_name,last_name,email',
+            ])
             ->whereKey($session)
             ->firstOrFail();
 

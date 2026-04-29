@@ -212,15 +212,6 @@ export default function AdminDashboard({ auth, metrics: initialMetrics }) {
         },
     ]
 
-    const onboardingItems = [
-        {
-            name: 'Default categories & fields',
-            description: 'Review system templates + config for new accounts (read-only)',
-            href: '/app/admin/onboarding/defaults',
-            icon: AcademicCapIcon,
-        },
-    ]
-
     const configItems = [
         { name: 'Permissions', description: 'Role permissions', href: '/app/admin/permissions', icon: LockClosedIcon },
         ...(perms.canViewMetadataRegistry ? [{ name: 'Metadata Registry', description: 'System metadata fields', href: '/app/admin/metadata/registry', icon: TagIcon }] : []),
@@ -334,12 +325,6 @@ export default function AdminDashboard({ auth, metrics: initialMetrics }) {
 
                     {/* 2. Grouped Sections */}
                     <div className="space-y-6">
-                        <SectionCard
-                            title="Onboarding & client setup"
-                            description="What new tenants inherit — catalog and metadata defaults"
-                            items={onboardingItems}
-                            defaultExpanded={true}
-                        />
                         {perms.canViewOperations && (
                             <SectionCard
                                 title="Operations & Recovery"
@@ -391,9 +376,17 @@ export default function AdminDashboard({ auth, metrics: initialMetrics }) {
                             defaultExpanded={false}
                         />
                         <SectionCard
-                            title="Documentation"
-                            description="System documentation"
-                            items={[{ name: 'Documentation', description: 'View docs', href: '/app/admin/documentation', icon: BookOpenIcon }]}
+                            title="Documentation & onboarding"
+                            description="Engineering docs and what new tenants inherit (catalog defaults)"
+                            items={[
+                                { name: 'Documentation', description: 'Repository docs, platform procedures', href: '/app/admin/documentation', icon: BookOpenIcon },
+                                {
+                                    name: 'Default categories & fields',
+                                    description: 'System templates for new accounts (read-only)',
+                                    href: '/app/admin/onboarding/defaults',
+                                    icon: AcademicCapIcon,
+                                },
+                            ]}
                             defaultExpanded={false}
                         />
                     </div>

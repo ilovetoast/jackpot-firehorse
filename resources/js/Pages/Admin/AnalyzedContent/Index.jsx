@@ -3,37 +3,9 @@ import { Link, usePage } from '@inertiajs/react'
 import AppNav from '../../../Components/AppNav'
 import AppFooter from '../../../Components/AppFooter'
 import AppHead from '../../../Components/AppHead'
-import { FilmIcon, SparklesIcon, PhotoIcon, RectangleStackIcon } from '@heroicons/react/24/outline'
+import { FilmIcon, SparklesIcon, PhotoIcon, ChevronRightIcon } from '@heroicons/react/24/outline'
 import AdminAiServicesNav from '../../../Components/Admin/AdminAiServicesNav'
 import VideoInsightRunDetailPanel from './VideoInsightRunDetailPanel'
-
-const TILES = [
-    {
-        name: 'Brand Intelligence',
-        description: 'EBI scores, asset alignment, simulate (dev)',
-        href: '/app/admin/brand-intelligence',
-        icon: SparklesIcon,
-    },
-    {
-        name: 'Generative audit (Editor & Studio)',
-        description: 'Canvas, presentation preview, composition video — prompts, credits, request/output',
-        href: '/app/admin/ai/editor-image-audit',
-        icon: PhotoIcon,
-    },
-    {
-        name: 'Studio layer extraction',
-        description: 'Extract layers sessions — floodfill, Fal SAM, errors, session JSON',
-        href: '/app/admin/ai/studio-layer-extraction',
-        icon: RectangleStackIcon,
-    },
-    {
-        name: 'Library video insights',
-        description: 'This page — status counts, library table, agent runs, troubleshooting',
-        href: '/app/admin/ai/analyzed-content',
-        icon: FilmIcon,
-        self: true,
-    },
-]
 
 function formatRunDuration(s) {
     if (s == null || Number.isNaN(Number(s))) {
@@ -84,9 +56,10 @@ export default function AdminAnalyzedContentIndex({
                     <div className="mb-8">
                         <h1 className="text-3xl font-bold tracking-tight text-slate-900">AI services hub</h1>
                         <p className="mt-2 max-w-3xl text-sm text-slate-600">
-                            One place to jump between <strong>brand alignment</strong> (EBI), <strong>generative Studio / Editor</strong>{' '}
-                            usage, <strong>composite layer extraction</strong> (local + SAM), and <strong>library video AI</strong>{' '}
-                            (this page). Operations / export failures live under{' '}
+                            One place to jump between <strong>brand alignment</strong> (EBI), <strong>generative and Studio work</strong>{' '}
+                            (canvas, composition video, and extract-layers — each run is either <strong>local</strong> floodfill or{' '}
+                            <strong>AI</strong> via Fal SAM), and <strong>library video AI</strong> (this page). Operations / export
+                            failures live under{' '}
                             <a href="/app/admin/operations-center?tab=studio-exports" className="text-indigo-600 hover:text-indigo-500">
                                 Studio video exports
                             </a>
@@ -98,40 +71,72 @@ export default function AdminAnalyzedContentIndex({
                         </p>
                     </div>
 
-                    <div className="mb-8 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                        {TILES.map((item) => {
-                            const Icon = item.icon
-                            const inner = (
-                                <>
-                                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-slate-100">
-                                        <Icon className="h-5 w-5 text-slate-600" />
+                    <div className="mb-8 grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
+                        <Link
+                            href="/app/admin/brand-intelligence"
+                            className="flex items-start gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition-colors hover:border-indigo-200 hover:bg-indigo-50/30"
+                        >
+                            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-slate-100">
+                                <SparklesIcon className="h-5 w-5 text-slate-600" />
+                            </div>
+                            <div className="min-w-0">
+                                <p className="font-medium text-slate-900">Brand Intelligence</p>
+                                <p className="text-sm text-slate-500">EBI scores, asset alignment, simulate (dev)</p>
+                            </div>
+                        </Link>
+
+                        <div className="flex h-full min-h-0 flex-col gap-0 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm ring-1 ring-slate-100">
+                            <div className="flex items-start gap-3 border-b border-slate-100 bg-slate-50/80 px-4 py-3">
+                                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white ring-1 ring-slate-200">
+                                    <PhotoIcon className="h-5 w-5 text-slate-600" />
+                                </div>
+                                <div className="min-w-0">
+                                    <p className="font-medium text-slate-900">Generative &amp; Studio</p>
+                                    <p className="text-sm text-slate-500">
+                                        Editor canvas, presentation preview, MP4 export pipeline, and cutout extraction — not the same
+                                        product as library video AI (below).
+                                    </p>
+                                </div>
+                            </div>
+                            <Link
+                                href="/app/admin/ai/editor-image-audit"
+                                className="group flex items-center justify-between gap-2 border-b border-slate-100 px-4 py-3 text-left transition-colors hover:bg-indigo-50/50"
+                            >
+                                <div>
+                                    <p className="text-sm font-medium text-slate-900">Generative AI audit</p>
+                                    <p className="text-xs text-slate-500">Text-to-image, image edit, presentation preview, Studio i2v — prompts, credits, request / output</p>
+                                </div>
+                                <ChevronRightIcon className="h-4 w-4 shrink-0 text-slate-400 group-hover:text-indigo-500" />
+                            </Link>
+                            <Link
+                                href="/app/admin/ai/studio-layer-extraction"
+                                className="group flex items-center justify-between gap-2 px-4 py-3 text-left transition-colors hover:bg-indigo-50/50"
+                            >
+                                <div className="min-w-0">
+                                    <p className="text-sm font-medium text-slate-900">Layer extraction sessions</p>
+                                    <p className="text-xs text-slate-500">Mask runs logged per session; uses local floodfill and/or remote Fal SAM</p>
+                                    <div className="mt-2 flex flex-wrap gap-1.5">
+                                        <span className="inline-flex items-center rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-700">
+                                            Local
+                                        </span>
+                                        <span className="inline-flex items-center rounded-md bg-violet-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-violet-800">
+                                            AI (SAM)
+                                        </span>
                                     </div>
-                                    <div className="min-w-0 flex-1">
-                                        <p className="font-medium text-slate-900">{item.name}</p>
-                                        <p className="text-sm text-slate-500">{item.description}</p>
-                                    </div>
-                                </>
-                            )
-                            if (item.self) {
-                                return (
-                                    <div
-                                        key={item.href}
-                                        className="flex items-center gap-3 rounded-xl border-2 border-indigo-200 bg-indigo-50/40 p-4"
-                                    >
-                                        {inner}
-                                    </div>
-                                )
-                            }
-                            return (
-                                <Link
-                                    key={item.href}
-                                    href={item.href}
-                                    className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition-colors hover:border-indigo-200 hover:bg-indigo-50/30"
-                                >
-                                    {inner}
-                                </Link>
-                            )
-                        })}
+                                </div>
+                                <ChevronRightIcon className="h-4 w-4 shrink-0 text-slate-400 group-hover:text-indigo-500" />
+                            </Link>
+                        </div>
+
+                        <div className="flex items-start gap-3 rounded-xl border-2 border-indigo-200 bg-indigo-50/40 p-4">
+                            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white">
+                                <FilmIcon className="h-5 w-5 text-slate-600" />
+                            </div>
+                            <div className="min-w-0">
+                                <p className="font-medium text-slate-900">Library video insights</p>
+                                <p className="text-sm text-slate-500">This page — status counts, library table, agent runs, troubleshooting</p>
+                            </div>
+                        </div>
                     </div>
 
                     <div className="mb-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">

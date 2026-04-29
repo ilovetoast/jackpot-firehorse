@@ -146,17 +146,6 @@ export default function AdminIndex({ companies: initialCompanies, users: initial
 
     const adminToolGroups = [
         {
-            heading: 'Onboarding & client setup',
-            tools: [
-                {
-                    name: 'Default categories & fields',
-                    icon: AcademicCapIcon,
-                    description: 'Review system category templates and field defaults for new accounts (read-only)',
-                    href: '/app/admin/onboarding/defaults',
-                },
-            ],
-        },
-        {
             heading: 'Support & Billing',
             tools: [
                 { name: 'Support', icon: QuestionMarkCircleIcon, description: 'Manage support tickets', href: '/app/admin/support/tickets' },
@@ -212,7 +201,13 @@ export default function AdminIndex({ companies: initialCompanies, users: initial
         {
             heading: 'Documentation',
             tools: [
-                { name: 'Documentation', icon: BookOpenIcon, description: 'View system documentation', href: '/app/admin/documentation' },
+                { name: 'Documentation', icon: BookOpenIcon, description: 'Engineering docs, platform procedures, and onboarding tools', href: '/app/admin/documentation' },
+                {
+                    name: 'Default categories & fields',
+                    icon: AcademicCapIcon,
+                    description: 'What new tenants inherit — system category templates and field defaults (read-only)',
+                    href: '/app/admin/onboarding/defaults',
+                },
             ],
         },
     ]

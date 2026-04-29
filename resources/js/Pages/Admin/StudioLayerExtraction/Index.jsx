@@ -12,6 +12,25 @@ function statusClass(status) {
     return 'bg-slate-100 text-slate-800'
 }
 
+function serviceBadge(row) {
+    const k = row.service_kind || (row.extraction_method === 'ai' ? 'ai' : row.extraction_method === 'local' ? 'local' : 'unknown')
+    if (k === 'ai') {
+        return (
+            <span className="inline-flex rounded-md bg-violet-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-violet-800">
+                AI (SAM)
+            </span>
+        )
+    }
+    if (k === 'local') {
+        return (
+            <span className="inline-flex rounded-md bg-slate-200/90 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-800">
+                Local
+            </span>
+        )
+    }
+    return <span className="text-xs text-slate-500">—</span>
+}
+
 export default function AdminStudioLayerExtractionIndex({ rows = [], counts = {}, status_filter: statusFilter, admin_asset_url }) {
     const { auth } = usePage().props
     const [detail, setDetail] = useState(null)
@@ -53,6 +72,12 @@ export default function AdminStudioLayerExtractionIndex({ rows = [], counts = {}
                     <AdminAiServicesNav />
                     <div className="mb-6">
                         <h1 className="text-3xl font-bold tracking-tight text-slate-900">Studio layer extraction</h1>
+                        <p className="mt-1 text-xs text-slate-500">
+                            Listed under <strong>Generative &amp; Studio</strong> on the{' '}
+                            <a href="/app/admin/ai/analyzed-content" className="text-indigo-600 hover:text-indigo-500">AI services hub</a>
+                            . Each session is either <span className="font-medium">Local</span> (floodfill) or{' '}
+                            <span className="font-medium">AI (SAM)</span> (Fal) — see the Service column.
+                        </p>
                         <p className="mt-2 max-w-3xl text-sm text-slate-600">
                             Recent <strong>Extract layers</strong> sessions (local floodfill and remote Fal SAM). Rows come from{' '}
                             <code className="rounded bg-slate-100 px-1 text-xs">studio_layer_extraction_sessions</code>. Use{' '}
@@ -105,6 +130,7 @@ export default function AdminStudioLayerExtractionIndex({ rows = [], counts = {}
                                     <tr>
                                         <th className="px-4 py-2 text-left font-medium text-slate-700">Updated</th>
                                         <th className="px-4 py-2 text-left font-medium text-slate-700">Status</th>
+                                        <th className="px-4 py-2 text-left font-medium text-slate-700">Service</th>
                                         <th className="px-4 py-2 text-left font-medium text-slate-700">Tenant</th>
                                         <th className="px-4 py-2 text-left font-medium text-slate-700">Method</th>
                                         <th className="px-4 py-2 text-left font-medium text-slate-700">Provider / model</th>
@@ -117,7 +143,7 @@ export default function AdminStudioLayerExtractionIndex({ rows = [], counts = {}
                                 <tbody className="divide-y divide-slate-100">
                                     {rows.length === 0 ? (
                                         <tr>
-                                            <td colSpan={9} className="px-4 py-10 text-center text-slate-500">
+                                            <td colSpan={10} className="px-4 py-10 text-center text-slate-500">
                                                 No layer extraction sessions yet.
                                             </td>
                                         </tr>
@@ -132,6 +158,7 @@ export default function AdminStudioLayerExtractionIndex({ rows = [], counts = {}
                                                         {row.status}
                                                     </span>
                                                 </td>
+                                                <td className="px-4 py-2">{serviceBadge(row)}</td>
                                                 <td className="px-4 py-2 text-slate-700">{row.tenant_name ?? '—'}</td>
                                                 <td className="max-w-[8rem] truncate px-4 py-2 font-mono text-xs text-slate-600" title={row.extraction_method || ''}>
                                                     {row.extraction_method ?? '—'}
