@@ -445,6 +445,9 @@ class StudioAnimationTest extends TestCase
         $this->assertSame('staged', $created?->intake_state);
         $this->assertSame('uploading', $created?->analysis_status);
         $this->assertNotEmpty($created?->metadata['_studio_staged_defer_ai'] ?? null);
+        $libraryTags = DB::table('asset_tags')->where('asset_id', $out->asset_id)->pluck('tag')->all();
+        $this->assertContains('ai', $libraryTags);
+        $this->assertContains('ai-generated', $libraryTags);
         $job->refresh();
         $this->assertTrue((bool) (($job->settings_json ?? [])['credits_tracked'] ?? false));
 

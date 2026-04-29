@@ -8,6 +8,7 @@ use App\Studio\LayerExtraction\Contracts\StudioLayerExtractionPointPickProviderI
 use App\Studio\LayerExtraction\Contracts\StudioLayerExtractionPointRefineProviderInterface;
 use App\Studio\LayerExtraction\Contracts\StudioLayerExtractionProviderInterface;
 use App\Studio\LayerExtraction\Dto\LayerExtractionCandidateDto;
+use App\Studio\LayerExtraction\Exceptions\LocalExtractionSourceTooLargeException;
 use App\Studio\LayerExtraction\Dto\LayerExtractionResult;
 use App\Support\EditorAssetOriginalBytesLoader;
 use InvalidArgumentException;
@@ -59,8 +60,8 @@ final class FloodfillStudioLayerExtractionProvider implements StudioLayerExtract
         $fullW = (int) $dims[0];
         $fullH = (int) $dims[1];
         if ($fullW * $fullH > $maxAnalysisPx) {
-            throw new InvalidArgumentException(
-                'This image is too large for local extraction. Try a smaller resolution, or add a paid segmentation provider later when available.'
+            throw new LocalExtractionSourceTooLargeException(
+                'This image is too large for local extraction.'
             );
         }
 
@@ -307,13 +308,30 @@ final class FloodfillStudioLayerExtractionProvider implements StudioLayerExtract
         if (! (bool) config('studio_layer_extraction.local_floodfill.refine_enabled', true)) {
             return null;
         }
-        if (! str_starts_with($candidate->id, 'pick_')) {
+        $meta0 = $candidate->metadata ?? [];
+        $isPick = str_starts_with($candidate->id, 'pick_');
+        $isBox = str_starts_with($candidate->id, 'box_');
+        if (! $isPick && ! $isBox) {
             return null;
         }
-        $meta = $candidate->metadata ?? [];
-        $method = (string) ($meta['method'] ?? '');
-        if ($method !== 'local_seed_floodfill' && $method !== 'local_seed_floodfill_refined') {
-            return null;
+        $method0 = (string) ($meta0['method'] ?? '');
+        if ($isPick) {
+            if ($method0 !== 'local_seed_floodfill' && $method0 !== 'local_seed_floodfill_refined') {
+                return null;
+            }
+        } else {
+            $okBox = in_array(
+                $method0,
+                [
+                    'local_box_floodfill', 'local_box_floodfill_refined',
+                    'local_box_rect_cutout',
+                    'local_box_text_graphic', 'local_box_text_graphic_refined',
+                ],
+                true
+            );
+            if (! $okBox) {
+                return null;
+            }
         }
         if ($positivePoints === []) {
             return null;
@@ -352,27 +370,45 @@ final class FloodfillStudioLayerExtractionProvider implements StudioLayerExtract
 
         $unionMap = [];
         $seeds = [];
-        foreach ($positivePoints as $pp) {
-            $xN = (float) $pp['x'];
-            $yN = (float) $pp['y'];
-            if ($xN < 0.0 || $xN > 1.0 || $yN < 0.0 || $yN > 1.0) {
-                continue;
-            }
-            $ppx = (int) max(0, min($fullW - 1, (int) round($xN * max(1, $fullW - 1))));
-            $ppy = (int) max(0, min($fullH - 1, (int) round($yN * max(1, $fullH - 1))));
-            $sx2 = (int) max(0, min($segW - 1, (int) floor($ppx * $segW / $fullW)));
-            $sy2 = (int) max(0, min($segH - 1, (int) floor($ppy * $segH / $fullH)));
-            $sidx = $sy2 * $segW + $sx2;
-            if ($bgMask[$sidx] === "\x01") {
-                continue;
-            }
-            $seeds[] = $sidx;
-            $candComp = $this->connectedForegroundFromSeed($bgMask, $segW, $segH, $sidx);
-            foreach ($candComp as $i) {
-                if ($i >= 0 && $i < $total) {
-                    $unionMap[$i] = true;
+        if ($isPick) {
+            foreach ($positivePoints as $pp) {
+                $xN = (float) $pp['x'];
+                $yN = (float) $pp['y'];
+                if ($xN < 0.0 || $xN > 1.0 || $yN < 0.0 || $yN > 1.0) {
+                    continue;
+                }
+                $ppx = (int) max(0, min($fullW - 1, (int) round($xN * max(1, $fullW - 1))));
+                $ppy = (int) max(0, min($fullH - 1, (int) round($yN * max(1, $fullH - 1))));
+                $sx2 = (int) max(0, min($segW - 1, (int) floor($ppx * $segW / $fullW)));
+                $sy2 = (int) max(0, min($segH - 1, (int) floor($ppy * $segH / $fullH)));
+                $sidx = $sy2 * $segW + $sx2;
+                if ($bgMask[$sidx] === "\x01") {
+                    continue;
+                }
+                $seeds[] = $sidx;
+                $candComp = $this->connectedForegroundFromSeed($bgMask, $segW, $segH, $sidx);
+                foreach ($candComp as $i) {
+                    if ($i >= 0 && $i < $total) {
+                        $unionMap[$i] = true;
+                    }
                 }
             }
+        } else {
+            $boxUnion = $this->buildBoxRefineInitialUnion(
+                $candidate,
+                $positivePoints,
+                $bgMask,
+                $segW,
+                $segH,
+                $total,
+                $fullW,
+                $fullH
+            );
+            if ($boxUnion === null) {
+                return null;
+            }
+            $unionMap = $boxUnion['unionMap'];
+            $seeds = $boxUnion['seeds'];
         }
         if ($seeds === [] || $unionMap === []) {
             return null;
@@ -473,24 +509,63 @@ final class FloodfillStudioLayerExtractionProvider implements StudioLayerExtract
             $posMeta[] = ['x' => (float) $pp['x'], 'y' => (float) $pp['y']];
         }
 
-        $metadata = [
-            'method' => 'local_seed_floodfill_refined',
-            'seed_point_normalized' => ['x' => $xNorm, 'y' => $yNorm],
-            'seed_point_pixels' => ['x' => $px, 'y' => $py],
-            'prompt_type' => 'point_refine',
-            'positive_points' => $posMeta,
-            'negative_points' => $negMeta,
-            'negative_points_pixels' => $negPix,
-            'refined' => true,
-            'refine_count' => $refineCount,
-            'provider' => 'floodfill',
-            'area_ratio' => $areaR,
-            'note' => 'Local mask detection (refined)',
-        ];
+        if ($isPick) {
+            $metadata = [
+                'method' => 'local_seed_floodfill_refined',
+                'seed_point_normalized' => ['x' => $xNorm, 'y' => $yNorm],
+                'seed_point_pixels' => ['x' => $px, 'y' => $py],
+                'prompt_type' => 'point_refine',
+                'positive_points' => $posMeta,
+                'negative_points' => $negMeta,
+                'negative_points_pixels' => $negPix,
+                'refined' => true,
+                'refine_count' => $refineCount,
+                'provider' => 'floodfill',
+                'area_ratio' => $areaR,
+                'note' => 'Local mask detection (refined)',
+            ];
+            $label = $candidate->label ?? 'Picked element';
+        } else {
+            $prev = $candidate->metadata ?? [];
+            $rawMethod = (string) ($prev['method'] ?? 'local_box_floodfill');
+            if (in_array(
+                $rawMethod,
+                ['local_box_floodfill_refined', 'local_box_text_graphic_refined'],
+                true
+            )) {
+                $refineMethod = $rawMethod;
+            } elseif (in_array($rawMethod, ['local_box_text_graphic'], true)) {
+                $refineMethod = 'local_box_text_graphic_refined';
+            } else {
+                $refineMethod = 'local_box_floodfill_refined';
+            }
+            $refinedNote = str_contains($refineMethod, 'text_graphic')
+                ? 'Box-constrained text/graphic mask (refined)'
+                : 'Box-constrained local mask (refined)';
+            $metadata = array_merge(
+                is_array($prev) ? $prev : [],
+                [
+                    'method' => $refineMethod,
+                    'seed_point_normalized' => ['x' => $xNorm, 'y' => $yNorm],
+                    'seed_point_pixels' => ['x' => $px, 'y' => $py],
+                    'prompt_type' => 'point_refine',
+                    'positive_points' => $posMeta,
+                    'negative_points' => $negMeta,
+                    'negative_points_pixels' => $negPix,
+                    'refined' => true,
+                    'refine_count' => $refineCount,
+                    'provider' => 'floodfill',
+                    'area_ratio' => $areaR,
+                    'source' => 'box',
+                    'note' => $refinedNote,
+                ]
+            );
+            $label = $candidate->label ?? 'Box-selected element';
+        }
 
         return $this->buildCandidateFromBgMask(
             $candidate->id,
-            $candidate->label ?? 'Picked element',
+            $label,
             $compMask,
             $segW,
             $segH,
@@ -501,6 +576,157 @@ final class FloodfillStudioLayerExtractionProvider implements StudioLayerExtract
             0,
             $metadata
         );
+    }
+
+    /**
+     * Box refine: start from the current cutout mask (plus any new include taps grown inside the box).
+     *
+     * @return ?array{unionMap: array<int, true>, seeds: list<int>}
+     */
+    private function buildBoxRefineInitialUnion(
+        LayerExtractionCandidateDto $candidate,
+        array $positivePoints,
+        string $bgMask,
+        int $segW,
+        int $segH,
+        int $total,
+        int $fullW,
+        int $fullH
+    ): ?array {
+        $meta = $candidate->metadata ?? [];
+        $mp = $meta['box_pixels'] ?? null;
+        if (! is_array($mp) || ! isset($mp['x'], $mp['y'], $mp['width'], $mp['height'])) {
+            return null;
+        }
+        $fx0 = (int) $mp['x'];
+        $fy0 = (int) $mp['y'];
+        $boxW = (int) $mp['width'];
+        $boxH = (int) $mp['height'];
+        if ($boxW < 1 || $boxH < 1) {
+            return null;
+        }
+        $fx1 = (int) ($fx0 + $boxW - 1);
+        $fy1 = (int) ($fy0 + $boxH - 1);
+        $inBox = $this->buildSegInBoxTable($segW, $segH, $fullW, $fullH, $fx0, $fy0, $fx1, $fy1);
+        $b64 = (string) ($candidate->maskBase64 ?? '');
+        if ($b64 === '') {
+            return null;
+        }
+        $smallMask = $this->layerMaskPngToSegComponentMask(
+            (string) base64_decode($b64, true),
+            $segW,
+            $segH,
+            $total,
+            $fullW,
+            $fullH
+        );
+        if ($smallMask === null) {
+            return null;
+        }
+        $union = [];
+        for ($i = 0; $i < $total; $i++) {
+            if ($inBox[$i] === "\x01" && $smallMask[$i] === "\x00") {
+                $union[$i] = true;
+            }
+        }
+        if ($union === []) {
+            return null;
+        }
+        $seeds = [];
+        $seenS = [];
+        foreach ($positivePoints as $pp) {
+            $xN = (float) $pp['x'];
+            $yN = (float) $pp['y'];
+            if ($xN < 0.0 || $xN > 1.0 || $yN < 0.0 || $yN > 1.0) {
+                continue;
+            }
+            $ppx = (int) max(0, min($fullW - 1, (int) round($xN * max(1, $fullW - 1))));
+            $ppy = (int) max(0, min($fullH - 1, (int) round($yN * max(1, $fullH - 1))));
+            $sx2 = (int) max(0, min($segW - 1, (int) floor($ppx * $segW / $fullW)));
+            $sy2 = (int) max(0, min($segH - 1, (int) floor($ppy * $segH / $fullH)));
+            $sidx = $sy2 * $segW + $sx2;
+            if (isset($union[$sidx])) {
+                if (! isset($seenS[$sidx])) {
+                    $seeds[] = $sidx;
+                    $seenS[$sidx] = true;
+                }
+
+                continue;
+            }
+            if ($bgMask[$sidx] === "\x01") {
+                continue;
+            }
+            $candComp = $this->connectedForegroundFromSeed($bgMask, $segW, $segH, $sidx);
+            foreach ($candComp as $i) {
+                if ($i >= 0 && $i < $total && $inBox[$i] === "\x01") {
+                    $union[$i] = true;
+                }
+            }
+            if (isset($union[$sidx]) && ! isset($seenS[$sidx])) {
+                $seeds[] = $sidx;
+                $seenS[$sidx] = true;
+            }
+        }
+        if ($seeds === []) {
+            $first = (int) array_key_first($union);
+            if ($first >= 0) {
+                $seeds[] = $first;
+            }
+        }
+        if ($seeds === []) {
+            return null;
+        }
+
+        return ['unionMap' => $union, 'seeds' => $seeds];
+    }
+
+    /**
+     * Invert of {@see maskToRgbaPng}: read full-res cutout mask PNG to segmentation-grid component mask
+     * (chr(0)=foreground, chr(1)=background).
+     *
+     * @return ?non-empty-string
+     */
+    private function layerMaskPngToSegComponentMask(
+        string $pngBinary,
+        int $segW,
+        int $segH,
+        int $total,
+        int $fullW,
+        int $fullH
+    ): ?string {
+        if ($pngBinary === '' || $total < 1) {
+            return null;
+        }
+        $im = @imagecreatefromstring($pngBinary);
+        if ($im === false) {
+            return null;
+        }
+        $iw = imagesx($im);
+        $ih = imagesy($im);
+        if ($iw < 1 || $ih < 1) {
+            imagedestroy($im);
+
+            return null;
+        }
+        if (! imageistruecolor($im)) {
+            imagepalettetotruecolor($im);
+        }
+        $out = str_repeat("\x00", $total);
+        for ($i = 0; $i < $total; $i++) {
+            $sx = $i % $segW;
+            $sy = (int) floor($i / $segW);
+            $fx = (int) min($fullW - 1, max(0, (int) floor(($sx + 0.5) * $fullW / $segW)));
+            $fy = (int) min($fullH - 1, max(0, (int) floor(($sy + 0.5) * $fullH / $segH)));
+            $mx = (int) min($iw - 1, max(0, (int) floor($fx * ($iw - 1) / max(1, $fullW - 1))));
+            $my = (int) min($ih - 1, max(0, (int) floor($fy * ($ih - 1) / max(1, $fullH - 1))));
+            $c = imagecolorat($im, $mx, $my);
+            $a = ((int) $c >> 24) & 0x7F;
+            $isBg = $a > 100;
+            $out[$i] = $isBg ? "\x01" : "\x00";
+        }
+        imagedestroy($im);
+
+        return $out;
     }
 
     /**
@@ -591,6 +817,71 @@ final class FloodfillStudioLayerExtractionProvider implements StudioLayerExtract
             return null;
         }
 
+        $mode = (string) ($options['mode'] ?? 'object');
+        $cfgL = config('studio_layer_extraction.local_floodfill', []);
+        $textFallback = (bool) ($cfgL['box_text_fallback_rectangle'] ?? false);
+        $samBox = [
+            'x' => $xn,
+            'y' => $yn,
+            'width' => $wN,
+            'height' => $hN,
+        ];
+        if ($mode === 'text_graphic' && (bool) ($cfgL['box_text_graphic_enabled'] ?? true)) {
+            $textComp = $this->buildTextGraphicBoxComponentMask(
+                $binary,
+                $inBox,
+                $segW,
+                $segH,
+                $total,
+            );
+            if ($textComp !== null) {
+                $fgCnt = 0;
+                for ($i = 0; $i < $total; $i++) {
+                    if ($inBox[$i] === "\x01" && $textComp[$i] === "\x00") {
+                        $fgCnt++;
+                    }
+                }
+                $arText = $fgCnt / $total;
+                if ($arText >= $minAr && $arText <= $maxAr) {
+                    $cxN = $xn + $wN / 2.0;
+                    $cyN = $yn + $hN / 2.0;
+                    $metadataTg = [
+                        'method' => 'local_box_text_graphic',
+                        'prompt_type' => 'box',
+                        'box_mode' => 'text_graphic',
+                        'boxes' => [$samBox],
+                        'box_normalized' => $boxMeta,
+                        'box_pixels' => $boxPixels,
+                        'positive_points' => [['x' => $cxN, 'y' => $cyN]],
+                        'negative_points' => [],
+                        'source' => 'box',
+                        'note' => 'Box-constrained text/graphic mask',
+                        'provider' => 'floodfill',
+                        'area_ratio' => $arText,
+                    ];
+
+                    return $this->buildCandidateFromBgMask(
+                        $candidateId,
+                        $label,
+                        $textComp,
+                        $segW,
+                        $segH,
+                        $scale,
+                        $fullW,
+                        $fullH,
+                        $arText,
+                        0,
+                        $metadataTg
+                    );
+                }
+                if (! $textFallback) {
+                    return null;
+                }
+            } elseif (! $textFallback) {
+                return null;
+            }
+        }
+
         $restricted = $this->applyBoxClipToBackgroundMask($bgMask, $inBox, $total);
         [$labelGrid, $by] = $this->labelForegroundComponents($restricted, $segW, $segH);
 
@@ -614,25 +905,21 @@ final class FloodfillStudioLayerExtractionProvider implements StudioLayerExtract
         }
         usort($items, fn (array $a, array $b) => $b['count'] <=> $a['count']);
 
-        $samBox = [
-            'x' => $xn,
-            'y' => $yn,
-            'width' => $wN,
-            'height' => $hN,
-        ];
         if ($items !== []) {
             $row = $items[0];
             $compId = (int) $row['id'];
             $compMask = $this->buildBgMaskForComponent($restricted, $labelGrid, $segW, $segH, $compId);
             $compCount = (int) $row['count'];
             $areaR = $compCount / $total;
+            $cxN = $xn + $wN / 2.0;
+            $cyN = $yn + $hN / 2.0;
             $metadata = [
                 'method' => 'local_box_floodfill',
                 'prompt_type' => 'box',
                 'boxes' => [$samBox],
                 'box_normalized' => $boxMeta,
                 'box_pixels' => $boxPixels,
-                'positive_points' => [],
+                'positive_points' => [['x' => $cxN, 'y' => $cyN]],
                 'negative_points' => [],
                 'source' => 'box',
                 'note' => 'Box-constrained local mask',
@@ -675,7 +962,7 @@ final class FloodfillStudioLayerExtractionProvider implements StudioLayerExtract
             'boxes' => [$samBox],
             'box_normalized' => $boxMeta,
             'box_pixels' => $boxPixels,
-            'positive_points' => [],
+            'positive_points' => [['x' => $xn + $wN / 2.0, 'y' => $yn + $hN / 2.0]],
             'negative_points' => [],
             'source' => 'box',
             'note' => 'Box-constrained local mask',
@@ -777,8 +1064,8 @@ final class FloodfillStudioLayerExtractionProvider implements StudioLayerExtract
         $fullW = (int) $dims[0];
         $fullH = (int) $dims[1];
         if ($fullW * $fullH > $maxAnalysisPx) {
-            throw new InvalidArgumentException(
-                'This image is too large for local extraction. Try a smaller resolution, or add a paid segmentation provider later when available.'
+            throw new LocalExtractionSourceTooLargeException(
+                'This image is too large for local extraction.'
             );
         }
 
@@ -1451,5 +1738,231 @@ final class FloodfillStudioLayerExtractionProvider implements StudioLayerExtract
         }
 
         return $png;
+    }
+
+    /**
+     * Foreground/background string: chr(0)=fg (keep), chr(1)=bg (transparent). Outside box = bg.
+     * Uses border luminance+color to estimate “paper” in the box; marks pixels that differ.
+     */
+    private function buildTextGraphicBoxComponentMask(
+        string $binary,
+        string $inBox,
+        int $segW,
+        int $segH,
+        int $total,
+    ): ?string {
+        $src = $this->decodeToTrueColorGd($binary);
+        $fullW = imagesx($src);
+        $fullH = imagesy($src);
+        $sw = $segW;
+        $sh = $segH;
+        $sc = @imagescale($src, $sw, $sh, self::IMAGE_SCALE_BILINEAR_FIXED);
+        imagedestroy($src);
+        if ($sc === false) {
+            return null;
+        }
+        if (! imageistruecolor($sc)) {
+            imagepalettetotruecolor($sc);
+        }
+        $thr = (float) config('studio_layer_extraction.local_floodfill.box_text_threshold', 0.18);
+        $minBoxFg = (float) config('studio_layer_extraction.local_floodfill.box_text_min_area_ratio', 0.002);
+        $dilate = max(0, (int) config('studio_layer_extraction.local_floodfill.box_text_dilate', 1));
+        $borderRgb = $this->textGraphicAverageBorderRgb($sc, $inBox, $segW, $segH, $total);
+        if ($borderRgb === null) {
+            imagedestroy($sc);
+
+            return null;
+        }
+        $bgL = 0.299 * $borderRgb['r'] + 0.587 * $borderRgb['g'] + 0.114 * $borderRgb['b'];
+        $fg = str_repeat("\0", $total);
+        for ($i = 0; $i < $total; $i++) {
+            if ($inBox[$i] !== "\x01") {
+                $fg[$i] = "\x01";
+                continue;
+            }
+            $sx = $i % $segW;
+            $sy = (int) floor($i / $segW);
+            $rgb = imagecolorat($sc, $sx, $sy);
+            $r = ($rgb >> 16) & 0xFF;
+            $g = ($rgb >> 8) & 0xFF;
+            $b = $rgb & 0xFF;
+            $a = ($rgb >> 24) & 0x7F;
+            if ($a > 100) {
+                $fg[$i] = "\x01";
+                continue;
+            }
+            $L = 0.299 * $r + 0.587 * $g + 0.114 * $b;
+            $dc = $this->colorDistance(['r' => $r, 'g' => $g, 'b' => $b], $borderRgb) / 441.0;
+            $dL = abs($L - $bgL) / 255.0;
+            $score = 0.5 * $dc + 0.5 * $dL;
+            $fg[$i] = $score > $thr ? "\x00" : "\x01";
+        }
+        imagedestroy($sc);
+        $comp = $this->textGraphicMorphologyClose3x3($fg, $inBox, $segW, $segH, $total, $dilate);
+        $boxCells = 0;
+        for ($i = 0; $i < $total; $i++) {
+            if ($inBox[$i] === "\x01") {
+                $boxCells++;
+            }
+        }
+        $fCnt = 0;
+        for ($i = 0; $i < $total; $i++) {
+            if ($inBox[$i] === "\x01" && $comp[$i] === "\x00") {
+                $fCnt++;
+            }
+        }
+        if ($boxCells < 1) {
+            return null;
+        }
+        if ($fCnt / (float) $boxCells < $minBoxFg) {
+            return null;
+        }
+        for ($i = 0; $i < $total; $i++) {
+            if ($inBox[$i] !== "\x01") {
+                $comp[$i] = "\x01";
+            }
+        }
+
+        return $comp;
+    }
+
+    /**
+     * @return ?array{r: float, g: float, b: float}
+     */
+    private function textGraphicAverageBorderRgb(
+        \GdImage $sc,
+        string $inBox,
+        int $segW,
+        int $segH,
+        int $total
+    ): ?array {
+        $rSum = 0.0;
+        $gSum = 0.0;
+        $bSum = 0.0;
+        $n = 0;
+        for ($i = 0; $i < $total; $i++) {
+            if ($inBox[$i] !== "\x01") {
+                continue;
+            }
+            $sx = $i % $segW;
+            $sy = (int) floor($i / $segW);
+            $edge = false;
+            foreach ([[-1, 0], [1, 0], [0, -1], [0, 1]] as $d) {
+                $nx = $sx + $d[0];
+                $ny = $sy + $d[1];
+                if ($nx < 0 || $ny < 0 || $nx >= $segW || $ny >= $segH) {
+                    $edge = true;
+                    break;
+                }
+                $ni = $ny * $segW + $nx;
+                if ($inBox[$ni] !== "\x01") {
+                    $edge = true;
+                    break;
+                }
+            }
+            if (! $edge) {
+                continue;
+            }
+            $rgb = imagecolorat($sc, $sx, $sy);
+            $r = ($rgb >> 16) & 0xFF;
+            $g = ($rgb >> 8) & 0xFF;
+            $b = $rgb & 0xFF;
+            $rSum += $r;
+            $gSum += $g;
+            $bSum += $b;
+            $n++;
+        }
+        if ($n < 1) {
+            return null;
+        }
+
+        return [
+            'r' => $rSum / $n,
+            'g' => $gSum / $n,
+            'b' => $bSum / $n,
+        ];
+    }
+
+    private function textGraphicMorphologyClose3x3(
+        string $fg,
+        string $inBox,
+        int $w,
+        int $h,
+        int $len,
+        int $dilatePass
+    ): string {
+        $a = $fg;
+        for ($d = 0; $d < max(0, $dilatePass); $d++) {
+            $a = $this->morph3x3DilateForeground($a, $inBox, $w, $h, $len);
+        }
+        for ($d = 0; $d < max(0, $dilatePass); $d++) {
+            $a = $this->morph3x3ErodeForeground($a, $inBox, $w, $h, $len);
+        }
+
+        return $a;
+    }
+
+    /** 0=foreground, 1=background. Dilate: center becomes fg if any 3x3 in-box cell is fg. */
+    private function morph3x3DilateForeground(string $a, string $inBox, int $w, int $h, int $len): string
+    {
+        $out = str_repeat("\0", $len);
+        for ($i = 0; $i < $len; $i++) {
+            if ($inBox[$i] !== "\x01") {
+                $out[$i] = $a[$i];
+                continue;
+            }
+            $x = $i % $w;
+            $y = (int) floor($i / $w);
+            $isFg = false;
+            for ($oy = -1; $oy <= 1; $oy++) {
+                for ($ox = -1; $ox <= 1; $ox++) {
+                    $nx = $x + $ox;
+                    $ny = $y + $oy;
+                    if ($nx < 0 || $ny < 0 || $nx >= $w || $ny >= $h) {
+                        continue;
+                    }
+                    $ni = $ny * $w + $nx;
+                    if ($inBox[$ni] === "\x01" && $a[$ni] === "\x00") {
+                        $isFg = true;
+                    }
+                }
+            }
+            $out[$i] = $isFg ? "\x00" : "\x01";
+        }
+
+        return $out;
+    }
+
+    /** Erosion: center stays fg only if 3x3 in-box is all fg. */
+    private function morph3x3ErodeForeground(string $a, string $inBox, int $w, int $h, int $len): string
+    {
+        $out = str_repeat("\0", $len);
+        for ($i = 0; $i < $len; $i++) {
+            if ($inBox[$i] !== "\x01") {
+                $out[$i] = $a[$i];
+                continue;
+            }
+            $x = $i % $w;
+            $y = (int) floor($i / $w);
+            $allFg = true;
+            for ($oy = -1; $oy <= 1; $oy++) {
+                for ($ox = -1; $ox <= 1; $ox++) {
+                    $nx = $x + $ox;
+                    $ny = $y + $oy;
+                    if ($nx < 0 || $ny < 0 || $nx >= $w || $ny >= $h) {
+                        $allFg = false;
+                        break 2;
+                    }
+                    $ni = $ny * $w + $nx;
+                    if ($inBox[$ni] !== "\x01" || $a[$ni] !== "\x00") {
+                        $allFg = false;
+                        break 2;
+                    }
+                }
+            }
+            $out[$i] = $allFg ? "\x00" : "\x01";
+        }
+
+        return $out;
     }
 }

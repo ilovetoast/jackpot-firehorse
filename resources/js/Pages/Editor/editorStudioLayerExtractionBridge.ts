@@ -39,6 +39,17 @@ export type ExtractionMethodOption = {
     provider_cost_source?: string
 }
 
+/** Set on 502 and failed-session payloads when `code === 'local_source_too_large'`. */
+export type LocalSourceTooLargePayload = {
+    code: 'local_source_too_large'
+    method: 'local'
+    can_try_ai: boolean
+    ai_available: boolean
+    ai_unavailable_reason: string | null
+}
+
+export type PostExtractLayersError = Error & Partial<LocalSourceTooLargePayload>
+
 export type PostExtractLayersResponse =
     | {
           status: 'ready'
@@ -69,7 +80,7 @@ export type LayerExtractionSessionResponse = {
     default_extraction_method?: 'local' | 'ai'
     available_methods?: ExtractionMethodOption[]
     provider_capabilities?: LayerExtractionProviderCapabilities
-}
+} & Partial<LocalSourceTooLargePayload>
 
 export type LayerExtractionPickResponse = {
     status: string
@@ -161,7 +172,18 @@ export async function postExtractLayers(
         throw new Error(text || 'Extract layers failed')
     }
     if (!res.ok) {
-        throw new Error(formatApiError(data, text || `Extract layers failed (${res.status})`))
+        const o = (data && typeof data === 'object' ? (data as Record<string, unknown>) : {}) as Record<string, unknown>
+        const e = new Error(
+            formatApiError(data, text || `Extract layers failed (${res.status})`)
+        ) as PostExtractLayersError
+        if (o.code === 'local_source_too_large') {
+            e.code = 'local_source_too_large'
+            e.method = o.method as 'local'
+            e.can_try_ai = o.can_try_ai === true
+            e.ai_available = o.ai_available === true
+            e.ai_unavailable_reason = typeof o.ai_unavailable_reason === 'string' ? o.ai_unavailable_reason : null
+        }
+        throw e
     }
     return data as PostExtractLayersResponse
 }

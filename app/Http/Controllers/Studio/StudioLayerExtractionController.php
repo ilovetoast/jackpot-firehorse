@@ -183,10 +183,15 @@ class StudioLayerExtractionController extends Controller
         }
 
         if ($session->status === StudioLayerExtractionSession::STATUS_FAILED) {
-            return response()->json([
-                'message' => $session->error_message ?? 'Extraction failed.',
-                'extraction_session_id' => $sessionId,
-            ], 502);
+            $errFields = $this->extractionService->extractionFailureFieldsForApi($session);
+
+            return response()->json(array_merge(
+                [
+                    'message' => $session->error_message ?? 'Extraction failed.',
+                    'extraction_session_id' => $sessionId,
+                ],
+                $errFields
+            ), 502);
         }
 
         $stored = json_decode((string) $session->candidates_json, true);
@@ -242,7 +247,7 @@ class StudioLayerExtractionController extends Controller
         $availableMethods = $this->extractionMethodService->buildAvailableMethods($tenant, $brand, $this->aiUsageService);
         $defaultExtractionMethod = $this->extractionMethodService->defaultMethodForContext($tenant, $brand);
 
-        return response()->json([
+        $payload = [
             'status' => $row->status,
             'extraction_session_id' => $row->id,
             'error_message' => $row->error_message,
@@ -251,7 +256,13 @@ class StudioLayerExtractionController extends Controller
             'default_extraction_method' => $defaultExtractionMethod,
             'available_methods' => $availableMethods,
             'provider_capabilities' => $this->providerCapabilitiesForSession($row),
-        ]);
+        ];
+
+        if ($row->status === StudioLayerExtractionSession::STATUS_FAILED) {
+            $payload = array_merge($payload, $this->extractionService->extractionFailureFieldsForApi($row));
+        }
+
+        return response()->json($payload);
     }
 
     /**

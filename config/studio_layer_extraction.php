@@ -79,6 +79,16 @@ return [
         'box_fallback_rectangle' => (bool) env('STUDIO_LAYER_EXTRACTION_BOX_FALLBACK_RECTANGLE', true),
         'box_min_size_ratio' => (float) env('STUDIO_LAYER_EXTRACTION_BOX_MIN_SIZE_RATIO', 0.02),
         'box_max_size_ratio' => (float) env('STUDIO_LAYER_EXTRACTION_BOX_MAX_SIZE_RATIO', 0.75),
+        /** Text/graphic box mode: high-contrast mask inside the box (local floodfill only). */
+        'box_text_graphic_enabled' => (bool) env('STUDIO_LAYER_EXTRACTION_BOX_TEXT_GRAPHIC_ENABLED', true),
+        'box_text_threshold' => (float) env('STUDIO_LAYER_EXTRACTION_BOX_TEXT_THRESHOLD', 0.18),
+        'box_text_min_area_ratio' => (float) env('STUDIO_LAYER_EXTRACTION_BOX_TEXT_MIN_AREA_RATIO', 0.002),
+        'box_text_dilate' => (int) env('STUDIO_LAYER_EXTRACTION_BOX_TEXT_DILATE', 1),
+        /**
+         * When no text/graphic pixels are found, return a full rectangle in the box (object-style).
+         * Default false: return null and a user-visible warning instead.
+         */
+        'box_text_fallback_rectangle' => (bool) env('STUDIO_LAYER_EXTRACTION_BOX_TEXT_FALLBACK_RECTANGLE', false),
     ],
 
     /**

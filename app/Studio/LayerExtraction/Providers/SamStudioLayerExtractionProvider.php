@@ -78,6 +78,9 @@ final class SamStudioLayerExtractionProvider implements
 
     public function extractCandidateFromPoint(Asset $asset, float $xNorm, float $yNorm, array $options = []): ?LayerExtractionCandidateDto
     {
+        if (($options['extraction_method'] ?? null) === 'ai' && ! $this->useRemoteSegmentation()) {
+            throw new InvalidArgumentException('AI segmentation is not available. Check that STUDIO_LAYER_EXTRACTION_SAM_ENABLED is true and the Fal API key is set.');
+        }
         $binary = $this->loadBinary($asset, $options);
         $this->assertInputSize($binary);
         $d = $this->dims($binary);
@@ -114,6 +117,9 @@ final class SamStudioLayerExtractionProvider implements
 
     public function extractCandidateFromBox(Asset $asset, array $boxNorm, array $options = []): ?LayerExtractionCandidateDto
     {
+        if (($options['extraction_method'] ?? null) === 'ai' && ! $this->useRemoteSegmentation()) {
+            throw new InvalidArgumentException('AI segmentation is not available. Check that STUDIO_LAYER_EXTRACTION_SAM_ENABLED is true and the Fal API key is set.');
+        }
         if (! isset($boxNorm['x'], $boxNorm['y'], $boxNorm['width'], $boxNorm['height'])) {
             throw new InvalidArgumentException('Box must include x, y, width, and height.');
         }

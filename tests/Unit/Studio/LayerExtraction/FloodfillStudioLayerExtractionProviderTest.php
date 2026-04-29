@@ -3,6 +3,7 @@
 namespace Tests\Unit\Studio\LayerExtraction;
 
 use App\Models\Asset;
+use App\Studio\LayerExtraction\Exceptions\LocalExtractionSourceTooLargeException;
 use App\Studio\LayerExtraction\Providers\FloodfillStudioLayerExtractionProvider;
 use Tests\TestCase;
 
@@ -84,7 +85,7 @@ class FloodfillStudioLayerExtractionProviderTest extends TestCase
         $p = new FloodfillStudioLayerExtractionProvider;
         $png = $this->makeWhitePngExceedingPixelCap($cap);
         $a = $this->makeMockAsset();
-        $this->expectException(\InvalidArgumentException::class);
+        $this->expectException(LocalExtractionSourceTooLargeException::class);
         $p->extractMasks($a, ['image_binary' => $png]);
     }
 
@@ -259,6 +260,96 @@ class FloodfillStudioLayerExtractionProviderTest extends TestCase
         $this->assertArrayHasKey('box_normalized', $c->metadata ?? []);
     }
 
+    public function test_box_refine_with_negative_shrinks_mask(): void
+    {
+        if (! extension_loaded('gd')) {
+            $this->markTestSkipped('GD required');
+        }
+        config([
+            'studio_layer_extraction.floodfill.max_segmentation_edge' => 256,
+            'studio_layer_extraction.floodfill.color_tolerance' => 50,
+            'studio_layer_extraction.local_floodfill.refine_enabled' => true,
+            'studio_layer_extraction.local_floodfill.negative_point_radius_ratio' => 0.15,
+            'studio_layer_extraction.local_floodfill.min_area_ratio' => 0.0001,
+            'studio_layer_extraction.local_floodfill.box_pick_enabled' => true,
+            'studio_layer_extraction.local_floodfill.box_fallback_rectangle' => true,
+        ]);
+
+        $p = new FloodfillStudioLayerExtractionProvider;
+        $png = $this->makeWhiteWithBlackDotPng();
+        $a = $this->makeMockAsset();
+        $box = $p->extractCandidateFromBox(
+            $a,
+            ['x' => 0.2, 'y' => 0.2, 'width' => 0.6, 'height' => 0.6],
+            [
+                'image_binary' => $png,
+                'label' => 'Box-selected element',
+                'candidate_id' => 'box_r1',
+                'mode' => 'object',
+            ]
+        );
+        $this->assertNotNull($box);
+        $w0 = (int) $box->bbox['width'] * (int) $box->bbox['height'];
+
+        $cxN = 0.2 + 0.3;
+        $cyN = 0.2 + 0.3;
+        $pos = [['x' => $cxN, 'y' => $cyN]];
+        $neg = [['x' => $cxN, 'y' => $cyN]];
+        $ref = $p->refineCandidateWithPoints($a, $box, $pos, $neg, ['image_binary' => $png]);
+        $this->assertNotNull($ref);
+        $w1 = (int) $ref->bbox['width'] * (int) $ref->bbox['height'];
+        $this->assertLessThan($w0, $w1, 'refine with exclude near center should reduce box mask area');
+        $this->assertStringStartsWith('local_box_', (string) ($ref->metadata['method'] ?? ''));
+        $this->assertStringContainsString('refined', (string) ($ref->metadata['method'] ?? ''));
+    }
+
+    public function test_text_graphic_box_does_not_fill_entire_box_rectangle(): void
+    {
+        if (! extension_loaded('gd')) {
+            $this->markTestSkipped('GD required');
+        }
+        config([
+            'studio_layer_extraction.floodfill.max_segmentation_edge' => 256,
+            'studio_layer_extraction.floodfill.color_tolerance' => 50,
+            'studio_layer_extraction.local_floodfill.box_pick_enabled' => true,
+            'studio_layer_extraction.local_floodfill.min_area_ratio' => 0.00001,
+            'studio_layer_extraction.local_floodfill.max_area_ratio' => 0.99,
+            'studio_layer_extraction.local_floodfill.box_text_graphic_enabled' => true,
+            'studio_layer_extraction.local_floodfill.box_text_fallback_rectangle' => false,
+            'studio_layer_extraction.local_floodfill.box_text_threshold' => 0.12,
+            'studio_layer_extraction.local_floodfill.box_text_min_area_ratio' => 0.0001,
+        ]);
+
+        $p = new FloodfillStudioLayerExtractionProvider;
+        $png = $this->makeWhiteImageWithNarrowBlackBarPng();
+        $a = $this->makeMockAsset();
+        $c = $p->extractCandidateFromBox(
+            $a,
+            ['x' => 0.1, 'y' => 0.2, 'width' => 0.8, 'height' => 0.5],
+            [
+                'image_binary' => $png,
+                'label' => 'Selected text/graphic',
+                'candidate_id' => 'box_tg1',
+                'mode' => 'text_graphic',
+            ]
+        );
+        $this->assertNotNull($c);
+        $this->assertSame('local_box_text_graphic', $c->metadata['method'] ?? null);
+        $dims = @getimagesizefromstring($png);
+        $this->assertIsArray($dims);
+        $fullW = (int) $dims[0];
+        $fullH = (int) $dims[1];
+        $boxWn = 0.8;
+        $boxHn = 0.5;
+        $boxPxW = (int) round($boxWn * $fullW);
+        $boxPxH = (int) round($boxHn * $fullH);
+        $this->assertLessThan(
+            0.85,
+            ((int) $c->bbox['width'] * (int) $c->bbox['height']) / max(1, $boxPxW * $boxPxH),
+            'text/graphic mask should be much smaller than full box rectangle'
+        );
+    }
+
     public function test_box_pick_disabled_returns_null(): void
     {
         if (! extension_loaded('gd')) {
@@ -294,6 +385,29 @@ class FloodfillStudioLayerExtractionProviderTest extends TestCase
         imagepng($im);
         $png = (string) ob_get_clean();
         imagedestroy($im);
+
+        return $png;
+    }
+
+    private function makeWhiteImageWithNarrowBlackBarPng(): string
+    {
+        $w = 100;
+        $h = 80;
+        $im = imagecreatetruecolor($w, $h);
+        if ($im === false) {
+            throw new \RuntimeException('GD');
+        }
+        $wpx = imagecolorallocate($im, 255, 255, 255);
+        $bpx = imagecolorallocate($im, 0, 0, 0);
+        imagefilledrectangle($im, 0, 0, $w - 1, $h - 1, $wpx);
+        imagefilledrectangle($im, 45, 15, 52, 65, $bpx);
+        ob_start();
+        imagepng($im);
+        $png = (string) ob_get_clean();
+        imagedestroy($im);
+        if ($png === '') {
+            throw new \RuntimeException('encode');
+        }
 
         return $png;
     }

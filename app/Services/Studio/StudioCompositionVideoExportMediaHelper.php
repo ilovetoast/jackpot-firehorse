@@ -45,6 +45,26 @@ final class StudioCompositionVideoExportMediaHelper
     }
 
     /**
+     * True when the primary export video comes from Studio animation (still or generative image → AI clip).
+     * Those layers are created with {@see EditorCompositionStudioVideoController::storeVideoLayer} provenance
+     * carrying {@code studioProvenance.jobId} (see editor still→clip flow).
+     *
+     * @param  array<string, mixed>  $doc  composition {@code document_json} root
+     */
+    public static function primaryVideoIsStudioStillToVideoAnimation(array $doc): bool
+    {
+        $layers = isset($doc['layers']) && is_array($doc['layers']) ? $doc['layers'] : [];
+        $primary = self::selectPrimaryVideoLayer($layers);
+        if ($primary === null) {
+            return false;
+        }
+        $prov = is_array($primary['studioProvenance'] ?? null) ? $primary['studioProvenance'] : [];
+        $jobId = $prov['jobId'] ?? null;
+
+        return is_string($jobId) && trim($jobId) !== '';
+    }
+
+    /**
      * Same trim + duration cap rules as {@see StudioCompositionVideoExportService} (legacy export).
      *
      * @param  array<string, mixed>  $doc  composition document_json root

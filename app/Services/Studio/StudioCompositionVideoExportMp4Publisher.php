@@ -113,6 +113,11 @@ final class StudioCompositionVideoExportMp4Publisher
 
         $this->videoPublishApplier->ensureShelfCategoryWhenMissing($asset->fresh(), $tenant, $brand);
 
+        $doc = is_array($composition->document_json) ? $composition->document_json : [];
+        if (StudioCompositionVideoExportMediaHelper::primaryVideoIsStudioStillToVideoAnimation($doc)) {
+            StudioStillToVideoLibraryTags::apply($asset, $tenant);
+        }
+
         AssetVersion::query()->create([
             'id' => (string) Str::uuid(),
             'asset_id' => $asset->id,

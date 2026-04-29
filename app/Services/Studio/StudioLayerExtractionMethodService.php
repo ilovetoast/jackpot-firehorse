@@ -67,6 +67,18 @@ final class StudioLayerExtractionMethodService
         return $this->samClient()->isAvailable();
     }
 
+    /**
+     * Human-readable reason when {@see isAiExtractionRuntimeAvailable} is false, or null when available.
+     */
+    public function aiExtractionUnavailableReasonIfAny(Tenant $tenant, Brand $brand): ?string
+    {
+        if ($this->isAiExtractionRuntimeAvailable($tenant, $brand)) {
+            return null;
+        }
+
+        return $this->aiUnavailableReason($tenant, $brand);
+    }
+
     public function isBillableOnSuccess(string $method, Tenant $tenant, Brand $brand): bool
     {
         if ($method === self::METHOD_LOCAL) {

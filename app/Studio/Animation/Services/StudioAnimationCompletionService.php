@@ -21,6 +21,7 @@ use App\Models\Tenant;
 use App\Models\User;
 use App\Services\AiUsageService;
 use App\Services\AssetPathGenerator;
+use App\Services\Studio\StudioStillToVideoLibraryTags;
 use App\Services\TenantBucketService;
 use App\Studio\Animation\Enums\StudioAnimationStatus;
 use App\Studio\Animation\Support\StudioAnimationFinalizeFingerprint;
@@ -248,6 +249,8 @@ final class StudioAnimationCompletionService
                     '_skip_ai_video_insights' => true,
                 ], static fn ($v) => $v !== null && $v !== ''),
             ]);
+
+            StudioStillToVideoLibraryTags::apply($asset, $tenant);
 
             $versionId = (string) Str::uuid();
             AssetVersion::query()->create([

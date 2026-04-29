@@ -3,6 +3,7 @@
 namespace App\Services\Studio;
 
 use App\Models\Asset;
+use App\Models\Brand;
 use App\Models\StudioLayerExtractionSession;
 use App\Models\Tenant;
 use App\Services\AiUsageService;
@@ -17,6 +18,7 @@ use App\Studio\LayerExtraction\Providers\FloodfillStudioLayerExtractionProvider;
 use App\Studio\LayerExtraction\Providers\SamStudioLayerExtractionProvider;
 use App\Studio\LayerExtraction\Dto\LayerExtractionCandidateDto;
 use App\Studio\LayerExtraction\Dto\LayerExtractionResult;
+use App\Studio\LayerExtraction\Exceptions\LocalExtractionSourceTooLargeException;
 use App\Support\EditorAssetOriginalBytesLoader;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
@@ -120,6 +122,25 @@ final class AiLayerExtractionService
             'fal_key_present' => filled((string) config('services.fal.key', '')),
             'status' => 'start',
         ]);
+        if (($meta0['extraction_method'] ?? null) === StudioLayerExtractionMethodService::METHOD_AI) {
+            $t = Tenant::query()->find($session->tenant_id);
+            $b = Brand::query()->find($session->brand_id);
+            if ($t === null || $b === null) {
+                $this->failSession($session, 'Invalid session context.', $started, null);
+
+                return;
+            }
+            if (! app(StudioLayerExtractionMethodService::class)->isAiExtractionRuntimeAvailable($t, $b)) {
+                $this->failSession(
+                    $session,
+                    'AI segmentation is not available. Check that STUDIO_LAYER_EXTRACTION_SAM_ENABLED is true and the Fal API key is set.',
+                    $started,
+                    null
+                );
+
+                return;
+            }
+        }
         $asset = Asset::query()
             ->whereKey($session->source_asset_id)
             ->where('tenant_id', $session->tenant_id)
@@ -144,6 +165,71 @@ final class AiLayerExtractionService
             $result = $prov->extractMasks($asset, [
                 'image_binary' => $binary,
             ]);
+        } catch (LocalExtractionSourceTooLargeException $e) {
+            $m0 = is_array($session->metadata) ? $session->metadata : [];
+            if (($m0['extraction_method'] ?? null) === StudioLayerExtractionMethodService::METHOD_LOCAL) {
+                $t = Tenant::query()->find($session->tenant_id);
+                $b = Brand::query()->find($session->brand_id);
+                if ($t !== null && $b !== null) {
+                    $ms = app(StudioLayerExtractionMethodService::class);
+                    $aiAvailable = $ms->isAiExtractionRuntimeAvailable($t, $b);
+                    $hasCredits = $this->aiUsageService->canUseFeature($t, 'studio_layer_extraction', 1);
+                    $canTryAi = $aiAvailable && $hasCredits;
+                    if ($aiAvailable && $hasCredits) {
+                        $userMsg = 'This image is too large for local extraction. Use AI segmentation instead, or upload a smaller image.';
+                        $unavail = null;
+                    } elseif ($aiAvailable && ! $hasCredits) {
+                        $userMsg = 'This image is too large for local extraction. AI segmentation may handle it, but you need more credits.';
+                        $unavail = 'insufficient_ai_credits';
+                    } else {
+                        $userMsg = 'This image is too large for local extraction. Try a smaller resolution or enable an AI segmentation provider.';
+                        $unavail = $ms->aiExtractionUnavailableReasonIfAny($t, $b);
+                    }
+                    $extractionError = [
+                        'code' => LocalExtractionSourceTooLargeException::CODE,
+                        'method' => StudioLayerExtractionMethodService::METHOD_LOCAL,
+                        'can_try_ai' => $canTryAi,
+                        'ai_available' => $aiAvailable,
+                        'ai_unavailable_reason' => $unavail,
+                    ];
+                    Log::warning('[studio_layer_extraction_provider]', [
+                        'session_id' => $session->id,
+                        'document_id' => $session->composition_id,
+                        'layer_id' => $session->source_layer_id,
+                        'asset_id' => $session->source_asset_id,
+                        'method' => $m0['extraction_method'] ?? null,
+                        'provider' => $session->provider,
+                        'request_mode' => 'extract_masks',
+                        'status_code' => 'local_source_too_large',
+                        'extraction_error' => $extractionError,
+                        'duration_ms' => (int) round((microtime(true) - $started) * 1000),
+                    ]);
+                    $this->failSession($session, $userMsg, $started, $e, $extractionError);
+
+                    return;
+                }
+            }
+            $m = is_array($session->metadata) ? $session->metadata : [];
+            $userMsg = $this->providerExceptionMessageForUser($e);
+            Log::warning('[studio_layer_extraction_provider]', [
+                'session_id' => $session->id,
+                'document_id' => $session->composition_id,
+                'layer_id' => $session->source_layer_id,
+                'asset_id' => $session->source_asset_id,
+                'method' => $m['extraction_method'] ?? null,
+                'provider' => $session->provider,
+                'sam_enabled' => (bool) config('studio_layer_extraction.sam.enabled'),
+                'fal_key_present' => filled((string) config('services.fal.key', '')),
+                'request_mode' => 'extract_masks',
+                'status_code' => 'exception',
+                'candidate_count' => 0,
+                'duration_ms' => (int) round((microtime(true) - $started) * 1000),
+                'error_class' => $e::class,
+                'failure_message' => $this->sanitizedLogFragment($e->getMessage()),
+            ]);
+            $this->failSession($session, $userMsg, $started, $e);
+
+            return;
         } catch (Throwable $e) {
             $m = is_array($session->metadata) ? $session->metadata : [];
             $userMsg = $this->providerExceptionMessageForUser($e);
@@ -364,17 +450,32 @@ final class AiLayerExtractionService
         return $fallback;
     }
 
-    private function failSession(StudioLayerExtractionSession $session, string $message, float $startedAt, ?Throwable $cause = null): void
-    {
+    /**
+     * Merges `extraction_error` (method-aware codes) for API/Operations use.
+     *
+     * @param  array{code: string, method: string, can_try_ai: bool, ai_available: bool, ai_unavailable_reason: string|null}|null  $extractionError
+     */
+    private function failSession(
+        StudioLayerExtractionSession $session,
+        string $message,
+        float $startedAt,
+        ?Throwable $cause = null,
+        ?array $extractionError = null
+    ): void {
+        $m = is_array($session->metadata) ? $session->metadata : [];
+        if ($extractionError !== null) {
+            $m['extraction_error'] = $extractionError;
+        }
         $session->update([
             'status' => StudioLayerExtractionSession::STATUS_FAILED,
             'error_message' => $message,
+            'metadata' => $m,
         ]);
 
-        $m = is_array($session->metadata) ? $session->metadata : [];
+        $m2 = is_array($session->metadata) ? $session->metadata : [];
         Log::info('[studio_layer_extraction]', [
             'session_id' => $session->id,
-            'method' => $m['extraction_method'] ?? null,
+            'method' => $m2['extraction_method'] ?? null,
             'document_id' => $session->composition_id,
             'layer_id' => $session->source_layer_id,
             'asset_id' => $session->source_asset_id,
@@ -386,6 +487,26 @@ final class AiLayerExtractionService
             'status' => 'failed',
             'failure_message' => $this->sanitizedLogFragment($cause?->getMessage() ?? $message),
         ]);
+    }
+
+    /**
+     * @return array<string, string|bool|null>
+     */
+    public function extractionFailureFieldsForApi(StudioLayerExtractionSession $session): array
+    {
+        $m = is_array($session->metadata) ? $session->metadata : [];
+        $e = $m['extraction_error'] ?? null;
+        if (! is_array($e) || (string) ($e['code'] ?? '') === '') {
+            return [];
+        }
+
+        return [
+            'code' => (string) $e['code'],
+            'method' => (string) ($e['method'] ?? 'local'),
+            'can_try_ai' => (bool) ($e['can_try_ai'] ?? false),
+            'ai_available' => (bool) ($e['ai_available'] ?? false),
+            'ai_unavailable_reason' => isset($e['ai_unavailable_reason']) && is_string($e['ai_unavailable_reason']) ? $e['ai_unavailable_reason'] : null,
+        ];
     }
 
     private function sanitizedLogFragment(string $raw): string
@@ -529,17 +650,79 @@ final class AiLayerExtractionService
         return (bool) config('studio_layer_extraction.local_floodfill.box_pick_enabled', true);
     }
 
+    private function assertSessionManualAiToolsIfNeeded(StudioLayerExtractionSession $session): void
+    {
+        $m = is_array($session->metadata) ? $session->metadata : [];
+        if (($m['extraction_method'] ?? null) !== StudioLayerExtractionMethodService::METHOD_AI) {
+            return;
+        }
+        $tenant = Tenant::query()->find($session->tenant_id);
+        $brand = Brand::query()->find($session->brand_id);
+        if ($tenant === null || $brand === null) {
+            throw new InvalidArgumentException('Invalid session context.');
+        }
+        if (! app(StudioLayerExtractionMethodService::class)->isAiExtractionRuntimeAvailable($tenant, $brand)) {
+            throw new InvalidArgumentException('AI segmentation is not available. Check that STUDIO_LAYER_EXTRACTION_SAM_ENABLED is true and the Fal API key is set.');
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $row
+     */
+    private function sessionRowSupportsPointRefine(array $row): bool
+    {
+        $m = isset($row['metadata']) && is_array($row['metadata']) ? $row['metadata'] : [];
+        $id = (string) ($row['id'] ?? '');
+        if (($m['segmentation_engine'] ?? null) === 'fal_sam2') {
+            return str_starts_with($id, 'pick_') || str_starts_with($id, 'box_');
+        }
+        if (str_starts_with($id, 'pick_')) {
+            $mt = (string) ($m['method'] ?? '');
+
+            return in_array($mt, ['local_seed_floodfill', 'local_seed_floodfill_refined'], true);
+        }
+        if (str_starts_with($id, 'box_')) {
+            $mt = (string) ($m['method'] ?? '');
+
+            return in_array(
+                $mt,
+                [
+                    'local_box_floodfill', 'local_box_floodfill_refined',
+                    'local_box_rect_cutout',
+                    'local_box_text_graphic', 'local_box_text_graphic_refined',
+                ],
+                true
+            );
+        }
+
+        return false;
+    }
+
     public function decorateCandidatesForApi(StudioLayerExtractionSession $session, array $stored): array
     {
+        $mSession = is_array($session->metadata) ? $session->metadata : [];
+        $em = $mSession['extraction_method'] ?? null;
         $out = [];
         foreach ($stored as $row) {
+            $im = isset($row['metadata']) && is_array($row['metadata']) ? $row['metadata'] : [];
+            $eng = (string) ($im['segmentation_engine'] ?? '');
+            $rawNotes = isset($row['notes']) ? (string) $row['notes'] : null;
+            $displayNotes = $rawNotes;
+            if ($eng === 'fal_sam2' || str_starts_with((string) ($im['method'] ?? ''), 'fal_sam2')) {
+                $displayNotes = 'AI segmentation';
+            } elseif (
+                str_starts_with((string) ($im['method'] ?? ''), 'local_')
+                || (string) ($im['provider'] ?? '') === 'floodfill'
+            ) {
+                $displayNotes = 'Local mask detection';
+            }
             $out[] = [
                 'id' => $row['id'],
                 'label' => $row['label'] ?? null,
                 'confidence' => $row['confidence'] ?? null,
                 'bbox' => $row['bbox'],
                 'selected' => (bool) ($row['selected'] ?? true),
-                'notes' => $row['notes'] ?? null,
+                'notes' => $displayNotes,
                 'metadata' => isset($row['metadata']) && is_array($row['metadata']) ? $row['metadata'] : null,
                 'preview_url' => route('app.studio.layer-extraction-sessions.preview', [
                     'session' => $session->id,
@@ -566,6 +749,7 @@ final class AiLayerExtractionService
         if ($session->status !== StudioLayerExtractionSession::STATUS_READY) {
             throw new InvalidArgumentException('Extraction session is not ready for point picking.');
         }
+        $this->assertSessionManualAiToolsIfNeeded($session);
         $prov = $this->providerForSession($session);
         if (! $prov instanceof StudioLayerExtractionPointPickProviderInterface) {
             throw new InvalidArgumentException('Point picking is not available for the current provider.');
@@ -616,6 +800,7 @@ final class AiLayerExtractionService
             'label' => $label,
             'candidate_id' => $candidateId,
             'existing_bboxes' => $existingBboxes,
+            'extraction_method' => is_array($session->metadata) ? ($session->metadata['extraction_method'] ?? null) : null,
         ]);
 
         if ($cand === null) {
@@ -671,6 +856,7 @@ final class AiLayerExtractionService
         if (! in_array($mode, ['object', 'text_graphic'], true)) {
             throw new InvalidArgumentException('Mode must be object or text_graphic.');
         }
+        $this->assertSessionManualAiToolsIfNeeded($session);
 
         $asset = Asset::query()
             ->whereKey($session->source_asset_id)
@@ -692,10 +878,10 @@ final class AiLayerExtractionService
                 $boxCount++;
             }
         }
-        $label = $mode === 'text_graphic' ? 'Selected text/graphic region' : 'Box-selected element';
+        $label = $mode === 'text_graphic' ? 'Selected text/graphic' : 'Box-selected element';
         if ($boxCount > 0) {
             $label = $mode === 'text_graphic'
-                ? 'Selected text/graphic region '.($boxCount + 1)
+                ? 'Selected text/graphic '.($boxCount + 1)
                 : 'Box-selected element '.($boxCount + 1);
         }
         $candidateId = 'box_'.(string) Str::uuid();
@@ -711,12 +897,17 @@ final class AiLayerExtractionService
             'label' => $label,
             'candidate_id' => $candidateId,
             'mode' => $mode,
+            'extraction_method' => is_array($session->metadata) ? ($session->metadata['extraction_method'] ?? null) : null,
         ]);
 
         if ($cand === null) {
-            $warn = (bool) config('studio_layer_extraction.local_floodfill.box_fallback_rectangle', true)
-                ? 'No clear foreground in that area. Try a different box or use point-pick. If rectangle fallback is disabled, the region may be too small or too large.'
-                : 'No useful region in that box. Try adjusting the size, enable rectangle cutout, or use point-pick.';
+            if ($mode === 'text_graphic') {
+                $warn = 'No text or graphic edges found in that box.';
+            } else {
+                $warn = (bool) config('studio_layer_extraction.local_floodfill.box_fallback_rectangle', true)
+                    ? 'No clear foreground in that area. Try a different box or use point-pick. If rectangle fallback is disabled, the region may be too small or too large.'
+                    : 'No useful region in that box. Try adjusting the size, enable rectangle cutout, or use point-pick.';
+            }
 
             return $this->pointPickResponse(
                 $session,
@@ -855,6 +1046,7 @@ final class AiLayerExtractionService
         if ($session->status !== StudioLayerExtractionSession::STATUS_READY) {
             throw new InvalidArgumentException('Extraction session is not ready for refinement.');
         }
+        $this->assertSessionManualAiToolsIfNeeded($session);
         $prov = $this->providerForSession($session);
         if (! $this->pointRefineEnabled($prov)) {
             throw new InvalidArgumentException('Point refinement is disabled.');
@@ -862,8 +1054,8 @@ final class AiLayerExtractionService
         if (! $prov instanceof StudioLayerExtractionPointRefineProviderInterface) {
             throw new InvalidArgumentException('Point refinement is not available for the current provider.');
         }
-        if (! str_starts_with($candidateId, 'pick_')) {
-            throw new InvalidArgumentException('Only picked candidates can be refined.');
+        if (! str_starts_with($candidateId, 'pick_') && ! str_starts_with($candidateId, 'box_')) {
+            throw new InvalidArgumentException('Only point- or box-selected candidates can be refined.');
         }
         if ($xNorm < 0.0 || $xNorm > 1.0 || $yNorm < 0.0 || $yNorm > 1.0) {
             throw new InvalidArgumentException('Coordinates must be between 0 and 1.');
@@ -896,6 +1088,9 @@ final class AiLayerExtractionService
         if ($row === null || $idx < 0) {
             throw new InvalidArgumentException('Candidate not found in this session.');
         }
+        if (! $this->sessionRowSupportsPointRefine($row)) {
+            throw new InvalidArgumentException('This candidate cannot be refined. Try Pick point or Draw box again.');
+        }
 
         $meta = isset($row['metadata']) && is_array($row['metadata']) ? $row['metadata'] : [];
         $positive = $this->normalizePositivePointsFromMetadata($meta);
@@ -923,8 +1118,11 @@ final class AiLayerExtractionService
         }
 
         $dto = $this->layerExtractionCandidateDtoFromSessionRow($row);
+        $mSession = is_array($session->metadata) ? $session->metadata : [];
+        $em = $mSession['extraction_method'] ?? null;
         $refined = $prov->refineCandidateWithPoints($asset, $dto, $positive, $negs, [
             'image_binary' => $binary,
+            'extraction_method' => $em,
         ]);
 
         if ($refined === null) {
@@ -982,6 +1180,7 @@ final class AiLayerExtractionService
         if ($session->status !== StudioLayerExtractionSession::STATUS_READY) {
             throw new InvalidArgumentException('Extraction session is not ready for refinement.');
         }
+        $this->assertSessionManualAiToolsIfNeeded($session);
         $prov = $this->providerForSession($session);
         if (! $this->pointRefineEnabled($prov)) {
             throw new InvalidArgumentException('Point refinement is disabled.');
@@ -989,8 +1188,8 @@ final class AiLayerExtractionService
         if (! $prov instanceof StudioLayerExtractionPointRefineProviderInterface) {
             throw new InvalidArgumentException('Point refinement is not available for the current provider.');
         }
-        if (! str_starts_with($candidateId, 'pick_')) {
-            throw new InvalidArgumentException('Only picked candidates can be refined.');
+        if (! str_starts_with($candidateId, 'pick_') && ! str_starts_with($candidateId, 'box_')) {
+            throw new InvalidArgumentException('Only point- or box-selected candidates can be refined.');
         }
         if ($xNorm < 0.0 || $xNorm > 1.0 || $yNorm < 0.0 || $yNorm > 1.0) {
             throw new InvalidArgumentException('Coordinates must be between 0 and 1.');
@@ -1022,6 +1221,9 @@ final class AiLayerExtractionService
         if ($row === null || $idx < 0) {
             throw new InvalidArgumentException('Candidate not found in this session.');
         }
+        if (! $this->sessionRowSupportsPointRefine($row)) {
+            throw new InvalidArgumentException('This candidate cannot be refined. Try Pick point or Draw box again.');
+        }
 
         $meta = isset($row['metadata']) && is_array($row['metadata']) ? $row['metadata'] : [];
         $positive = $this->normalizePositivePointsFromMetadata($meta);
@@ -1049,8 +1251,11 @@ final class AiLayerExtractionService
         }
 
         $dto = $this->layerExtractionCandidateDtoFromSessionRow($row);
+        $mSession = is_array($session->metadata) ? $session->metadata : [];
+        $em = $mSession['extraction_method'] ?? null;
         $refined = $prov->refineCandidateWithPoints($asset, $dto, $positive, $negs, [
             'image_binary' => $binary,
+            'extraction_method' => $em,
         ]);
 
         if ($refined === null) {
@@ -1221,6 +1426,16 @@ final class AiLayerExtractionService
             $sp = $meta['seed_point_normalized'];
             if (isset($sp['x'], $sp['y']) && is_numeric($sp['x']) && is_numeric($sp['y'])) {
                 return [['x' => (float) $sp['x'], 'y' => (float) $sp['y']]];
+            }
+        }
+        if (isset($meta['box_normalized']) && is_array($meta['box_normalized'])) {
+            $b = $meta['box_normalized'];
+            if (isset($b['x'], $b['y'], $b['width'], $b['height'])
+                && is_numeric($b['x']) && is_numeric($b['y']) && is_numeric($b['width']) && is_numeric($b['height'])) {
+                return [[
+                    'x' => (float) $b['x'] + (float) $b['width'] / 2.0,
+                    'y' => (float) $b['y'] + (float) $b['height'] / 2.0,
+                ]];
             }
         }
 

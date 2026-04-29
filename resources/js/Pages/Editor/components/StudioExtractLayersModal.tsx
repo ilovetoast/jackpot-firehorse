@@ -12,8 +12,10 @@ import {
     postLayerExtractionRefine,
     postLayerExtractionResetRefine,
     type ExtractionMethodOption,
+    type LocalSourceTooLargePayload,
     type LayerExtractionCandidateDto,
     type LayerExtractionProviderCapabilities,
+    type PostExtractLayersError,
 } from '../editorStudioLayerExtractionBridge'
 import { migrateDocumentIfNeeded, type DocumentModel } from '../documentModel'
 
@@ -169,6 +171,7 @@ export function StudioExtractLayersModal(props: Props) {
     creditsCallbackRef.current = onCreditsMayHaveChanged
     const [busy, setBusy] = useState(false)
     const [err, setErr] = useState<string | null>(null)
+    const [localTooLargeMeta, setLocalTooLargeMeta] = useState<LocalSourceTooLargePayload | null>(null)
     const [sessionId, setSessionId] = useState<string | null>(null)
     const [candidates, setCandidates] = useState<LayerExtractionCandidateDto[]>([])
     const [selected, setSelected] = useState<Record<string, boolean>>({})
@@ -222,6 +225,7 @@ export function StudioExtractLayersModal(props: Props) {
         setBoxTargetMode('object')
         setBoxDrag(null)
         setBoxWarning(null)
+        setLocalTooLargeMeta(null)
     }, [])
 
     const mergeSelectedFromResponse = useCallback((list: LayerExtractionCandidateDto[]) => {
@@ -246,11 +250,17 @@ export function StudioExtractLayersModal(props: Props) {
         [mergeSelectedFromResponse]
     )
 
-    const runExtraction = useCallback(async () => {
+    const runExtraction = useCallback(
+        async (forceMethod?: 'local' | 'ai') => {
         if (!compositionId || !layerId) {
             return
         }
+        const methodToRun = forceMethod ?? extractionMethod
+        if (forceMethod) {
+            setExtractionMethod(forceMethod)
+        }
         setErr(null)
+        setLocalTooLargeMeta(null)
         setBusy(true)
         setPollNote(null)
         setRefiningCandidateId(null)
@@ -258,7 +268,7 @@ export function StudioExtractLayersModal(props: Props) {
         setBoxToolActive(false)
         setEditingTargetId(null)
         try {
-            const res = await postExtractLayers(compositionId, layerId, { method: extractionMethod })
+            const res = await postExtractLayers(compositionId, layerId, { method: methodToRun })
             if (res.extraction_method) {
                 setExtractionMethod(res.extraction_method)
             }
@@ -276,7 +286,7 @@ export function StudioExtractLayersModal(props: Props) {
                 creditsCallbackRef.current?.()
             } else {
                 setPollNote('Working on segmentation…')
-                const isAi = res.extraction_method === 'ai' || extractionMethod === 'ai'
+                const isAi = res.extraction_method === 'ai' || methodToRun === 'ai'
                 const maxTries = isAi ? 150 : 90
                 const delayMs = isAi ? 1000 : 600
                 let tries = 0
@@ -313,6 +323,18 @@ export function StudioExtractLayersModal(props: Props) {
                     if (st.status === 'failed' || st.status === 'expired') {
                         setPollNote(null)
                         const em = (st.error_message || '').trim()
+                        if (st.code === 'local_source_too_large') {
+                            const fe: PostExtractLayersError = new Error(
+                                em !== '' ? em : 'This image is too large for local extraction.'
+                            )
+                            fe.code = 'local_source_too_large'
+                            fe.method = 'local'
+                            fe.can_try_ai = st.can_try_ai === true
+                            fe.ai_available = st.ai_available === true
+                            fe.ai_unavailable_reason =
+                                typeof st.ai_unavailable_reason === 'string' ? st.ai_unavailable_reason : null
+                            throw fe
+                        }
                         throw new Error(
                             em !== ''
                                 ? em
@@ -328,11 +350,26 @@ export function StudioExtractLayersModal(props: Props) {
                 }
             }
         } catch (e: unknown) {
+            const p = e as PostExtractLayersError
+            if (p?.code === 'local_source_too_large') {
+                setLocalTooLargeMeta({
+                    code: 'local_source_too_large',
+                    method: 'local',
+                    can_try_ai: p.can_try_ai === true,
+                    ai_available: p.ai_available === true,
+                    ai_unavailable_reason:
+                        typeof p.ai_unavailable_reason === 'string' ? p.ai_unavailable_reason : null,
+                })
+            } else {
+                setLocalTooLargeMeta(null)
+            }
             setErr(e instanceof Error ? e.message : 'Extraction failed')
         } finally {
             setBusy(false)
         }
-    }, [compositionId, layerId, extractionMethod, applySessionCandidates])
+    },
+    [compositionId, layerId, extractionMethod, applySessionCandidates]
+)
 
     useEffect(() => {
         if (!open) {
@@ -376,7 +413,8 @@ export function StudioExtractLayersModal(props: Props) {
     const aiMethodOption = useMemo(() => methodOptions?.find((m) => m.key === 'ai'), [methodOptions])
     const canUseImageTools = Boolean(sessionId && sourceImageUrl)
     const canRefineTarget = Boolean(
-        editingTargetId?.startsWith('pick_') && providerCapabilities?.supports_point_refine
+        (editingTargetId?.startsWith('pick_') || editingTargetId?.startsWith('box_')) &&
+            providerCapabilities?.supports_point_refine
     )
 
     useEffect(() => {
@@ -413,6 +451,18 @@ export function StudioExtractLayersModal(props: Props) {
             const o = s as { x: unknown; y: unknown }
             if (typeof o.x === 'number' && typeof o.y === 'number') {
                 return [{ x: o.x, y: o.y }]
+            }
+        }
+        const b = m.box_normalized
+        if (b && typeof b === 'object' && 'x' in b && 'y' in b && 'width' in b && 'height' in b) {
+            const o = b as { x: number; y: number; width: number; height: number }
+            if (
+                typeof o.x === 'number' &&
+                typeof o.y === 'number' &&
+                typeof o.width === 'number' &&
+                typeof o.height === 'number'
+            ) {
+                return [{ x: o.x + o.width / 2, y: o.y + o.height / 2 }]
             }
         }
         return []
@@ -759,10 +809,12 @@ export function StudioExtractLayersModal(props: Props) {
                                         : undefined
                                 }
                                 className={`min-h-[2.5rem] flex-1 rounded-md px-2.5 py-1.5 text-left text-[11px] font-medium leading-snug transition ${
-                                    extractionMethod === 'ai' && aiMethodOption?.available
-                                        ? 'bg-violet-700/90 text-white shadow'
-                                        : 'text-gray-400 hover:bg-gray-800/60 hover:text-gray-200'
-                                } ${!aiMethodOption?.available ? 'cursor-not-allowed opacity-45' : ''}`}
+                                    !aiMethodOption?.available
+                                        ? 'cursor-not-allowed text-gray-500 opacity-50'
+                                        : extractionMethod === 'ai'
+                                          ? 'bg-violet-700/90 text-white shadow'
+                                          : 'border border-violet-800/50 text-violet-100/95 hover:border-violet-600/60 hover:bg-violet-950/50 hover:text-violet-50'
+                                }`}
                             >
                                 AI segmentation — Uses credits
                             </button>
@@ -848,7 +900,13 @@ export function StudioExtractLayersModal(props: Props) {
                             <button
                                 type="button"
                                 onClick={() => {
-                                    if (!editingTargetId?.startsWith('pick_') || !providerCapabilities?.supports_point_refine) {
+                                    if (
+                                        !editingTargetId?.startsWith('pick_') &&
+                                        !editingTargetId?.startsWith('box_')
+                                    ) {
+                                        return
+                                    }
+                                    if (!providerCapabilities?.supports_point_refine) {
                                         return
                                     }
                                     setRefiningCandidateId(editingTargetId)
@@ -875,8 +933,8 @@ export function StudioExtractLayersModal(props: Props) {
                             <span className="font-medium text-gray-400">Auto detect</span> runs the current
                             method (floodfill auto or AI/SAM). <span className="font-medium text-gray-400">Pick</span>{' '}
                             and <span className="font-medium text-gray-400">Draw box</span> add targeted masks.{' '}
-                            <span className="font-medium text-gray-400">Refine selected</span> works on a picked
-                            cutout: select a candidate first, then add/remove area.
+                            <span className="font-medium text-gray-400">Refine selected</span>: select a
+                            candidate (violet ring), then add or remove areas.
                         </p>
                     </div>
                 )}
@@ -902,10 +960,34 @@ export function StudioExtractLayersModal(props: Props) {
                 {err && (
                     <div className="mt-3 space-y-2" role="alert">
                         <p className="text-xs font-medium text-red-400">{err}</p>
+                        {localTooLargeMeta?.code === 'local_source_too_large' &&
+                            localTooLargeMeta.can_try_ai === true &&
+                            aiMethodOption?.available === true && (
+                                <button
+                                    type="button"
+                                    onClick={() => void runExtraction('ai')}
+                                    disabled={busy}
+                                    className="rounded border border-violet-500/80 bg-violet-900/40 px-2.5 py-1.5 text-[11px] font-semibold text-violet-100 hover:bg-violet-800/50 disabled:cursor-not-allowed disabled:opacity-40"
+                                >
+                                    Switch to AI segmentation
+                                </button>
+                            )}
+                        {localTooLargeMeta?.code === 'local_source_too_large' &&
+                            localTooLargeMeta.ai_unavailable_reason === 'insufficient_ai_credits' && (
+                                <p className="text-[10px] text-amber-200/90">
+                                    <a
+                                        href="/billing"
+                                        className="font-medium text-amber-100 underline hover:text-amber-50"
+                                    >
+                                        Manage credits
+                                    </a>
+                                </p>
+                            )}
                         <button
                             type="button"
                             onClick={() => {
                                 setErr(null)
+                                setLocalTooLargeMeta(null)
                                 setSessionId(null)
                                 setCandidates([])
                                 setSelected({})
@@ -1002,37 +1084,52 @@ export function StudioExtractLayersModal(props: Props) {
                                     )}
                                 </div>
                                 {boxToolActive && !refiningCandidateId && (
-                                    <div className="space-y-1.5">
+                                    <div className="space-y-2.5">
                                         <p className="text-[11px] text-sky-100/90">
-                                            Drag around the object or text you want to separate.
+                                            Drag a box. Choose the mode that matches the subject.
                                         </p>
-                                        <div className="flex flex-wrap items-center gap-2 text-[10px] text-gray-400">
-                                            <span>Box target:</span>
-                                            <label className="flex cursor-pointer items-center gap-1">
-                                                <input
-                                                    type="radio"
-                                                    name="box-target"
-                                                    checked={boxTargetMode === 'object'}
-                                                    onChange={() => setBoxTargetMode('object')}
-                                                    disabled={pickBusy}
-                                                />
-                                                Object
-                                            </label>
-                                            <label className="flex cursor-pointer items-center gap-1">
-                                                <input
-                                                    type="radio"
-                                                    name="box-target"
-                                                    checked={boxTargetMode === 'text_graphic'}
-                                                    onChange={() => setBoxTargetMode('text_graphic')}
-                                                    disabled={pickBusy}
-                                                />
-                                                Text / graphic
-                                            </label>
+                                        <div className="space-y-2 rounded border border-sky-900/40 bg-slate-900/30 p-2.5">
+                                            <p className="text-[10px] font-medium uppercase tracking-wide text-sky-200/80">
+                                                Draw box mode
+                                            </p>
+                                            <div className="space-y-2 text-[10px]">
+                                                <label className="flex cursor-pointer items-start gap-2">
+                                                    <input
+                                                        type="radio"
+                                                        name="box-target"
+                                                        className="mt-0.5"
+                                                        checked={boxTargetMode === 'object'}
+                                                        onChange={() => setBoxTargetMode('object')}
+                                                        disabled={pickBusy}
+                                                    />
+                                                    <span>
+                                                        <span className="font-medium text-sky-100/95">Object</span>
+                                                        <span className="text-gray-400"> — </span>
+                                                        <span className="text-gray-500">
+                                                            Best for products, people, and shapes.
+                                                        </span>
+                                                    </span>
+                                                </label>
+                                                <label className="flex cursor-pointer items-start gap-2">
+                                                    <input
+                                                        type="radio"
+                                                        name="box-target"
+                                                        className="mt-0.5"
+                                                        checked={boxTargetMode === 'text_graphic'}
+                                                        onChange={() => setBoxTargetMode('text_graphic')}
+                                                        disabled={pickBusy}
+                                                    />
+                                                    <span>
+                                                        <span className="font-medium text-sky-100/95">Text / graphic</span>
+                                                        <span className="text-gray-400"> — </span>
+                                                        <span className="text-gray-500">
+                                                            Best for flattened type, logos, and flat artwork. Creates an
+                                                            image cutout, not editable text.
+                                                        </span>
+                                                    </span>
+                                                </label>
+                                            </div>
                                         </div>
-                                        <p className="text-[10px] leading-relaxed text-gray-500">
-                                            For text or connected artwork, draw a box around the region. This creates an
-                                            image cutout, not editable text.
-                                        </p>
                                     </div>
                                 )}
                                 {pickMode && !refiningCandidateId && (
@@ -1046,9 +1143,10 @@ export function StudioExtractLayersModal(props: Props) {
                                             Refining: {refiningCandidate.label ?? refiningCandidate.id}
                                         </p>
                                         <p className="text-[10px] leading-relaxed text-gray-400">
-                                            Use <span className="text-emerald-200/95">Add area</span> to include more of
-                                            the object. Use <span className="text-rose-200/95">Remove area</span> to
-                                            exclude unwanted regions.
+                                            Select a candidate, then use Refine to add or remove areas.{' '}
+                                            <span className="text-emerald-200/95">Add area</span> includes more of the
+                                            subject. <span className="text-rose-200/95">Remove area</span> excludes
+                                            background or mistakes.
                                         </p>
                                         <div className="flex flex-wrap gap-1.5">
                                             <button
@@ -1211,8 +1309,16 @@ export function StudioExtractLayersModal(props: Props) {
                                           .length - 1
                                   )
                                 : 0
-                        const maskSourceLabel =
-                            extractionMethod === 'ai' ? 'AI segmentation mask' : 'Local mask detection'
+                        const meta0 =
+                            c.metadata && typeof c.metadata === 'object'
+                                ? (c.metadata as Record<string, unknown>)
+                                : null
+                        const methodStr = typeof meta0?.method === 'string' ? meta0.method : ''
+                        const cardIsAi =
+                            c.notes === 'AI segmentation' ||
+                            meta0?.segmentation_engine === 'fal_sam2' ||
+                            methodStr.startsWith('fal_sam2')
+                        const maskSourceLabel = cardIsAi ? 'AI segmentation' : 'Local mask detection'
                         return (
                         <div
                             key={c.id}
@@ -1277,9 +1383,10 @@ export function StudioExtractLayersModal(props: Props) {
                                             {(c.metadata as { note: string }).note}
                                         </p>
                                     )}
-                                {c.id.startsWith('pick_') && (nNeg > 0 || nPosExtra > 0) && (
+                                {(c.id.startsWith('pick_') || c.id.startsWith('box_')) &&
+                                    (nNeg > 0 || nPosExtra > 0) && (
                                     <p className="mt-1 text-[10px] text-amber-100/90">
-                                        Picked element
+                                        {c.id.startsWith('box_') ? 'Box cutout' : 'Picked element'}
                                         {nPosExtra > 0
                                             ? ` — ${nPosExtra} include tap${nPosExtra === 1 ? '' : 's'}`
                                             : ''}
@@ -1295,11 +1402,6 @@ export function StudioExtractLayersModal(props: Props) {
                                     className="flex max-w-[8.5rem] shrink-0 flex-col items-end gap-1.5 self-start text-right"
                                     onClick={(e) => e.stopPropagation()}
                                 >
-                                    {c.id.startsWith('box_') && providerCapabilities?.supports_point_refine && (
-                                        <span className="text-[9px] leading-tight text-gray-500">
-                                            Use Refine on a point-picked cutout (Tools → Refine selected).
-                                        </span>
-                                    )}
                                     <button
                                         type="button"
                                         onClick={() => void removeManualCandidate(c.id)}

@@ -20,6 +20,7 @@ use App\Studio\LayerExtraction\Contracts\StudioLayerExtractionProviderInterface;
 use App\Studio\LayerExtraction\Dto\LayerExtractionResult;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use RuntimeException;
@@ -1486,6 +1487,89 @@ class StudioLayerExtractionTest extends TestCase
         $r->assertOk();
         $this->assertNull($r->json('new_candidate'));
         $this->assertNotNull($r->json('warning'));
+    }
+
+    public function test_local_too_large_returns_structured_error_when_ai_available(): void
+    {
+        $path = 'tenants/'.$this->tenant->uuid.'/assets/'.$this->asset->id.'/v1/original.png';
+        Storage::disk('s3')->put($path, $this->makeSolidPng(500, 500, 255, 255, 255));
+        config([
+            'studio_layer_extraction.always_queue' => false,
+            'studio_layer_extraction.async_pixel_threshold' => 1_000_000,
+            'studio_layer_extraction.local_floodfill.max_analysis_pixels' => 200_000,
+            'studio_layer_extraction.sam.enabled' => true,
+            'services.fal.key' => 'test-fal-key',
+        ]);
+
+        $resp = $this->actingAs($this->admin)
+            ->withSession(['tenant_id' => $this->tenant->id, 'brand_id' => $this->brand->id])
+            ->postJson(
+                "/app/studio/documents/{$this->composition->id}/layers/{$this->layerId}/extract-layers",
+                ['method' => 'local']
+            );
+
+        $resp->assertStatus(502);
+        $resp->assertJsonPath('code', 'local_source_too_large');
+        $resp->assertJsonPath('method', 'local');
+        $this->assertTrue($resp->json('ai_available'));
+        $this->assertTrue($resp->json('can_try_ai'));
+        $this->assertNull($resp->json('ai_unavailable_reason'));
+    }
+
+    public function test_local_too_large_when_ai_unavailable_does_not_offer_switch(): void
+    {
+        $path = 'tenants/'.$this->tenant->uuid.'/assets/'.$this->asset->id.'/v1/original.png';
+        Storage::disk('s3')->put($path, $this->makeSolidPng(500, 500, 255, 255, 255));
+        config([
+            'studio_layer_extraction.always_queue' => false,
+            'studio_layer_extraction.async_pixel_threshold' => 1_000_000,
+            'studio_layer_extraction.local_floodfill.max_analysis_pixels' => 200_000,
+            'studio_layer_extraction.sam.enabled' => false,
+            'services.fal.key' => '',
+        ]);
+
+        $resp = $this->actingAs($this->admin)
+            ->withSession(['tenant_id' => $this->tenant->id, 'brand_id' => $this->brand->id])
+            ->postJson(
+                "/app/studio/documents/{$this->composition->id}/layers/{$this->layerId}/extract-layers",
+                ['method' => 'local']
+            );
+
+        $resp->assertStatus(502);
+        $resp->assertJsonPath('code', 'local_source_too_large');
+        $this->assertFalse($resp->json('ai_available'));
+        $this->assertFalse($resp->json('can_try_ai'));
+        $this->assertIsString($resp->json('ai_unavailable_reason'));
+    }
+
+    public function test_ai_method_runs_for_image_that_exceeds_local_pixel_cap_with_fal_mocked(): void
+    {
+        $path = 'tenants/'.$this->tenant->uuid.'/assets/'.$this->asset->id.'/v1/original.png';
+        Storage::disk('s3')->put($path, $this->makeSolidPng(500, 500, 10, 20, 30));
+        $maskPng = $this->makeWhiteWithBlackSquarePng();
+        config([
+            'studio_layer_extraction.always_queue' => false,
+            'studio_layer_extraction.async_pixel_threshold' => 1_000_000,
+            'studio_layer_extraction.local_floodfill.max_analysis_pixels' => 200_000,
+            'studio_layer_extraction.sam.enabled' => true,
+            'studio_layer_extraction.sam.prefer_queue' => false,
+            'services.fal.sam2_endpoint' => 'https://fal.test/fal-ai/sam2/image',
+            'services.fal.key' => 'test-fal-key',
+        ]);
+        Http::fake([
+            'https://fal.test/*' => Http::response(['image' => ['url' => 'https://cdn.test/m.png']], 200),
+            'https://cdn.test/*' => Http::response($maskPng, 200, ['Content-Type' => 'image/png']),
+        ]);
+
+        $resp = $this->actingAs($this->admin)
+            ->withSession(['tenant_id' => $this->tenant->id, 'brand_id' => $this->brand->id])
+            ->postJson(
+                "/app/studio/documents/{$this->composition->id}/layers/{$this->layerId}/extract-layers",
+                ['method' => 'ai']
+            );
+
+        $resp->assertOk();
+        $this->assertNotEmpty($resp->json('candidates'));
     }
 
     public function test_cleanup_command_removes_expired_sessions(): void
