@@ -816,15 +816,39 @@ PROMPT
             // ],
         ],
         'tasks' => [
-            // Per-task type budgets (optional)
-            // Example:
-            // 'support_ticket_summary' => [
-            //     'monthly' => [
-            //         'amount' => 200.00,
-            //         'warning_threshold_percent' => 80,
-            //         'hard_limit_enabled' => false,
-            //     ],
-            // ],
+            /*
+             * Studio / external API “contract” caps (USD per calendar month).
+             * Used = sum of estimated_cost on ai_agent_runs for this task_type in the month.
+             * Rows are created by migration from these defaults; edit caps in Admin → AI → Budgets.
+             * hard_limit_enabled: when false, overage is allowed but still visible (monitoring).
+             */
+            'studio_layer_extraction' => [
+                'display_name' => 'Studio: AI layer segmentation (SAM / Fal)',
+                'description' => 'Remote mask extraction billed once per successful session.',
+                'monthly' => [
+                    'amount' => (float) env('AI_BUDGET_STUDIO_LAYER_EXTRACTION_USD', 50000),
+                    'warning_threshold_percent' => 80,
+                    'hard_limit_enabled' => (bool) env('AI_BUDGET_STUDIO_LAYER_EXTRACTION_HARD', false),
+                ],
+            ],
+            'studio_layer_background_fill' => [
+                'display_name' => 'Studio: background fill (inpaint)',
+                'description' => 'Inpainting / cleanup provider after cutout; billed once per session when enabled.',
+                'monthly' => [
+                    'amount' => (float) env('AI_BUDGET_STUDIO_LAYER_BG_FILL_USD', 50000),
+                    'warning_threshold_percent' => 80,
+                    'hard_limit_enabled' => (bool) env('AI_BUDGET_STUDIO_LAYER_BG_FILL_HARD', false),
+                ],
+            ],
+            'studio_composition_animation' => [
+                'display_name' => 'Studio: still → AI video (composition animation)',
+                'description' => 'Image-to-video vendor COGS estimate per completed job (config STUDIO_ANIMATION_ESTIMATED_USD_*).',
+                'monthly' => [
+                    'amount' => (float) env('AI_BUDGET_STUDIO_COMPOSITION_ANIMATION_USD', 50000),
+                    'warning_threshold_percent' => 80,
+                    'hard_limit_enabled' => (bool) env('AI_BUDGET_STUDIO_COMPOSITION_ANIMATION_HARD', false),
+                ],
+            ],
         ],
     ],
 

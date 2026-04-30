@@ -1,10 +1,8 @@
 import { useState } from 'react'
-import { Link, usePage } from '@inertiajs/react'
-import AppNav from '../../../Components/AppNav'
-import AppFooter from '../../../Components/AppFooter'
+import { Link } from '@inertiajs/react'
 import AppHead from '../../../Components/AppHead'
 import { FilmIcon, SparklesIcon, PhotoIcon, ChevronRightIcon } from '@heroicons/react/24/outline'
-import AdminAiServicesNav from '../../../Components/Admin/AdminAiServicesNav'
+import AdminAiCenterPage from '../../../Components/Admin/AdminAiCenterPage'
 import VideoInsightRunDetailPanel from './VideoInsightRunDetailPanel'
 
 function formatRunDuration(s) {
@@ -40,37 +38,21 @@ export default function AdminAnalyzedContentIndex({
     video_insight_run_detail_base,
     video_insight_frames_base,
 }) {
-    const { auth } = usePage().props
     const c = video_insight_counts || {}
     const [detailRunId, setDetailRunId] = useState(null)
 
     return (
-        <div className="min-h-full">
-            <AppHead title="AI services hub" suffix="Admin" />
-            <AppNav brand={auth?.activeBrand} tenant={null} />
-            <main className="bg-slate-50">
-                <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-                    <div className="mb-6">
-                        <AdminAiServicesNav />
-                    </div>
-                    <div className="mb-8">
-                        <h1 className="text-3xl font-bold tracking-tight text-slate-900">AI services hub</h1>
-                        <p className="mt-2 max-w-3xl text-sm text-slate-600">
-                            One place to jump between <strong>brand alignment</strong> (EBI), <strong>generative and Studio work</strong>{' '}
-                            (canvas, composition video, and extract-layers — each run is either <strong>local</strong> floodfill or{' '}
-                            <strong>AI</strong> via Fal SAM), and <strong>library video AI</strong> (this page). Operations / export
-                            failures live under{' '}
-                            <a href="/app/admin/operations-center?tab=studio-exports" className="text-indigo-600 hover:text-indigo-500">
-                                Studio video exports
-                            </a>
-                            . Cost and run volume for agents also live in the{' '}
-                            <a href="/app/admin/ai" className="text-indigo-600 hover:text-indigo-500">
-                                AI Dashboard
-                            </a>
-                            .
-                        </p>
-                    </div>
-
+        <>
+            <AppHead title="Video intelligence" suffix="Admin" />
+            <AdminAiCenterPage
+                breadcrumbs={[
+                    { label: 'Admin', href: '/app/admin' },
+                    { label: 'AI Control Center', href: '/app/admin/ai' },
+                    { label: 'Video intelligence' },
+                ]}
+                title="Video intelligence"
+                description="Brand alignment (EBI), generative and Studio work (canvas, composition video, extract-layers), and library video AI. Operations and export failures live under Reliability → Studio export failures; run volume and cost live in AI Control Center."
+            >
                     <div className="mb-8 grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
                         <Link
                             href="/app/admin/brand-intelligence"
@@ -361,9 +343,7 @@ export default function AdminAnalyzedContentIndex({
                             </table>
                         </div>
                     </div>
-                </div>
-            </main>
-            <AppFooter />
+            </AdminAiCenterPage>
 
             {detailRunId != null && video_insight_run_detail_base && video_insight_frames_base && (
                 <VideoInsightRunDetailPanel
@@ -373,6 +353,6 @@ export default function AdminAnalyzedContentIndex({
                     framesBase={video_insight_frames_base}
                 />
             )}
-        </div>
+        </>
     )
 }

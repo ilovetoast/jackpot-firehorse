@@ -1,7 +1,10 @@
 import { useState, useEffect } from 'react'
-import { Link, usePage } from '@inertiajs/react'
+import { usePage } from '@inertiajs/react'
+import AppHead from '../../Components/AppHead'
 import AppNav from '../../Components/AppNav'
 import AppFooter from '../../Components/AppFooter'
+import AdminShell from '../../Components/Admin/AdminShell'
+import AdminReliabilitySectionSidebar from '../../Components/Admin/AdminReliabilitySectionSidebar'
 import {
     DocumentTextIcon,
     ServerStackIcon,
@@ -71,33 +74,30 @@ export default function AdminLogViewer() {
 
     return (
         <div className="min-h-full">
+            <AppHead title="Raw logs" suffix="Admin" />
             <AppNav brand={auth.activeBrand} tenant={null} />
-            <main className="bg-gray-50">
-                <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
-                    <div className="mb-8">
-                        <Link
-                            href="/app/admin"
-                            className="text-sm font-medium text-gray-500 hover:text-gray-700 mb-4 inline-block"
-                        >
-                            ← Back to Admin Dashboard
-                        </Link>
-                        <h1 className="text-3xl font-bold tracking-tight text-gray-900">Admin Logs</h1>
-                        <p className="mt-2 text-sm text-gray-700">
-                            Web and worker errors/warnings (Redis, last 50). Deploy shows the last lines of the
-                            server deploy script log.
-                        </p>
-                    </div>
-
+            <main className="min-h-0">
+                <AdminShell
+                    centerKey="reliability"
+                    breadcrumbs={[
+                        { label: 'Admin', href: '/app/admin' },
+                        { label: 'Reliability Center', href: '/app/admin/reliability' },
+                        { label: 'Raw logs' },
+                    ]}
+                    title="Raw logs"
+                    description="Web and worker errors/warnings (Redis, last 50). Deploy shows the last lines of the server deploy script log."
+                    sidebar={<AdminReliabilitySectionSidebar />}
+                >
                     {/* Tabs */}
-                    <div className="mb-6 border-b border-gray-200">
+                    <div className="mb-6 border-b border-slate-200">
                         <nav className="-mb-px flex flex-wrap gap-x-6 gap-y-1">
                             <button
                                 type="button"
                                 onClick={() => setActiveTab('web')}
                                 className={`flex items-center gap-2 border-b-2 px-1 py-4 text-sm font-medium ${
                                     activeTab === 'web'
-                                        ? 'border-indigo-500 text-indigo-600'
-                                        : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
+                                        ? 'border-slate-900 text-slate-900'
+                                        : 'border-transparent text-slate-500 hover:border-slate-300 hover:text-slate-700'
                                 }`}
                             >
                                 <ComputerDesktopIcon className="h-5 w-5" />
@@ -108,8 +108,8 @@ export default function AdminLogViewer() {
                                 onClick={() => setActiveTab('worker')}
                                 className={`flex items-center gap-2 border-b-2 px-1 py-4 text-sm font-medium ${
                                     activeTab === 'worker'
-                                        ? 'border-indigo-500 text-indigo-600'
-                                        : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
+                                        ? 'border-slate-900 text-slate-900'
+                                        : 'border-transparent text-slate-500 hover:border-slate-300 hover:text-slate-700'
                                 }`}
                             >
                                 <ServerStackIcon className="h-5 w-5" />
@@ -120,8 +120,8 @@ export default function AdminLogViewer() {
                                 onClick={() => setActiveTab('deploy')}
                                 className={`flex items-center gap-2 border-b-2 px-1 py-4 text-sm font-medium ${
                                     activeTab === 'deploy'
-                                        ? 'border-indigo-500 text-indigo-600'
-                                        : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
+                                        ? 'border-slate-900 text-slate-900'
+                                        : 'border-transparent text-slate-500 hover:border-slate-300 hover:text-slate-700'
                                 }`}
                             >
                                 <RocketLaunchIcon className="h-5 w-5" />
@@ -131,14 +131,14 @@ export default function AdminLogViewer() {
                     </div>
 
                     {/* Log list */}
-                    <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
+                    <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
                         <div className="p-6">
                             {loading ? (
-                                <p className="text-sm text-gray-500">Loading...</p>
+                                <p className="text-sm text-slate-500">Loading...</p>
                             ) : isDeploy ? (
                                 <>
                                     {deployPayload.path && (
-                                        <p className="mb-3 text-xs text-gray-500 font-mono break-all">
+                                        <p className="mb-3 text-xs text-slate-500 font-mono break-all">
                                             {deployPayload.path}
                                         </p>
                                     )}
@@ -147,36 +147,36 @@ export default function AdminLogViewer() {
                                             {deployPayload.error}
                                         </div>
                                     ) : deployPayload.lines.length === 0 ? (
-                                        <div className="flex flex-col items-center justify-center py-12 text-gray-500">
-                                            <DocumentTextIcon className="h-12 w-12 mb-4 text-gray-300" />
+                                        <div className="flex flex-col items-center justify-center py-12 text-slate-500">
+                                            <DocumentTextIcon className="h-12 w-12 mb-4 text-slate-300" />
                                             <p className="text-sm">Deploy log is empty</p>
                                             <p className="mt-1 text-xs">Run a deploy to append output here</p>
                                         </div>
                                     ) : (
-                                        <pre className="max-h-[70vh] overflow-auto rounded-md bg-gray-900 p-4 text-left text-xs text-gray-100 whitespace-pre-wrap break-words">
+                                        <pre className="max-h-[70vh] overflow-auto rounded-md bg-slate-900 p-4 text-left text-xs text-slate-100 whitespace-pre-wrap break-words">
                                             {deployPayload.lines.join('\n')}
                                         </pre>
                                     )}
                                 </>
                             ) : logs.length === 0 ? (
-                                <div className="flex flex-col items-center justify-center py-12 text-gray-500">
-                                    <DocumentTextIcon className="h-12 w-12 mb-4 text-gray-300" />
+                                <div className="flex flex-col items-center justify-center py-12 text-slate-500">
+                                    <DocumentTextIcon className="h-12 w-12 mb-4 text-slate-300" />
                                     <p className="text-sm">No recent logs</p>
                                     <p className="mt-1 text-xs">Errors and warnings will appear here when they occur</p>
                                 </div>
                             ) : (
-                                <ul className="space-y-4 divide-y divide-gray-100">
+                                <ul className="space-y-4 divide-y divide-slate-100">
                                     {logs.map((entry, i) => (
                                         <li key={i} className="pt-4 first:pt-0">
                                             <div className="flex items-start gap-3">
-                                                <span className="text-xs text-gray-400 shrink-0">
+                                                <span className="text-xs text-slate-400 shrink-0">
                                                     {formatTimestamp(entry.timestamp)}
                                                 </span>
                                                 <span className="shrink-0">{levelBadge(entry.level || 'warning')}</span>
                                                 <div className="min-w-0 flex-1">
-                                                    <p className="text-sm font-medium text-gray-900">{entry.message || '-'}</p>
+                                                    <p className="text-sm font-medium text-slate-900">{entry.message || '-'}</p>
                                                     {contextFields(entry).length > 0 && (
-                                                        <dl className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-600">
+                                                        <dl className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-600">
                                                             {contextFields(entry).map(([k, v]) => (
                                                                 <div key={k} className="flex gap-1">
                                                                     <dt className="font-medium">{k}:</dt>
@@ -193,7 +193,7 @@ export default function AdminLogViewer() {
                             )}
                         </div>
                     </div>
-                </div>
+                </AdminShell>
             </main>
             <AppFooter />
         </div>

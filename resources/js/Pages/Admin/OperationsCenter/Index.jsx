@@ -1,9 +1,11 @@
-import { Link, router } from '@inertiajs/react'
-import { Fragment, useState, useRef, useEffect, useMemo } from 'react'
+import { router } from '@inertiajs/react'
+import { useState, useRef, useEffect, useMemo } from 'react'
 import axios from 'axios'
 import AppNav from '../../../Components/AppNav'
 import AppFooter from '../../../Components/AppFooter'
-import AdminAiServicesNav from '../../../Components/Admin/AdminAiServicesNav'
+import AdminShell from '../../../Components/Admin/AdminShell'
+import AdminReliabilitySectionSidebar from '../../../Components/Admin/AdminReliabilitySectionSidebar'
+import { AdminTruncatedCell } from '../../../Components/Admin/AdminDataTable'
 import AssetDetailModal from '../../../Components/Admin/AssetDetailModal'
 import {
     CheckCircleIcon,
@@ -184,17 +186,18 @@ function IncidentRow({ incident: i, onAction, selected, onSelect, onSourceClick 
 
 const TABS = [
     { id: 'overview', label: 'Overview', icon: ChartBarSquareIcon },
-    { id: 'queue', label: 'Queue', icon: QueueListIcon },
+    { id: 'queue', label: 'Queue & scheduler', icon: QueueListIcon },
     { id: 'incidents', label: 'Incidents', icon: ExclamationTriangleIcon },
     { id: 'application-errors', label: 'Application errors', icon: BoltIcon },
-    { id: 'studio-exports', label: 'Studio video exports', icon: VideoCameraIcon },
-    { id: 'reliability', label: 'Reliability Metrics', icon: ChartBarIcon },
-    { id: 'failed-jobs', label: 'Failed Jobs', icon: ServerStackIcon },
+    { id: 'studio-exports', label: 'Studio export failures', icon: VideoCameraIcon },
+    { id: 'reliability', label: 'Reliability metrics', icon: ChartBarIcon },
+    { id: 'failed-jobs', label: 'Queue failed jobs', icon: ServerStackIcon },
 ]
 
 export default function OperationsCenterIndex({
     auth,
     tab = 'overview',
+    tab_switch_route_name: tabSwitchRouteName = 'admin.reliability.index',
     incidents,
     failedJobs,
     applicationErrors = [],
@@ -211,6 +214,7 @@ export default function OperationsCenterIndex({
     const [clearAppErrorsLoading, setClearAppErrorsLoading] = useState(false)
     const [studioExportDeleteId, setStudioExportDeleteId] = useState(null)
     const [studioExportBulkLoading, setStudioExportBulkLoading] = useState(false)
+    const [studioExportDrawer, setStudioExportDrawer] = useState(null)
     const [selectedStudioExportIds, setSelectedStudioExportIds] = useState(() => new Set())
     const studioExportSelectAllRef = useRef(null)
     const [quickViewData, setQuickViewData] = useState(null)
@@ -299,7 +303,7 @@ export default function OperationsCenterIndex({
         })
     }, [studioExportRows])
 
-    const setTab = (t) => router.get(route('admin.operations-center.index'), { tab: t }, { preserveState: true })
+    const setTab = (t) => router.get(route(tabSwitchRouteName), { tab: t }, { preserveState: true })
 
     const deleteStudioExportJobRow = async (jobId) => {
         if (
@@ -521,45 +525,36 @@ export default function OperationsCenterIndex({
     const QueueStatusIcon = queueStatus.icon
     const SchedulerStatusIcon = schedulerStatus.icon
 
+    const tabMeta = TABS.find((x) => x.id === tab)
+    const tabLabel = tabMeta?.label ?? 'Overview'
+
     return (
         <div className="min-h-full">
             <AppNav brand={auth.activeBrand} tenant={null} />
-            <main className="bg-gray-50">
-                <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
-                    <Link href="/app/admin" className="text-sm font-medium text-gray-500 hover:text-gray-700 mb-4 inline-block">
-                        ← Back to Admin Dashboard
-                    </Link>
-                    <h1 className="text-3xl font-bold tracking-tight text-gray-900">Operations Center</h1>
-                    <p className="mt-2 text-sm text-gray-700">
-                        Unified view of incidents, application errors, Studio composition export failures, queue, scheduler, and failed jobs.
-                        Data from system_incidents, application_error_events, studio_composition_video_export_jobs, and failed_jobs. For
-                        generative and layer-extraction debugging, use the AI services nav below; export failures are only one part of
-                        Studio reliability.
-                    </p>
-
-                    <div className="mt-6 text-gray-600">
-                        <AdminAiServicesNav />
-                    </div>
-
-                    {/* Tabs */}
-                    <div className="mt-6 border-b border-gray-200">
-                        <nav className="-mb-px flex space-x-8">
-                            {TABS.map((t) => (
-                                <button
-                                    key={t.id}
-                                    onClick={() => setTab(t.id)}
-                                    className={`whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm ${
-                                        tab === t.id
-                                            ? 'border-indigo-500 text-indigo-600'
-                                            : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                                    }`}
-                                >
-                                    {t.label}
-                                </button>
-                            ))}
-                        </nav>
-                    </div>
-
+            <main className="min-h-0">
+                <AdminShell
+                    centerKey="reliability"
+                    breadcrumbs={[
+                        { label: 'Admin', href: '/app/admin' },
+                        { label: 'Reliability Center', href: '/app/admin/reliability' },
+                        { label: tabLabel },
+                    ]}
+                    title="Reliability Center"
+                    description="Platform health, failures, and recovery. Queue, scheduler, incidents, application errors, failed jobs, and Studio export diagnostics."
+                    technicalNote={
+                        <details className="mt-3 max-w-3xl rounded-md border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
+                            <summary className="cursor-pointer font-medium text-slate-700">Technical notes</summary>
+                            <p className="mt-2 leading-relaxed">
+                                Primary sources include <code className="rounded bg-slate-100 px-1">system_incidents</code>,{' '}
+                                <code className="rounded bg-slate-100 px-1">application_error_events</code>,{' '}
+                                <code className="rounded bg-slate-100 px-1">failed_jobs</code>, and{' '}
+                                <code className="rounded bg-slate-100 px-1">studio_composition_video_export_jobs</code>. AI run
+                                forensics live under AI Control.
+                            </p>
+                        </details>
+                    }
+                    sidebar={<AdminReliabilitySectionSidebar tabSwitchRouteName={tabSwitchRouteName} />}
+                >
                     {/* Tab content */}
                     <div className="mt-6">
                         {tab === 'overview' && (
@@ -923,15 +918,17 @@ export default function OperationsCenterIndex({
                                 <div className="overflow-hidden rounded-lg bg-white shadow ring-1 ring-gray-200">
                                     <div className="px-4 py-4 sm:px-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                                         <div>
-                                            <h2 className="text-lg font-semibold text-gray-900">Failed Studio export jobs</h2>
-                                            <p className="mt-1 text-sm text-gray-500">
-                                                This list is <span className="font-medium text-gray-800">failed rows only</span> (newest first, up to 100). Successful
-                                                exports are not shown here — use tenant tools or asset history for completed MP4s.{' '}
-                                                <span className="font-mono text-gray-700">blend</span> marks graphs that used{' '}
-                                                <span className="font-mono text-gray-700">blend=all_mode=…</span>. Full <span className="font-mono text-gray-700">filter_complex</span> lives in{' '}
-                                                <span className="font-mono text-gray-700">error_json</span> in the database. Use checkboxes to remove multiple rows, or delete all
-                                                shown in the table. That only tidies diagnostics; it does not fix the underlying composition.
+                                            <h2 className="text-lg font-semibold text-gray-900">Studio export failures</h2>
+                                            <p className="mt-1 text-sm text-gray-600">
+                                                Failed export job rows only (newest first). Deleting rows tidies diagnostics; it does not repair compositions.
                                             </p>
+                                            <details className="mt-2 text-xs text-gray-500">
+                                                <summary className="cursor-pointer font-medium text-gray-700">Technical notes</summary>
+                                                <p className="mt-1 leading-relaxed">
+                                                    Successful exports are not listed. <code className="rounded bg-gray-100 px-0.5">blend</code> marks blend graphs; full
+                                                    FFmpeg context is in the database. Use <strong>Details</strong> for stderr and structured JSON.
+                                                </p>
+                                            </details>
                                         </div>
                                         <div className="flex flex-wrap items-center gap-2 shrink-0">
                                             {someStudioExportsSelected && (
@@ -965,9 +962,10 @@ export default function OperationsCenterIndex({
                                             </button>
                                         </div>
                                     </div>
-                                    <div className="border-t border-gray-200 overflow-x-auto">
-                                        <table className="w-full min-w-[60rem] table-fixed divide-y divide-gray-300">
-                                            <thead>
+                                    <div className="border-t border-gray-200">
+                                        <div className="overflow-x-auto">
+                                            <table className="min-w-[56rem] w-full table-fixed divide-y divide-gray-200">
+                                            <thead className="bg-gray-50">
                                                 <tr>
                                                     <th className="w-10 py-3.5 pl-4 pr-0">
                                                         <input
@@ -986,13 +984,15 @@ export default function OperationsCenterIndex({
                                                     <th className="w-[8.5rem] py-3.5 px-2 text-left text-xs font-semibold uppercase tracking-wide text-gray-600">Mode</th>
                                                     <th className="w-[9rem] py-3.5 px-2 text-left text-xs font-semibold uppercase tracking-wide text-gray-600">Code</th>
                                                     <th className="min-w-0 py-3.5 px-2 text-left text-xs font-semibold uppercase tracking-wide text-gray-600">Message</th>
-                                                    <th className="w-[5.5rem] py-3.5 pr-4 pl-2 text-right text-xs font-semibold uppercase tracking-wide text-gray-600">Actions</th>
+                                                    <th className="sticky right-0 z-10 w-[8.5rem] bg-gray-50 py-3.5 pr-4 pl-2 text-right text-xs font-semibold uppercase tracking-wide text-gray-600 shadow-[-4px_0_6px_-2px_rgba(0,0,0,0.06)]">Actions</th>
                                                 </tr>
                                             </thead>
-                                            <tbody className="divide-y divide-gray-200">
-                                                {(studioVideoExports?.rows ?? []).map((row) => (
-                                                    <Fragment key={row.id}>
-                                                        <tr className="align-top">
+                                            <tbody className="divide-y divide-gray-200 bg-white">
+                                                {(studioVideoExports?.rows ?? []).map((row) => {
+                                                    const msg = row.error_message ? String(row.error_message) : ''
+                                                    const msgShort = msg.length > 96 ? `${msg.slice(0, 96)}…` : msg || '—'
+                                                    return (
+                                                        <tr key={row.id} className="align-top">
                                                             <td className="w-10 py-2.5 pl-4 pr-0 align-top">
                                                                 <input
                                                                     type="checkbox"
@@ -1014,78 +1014,63 @@ export default function OperationsCenterIndex({
                                                                 </span>
                                                             </td>
                                                             <td className="min-w-0 py-2.5 px-2 align-top text-xs text-gray-700">
-                                                                <span className="block truncate font-medium text-gray-900" title={row.tenant_name || ''}>
+                                                                <AdminTruncatedCell className="font-medium text-gray-900" title={row.tenant_name || ''}>
                                                                     {row.tenant_name || `Tenant #${row.tenant_id}`}
-                                                                </span>
+                                                                </AdminTruncatedCell>
                                                                 {row.tenant_slug ? (
-                                                                    <span className="block truncate text-[10px] text-gray-500" title={row.tenant_slug}>{row.tenant_slug}</span>
+                                                                    <AdminTruncatedCell className="text-[10px] text-gray-500" title={row.tenant_slug}>
+                                                                        {row.tenant_slug}
+                                                                    </AdminTruncatedCell>
                                                                 ) : null}
                                                             </td>
                                                             <td className="py-2.5 px-2 align-top font-mono text-xs text-gray-700">{row.composition_id}</td>
                                                             <td className="min-w-0 py-2.5 px-2 align-top text-xs text-gray-600">
-                                                                <span className="break-all">{row.render_mode || '—'}</span>
+                                                                <AdminTruncatedCell title={row.render_mode || ''}>{row.render_mode || '—'}</AdminTruncatedCell>
                                                                 {row.has_blend_graph ? (
                                                                     <span className="mt-0.5 inline-block rounded bg-violet-100 px-1 py-0.5 text-[10px] font-medium text-violet-800">blend</span>
                                                                 ) : null}
                                                             </td>
                                                             <td className="min-w-0 py-2.5 px-2 align-top text-xs text-gray-600">
-                                                                <span className="break-all font-mono text-[10px]">{row.error_code || '—'}</span>
+                                                                <AdminTruncatedCell className="font-mono text-[10px]" title={row.error_code || ''}>
+                                                                    {row.error_code || '—'}
+                                                                </AdminTruncatedCell>
                                                                 {row.exit_code != null ? (
                                                                     <span className="block text-[10px] text-gray-500">exit {row.exit_code}</span>
                                                                 ) : null}
                                                             </td>
-                                                            <td className="min-w-0 py-2.5 px-2 align-top text-xs text-gray-900">
-                                                                <p className="break-words hyphens-auto text-left leading-snug" title={row.error_message}>
-                                                                    {row.error_message || '—'}
-                                                                </p>
+                                                            <td className="min-w-0 max-w-[14rem] py-2.5 px-2 align-top text-xs text-gray-900">
+                                                                <AdminTruncatedCell title={msg}>{msgShort}</AdminTruncatedCell>
                                                             </td>
-                                                            <td className="py-2.5 pr-4 pl-2 align-top text-right">
-                                                                <button
-                                                                    type="button"
-                                                                    disabled={studioExportDeleteId === row.id}
-                                                                    onClick={() => void deleteStudioExportJobRow(row.id)}
-                                                                    className="inline-flex shrink-0 rounded border border-gray-300 bg-white px-2 py-1 text-[11px] font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-                                                                    aria-label={`Delete failed export job ${row.id}`}
-                                                                >
-                                                                    {studioExportDeleteId === row.id ? '…' : 'Delete'}
-                                                                </button>
-                                                            </td>
-                                                        </tr>
-                                                        <tr className="bg-slate-50/90">
-                                                            <td colSpan={9} className="min-w-0 px-4 pb-4 pt-0">
-                                                                {row.stderr_preview ? (
-                                                                    <>
-                                                                        <div className="pt-2 text-xs font-semibold uppercase tracking-wide text-slate-600">
-                                                                            FFmpeg stderr (tail)
-                                                                        </div>
-                                                                        <pre className="mt-1 max-h-60 overflow-auto whitespace-pre-wrap break-words rounded-md border border-slate-200 bg-white p-3 font-mono text-[11px] leading-snug text-slate-900 shadow-inner">
-                                                                            {row.stderr_preview}
-                                                                        </pre>
-                                                                    </>
-                                                                ) : null}
-                                                                {row.diagnostics_detail ? (
-                                                                    <>
-                                                                        <div className={`text-xs font-semibold uppercase tracking-wide text-slate-600 ${row.stderr_preview ? 'mt-3' : 'pt-2'}`}>
-                                                                            Structured diagnostics (JSON)
-                                                                        </div>
-                                                                        <pre className="mt-1 max-h-72 overflow-auto whitespace-pre-wrap break-all rounded-md border border-slate-200 bg-white p-3 font-mono text-[11px] leading-snug text-slate-900 shadow-inner">
-                                                                            {row.diagnostics_detail}
-                                                                        </pre>
-                                                                    </>
-                                                                ) : null}
-                                                                {!row.stderr_preview && !row.diagnostics_detail ? (
-                                                                    <p className="pt-2 text-xs text-slate-500">
-                                                                        No FFmpeg stderr or structured diagnostics payload for this failure.
-                                                                    </p>
-                                                                ) : null}
+                                                            <td className="sticky right-0 z-10 bg-white py-2.5 pr-4 pl-2 text-right align-top shadow-[-4px_0_6px_-2px_rgba(0,0,0,0.06)]">
+                                                                <div className="flex flex-col items-end gap-1">
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => setStudioExportDrawer(row)}
+                                                                        className="inline-flex rounded border border-indigo-200 bg-indigo-50 px-2 py-1 text-[11px] font-medium text-indigo-800 hover:bg-indigo-100"
+                                                                    >
+                                                                        Details
+                                                                    </button>
+                                                                    <button
+                                                                        type="button"
+                                                                        disabled={studioExportDeleteId === row.id}
+                                                                        onClick={() => void deleteStudioExportJobRow(row.id)}
+                                                                        className="inline-flex rounded border border-gray-300 bg-white px-2 py-1 text-[11px] font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                                                                        aria-label={`Delete failed export job ${row.id}`}
+                                                                    >
+                                                                        {studioExportDeleteId === row.id ? '…' : 'Delete'}
+                                                                    </button>
+                                                                </div>
                                                             </td>
                                                         </tr>
-                                                    </Fragment>
-                                                ))}
+                                                    )
+                                                })}
                                             </tbody>
                                         </table>
+                                        </div>
                                         {(studioVideoExports?.rows ?? []).length === 0 && (
-                                            <p className="py-8 text-center text-sm text-gray-500">No failed Studio video export jobs in this environment.</p>
+                                            <p className="py-8 text-center text-sm text-gray-500">
+                                                No failed Studio export jobs in this environment — either exports are healthy or this table is empty.
+                                            </p>
                                         )}
                                     </div>
                                 </div>
@@ -1189,7 +1174,7 @@ export default function OperationsCenterIndex({
                             <div className="overflow-hidden rounded-lg bg-white shadow ring-1 ring-gray-200">
                                 <div className="px-4 py-4 sm:px-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                                     <div>
-                                        <h2 className="text-lg font-semibold text-gray-900">Failed Jobs (Horizon / DB)</h2>
+                                        <h2 className="text-lg font-semibold text-gray-900">Queue failed jobs</h2>
                                         <p className="mt-1 text-sm text-gray-500">
                                             Recent failed jobs from failed_jobs table. Clearing removes stored failure records only;
                                             use Horizon to retry work if needed.{' '}
@@ -1241,8 +1226,63 @@ export default function OperationsCenterIndex({
                             </div>
                         )}
                     </div>
-                </div>
+                </AdminShell>
             </main>
+
+            {studioExportDrawer && (
+                <div className="fixed inset-0 z-[60] flex justify-end bg-black/40" role="dialog" aria-modal="true">
+                    <button
+                        type="button"
+                        className="absolute inset-0 cursor-default"
+                        aria-label="Close details"
+                        onClick={() => setStudioExportDrawer(null)}
+                    />
+                    <div className="relative flex h-full w-full max-w-lg flex-col overflow-y-auto bg-white shadow-xl">
+                        <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3">
+                            <h2 className="text-lg font-semibold text-gray-900">Export failure details</h2>
+                            <button
+                                type="button"
+                                onClick={() => setStudioExportDrawer(null)}
+                                className="rounded-md px-2 py-1 text-sm font-medium text-gray-600 hover:bg-gray-100"
+                            >
+                                Close
+                            </button>
+                        </div>
+                        <div className="space-y-4 px-4 py-4 text-sm text-gray-800">
+                            <p>
+                                <span className="text-gray-500">Job id:</span>{' '}
+                                <span className="font-mono text-xs">{studioExportDrawer.id}</span>
+                            </p>
+                            <p>
+                                <span className="text-gray-500">Composition:</span>{' '}
+                                <span className="font-mono text-xs">{studioExportDrawer.composition_id}</span>
+                            </p>
+                            <p>
+                                <span className="text-gray-500">Message</span>
+                            </p>
+                            <p className="whitespace-pre-wrap rounded-md border border-gray-200 bg-gray-50 p-3 text-xs leading-relaxed">
+                                {studioExportDrawer.error_message || '—'}
+                            </p>
+                            {studioExportDrawer.stderr_preview ? (
+                                <div>
+                                    <p className="text-xs font-semibold uppercase tracking-wide text-gray-600">FFmpeg stderr (tail)</p>
+                                    <pre className="mt-1 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-md border border-gray-200 bg-slate-950 p-3 font-mono text-[11px] text-slate-100">
+                                        {studioExportDrawer.stderr_preview}
+                                    </pre>
+                                </div>
+                            ) : null}
+                            {studioExportDrawer.diagnostics_detail ? (
+                                <div>
+                                    <p className="text-xs font-semibold uppercase tracking-wide text-gray-600">Structured diagnostics</p>
+                                    <pre className="mt-1 max-h-72 overflow-auto whitespace-pre-wrap break-all rounded-md border border-gray-200 bg-gray-50 p-3 font-mono text-[11px]">
+                                        {studioExportDrawer.diagnostics_detail}
+                                    </pre>
+                                </div>
+                            ) : null}
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Asset Quick View Modal (from source click in Incidents) */}
             {(quickViewData !== null || quickViewLoading) && (

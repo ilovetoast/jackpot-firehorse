@@ -1,9 +1,7 @@
 import { useState } from 'react'
-import { Link, router, usePage } from '@inertiajs/react'
-import AppNav from '../../../Components/AppNav'
-import AppFooter from '../../../Components/AppFooter'
+import { Link, router } from '@inertiajs/react'
 import AppHead from '../../../Components/AppHead'
-import AdminAiServicesNav from '../../../Components/Admin/AdminAiServicesNav'
+import AdminAiCenterPage from '../../../Components/Admin/AdminAiCenterPage'
 
 function statusClass(status) {
     if (status === 'ready' || status === 'confirmed') return 'bg-emerald-100 text-emerald-900'
@@ -32,7 +30,6 @@ function serviceBadge(row) {
 }
 
 export default function AdminStudioLayerExtractionIndex({ rows = [], counts = {}, status_filter: statusFilter, admin_asset_url }) {
-    const { auth } = usePage().props
     const [detail, setDetail] = useState(null)
     const [loadingDetail, setLoadingDetail] = useState(false)
 
@@ -64,29 +61,27 @@ export default function AdminStudioLayerExtractionIndex({ rows = [], counts = {}
     const c = counts || {}
 
     return (
-        <div className="min-h-full">
+        <>
             <AppHead title="Studio layer extraction (admin)" suffix="Admin" />
-            <AppNav brand={auth?.activeBrand} tenant={null} />
-            <main className="bg-slate-50">
-                <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-                    <AdminAiServicesNav />
-                    <div className="mb-6">
-                        <h1 className="text-3xl font-bold tracking-tight text-slate-900">Studio layer extraction</h1>
-                        <p className="mt-1 text-xs text-slate-500">
-                            Listed under <strong>Generative &amp; Studio</strong> on the{' '}
-                            <a href="/app/admin/ai/analyzed-content" className="text-indigo-600 hover:text-indigo-500">AI services hub</a>
-                            . Each session is either <span className="font-medium">Local</span> (floodfill) or{' '}
-                            <span className="font-medium">AI (SAM)</span> (Fal) — see the Service column.
-                        </p>
-                        <p className="mt-2 max-w-3xl text-sm text-slate-600">
-                            Recent <strong>Extract layers</strong> sessions (local floodfill and remote Fal SAM). Rows come from{' '}
-                            <code className="rounded bg-slate-100 px-1 text-xs">studio_layer_extraction_sessions</code>. Use{' '}
-                            <strong>Session JSON</strong> for metadata, staged candidates, and error text when debugging SAM or
-                            size limits. Server logs also tag <code className="rounded bg-slate-100 px-1 text-xs">[studio_layer_extraction]</code>{' '}
-                            and <code className="rounded bg-slate-100 px-1 text-xs">[studio_layer_extraction_fal]</code>.
-                        </p>
-                    </div>
-
+            <AdminAiCenterPage
+                breadcrumbs={[
+                    { label: 'Admin', href: '/app/admin' },
+                    { label: 'AI Control Center', href: '/app/admin/ai' },
+                    { label: 'Studio layer extraction' },
+                ]}
+                title="Studio layer extraction"
+                description="Recent Extract layers sessions (local floodfill and remote Fal SAM). Rows come from studio_layer_extraction_sessions. Each session is Local (floodfill) or AI (SAM) — see the Service column."
+                technicalNote={
+                    <p className="mt-2 text-xs text-slate-500">
+                        Also see{' '}
+                        <a href="/app/admin/ai/analyzed-content" className="font-medium text-indigo-600 hover:text-indigo-800">
+                            Video intelligence
+                        </a>
+                        . Logs tag <code className="rounded bg-slate-100 px-1">[studio_layer_extraction]</code> and{' '}
+                        <code className="rounded bg-slate-100 px-1">[studio_layer_extraction_fal]</code>.
+                    </p>
+                }
+            >
                     <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-5">
                         {[
                             { label: 'Total', v: c.total },
@@ -203,9 +198,7 @@ export default function AdminStudioLayerExtractionIndex({ rows = [], counts = {}
                             </table>
                         </div>
                     </div>
-                </div>
-            </main>
-            <AppFooter />
+            </AdminAiCenterPage>
 
             {(loadingDetail || detail) && (
                 <div
@@ -244,6 +237,6 @@ export default function AdminStudioLayerExtractionIndex({ rows = [], counts = {}
                     </div>
                 </div>
             )}
-        </div>
+        </>
     )
 }

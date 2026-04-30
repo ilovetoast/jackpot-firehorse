@@ -765,6 +765,13 @@ type AddLayerMenuChoice = 'text' | 'image' | 'video' | 'ai_video' | 'generative'
 
 /** Shared grid for "Add layer" — used at the top and bottom of the layer stack panel. */
 function AddLayerTypeMenu({ onPick }: { onPick: (choice: AddLayerMenuChoice) => void }) {
+    const page = usePage()
+    const auth = page.props.auth as
+        | { permissions?: { ai_enabled?: boolean }; studio_platform_features?: Record<string, boolean> }
+        | undefined
+    const aiOn = auth?.permissions?.ai_enabled !== false
+    const stillToVideoOn = auth?.studio_platform_features?.studio_composition_animation !== false
+
     return (
         <div className="w-64 rounded-lg bg-gray-900 p-4 shadow-xl ring-1 ring-gray-700">
             <p className="mb-3 text-[10px] font-semibold uppercase tracking-wider text-gray-400">Add layer</p>
@@ -825,18 +832,25 @@ function AddLayerTypeMenu({ onPick }: { onPick: (choice: AddLayerMenuChoice) => 
                     <span className="flex h-5 w-5 items-center justify-center text-lg leading-none">◑</span>
                     <span className="text-[11px] font-medium">Mask</span>
                 </button>
-                <button
-                    type="button"
-                    onClick={() => onPick('ai_video')}
-                    className="col-span-2 flex flex-row items-center justify-center gap-2 rounded-md border border-violet-800/80 bg-violet-950/40 px-2 py-2.5 text-violet-100 transition-colors hover:border-violet-500 hover:bg-violet-900/50"
-                    title="Turn a still layer into an AI video clip (library Video is for uploaded MP4s)"
-                >
-                    <span className="flex items-center gap-0.5" aria-hidden>
-                        <FilmIcon className="h-5 w-5" />
-                        <SparklesIcon className="h-4 w-4 -ml-0.5 opacity-90" />
-                    </span>
-                    <span className="text-[11px] font-medium">AI video (still → clip)</span>
-                </button>
+                {stillToVideoOn && (
+                    <button
+                        type="button"
+                        onClick={() => onPick('ai_video')}
+                        disabled={!aiOn}
+                        className="col-span-2 flex flex-row items-center justify-center gap-2 rounded-md border border-violet-800/80 bg-violet-950/40 px-2 py-2.5 text-violet-100 transition-colors hover:border-violet-500 hover:bg-violet-900/50 disabled:cursor-not-allowed disabled:opacity-40"
+                        title={
+                            !aiOn
+                                ? 'AI is disabled for this workspace'
+                                : 'Turn a still layer into an AI video clip (library Video is for uploaded MP4s)'
+                        }
+                    >
+                        <span className="flex items-center gap-0.5" aria-hidden>
+                            <FilmIcon className="h-5 w-5" />
+                            <SparklesIcon className="h-4 w-4 -ml-0.5 opacity-90" />
+                        </span>
+                        <span className="text-[11px] font-medium">AI video (still → clip)</span>
+                    </button>
+                )}
             </div>
         </div>
     )
@@ -1478,9 +1492,12 @@ export default function AssetEditor() {
             user?: { id: number } | null
             activeBrand?: { id?: number; name?: string; primary_color?: string | null }
             permissions?: { ai_enabled?: boolean }
+            studio_platform_features?: Record<string, boolean>
         }
     }
     const aiEnabled = auth?.permissions?.ai_enabled !== false
+    const studioPlatformFeatures = auth?.studio_platform_features ?? {}
+    const studioStillToVideoProductEnabled = studioPlatformFeatures.studio_composition_animation !== false
     const activeBrandId = auth?.activeBrand?.id
     /** Bumps when the address bar’s `composition` query changes without an Inertia navigation (save, replaceState, back/forward). */
     const [compositionUrlEpoch, setCompositionUrlEpoch] = useState(0)
@@ -4698,6 +4715,10 @@ export default function AssetEditor() {
                 setActivityToast('AI features are disabled for this workspace.')
                 return
             }
+            if (!studioStillToVideoProductEnabled) {
+                setActivityToast('Still → AI video is temporarily unavailable.')
+                return
+            }
             if (!compositionId) {
                 if (compositionIdFromUrl && compositionBootstrapping) {
                     setActivityToast('Still loading your composition…')
@@ -4717,7 +4738,14 @@ export default function AssetEditor() {
             setStudioAnimateModalMountKey((k) => k + 1)
             setStudioAnimateModalOpen(true)
         },
-        [aiEnabled, compositionId, compositionIdFromUrl, compositionBootstrapping, editorConfirm],
+        [
+            aiEnabled,
+            studioStillToVideoProductEnabled,
+            compositionId,
+            compositionIdFromUrl,
+            compositionBootstrapping,
+            editorConfirm,
+        ],
     )
 
     /** Same gating as {@link openStudioAnimateModal} — do not require a resolved id on the button; explain on click. */
@@ -8849,25 +8877,27 @@ export default function AssetEditor() {
                                             <button type="button" onClick={() => { setLeftPanel(null); void duplicateWholeComposition() }} disabled={!compositionId} className="flex w-full items-center gap-2.5 rounded-md px-3 py-1.5 text-sm text-gray-200 hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed">
                                                 <DocumentDuplicateIcon className="h-4 w-4 shrink-0 text-gray-400" /> Duplicate
                                             </button>
-                                            <button
-                                                type="button"
-                                                onClick={() => {
-                                                    setLeftPanel(null)
-                                                    openStudioAnimateModal()
-                                                }}
-                                                disabled={!compositionId || !aiEnabled}
-                                                className="flex w-full items-center gap-2.5 rounded-md px-3 py-1.5 text-sm text-gray-200 hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
-                                                title={
-                                                    !compositionId
-                                                        ? 'Save the composition first'
-                                                        : !aiEnabled
-                                                          ? 'AI features are disabled for this workspace'
-                                                          : 'Create a short AI video from the canvas or a still layer (image-to-video)'
-                                                }
-                                            >
-                                                <FilmIcon className="h-4 w-4 shrink-0 text-violet-400" aria-hidden />
-                                                Animate composition…
-                                            </button>
+                                            {studioStillToVideoProductEnabled && (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                        setLeftPanel(null)
+                                                        openStudioAnimateModal()
+                                                    }}
+                                                    disabled={!compositionId || !aiEnabled}
+                                                    className="flex w-full items-center gap-2.5 rounded-md px-3 py-1.5 text-sm text-gray-200 hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
+                                                    title={
+                                                        !compositionId
+                                                            ? 'Save the composition first'
+                                                            : !aiEnabled
+                                                              ? 'AI features are disabled for this workspace'
+                                                              : 'Create a short AI video from the canvas or a still layer (image-to-video)'
+                                                    }
+                                                >
+                                                    <FilmIcon className="h-4 w-4 shrink-0 text-violet-400" aria-hidden />
+                                                    Animate composition…
+                                                </button>
+                                            )}
                                             <button
                                                 type="button"
                                                 onClick={() => {
@@ -10912,24 +10942,30 @@ export default function AssetEditor() {
                                                     <SparklesIcon className="h-3.5 w-3.5 shrink-0 text-violet-200" aria-hidden />
                                                     Generate / Refine
                                                 </button>
-                                                <button
-                                                    type="button"
-                                                    disabled={selectedLayer.locked || !aiEnabled}
-                                                    onClick={() =>
-                                                        openStudioAnimateModal({
-                                                            sourceKind: 'layer_isolated',
-                                                            layerId: selectedLayer.id,
-                                                        })
-                                                    }
-                                                    className="flex min-h-[2.5rem] items-center justify-center gap-1.5 rounded-md border border-violet-700/50 bg-violet-950/30 px-2 py-2 text-[10px] font-semibold text-violet-100 transition-colors hover:border-violet-500/70 hover:bg-violet-900/40 disabled:cursor-not-allowed disabled:opacity-45"
-                                                    title={!aiEnabled ? 'AI is disabled for this workspace' : 'Queue still → video (AI)'}
-                                                >
-                                                    <span className="flex items-center gap-0.5" aria-hidden>
-                                                        <FilmIcon className="h-3.5 w-3.5" />
-                                                        <SparklesIcon className="h-3 w-3" />
-                                                    </span>
-                                                    Still to video
-                                                </button>
+                                                {studioStillToVideoProductEnabled && (
+                                                    <button
+                                                        type="button"
+                                                        disabled={selectedLayer.locked || !aiEnabled}
+                                                        onClick={() =>
+                                                            openStudioAnimateModal({
+                                                                sourceKind: 'layer_isolated',
+                                                                layerId: selectedLayer.id,
+                                                            })
+                                                        }
+                                                        className="flex min-h-[2.5rem] items-center justify-center gap-1.5 rounded-md border border-violet-700/50 bg-violet-950/30 px-2 py-2 text-[10px] font-semibold text-violet-100 transition-colors hover:border-violet-500/70 hover:bg-violet-900/40 disabled:cursor-not-allowed disabled:opacity-45"
+                                                        title={
+                                                            !aiEnabled
+                                                                ? 'AI is disabled for this workspace'
+                                                                : 'Queue still → video (AI)'
+                                                        }
+                                                    >
+                                                        <span className="flex items-center gap-0.5" aria-hidden>
+                                                            <FilmIcon className="h-3.5 w-3.5" />
+                                                            <SparklesIcon className="h-3 w-3" />
+                                                        </span>
+                                                        Still to video
+                                                    </button>
+                                                )}
                                                 {canExtractRasterLayers && (
                                                     <button
                                                         type="button"
@@ -10995,25 +11031,31 @@ export default function AssetEditor() {
                                                 <SparklesIcon className="h-3.5 w-3.5 shrink-0 text-violet-200" aria-hidden />
                                                 AI image editing
                                             </button>
-                                            <button
-                                                id="jp-element-still-to-video"
-                                                type="button"
-                                                disabled={selectedLayer.locked || !aiEnabled}
-                                                onClick={() =>
-                                                    openStudioAnimateModal({
-                                                        sourceKind: 'layer_isolated',
-                                                        layerId: selectedLayer.id,
-                                                    })
-                                                }
-                                                className="flex min-h-[2.5rem] items-center justify-center gap-1.5 rounded-md border border-violet-700/50 bg-violet-950/30 px-2 py-2 text-[10px] font-semibold text-violet-100 transition-colors hover:border-violet-500/70 hover:bg-violet-900/40 disabled:cursor-not-allowed disabled:opacity-45"
-                                                title={!aiEnabled ? 'AI is disabled for this workspace' : 'Queue still → video (AI)'}
-                                            >
-                                                <span className="flex items-center gap-0.5" aria-hidden>
-                                                    <FilmIcon className="h-3.5 w-3.5" />
-                                                    <SparklesIcon className="h-3 w-3" />
-                                                </span>
-                                                Still to video
-                                            </button>
+                                            {studioStillToVideoProductEnabled && (
+                                                <button
+                                                    id="jp-element-still-to-video"
+                                                    type="button"
+                                                    disabled={selectedLayer.locked || !aiEnabled}
+                                                    onClick={() =>
+                                                        openStudioAnimateModal({
+                                                            sourceKind: 'layer_isolated',
+                                                            layerId: selectedLayer.id,
+                                                        })
+                                                    }
+                                                    className="flex min-h-[2.5rem] items-center justify-center gap-1.5 rounded-md border border-violet-700/50 bg-violet-950/30 px-2 py-2 text-[10px] font-semibold text-violet-100 transition-colors hover:border-violet-500/70 hover:bg-violet-900/40 disabled:cursor-not-allowed disabled:opacity-45"
+                                                    title={
+                                                        !aiEnabled
+                                                            ? 'AI is disabled for this workspace'
+                                                            : 'Queue still → video (AI)'
+                                                    }
+                                                >
+                                                    <span className="flex items-center gap-0.5" aria-hidden>
+                                                        <FilmIcon className="h-3.5 w-3.5" />
+                                                        <SparklesIcon className="h-3 w-3" />
+                                                    </span>
+                                                    Still to video
+                                                </button>
+                                            )}
                                             {canExtractRasterLayers && (
                                                 <button
                                                     id="jp-element-extract-layers"

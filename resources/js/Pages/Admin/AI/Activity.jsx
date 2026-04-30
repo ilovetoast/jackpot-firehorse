@@ -1,7 +1,6 @@
-import { Link, router, usePage } from '@inertiajs/react'
+import { Link, router } from '@inertiajs/react'
 import { useState } from 'react'
-import AppNav from '../../../Components/AppNav'
-import AppFooter from '../../../Components/AppFooter'
+import AdminAiCenterPage from '../../../Components/Admin/AdminAiCenterPage'
 import {
     BoltIcon,
     CheckCircleIcon,
@@ -17,7 +16,6 @@ import {
 } from './studioAnimationRunDisplay'
 
 export default function AIActivity({ runs, filters, filterOptions }) {
-    const { auth } = usePage().props
     const [localFilters, setLocalFilters] = useState(filters || {})
     const [selectedRun, setSelectedRun] = useState(null)
     const [runDetails, setRunDetails] = useState(null)
@@ -84,31 +82,23 @@ export default function AIActivity({ runs, filters, filterOptions }) {
     }
 
     return (
-        <div className="min-h-full">
-            <AppNav brand={auth.activeBrand} tenant={null} />
-            <main className="bg-gray-50">
-                <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
-                    {/* Header */}
-                    <div className="mb-6">
-                        <Link
-                            href="/app/admin/ai"
-                            className="text-sm font-medium text-gray-500 hover:text-gray-700 mb-4 inline-block"
-                        >
-                            ← Back to AI Dashboard
-                        </Link>
-                        <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-2">
-                            <div>
-                                <h1 className="text-3xl font-bold tracking-tight text-gray-900">AI Activity</h1>
-                                <p className="mt-2 text-sm text-gray-700">View all AI agent executions across the system</p>
-                            </div>
-                            <Link
-                                href="/app/admin/ai/editor-image-audit"
-                                className="text-sm font-medium text-indigo-600 hover:text-indigo-800 shrink-0"
-                            >
-                                Editor / Studio video audit →
-                            </Link>
-                        </div>
-                    </div>
+        <AdminAiCenterPage
+            breadcrumbs={[
+                { label: 'Admin', href: '/app/admin' },
+                { label: 'AI Control Center', href: '/app/admin/ai' },
+                { label: 'AI activity' },
+            ]}
+            title="AI activity"
+            description="View all AI agent executions across the system."
+        >
+            <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
+                <Link
+                    href="/app/admin/ai/editor-image-audit"
+                    className="text-sm font-medium text-indigo-600 hover:text-indigo-800"
+                >
+                    Editor / Studio video audit →
+                </Link>
+            </div>
 
                     {/* Filters */}
                     <div className="mb-6 bg-white shadow-sm ring-1 ring-gray-200 rounded-lg p-4">
@@ -571,9 +561,6 @@ export default function AIActivity({ runs, filters, filterOptions }) {
                             </div>
                         </div>
                     )}
-                </div>
-            </main>
-            <AppFooter />
-        </div>
+        </AdminAiCenterPage>
     )
 }

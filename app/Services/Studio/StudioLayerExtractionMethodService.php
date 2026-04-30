@@ -4,6 +4,7 @@ namespace App\Services\Studio;
 
 use App\Models\Brand;
 use App\Models\Tenant;
+use App\Services\AI\AIStudioPlatformFeatures;
 use App\Services\AiUsageService;
 use App\Studio\LayerExtraction\Contracts\SamSegmentationClientInterface;
 use App\Services\Fal\FalModelPricingService;
@@ -16,6 +17,7 @@ final class StudioLayerExtractionMethodService
 {
     public function __construct(
         protected FalModelPricingService $falModelPricing,
+        protected AIStudioPlatformFeatures $studioPlatformFeatures,
     ) {}
 
     public const METHOD_LOCAL = 'local';
@@ -51,6 +53,9 @@ final class StudioLayerExtractionMethodService
      */
     public function isAiExtractionRuntimeAvailable(Tenant $tenant, Brand $brand): bool
     {
+        if (! $this->studioPlatformFeatures->isStudioLayerExtractionAiEnabled()) {
+            return false;
+        }
         if (! (bool) config('studio_layer_extraction.allow_ai', true)) {
             return false;
         }
@@ -134,6 +139,9 @@ final class StudioLayerExtractionMethodService
 
     private function aiUnavailableReason(Tenant $tenant, Brand $brand): string
     {
+        if (! $this->studioPlatformFeatures->isStudioLayerExtractionAiEnabled()) {
+            return 'AI segmentation is temporarily disabled by the platform administrator.';
+        }
         if (! (bool) config('studio_layer_extraction.allow_ai', true)) {
             return 'AI layer extraction is disabled in this environment.';
         }

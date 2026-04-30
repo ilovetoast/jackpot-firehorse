@@ -5,17 +5,18 @@ import { CheckCircleIcon, XCircleIcon, XMarkIcon, CurrencyDollarIcon, ChartBarIc
 import BudgetStatusBadge from './BudgetStatusBadge'
 
 // Activity Tab Content
-export function ActivityTabContent({ runs, failedJobs = [], filterOptions, canManage }) {
+export function ActivityTabContent({ runs, failedJobs = [], filterOptions, canManage, variant = 'full' }) {
     const [localFilters, setLocalFilters] = useState({})
     const [showFailedJobs, setShowFailedJobs] = useState(false)
+    const isPreview = variant === 'preview'
 
     const applyFilters = (newFilters) => {
         const updatedFilters = { ...localFilters, ...newFilters }
         setLocalFilters(updatedFilters)
-        router.get('/app/admin/ai', { tab: 'activity', ...updatedFilters }, {
+        router.get('/app/admin/ai/activity', updatedFilters, {
             preserveState: true,
             preserveScroll: true,
-            only: ['tabContent'],
+            only: ['runs', 'filters', 'filterOptions'],
         })
     }
 
@@ -40,30 +41,44 @@ export function ActivityTabContent({ runs, failedJobs = [], filterOptions, canMa
 
     return (
         <div>
-            {/* Filters */}
-            <div className="mb-6 bg-white shadow-sm ring-1 ring-gray-200 rounded-lg p-4">
-                <div className="flex flex-wrap items-center gap-3">
-                    <select
-                        value={localFilters.agent_id || ''}
-                        onChange={(e) => applyFilters({ agent_id: e.target.value || null })}
-                        className="block w-full min-w-[180px] rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm py-1.5"
+            {isPreview ? (
+                <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+                    <h2 className="text-lg font-semibold text-gray-900">Recent AI activity</h2>
+                    <a
+                        href="/app/admin/ai/activity"
+                        className="text-sm font-medium text-indigo-600 hover:text-indigo-800"
                     >
-                        <option value="">All Agents</option>
-                        {filterOptions?.agents?.map((agent) => (
-                            <option key={agent.value} value={agent.value}>{agent.label}</option>
-                        ))}
-                    </select>
-                    <select
-                        value={localFilters.status || ''}
-                        onChange={(e) => applyFilters({ status: e.target.value || null })}
-                        className="block w-full min-w-[140px] rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm py-1.5"
-                    >
-                        <option value="">All Statuses</option>
-                        <option value="success">Success</option>
-                        <option value="failed">Failed</option>
-                    </select>
+                        Open full AI activity →
+                    </a>
                 </div>
-            </div>
+            ) : null}
+
+            {/* Filters */}
+            {!isPreview ? (
+                <div className="mb-6 bg-white shadow-sm ring-1 ring-gray-200 rounded-lg p-4">
+                    <div className="flex flex-wrap items-center gap-3">
+                        <select
+                            value={localFilters.agent_id || ''}
+                            onChange={(e) => applyFilters({ agent_id: e.target.value || null })}
+                            className="block w-full min-w-[180px] rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm py-1.5"
+                        >
+                            <option value="">All Agents</option>
+                            {filterOptions?.agents?.map((agent) => (
+                                <option key={agent.value} value={agent.value}>{agent.label}</option>
+                            ))}
+                        </select>
+                        <select
+                            value={localFilters.status || ''}
+                            onChange={(e) => applyFilters({ status: e.target.value || null })}
+                            className="block w-full min-w-[140px] rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm py-1.5"
+                        >
+                            <option value="">All Statuses</option>
+                            <option value="success">Success</option>
+                            <option value="failed">Failed</option>
+                        </select>
+                    </div>
+                </div>
+            ) : null}
 
             {/* Table */}
             <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
@@ -90,7 +105,7 @@ export function ActivityTabContent({ runs, failedJobs = [], filterOptions, canMa
                     </tbody>
                 </table>
             </div>
-            {runs.links && (
+            {!isPreview && runs.links ? (
                 <div className="mt-4 flex justify-center">
                     <div className="flex space-x-2">
                         {runs.links.map((link, idx) => {
@@ -103,11 +118,11 @@ export function ActivityTabContent({ runs, failedJobs = [], filterOptions, canMa
                                     />
                                 )
                             }
-                            // Parse URL and ensure tab parameter is set
                             const url = new URL(link.url, window.location.origin)
-                            url.searchParams.set('tab', 'activity')
-                            // Preserve any existing filters
-                            Object.keys(localFilters).forEach(key => {
+                            if (!url.pathname.endsWith('/admin/ai/activity')) {
+                                url.pathname = '/app/admin/ai/activity'
+                            }
+                            Object.keys(localFilters).forEach((key) => {
                                 if (localFilters[key] && !url.searchParams.has(key)) {
                                     url.searchParams.set(key, localFilters[key])
                                 }
@@ -115,7 +130,10 @@ export function ActivityTabContent({ runs, failedJobs = [], filterOptions, canMa
                             return (
                                 <button
                                     key={idx}
-                                    onClick={() => router.get(url.pathname + url.search, {}, { preserveState: true, only: ['tabContent'] })}
+                                    type="button"
+                                    onClick={() =>
+                                        router.get(url.pathname + url.search, {}, { preserveState: true, only: ['runs', 'filters', 'filterOptions'] })
+                                    }
                                     className={`px-3 py-2 text-sm rounded-md ${
                                         link.active ? 'bg-indigo-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-50'
                                     }`}
@@ -125,7 +143,7 @@ export function ActivityTabContent({ runs, failedJobs = [], filterOptions, canMa
                         })}
                     </div>
                 </div>
-            )}
+            ) : null}
 
             {/* Failed Jobs Section */}
             {failedJobs && failedJobs.length > 0 && (
@@ -210,7 +228,7 @@ export function ModelsTabContent({ models, environment, canManage }) {
             preserveScroll: true,
             onSuccess: () => {
                 setEditingModel(null)
-                router.get('/app/admin/ai', { tab: 'models' }, { preserveState: true, only: ['tabContent'] })
+                router.visit('/app/admin/ai/models', { preserveScroll: true })
             },
         })
     }
@@ -337,19 +355,19 @@ export function ReportsTabContent({ report, filters, filterOptions, environment 
     const applyFilters = (newFilters) => {
         const updatedFilters = { ...localFilters, ...newFilters }
         setLocalFilters(updatedFilters)
-        router.get('/app/admin/ai', { tab: 'reports', ...updatedFilters }, {
+        router.get('/app/admin/ai/reports', updatedFilters, {
             preserveState: true,
             preserveScroll: true,
-            only: ['tabContent'],
+            only: ['report', 'filters', 'filterOptions', 'environment'],
         })
     }
 
     const clearFilters = () => {
         setLocalFilters({})
-        router.get('/app/admin/ai', { tab: 'reports' }, {
+        router.get('/app/admin/ai/reports', {}, {
             preserveState: true,
             preserveScroll: true,
-            only: ['tabContent'],
+            only: ['report', 'filters', 'filterOptions', 'environment'],
         })
     }
 
@@ -638,10 +656,7 @@ export function BudgetsTabContent({ budgets, environment, canManage }) {
             preserveScroll: true,
             onSuccess: () => {
                 setEditingBudget(null)
-                router.get('/app/admin/ai', { tab: 'budgets' }, {
-                    preserveState: true,
-                    only: ['tabContent'],
-                })
+                router.visit('/app/admin/ai/budgets', { preserveScroll: true })
             },
         })
     }

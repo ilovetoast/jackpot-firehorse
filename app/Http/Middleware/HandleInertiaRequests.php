@@ -590,6 +590,8 @@ class HandleInertiaRequests extends Middleware
                         ? ($tenant->settings['ai_enabled'] ?? true)
                         : true,
                 ],
+                /** Platform admin toggles for Studio paid APIs (see Admin → AI → Studio platform features). */
+                'studio_platform_features' => app(\App\Services\AI\AIStudioPlatformFeatures::class)->effectiveMap(),
                 // Phase AF-5: Approval feature flags (plan-gated)
                 'approval_features' => $tenant ? (function () use ($tenant) {
                     $featureGate = app(FeatureGate::class);

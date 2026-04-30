@@ -2,6 +2,8 @@
 
 namespace App\Http\Controllers\Studio;
 
+use App\Enums\AITaskType;
+use App\Exceptions\AIBudgetExceededException;
 use App\Exceptions\PlanLimitExceededException;
 use App\Http\Controllers\Controller;
 use App\Jobs\StudioExtractLayersJob;
@@ -12,6 +14,7 @@ use App\Models\StudioLayerExtractionSession;
 use App\Models\StudioAnimationJob;
 use App\Models\Tenant;
 use App\Models\User;
+use App\Services\AI\StudioTaskBudgetGate;
 use App\Services\AiUsageService;
 use App\Services\Fal\FalModelPricingService;
 use App\Services\Studio\AiLayerExtractionService;
@@ -35,6 +38,7 @@ class StudioLayerExtractionController extends Controller
         protected StudioLayerExtractionConfirmService $confirmService,
         protected StudioLayerExtractionMethodService $extractionMethodService,
         protected FalModelPricingService $falModelPricing,
+        protected StudioTaskBudgetGate $studioTaskBudgetGate,
     ) {}
 
     /**
@@ -107,7 +111,15 @@ class StudioLayerExtractionController extends Controller
         }
         if ($mustPreCheckCredits) {
             try {
+                $this->studioTaskBudgetGate->assertTaskAllowsEstimatedSpend(
+                    AITaskType::STUDIO_LAYER_EXTRACTION,
+                    $this->estimatedUsdForLayerExtractionAttempt(),
+                );
                 $this->aiUsageService->checkUsage($tenant, 'studio_layer_extraction', 1);
+            } catch (AIBudgetExceededException) {
+                return response()->json([
+                    'message' => 'Monthly segmentation service budget (USD) would be exceeded. Raise the cap in Admin → AI → Budgets, disable the hard limit, or use local extraction.',
+                ], 402);
             } catch (PlanLimitExceededException $e) {
                 if ($method === StudioLayerExtractionMethodService::METHOD_AI
                     && $e->limitType === PlanLimitExceededException::LIMIT_AI_CREDITS) {
@@ -415,6 +427,10 @@ class StudioLayerExtractionController extends Controller
                 $brand,
                 $user,
             );
+        } catch (AIBudgetExceededException) {
+            return response()->json([
+                'message' => 'Monthly background-fill service budget (USD) would be exceeded. Adjust Admin → AI → Budgets or continue without a filled background.',
+            ], 402);
         } catch (PlanLimitExceededException $e) {
             if ($e->limitType === PlanLimitExceededException::LIMIT_AI_CREDITS) {
                 return response()->json(['message' => 'Not enough AI credits for background fill.'], 402);
@@ -434,6 +450,16 @@ class StudioLayerExtractionController extends Controller
         }
 
         return response()->json($out);
+    }
+
+    private function estimatedUsdForLayerExtractionAttempt(): float
+    {
+        $n = $this->falModelPricing->estimatedCostUsd();
+        if ($n !== null && $n > 0) {
+            return (float) $n;
+        }
+
+        return (float) config('studio_layer_extraction.cost_tracking.extraction_fallback_estimated_usd', 0.05);
     }
 
     private function purgeExpiredSessions(): void

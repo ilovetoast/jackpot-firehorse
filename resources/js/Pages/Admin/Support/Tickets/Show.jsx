@@ -1,8 +1,11 @@
 import { useForm, Link, usePage, router } from '@inertiajs/react'
 import { useState } from 'react'
 import { useForm as useConvertForm } from '@inertiajs/react'
+import AppHead from '../../../../Components/AppHead'
 import AppNav from '../../../../Components/AppNav'
 import AppFooter from '../../../../Components/AppFooter'
+import AdminShell from '../../../../Components/Admin/AdminShell'
+import AdminSupportSectionSidebar from '../../../../Components/Admin/AdminSupportSectionSidebar'
 import Avatar from '../../../../Components/Avatar'
 import BrandAvatar from '../../../../Components/BrandAvatar'
 import SLAPanel from '../../../../Components/Tickets/SLAPanel'
@@ -114,63 +117,73 @@ export default function AdminTicketsShow({ ticket, publicMessages, internalNotes
         tabs.push({ id: 'audit', name: 'Audit Log', icon: ClockIcon })
     }
 
+    const isEngQueueTicket =
+        ticket.is_engineering_queue === true ||
+        (ticket.type === 'internal' && ticket.assigned_team === 'engineering')
+    const queueListHref = isEngQueueTicket
+        ? '/app/admin/support/tickets?type=engineering'
+        : '/app/admin/support/tickets'
+
     return (
-        <div className="min-h-full bg-gray-50">
+        <div className="min-h-full">
+            <AppHead title={ticket.ticket_number} suffix="Admin" />
             <AppNav brand={auth.activeBrand} tenant={auth.tenant} />
-            <main className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
-                <div className="mb-6">
-                    <Link
-                        href="/app/admin/support/tickets"
-                        className="text-sm text-gray-500 hover:text-gray-700 mb-4 inline-block"
-                    >
-                        ← Back to tickets
-                    </Link>
-                    <div className="flex items-center justify-between">
-                        <div>
-                            <div className="flex items-center gap-3">
-                                <h1 className="text-3xl font-bold tracking-tight text-gray-900">{ticket.ticket_number}</h1>
+            <main className="min-h-0">
+                <AdminShell
+                    centerKey="support"
+                    breadcrumbs={[
+                        { label: 'Admin', href: '/app/admin' },
+                        { label: 'Support', href: '/app/admin/support' },
+                        {
+                            label: isEngQueueTicket ? 'Engineering queue' : 'Support tickets',
+                            href: queueListHref,
+                        },
+                        { label: ticket.ticket_number },
+                    ]}
+                    title={ticket.ticket_number}
+                    description={ticket.subject || 'Ticket'}
+                    technicalNote={
+                        <div className="mt-3 space-y-3">
+                            <div className="flex flex-wrap items-center gap-2">
                                 {getTypeBadge(ticket.type)}
                                 {getStatusBadge(ticket.status)}
+                                <span className="text-xs text-slate-500">
+                                    Created {new Date(ticket.created_at).toLocaleString()} · Updated{' '}
+                                    {new Date(ticket.updated_at).toLocaleString()}
+                                </span>
                             </div>
-                            {ticket.subject && (
-                                <p className="mt-2 text-lg text-gray-900">{ticket.subject}</p>
+                            {(ticket.category || ticket.tenant || (ticket.brands && ticket.brands.length > 0)) && (
+                                <div className="flex flex-wrap items-center gap-4 text-sm text-slate-700">
+                                    {ticket.category && (
+                                        <div className="flex items-center gap-2">
+                                            {getCategoryIcon(ticket.category_value)}
+                                            <span>Category: {ticket.category}</span>
+                                        </div>
+                                    )}
+                                    {ticket.tenant && <span>Tenant: {ticket.tenant.name}</span>}
+                                    {ticket.brands && ticket.brands.length > 0 && (
+                                        <div className="flex items-center gap-2 flex-wrap">
+                                            <span>Brands:</span>
+                                            {ticket.brands.map((brand) => (
+                                                <div key={brand.id} className="flex items-center gap-1.5">
+                                                    <BrandAvatar
+                                                        logoPath={brand.logo_path}
+                                                        name={brand.name}
+                                                        primaryColor={brand.primary_color}
+                                                        iconBgColor={brand.icon_bg_color}
+                                                        size="sm"
+                                                    />
+                                                    <span>{brand.name}</span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
                             )}
-                            <div className="mt-2 flex items-center gap-4 flex-wrap">
-                                {ticket.category && (
-                                    <div className="flex items-center gap-2">
-                                        {getCategoryIcon(ticket.category_value)}
-                                        <span className="text-sm text-gray-700">Category: {ticket.category}</span>
-                                    </div>
-                                )}
-                                {ticket.tenant && (
-                                    <span className="text-sm text-gray-700">Tenant: {ticket.tenant.name}</span>
-                                )}
-                                {ticket.brands.length > 0 && (
-                                    <div className="flex items-center gap-2 flex-wrap">
-                                        <span className="text-sm text-gray-700">Brands:</span>
-                                        {ticket.brands.map((brand) => (
-                                            <div key={brand.id} className="flex items-center gap-1.5">
-                                                <BrandAvatar
-                                                    logoPath={brand.logo_path}
-                                                    name={brand.name}
-                                                    primaryColor={brand.primary_color}
-                                                    iconBgColor={brand.icon_bg_color}
-                                                    size="sm"
-                                                />
-                                                <span className="text-sm text-gray-700">{brand.name}</span>
-                                            </div>
-                                        ))}
-                                    </div>
-                                )}
-                            </div>
                         </div>
-                        <div className="text-right">
-                            <p className="text-xs text-gray-500">Created {new Date(ticket.created_at).toLocaleString()}</p>
-                            <p className="text-xs text-gray-500">Updated {new Date(ticket.updated_at).toLocaleString()}</p>
-                        </div>
-                    </div>
-                </div>
-
+                    }
+                    sidebar={<AdminSupportSectionSidebar />}
+                >
                 {/* Info Panel */}
                 <div className="bg-white shadow-sm ring-1 ring-gray-200 rounded-lg overflow-hidden mb-6">
                     <div className="px-6 py-4 border-b border-gray-200">
@@ -506,6 +519,7 @@ export default function AdminTicketsShow({ ticket, publicMessages, internalNotes
                         )}
                     </div>
                 </div>
+                </AdminShell>
             </main>
             <AppFooter />
 

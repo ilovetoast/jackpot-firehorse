@@ -30,13 +30,9 @@ Route::prefix('portal/{brandSlug}')->group(function () {
     Route::get('/assets/{asset}', [PublicBrandPortalController::class, 'asset'])->name('public-portal.path.asset');
 });
 
-// Handle OPTIONS preflight requests for CORS
-Route::options('/{any}', function () {
-    return response('', 200)
-        ->header('Access-Control-Allow-Origin', '*')
-        ->header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
-        ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
-})->where('any', '.*');
+// CORS preflight: use Laravel's default HandleCors middleware (do not register a catch-all OPTIONS route here -
+// it matched every path and produced misleading 405 "GET not supported; only OPTIONS" when a real GET was
+// missing from route:cache or not deployed).
 
 // PWA manifest — must be publicly accessible (no auth) so browsers can fetch it
 Route::get('/manifest.webmanifest', function () {
@@ -380,6 +376,8 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
     Route::post('/admin/data-subject-requests/{data_subject_request}/reject', [\App\Http\Controllers\Admin\DataSubjectRequestController::class, 'reject'])->name('admin.data-subject-requests.reject');
     Route::get('/admin/api/overview', [\App\Http\Controllers\Admin\AdminOverviewController::class, 'metrics'])->name('admin.api.overview');
     Route::get('/admin/organization', [\App\Http\Controllers\SiteAdminController::class, 'organization'])->name('admin.organization.index');
+    Route::get('/admin/platform', [\App\Http\Controllers\Admin\AdminPlatformHubController::class, 'index'])->name('admin.platform.index');
+    Route::get('/admin/support', [\App\Http\Controllers\Admin\AdminSupportHubController::class, 'index'])->name('admin.support.hub');
 
     // Admin API endpoints (AJAX)
     Route::get('/admin/api/stats', [\App\Http\Controllers\SiteAdminController::class, 'stats'])->name('admin.api.stats');
@@ -414,7 +412,10 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
     Route::post('/admin/assets/{asset}/update-classification', [\App\Http\Controllers\Admin\AdminAssetController::class, 'updateClassification'])->name('admin.assets.update-classification');
     Route::post('/admin/assets/{asset}/clear-promotion-failed', [\App\Http\Controllers\Admin\AdminAssetController::class, 'clearPromotionFailed'])->name('admin.assets.clear-promotion-failed');
     Route::post('/admin/assets/{asset}/versions/{version}/restore', [\App\Http\Controllers\Admin\AdminAssetController::class, 'restoreVersion'])->name('admin.assets.versions.restore');
-    Route::get('/admin/operations-center', [\App\Http\Controllers\Admin\OperationsCenterController::class, 'index'])->name('admin.operations-center.index');
+    Route::get('/admin/reliability', [\App\Http\Controllers\Admin\OperationsCenterController::class, 'index'])->name('admin.reliability.index');
+    Route::get('/admin/operations-center', function (Request $request) {
+        return redirect()->route('admin.reliability.index', $request->query())->setStatusCode(301);
+    })->name('admin.operations-center.index');
     Route::post('/admin/operations-center/failed-jobs/flush', [\App\Http\Controllers\Admin\OperationsCenterController::class, 'flushFailedJobs'])->name('admin.operations-center.failed-jobs.flush');
     Route::post('/admin/operations-center/application-errors/clear', [\App\Http\Controllers\Admin\OperationsCenterController::class, 'clearApplicationErrorEvents'])->name('admin.operations-center.application-errors.clear');
     Route::post('/admin/studio-composition-video-export-jobs/bulk-delete', [\App\Http\Controllers\Admin\OperationsCenterController::class, 'bulkDestroyStudioVideoExportJobs'])->name('admin.studio-composition-video-export-jobs.bulk-delete');
@@ -540,6 +541,8 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
     Route::get('/admin/ai/automations', [\App\Http\Controllers\Admin\AIDashboardController::class, 'automations'])->name('admin.ai.automations');
     Route::get('/admin/ai/reports', [\App\Http\Controllers\Admin\AIDashboardController::class, 'reports'])->name('admin.ai.reports');
     Route::get('/admin/ai/budgets', [\App\Http\Controllers\Admin\AIDashboardController::class, 'budgets'])->name('admin.ai.budgets');
+    Route::get('/admin/ai/studio-platform-features', [\App\Http\Controllers\Admin\AIDashboardController::class, 'studioPlatformFeatures'])->name('admin.ai.studio-platform-features');
+    Route::post('/admin/ai/studio-platform-features', [\App\Http\Controllers\Admin\AIDashboardController::class, 'updateStudioPlatformFeature'])->name('admin.ai.studio-platform-features.update');
     Route::post('/admin/ai/models/{modelKey}/override', [\App\Http\Controllers\Admin\AIDashboardController::class, 'updateModelOverride'])->name('admin.ai.models.override');
     Route::post('/admin/ai/agents/{agentId}/override', [\App\Http\Controllers\Admin\AIDashboardController::class, 'updateAgentOverride'])->name('admin.ai.agents.override');
 

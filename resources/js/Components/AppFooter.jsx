@@ -10,40 +10,38 @@ export default function AppFooter({ variant = 'light' }) {
 
     const linkBase = 'underline-offset-2 transition hover:underline'
     const linkClass = dark
-        ? `text-white/55 hover:text-white/90 ${linkBase}`
+        ? `text-white/45 hover:text-white/75 ${linkBase}`
         : settings
-          ? `text-slate-400/78 hover:text-slate-500/80 ${linkBase}`
-          : `text-slate-500/80 hover:text-slate-600/90 ${linkBase}`
+          ? `text-slate-400/55 hover:text-slate-500/75 ${linkBase}`
+          : `text-slate-400/50 hover:text-slate-500/70 ${linkBase}`
 
     const copyrightClass = dark
-        ? 'text-center text-sm font-medium uppercase tracking-[0.1em] text-white/50'
+        ? 'text-center text-[10px] font-normal uppercase tracking-[0.14em] text-white/38'
         : settings
-          ? 'text-center text-xs font-medium uppercase tracking-[0.1em] text-slate-400/45'
-          : 'text-center text-sm font-medium uppercase tracking-[0.1em] text-slate-500/70'
+          ? 'text-center text-[10px] font-normal uppercase tracking-[0.12em] text-slate-400/40'
+          : 'text-center text-[10px] font-normal uppercase tracking-[0.12em] text-slate-400/45'
 
     const legalClass = dark
-        ? 'text-center text-xs font-medium uppercase tracking-[0.08em] text-white/40'
+        ? 'text-center text-[10px] font-normal uppercase tracking-[0.1em] text-white/32'
         : settings
-          ? 'text-center text-[11px] font-medium leading-snug uppercase tracking-[0.08em] text-slate-400/70'
-          : 'text-center text-xs font-medium uppercase tracking-[0.08em] text-slate-500/75'
+          ? 'text-center text-[10px] font-normal leading-snug uppercase tracking-[0.1em] text-slate-400/38'
+          : 'text-center text-[10px] font-normal uppercase tracking-[0.1em] text-slate-400/40'
 
     return (
         <footer
             className={
                 dark
                     ? 'bg-transparent'
-                    : 'border-t border-gray-200/50 bg-transparent'
+                    : 'border-t border-gray-200/35 bg-transparent'
             }
         >
             <div
-                className={`mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 space-y-1.5 ${
-                    settings ? 'py-3' : 'py-4'
-                }`}
+                className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 space-y-0.5 py-2.5"
             >
                 <p className={`${copyrightClass} antialiased`}>
                     <span
                         className={
-                            dark ? 'text-white/60' : settings ? 'text-slate-400/78' : 'text-slate-500/90'
+                            dark ? 'text-white/45' : settings ? 'text-slate-400/50' : 'text-slate-400/55'
                         }
                     >
                         Jackpot
@@ -51,10 +49,10 @@ export default function AppFooter({ variant = 'light' }) {
                     <span
                         className={
                             dark
-                                ? 'text-white/45'
+                                ? 'text-white/35'
                                 : settings
-                                  ? 'text-slate-400/40'
-                                  : 'text-slate-400/65'
+                                  ? 'text-slate-400/38'
+                                  : 'text-slate-400/42'
                         }
                     >
                         &copy; {new Date().getFullYear()}
@@ -63,10 +61,10 @@ export default function AppFooter({ variant = 'light' }) {
                         aria-hidden
                         className={
                             dark
-                                ? 'text-white/25'
+                                ? 'text-white/22'
                                 : settings
-                                  ? 'text-slate-400/32'
-                                  : 'text-slate-400/55'
+                                  ? 'text-slate-400/28'
+                                  : 'text-slate-400/32'
                         }
                     >
                         ·
@@ -84,19 +82,27 @@ export default function AppFooter({ variant = 'light' }) {
                     <a href="/terms" className={linkClass}>
                         Terms
                     </a>
-                    <span aria-hidden className="mx-1.5 opacity-40">·</span>
+                    <span aria-hidden className="mx-1 opacity-30">
+                        ·
+                    </span>
                     <a href="/privacy" className={linkClass}>
                         Privacy
                     </a>
-                    <span aria-hidden className="mx-1.5 opacity-40">·</span>
+                    <span aria-hidden className="mx-1 opacity-30">
+                        ·
+                    </span>
                     <a href="/dpa" className={linkClass}>
                         DPA
                     </a>
-                    <span aria-hidden className="mx-1.5 opacity-40">·</span>
+                    <span aria-hidden className="mx-1 opacity-30">
+                        ·
+                    </span>
                     <a href="/subprocessors" className={linkClass}>
                         Subprocessors
                     </a>
-                    <span aria-hidden className="mx-1.5 opacity-40">·</span>
+                    <span aria-hidden className="mx-1 opacity-30">
+                        ·
+                    </span>
                     <a href="/accessibility" className={linkClass}>
                         Accessibility
                     </a>

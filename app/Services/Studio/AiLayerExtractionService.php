@@ -576,9 +576,11 @@ final class AiLayerExtractionService
             $usesAi = self::usesAiRemoteSegmentation();
         }
 
+        $bgFillProductEnabled = app(\App\Services\AI\AIStudioPlatformFeatures::class)->isStudioLayerBackgroundFillEnabled();
+
         $out = [
             'supports_multiple_masks' => $p->supportsMultipleMasks(),
-            'supports_background_fill' => $this->backgroundFillCapable(),
+            'supports_background_fill' => $this->backgroundFillCapable() && $bgFillProductEnabled,
             'supports_labels' => $p->supportsLabels(),
             'supports_confidence' => $p->supportsConfidence(),
             'supports_point_pick' => $p instanceof StudioLayerExtractionPointPickProviderInterface,

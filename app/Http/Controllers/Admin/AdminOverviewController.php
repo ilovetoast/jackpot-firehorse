@@ -23,6 +23,7 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Str;
 use Inertia\Inertia;
 use Inertia\Response;
 use Laravel\Cashier\Subscription;
@@ -85,31 +86,43 @@ class AdminOverviewController extends Controller
 
     protected function getOverviewMetrics(): array
     {
-        return cache()->remember('admin_overview_metrics', 60, function () {
-            $incidents = $this->getIncidentMetrics();
-            $queue = $this->getQueueHealth();
-            $scheduler = $this->getSchedulerHealth();
-            $autoRecovery = $this->getAutoRecoveryMetrics();
-            $support = $this->getSupportMetrics();
-            $ai = $this->getAIMetrics();
-            $failures = $this->getFailureMetrics();
-            $org = $this->getOrganizationMetrics();
-            $healthScore = $this->computeHealthScore($incidents, $queue, $scheduler, $failures);
-
-            return [
-                'incidents' => $incidents,
-                'queue' => $queue,
-                'scheduler' => $scheduler,
-                'auto_recovery' => $autoRecovery,
-                'support' => $support,
-                'ai' => $ai,
-                'failures' => $failures,
-                'organization' => $org,
-                'health_score' => $healthScore,
-                'last_deploy' => $this->getLastDeployTimestamp(),
-                'horizon_workers' => $this->getHorizonWorkerCount(),
-            ];
+        $cached = cache()->remember('admin_overview_metrics', 60, function () {
+            return $this->buildCachedOverviewMetrics();
         });
+
+        return array_merge($cached, [
+            'release' => $this->buildReleasePayload(),
+            'horizon_workers' => $this->getHorizonWorkerCount(),
+        ]);
+    }
+
+    /**
+     * Heavy Command Center metrics cached 60s. Excludes {@see buildReleasePayload()} and
+     * {@see getHorizonWorkerCount()} so deploy/commit/env lines are not stuck behind this TTL.
+     */
+    protected function buildCachedOverviewMetrics(): array
+    {
+        $incidents = $this->getIncidentMetrics();
+        $queue = $this->getQueueHealth();
+        $scheduler = $this->getSchedulerHealth();
+        $autoRecovery = $this->getAutoRecoveryMetrics();
+        $support = $this->getSupportMetrics();
+        $ai = $this->getAIMetrics();
+        $failures = $this->getFailureMetrics();
+        $org = $this->getOrganizationMetrics();
+        $healthScore = $this->computeHealthScore($incidents, $queue, $scheduler, $failures);
+
+        return [
+            'incidents' => $incidents,
+            'queue' => $queue,
+            'scheduler' => $scheduler,
+            'auto_recovery' => $autoRecovery,
+            'support' => $support,
+            'ai' => $ai,
+            'failures' => $failures,
+            'organization' => $org,
+            'health_score' => $healthScore,
+        ];
     }
 
     /**
@@ -117,7 +130,7 @@ class AdminOverviewController extends Controller
      */
     protected function getOverviewMetricsFallback(): array
     {
-        return [
+        return array_merge([
             'incidents' => ['critical' => 0, 'error' => 0, 'warning' => 0, 'total_unresolved' => 0],
             'queue' => ['status' => 'unknown', 'pending_count' => null, 'failed_count' => null],
             'scheduler' => ['status' => 'unknown', 'last_heartbeat' => null, 'heartbeat_age_minutes' => null],
@@ -133,9 +146,10 @@ class AdminOverviewController extends Controller
             ],
             'organization' => ['tenants' => 0, 'users' => 0],
             'health_score' => null,
-            'last_deploy' => null,
-            'horizon_workers' => null,
-        ];
+        ], [
+            'release' => $this->buildReleasePayload(),
+            'horizon_workers' => $this->getHorizonWorkerCount(),
+        ]);
     }
 
     protected function getIncidentMetrics(): array
@@ -348,9 +362,56 @@ class AdminOverviewController extends Controller
     {
         $path = base_path('.deploy_timestamp');
         if (file_exists($path)) {
-            return trim(file_get_contents($path));
+            return trim((string) file_get_contents($path));
         }
+
         return null;
+    }
+
+    /**
+     * Version metadata for the Command Center (env, optional .release-info.json, .deploy_timestamp).
+     *
+     * Optional JSON at base_path('.release-info.json'): commit|sha, committed_at|time, message, status_url
+     */
+    protected function buildReleasePayload(): array
+    {
+        $fromFile = [];
+        $jsonPath = base_path('.release-info.json');
+        if (is_file($jsonPath) && is_readable($jsonPath)) {
+            $decoded = json_decode((string) file_get_contents($jsonPath), true);
+            if (is_array($decoded)) {
+                $fromFile = [
+                    'commit' => $decoded['commit'] ?? $decoded['sha'] ?? null,
+                    'committed_at' => $decoded['committed_at'] ?? $decoded['time'] ?? null,
+                    'message' => $decoded['message'] ?? null,
+                    'status_url' => $decoded['status_url'] ?? null,
+                ];
+            }
+        }
+
+        $commit = $fromFile['commit'] ?? env('APP_BUILD_COMMIT');
+        $committedAt = $fromFile['committed_at'] ?? env('APP_BUILD_TIME');
+        $message = $fromFile['message'] ?? env('APP_BUILD_MESSAGE');
+        $statusUrl = $fromFile['status_url'] ?? env('APP_STATUS_PAGE_URL');
+
+        if (is_string($message) && $message !== '') {
+            $message = Str::limit(trim($message), 160);
+        } else {
+            $message = null;
+        }
+
+        $commit = is_string($commit) && $commit !== '' ? trim($commit) : null;
+        $committedAt = is_string($committedAt) && $committedAt !== '' ? trim($committedAt) : null;
+        $statusUrl = is_string($statusUrl) && $statusUrl !== '' ? trim($statusUrl) : null;
+        $deployedAt = $this->getLastDeployTimestamp();
+
+        return [
+            'commit' => $commit,
+            'committed_at' => $committedAt,
+            'message' => $message,
+            'status_url' => $statusUrl,
+            'deployed_at' => is_string($deployedAt) && $deployedAt !== '' ? $deployedAt : null,
+        ];
     }
 
     protected function getHorizonWorkerCount(): ?int

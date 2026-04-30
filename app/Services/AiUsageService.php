@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Enums\AITaskType;
 use App\Exceptions\PlanLimitExceededException;
 use App\Models\AIAgentRun;
+use App\Services\Fal\FalModelPricingService;
 use App\Models\StudioLayerExtractionSession;
 use App\Models\Tenant;
 use Carbon\Carbon;
@@ -160,6 +161,7 @@ class AiUsageService
         string $remoteProvider,
         string $featureKey,
     ): void {
+        $estimatedUsd = $this->resolveStudioLayerEstimatedUsd($taskType);
         $meta = [
             'tenant_id' => $tenant->id,
             'brand_id' => $brandId,
@@ -168,6 +170,10 @@ class AiUsageService
             'model' => $modelUsed,
             'feature' => $featureKey,
             'extraction_session_id' => $extractionSessionId,
+            'estimated_provider_usd' => $estimatedUsd,
+            'estimated_cost_basis' => $taskType === AITaskType::STUDIO_LAYER_BACKGROUND_FILL
+                ? 'config:studio_layer_extraction.cost_tracking.background_fill_estimated_usd'
+                : 'fal_pricing_or_config:studio_layer_extraction.cost_tracking.extraction_fallback_estimated_usd',
         ];
         AIAgentRun::query()->create([
             'agent_id' => $agentId,
@@ -182,12 +188,27 @@ class AiUsageService
             'model_used' => $modelUsed !== '' ? $modelUsed : 'n/a',
             'tokens_in' => 0,
             'tokens_out' => 0,
-            'estimated_cost' => 0,
+            'estimated_cost' => $estimatedUsd,
             'status' => 'success',
             'started_at' => now(),
             'completed_at' => now(),
             'metadata' => $meta,
         ]);
+    }
+
+    private function resolveStudioLayerEstimatedUsd(string $taskType): float
+    {
+        if ($taskType === AITaskType::STUDIO_LAYER_BACKGROUND_FILL) {
+            return (float) config('studio_layer_extraction.cost_tracking.background_fill_estimated_usd', 0.08);
+        }
+
+        $fal = app(FalModelPricingService::class);
+        $fromFal = $fal->estimatedCostUsd();
+        if ($fromFal !== null && $fromFal > 0) {
+            return (float) $fromFal;
+        }
+
+        return (float) config('studio_layer_extraction.cost_tracking.extraction_fallback_estimated_usd', 0.05);
     }
 
     /**

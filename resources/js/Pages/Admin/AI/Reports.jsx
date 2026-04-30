@@ -1,11 +1,9 @@
-import { Link, router, usePage } from '@inertiajs/react'
+import { router } from '@inertiajs/react'
 import { useState } from 'react'
-import AppNav from '../../../Components/AppNav'
-import AppFooter from '../../../Components/AppFooter'
+import AdminAiCenterPage from '../../../Components/Admin/AdminAiCenterPage'
 import { CurrencyDollarIcon, ChartBarIcon } from '@heroicons/react/24/outline'
 
 export default function AIReports({ report, filters, filterOptions, environment }) {
-    const { auth } = usePage().props
     const [localFilters, setLocalFilters] = useState(filters || {})
 
     const applyFilters = (newFilters) => {
@@ -26,29 +24,20 @@ export default function AIReports({ report, filters, filterOptions, environment 
     }
 
     return (
-        <div className="min-h-full">
-            <AppNav brand={auth.activeBrand} tenant={null} />
-            <main className="bg-gray-50">
-                <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
-                    {/* Header */}
-                    <div className="mb-6">
-                        <Link
-                            href="/app/admin/ai"
-                            className="text-sm font-medium text-gray-500 hover:text-gray-700 mb-4 inline-block"
-                        >
-                            ← Back to AI Dashboard
-                        </Link>
-                        <div className="flex items-center justify-between">
-                            <div>
-                                <h1 className="text-3xl font-bold tracking-tight text-gray-900">AI Cost Reports</h1>
-                                <p className="mt-2 text-sm text-gray-700">View detailed cost analysis and usage metrics</p>
-                            </div>
-                            <div className="text-sm text-gray-500">
-                                Environment: <span className="font-medium text-gray-900">{environment}</span>
-                            </div>
-                        </div>
-                    </div>
-
+        <AdminAiCenterPage
+            breadcrumbs={[
+                { label: 'Admin', href: '/app/admin' },
+                { label: 'AI Control Center', href: '/app/admin/ai' },
+                { label: 'Reports' },
+            ]}
+            title="Reports"
+            description="Detailed cost analysis and usage metrics."
+            technicalNote={
+                <p className="mt-2 text-xs text-slate-500">
+                    Environment: <span className="font-medium text-slate-800">{environment}</span>
+                </p>
+            }
+        >
                     {/* Summary Cards */}
                     <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
                         <div className="rounded-lg bg-white p-6 shadow-sm ring-1 ring-gray-200">
@@ -223,9 +212,6 @@ export default function AIReports({ report, filters, filterOptions, environment 
                             </div>
                         )}
                     </div>
-                </div>
-            </main>
-            <AppFooter />
-        </div>
+        </AdminAiCenterPage>
     )
 }

@@ -467,15 +467,20 @@ class AIConfigService
         foreach ($taskConfigs as $taskType => $taskConfig) {
             $taskBudget = AIBudget::forTask($taskType)->monthly()->byEnvironment($environment)->first();
             $override = $taskBudget?->overrides()->byEnvironment($environment)->first();
+            $displayName = is_array($taskConfig) ? ($taskConfig['display_name'] ?? null) : null;
+            $taskDescription = is_array($taskConfig) ? ($taskConfig['description'] ?? null) : null;
 
             $budgets[] = [
                 'id' => $taskBudget?->id,
                 'budget_type' => 'task_type',
                 'scope_key' => $taskType,
-                'name' => "Task Type: {$taskType}",
+                'name' => is_string($displayName) && $displayName !== ''
+                    ? $displayName
+                    : "Task Type: {$taskType}",
+                'description' => $taskDescription,
                 'period' => 'monthly',
                 'period_description' => 'Calendar month (usage resets on the 1st; app timezone).',
-                'config' => $taskConfig['monthly'] ?? null,
+                'config' => is_array($taskConfig) ? ($taskConfig['monthly'] ?? null) : null,
                 'override' => $override ? [
                     'id' => $override->id,
                     'amount' => $override->amount,

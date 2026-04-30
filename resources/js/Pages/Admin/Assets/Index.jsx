@@ -1,9 +1,11 @@
-import { Link, router } from '@inertiajs/react'
+import { router } from '@inertiajs/react'
 import AppHead from '../../../Components/AppHead'
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
 import axios from 'axios'
 import AppNav from '../../../Components/AppNav'
 import AppFooter from '../../../Components/AppFooter'
+import AdminShell from '../../../Components/Admin/AdminShell'
+import AdminReliabilitySectionSidebar from '../../../Components/Admin/AdminReliabilitySectionSidebar'
 import AssetDetailModal from '../../../Components/Admin/AssetDetailModal'
 import {
     PhotoIcon,
@@ -669,23 +671,21 @@ export default function AdminAssetsIndex({
     }
 
     return (
-        <div className="min-h-full bg-slate-50">
+        <div className="min-h-full">
             <AppHead title="Asset Operations" suffix="Admin" />
             <AppNav brand={auth.activeBrand} tenant={null} />
-            <main className="mx-auto max-w-[1600px] px-4 sm:px-6 lg:px-8 py-8">
-                <div className="mb-6 flex items-center justify-between">
-                    <div>
-                        <h1 className="text-2xl font-bold tracking-tight text-slate-900">Asset Operations</h1>
-                        <p className="mt-1 text-sm text-slate-600">Cross-tenant search, repair, restore</p>
-                    </div>
-                    <Link
-                        href="/app/admin"
-                        className="text-sm text-slate-500 hover:text-slate-700"
-                    >
-                        ← Command Center
-                    </Link>
-                </div>
-
+            <main className="min-h-0">
+                <AdminShell
+                    centerKey="reliability"
+                    breadcrumbs={[
+                        { label: 'Admin', href: '/app/admin' },
+                        { label: 'Reliability Center', href: '/app/admin/reliability' },
+                        { label: 'Asset Operations' },
+                    ]}
+                    title="Asset Operations"
+                    description="Cross-tenant search, repair, restore"
+                    sidebar={<AdminReliabilitySectionSidebar />}
+                >
                 {/* Warning: Library assets (asset + execution) missing category — generative / reference / composition excluded */}
                 {assetsWithoutCategoryCount > 0 && (
                     <div className="mb-4 rounded-lg border-2 border-amber-500 bg-amber-50 p-4">
@@ -1442,6 +1442,7 @@ export default function AdminAssetsIndex({
                         </div>
                     </div>
                 )}
+                </AdminShell>
             </main>
 
             {/* Asset Detail Modal */}

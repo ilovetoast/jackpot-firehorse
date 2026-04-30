@@ -150,6 +150,7 @@ class OperationsCenterController extends Controller
 
         return Inertia::render('Admin/OperationsCenter/Index', [
             'tab' => $tab,
+            'tab_switch_route_name' => 'admin.reliability.index',
             'incidents' => $incidents,
             'failedJobs' => $failedJobs,
             'applicationErrors' => $applicationErrors,

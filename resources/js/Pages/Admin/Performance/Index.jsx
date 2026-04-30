@@ -1,7 +1,8 @@
-import { Link } from '@inertiajs/react'
 import AppHead from '../../../Components/AppHead'
 import AppNav from '../../../Components/AppNav'
 import AppFooter from '../../../Components/AppFooter'
+import AdminShell from '../../../Components/Admin/AdminShell'
+import AdminReliabilitySectionSidebar from '../../../Components/Admin/AdminReliabilitySectionSidebar'
 import { ChartBarIcon, ServerIcon } from '@heroicons/react/24/outline'
 
 export default function AdminPerformanceIndex({ auth, metrics, asset_url_metrics = null }) {
@@ -16,20 +17,21 @@ export default function AdminPerformanceIndex({ auth, metrics, asset_url_metrics
         : null
 
     return (
-        <div className="min-h-full bg-slate-50">
+        <div className="min-h-full">
             <AppHead title="Performance" suffix="Admin" />
             <AppNav brand={auth.activeBrand} tenant={null} />
-            <main className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
-                <div className="mb-6 flex items-center justify-between">
-                    <div>
-                        <h1 className="text-2xl font-bold tracking-tight text-slate-900">Performance</h1>
-                        <p className="mt-1 text-sm text-slate-600">Response timing, slow routes, client metrics (last {period}h)</p>
-                    </div>
-                    <Link href="/app/admin" className="text-sm text-slate-500 hover:text-slate-700">
-                        ← Command Center
-                    </Link>
-                </div>
-
+            <main className="min-h-0">
+                <AdminShell
+                    centerKey="reliability"
+                    breadcrumbs={[
+                        { label: 'Admin', href: '/app/admin' },
+                        { label: 'Reliability Center', href: '/app/admin/reliability' },
+                        { label: 'Performance' },
+                    ]}
+                    title="Performance"
+                    description={`Response timing, slow routes, and client load metrics (last ${period}h).`}
+                    sidebar={<AdminReliabilitySectionSidebar />}
+                >
                 <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
                     {/* Server metrics */}
                     <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -244,6 +246,7 @@ export default function AdminPerformanceIndex({ auth, metrics, asset_url_metrics
                         If values are wrong, run <code className="bg-slate-100 px-1 rounded">php artisan config:clear</code> and restart the server.
                     </p>
                 </div>
+                </AdminShell>
             </main>
             <AppFooter />
         </div>

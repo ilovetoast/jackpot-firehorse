@@ -1,11 +1,10 @@
-import { Link, router, usePage, useForm } from '@inertiajs/react'
+import { usePage, useForm } from '@inertiajs/react'
 import { useState } from 'react'
-import AppNav from '../../../Components/AppNav'
-import AppFooter from '../../../Components/AppFooter'
+import AdminAiCenterPage from '../../../Components/Admin/AdminAiCenterPage'
 import { CheckCircleIcon, XCircleIcon } from '@heroicons/react/24/outline'
 
 export default function AIAgents({ agents, environment, availableModels = [], canManage }) {
-    const { auth, errors: pageErrors } = usePage().props
+    const { errors: pageErrors } = usePage().props
     const [editingAgent, setEditingAgent] = useState(null)
     const { data, setData, post, processing, errors } = useForm({
         active: null,
@@ -41,31 +40,20 @@ export default function AIAgents({ agents, environment, availableModels = [], ca
     }
 
     return (
-        <div className="min-h-full">
-            <AppNav brand={auth.activeBrand} tenant={null} />
-            <main className="bg-gray-50">
-                <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
-                    {/* Header */}
-                    <div className="mb-6">
-                        <Link
-                            href="/app/admin/ai"
-                            className="text-sm font-medium text-gray-500 hover:text-gray-700 mb-4 inline-block"
-                        >
-                            ← Back to AI Dashboard
-                        </Link>
-                        <div className="flex items-center justify-between">
-                            <div>
-                                <h1 className="text-3xl font-bold tracking-tight text-gray-900">AI Agents</h1>
-                                <p className="mt-2 text-sm text-gray-700">
-                                    Manage AI agent configuration and overrides
-                                </p>
-                            </div>
-                            <div className="text-sm text-gray-500">
-                                Environment: <span className="font-medium text-gray-900">{environment}</span>
-                            </div>
-                        </div>
-                    </div>
-
+        <AdminAiCenterPage
+            breadcrumbs={[
+                { label: 'Admin', href: '/app/admin' },
+                { label: 'AI Control Center', href: '/app/admin/ai' },
+                { label: 'Agents' },
+            ]}
+            title="Agents"
+            description="Manage AI agent configuration and overrides."
+            technicalNote={
+                <p className="mt-2 text-xs text-slate-500">
+                    Environment: <span className="font-medium text-slate-800">{environment}</span>
+                </p>
+            }
+        >
                     {/* Info Message */}
                     {canManage && (
                         <div className="mb-6 rounded-lg bg-blue-50 p-4 ring-1 ring-blue-200">
@@ -239,9 +227,6 @@ export default function AIAgents({ agents, environment, availableModels = [], ca
                             </tbody>
                         </table>
                     </div>
-                </div>
-            </main>
-            <AppFooter />
-        </div>
+        </AdminAiCenterPage>
     )
 }

@@ -2,6 +2,8 @@
 
 namespace App\Studio\Animation\Services;
 
+use App\Enums\AITaskType;
+use App\Exceptions\AIBudgetExceededException;
 use App\Exceptions\PlanLimitExceededException;
 use App\Jobs\FinalizeStudioAnimationJob;
 use App\Jobs\PollStudioAnimationJob;
@@ -13,7 +15,10 @@ use App\Models\StudioAnimationJob;
 use App\Models\StudioAnimationOutput;
 use App\Models\Tenant;
 use App\Models\User;
+use App\Services\AI\AIStudioPlatformFeatures;
+use App\Services\AI\StudioTaskBudgetGate;
 use App\Services\AiUsageService;
+use App\Support\StudioCompositionAnimationBudgetEstimator;
 use App\Studio\Animation\Analysis\CompositionAnimationPreflightAnalyzer;
 use App\Studio\Animation\Data\CreateStudioAnimationData;
 use App\Studio\Animation\Enums\StudioAnimationSourceStrategy;
@@ -74,6 +79,23 @@ final class StudioAnimationService
     {
         if (! (bool) config('studio_animation.enabled', true)) {
             throw ValidationException::withMessages(['provider' => 'Studio animation is disabled.']);
+        }
+
+        if (! app(AIStudioPlatformFeatures::class)->isStudioCompositionAnimationEnabled()) {
+            throw ValidationException::withMessages([
+                'studio' => 'Still → AI video is temporarily disabled by the platform administrator.',
+            ]);
+        }
+
+        try {
+            app(StudioTaskBudgetGate::class)->assertTaskAllowsEstimatedSpend(
+                AITaskType::STUDIO_COMPOSITION_ANIMATION,
+                StudioCompositionAnimationBudgetEstimator::estimateCogsUsdForDurationSeconds($data->durationSeconds),
+            );
+        } catch (AIBudgetExceededException) {
+            throw ValidationException::withMessages([
+                'studio' => 'Monthly still → AI video service budget (USD) would be exceeded. Adjust Admin → AI → Budgets.',
+            ]);
         }
 
         $providers = config('studio_animation.providers', []);

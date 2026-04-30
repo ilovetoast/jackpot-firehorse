@@ -2,7 +2,10 @@ import { useState } from 'react'
 import { Link, router, usePage } from '@inertiajs/react'
 import axios from 'axios'
 import AppNav from '../../Components/AppNav'
+import AppHead from '../../Components/AppHead'
 import AppFooter from '../../Components/AppFooter'
+import AdminShell from '../../Components/Admin/AdminShell'
+import AdminReliabilitySectionSidebar from '../../Components/Admin/AdminReliabilitySectionSidebar'
 import {
     CheckCircleIcon,
     ExclamationTriangleIcon,
@@ -113,27 +116,24 @@ export default function AdminSystemStatus({ systemHealth, recentFailedJobs, asse
 
     return (
         <div className="min-h-full">
+            <AppHead title="System status" suffix="Admin" />
             <AppNav brand={auth.activeBrand} tenant={null} />
-            <main className="bg-gray-50">
-                <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
-                    {/* Header */}
-                    <div className="mb-8">
-                        <Link
-                            href="/app/admin"
-                            className="text-sm font-medium text-gray-500 hover:text-gray-700 mb-4 inline-block"
-                        >
-                            ← Back to Admin Dashboard
-                        </Link>
-                        <h1 className="text-3xl font-bold tracking-tight text-gray-900">System Status</h1>
-                        <p className="mt-2 text-sm text-gray-700">
-                            Monitor system health, queues, scheduler, storage, and asset processing
-                        </p>
-                    </div>
-
+            <main className="min-h-0">
+                <AdminShell
+                    centerKey="reliability"
+                    breadcrumbs={[
+                        { label: 'Admin', href: '/app/admin' },
+                        { label: 'Reliability Center', href: '/app/admin/reliability' },
+                        { label: 'System status' },
+                    ]}
+                    title="System status"
+                    description="Queue, scheduler, storage, thumbnails, deployment metadata, failed jobs, cron schedule, and assets with processing issues."
+                    sidebar={<AdminReliabilitySectionSidebar />}
+                >
                     {/* Deployment / Deployed commit */}
                     <div className="mb-8">
-                        <h2 className="text-lg font-semibold text-gray-900 mb-4">Deployment</h2>
-                        <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
+                        <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-slate-500">Deployment</h2>
+                        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
                             <div className="p-6">
                                 <div className="flex items-center mb-4">
                                     <CubeIcon className="h-6 w-6 text-gray-400 mr-3" />
@@ -167,10 +167,10 @@ export default function AdminSystemStatus({ systemHealth, recentFailedJobs, asse
 
                     {/* System Health Cards */}
                     <div className="mb-8">
-                        <h2 className="text-lg font-semibold text-gray-900 mb-4">System Health</h2>
-                        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                        <h2 className="mb-5 text-sm font-semibold uppercase tracking-wide text-slate-500">System health</h2>
+                        <div className="grid w-full grid-cols-1 gap-5 sm:grid-cols-2 sm:gap-x-6 sm:gap-y-5 lg:grid-cols-4 lg:gap-x-6 lg:gap-y-5">
                             {/* Queue Health */}
-                            <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
+                            <div className="min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
                                 <div className="p-6">
                                     <div className="flex items-center justify-between mb-4">
                                         <div className="flex items-center">
@@ -224,7 +224,7 @@ export default function AdminSystemStatus({ systemHealth, recentFailedJobs, asse
                             </div>
 
                             {/* Scheduler Health */}
-                            <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
+                            <div className="min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
                                 <div className="p-6">
                                     <div className="flex items-center justify-between mb-4">
                                         <div className="flex items-center">
@@ -261,7 +261,7 @@ export default function AdminSystemStatus({ systemHealth, recentFailedJobs, asse
                             </div>
 
                             {/* Storage Health */}
-                            <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
+                            <div className="min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
                                 <div className="p-6">
                                     <div className="flex items-center justify-between mb-4">
                                         <div className="flex items-center">
@@ -295,7 +295,7 @@ export default function AdminSystemStatus({ systemHealth, recentFailedJobs, asse
                             </div>
 
                             {/* Thumbnail Health */}
-                            <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
+                            <div className="min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
                                 <div className="p-6">
                                     <div className="flex items-center justify-between mb-4">
                                         <div className="flex items-center">
@@ -335,8 +335,8 @@ export default function AdminSystemStatus({ systemHealth, recentFailedJobs, asse
                     {/* AI System Reliability Insight */}
                     {latestAIInsight && (
                         <div className="mb-8">
-                            <h2 className="text-lg font-semibold text-gray-900 mb-4">AI System Insight</h2>
-                            <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
+                            <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-slate-500">AI system insight</h2>
+                            <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
                                 <div className="p-6">
                                     <div className="flex items-start justify-between mb-4">
                                         <div className="flex items-center">
@@ -379,8 +379,8 @@ export default function AdminSystemStatus({ systemHealth, recentFailedJobs, asse
 
                     {/* Recent Failed Jobs */}
                     <div className="mb-8">
-                        <h2 className="text-lg font-semibold text-gray-900 mb-4">Recent Failed Jobs</h2>
-                        <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
+                        <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-slate-500">Recent failed jobs</h2>
+                        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
                             {recentFailedJobs && recentFailedJobs.length > 0 ? (
                                 <div className="overflow-x-auto">
                                     <table className="min-w-full divide-y divide-gray-200">
@@ -435,8 +435,8 @@ export default function AdminSystemStatus({ systemHealth, recentFailedJobs, asse
 
                     {/* Scheduled Tasks */}
                     <div className="mb-8">
-                        <h2 className="text-lg font-semibold text-gray-900 mb-4">Scheduled Tasks</h2>
-                        <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
+                        <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-slate-500">Scheduled tasks</h2>
+                        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
                             {scheduledTasks && scheduledTasks.length > 0 ? (
                                 <div className="overflow-x-auto">
                                     <table className="min-w-full divide-y divide-gray-200">
@@ -495,8 +495,8 @@ export default function AdminSystemStatus({ systemHealth, recentFailedJobs, asse
 
                     {/* Assets with Issues */}
                     <div className="mb-8">
-                        <h2 className="text-lg font-semibold text-gray-900 mb-4">Assets with Processing Issues</h2>
-                        <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
+                        <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-slate-500">Assets with processing issues</h2>
+                        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
                             {assetsWithIssues && assetsWithIssues.length > 0 ? (
                                 <div className="overflow-x-auto">
                                     <table className="min-w-full divide-y divide-gray-200">
@@ -603,7 +603,7 @@ export default function AdminSystemStatus({ systemHealth, recentFailedJobs, asse
                     </div>
 
                     {/* Footer Notes */}
-                    <div className="text-xs text-gray-500">
+                    <div className="text-xs text-slate-500">
                         <p>
                             • Last updated: {new Date().toLocaleString()}
                         </p>
@@ -611,7 +611,7 @@ export default function AdminSystemStatus({ systemHealth, recentFailedJobs, asse
                             • TODO: Add alerting, retry buttons, and job execution history in future phases
                         </p>
                     </div>
-                </div>
+                </AdminShell>
             </main>
             <AppFooter />
         </div>

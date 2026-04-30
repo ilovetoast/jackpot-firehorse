@@ -208,7 +208,7 @@ class ApplicationErrorEventsAndAiAgentHealthTest extends TestCase
 
         $response = $this->actingAs($admin)
             ->withSession(['tenant_id' => $tenant->id])
-            ->get(route('admin.operations-center.index', ['tab' => 'application-errors']));
+            ->get(route('admin.reliability.index', ['tab' => 'application-errors']));
 
         $response->assertOk();
         $props = $response->inertiaPage()['props'] ?? [];

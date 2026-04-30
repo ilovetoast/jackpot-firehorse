@@ -1,11 +1,9 @@
-import { Link, router, usePage, useForm } from '@inertiajs/react'
+import { useForm } from '@inertiajs/react'
 import { useState } from 'react'
-import AppNav from '../../../Components/AppNav'
-import AppFooter from '../../../Components/AppFooter'
+import AdminAiCenterPage from '../../../Components/Admin/AdminAiCenterPage'
 import { CheckCircleIcon, XCircleIcon, ClockIcon } from '@heroicons/react/24/outline'
 
 export default function AIAutomations({ automations, environment, canManage }) {
-    const { auth } = usePage().props
     const [editingAutomation, setEditingAutomation] = useState(null)
     const { data, setData, post, processing, errors } = useForm({
         enabled: null,
@@ -57,31 +55,20 @@ export default function AIAutomations({ automations, environment, canManage }) {
     }
 
     return (
-        <div className="min-h-full">
-            <AppNav brand={auth.activeBrand} tenant={null} />
-            <main className="bg-gray-50">
-                <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
-                    {/* Header */}
-                    <div className="mb-6">
-                        <Link
-                            href="/app/admin/ai"
-                            className="text-sm font-medium text-gray-500 hover:text-gray-700 mb-4 inline-block"
-                        >
-                            ← Back to AI Dashboard
-                        </Link>
-                        <div className="flex items-center justify-between">
-                            <div>
-                                <h1 className="text-3xl font-bold tracking-tight text-gray-900">AI Automations</h1>
-                                <p className="mt-2 text-sm text-gray-700">
-                                    Manage AI automation triggers and thresholds
-                                </p>
-                            </div>
-                            <div className="text-sm text-gray-500">
-                                Environment: <span className="font-medium text-gray-900">{environment}</span>
-                            </div>
-                        </div>
-                    </div>
-
+        <AdminAiCenterPage
+            breadcrumbs={[
+                { label: 'Admin', href: '/app/admin' },
+                { label: 'AI Control Center', href: '/app/admin/ai' },
+                { label: 'Automations' },
+            ]}
+            title="Automations"
+            description="Manage AI automation triggers and thresholds."
+            technicalNote={
+                <p className="mt-2 text-xs text-slate-500">
+                    Environment: <span className="font-medium text-slate-800">{environment}</span>
+                </p>
+            }
+        >
                     {/* Info Message */}
                     {canManage && (
                         <div className="mb-6 rounded-lg bg-blue-50 p-4 ring-1 ring-blue-200">
@@ -239,9 +226,6 @@ export default function AIAutomations({ automations, environment, canManage }) {
                             </tbody>
                         </table>
                     </div>
-                </div>
-            </main>
-            <AppFooter />
-        </div>
+        </AdminAiCenterPage>
     )
 }

@@ -161,7 +161,7 @@ export default function ActivityLogs({ events, pagination, filters, filter_optio
                         </Link>
                         <div className="flex items-center justify-between mb-4">
                             <div>
-                                <h1 className="text-3xl font-bold tracking-tight text-gray-900">Activity Logs</h1>
+                                <h1 className="text-3xl font-bold tracking-tight text-gray-900">Activity history</h1>
                                 <p className="mt-2 text-sm text-gray-700">View and filter all system activity events</p>
                             </div>
                             <button

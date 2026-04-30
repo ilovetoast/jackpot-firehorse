@@ -156,4 +156,13 @@ return [
 
     /** If width×height exceeds this, extraction is always queued. */
     'async_pixel_threshold' => (int) env('STUDIO_LAYER_EXTRACTION_ASYNC_PIXEL_THRESHOLD', 2_500_000),
+
+    /**
+     * Internal USD guesses for {@see \App\Models\AIAgentRun::estimated_cost} and monthly task budgets.
+     * Align with your vendor pricing; not invoices.
+     */
+    'cost_tracking' => [
+        'extraction_fallback_estimated_usd' => (float) env('STUDIO_LAYER_EXTRACTION_FALLBACK_ESTIMATED_USD', 0.05),
+        'background_fill_estimated_usd' => (float) env('STUDIO_LAYER_BG_FILL_ESTIMATED_USD', 0.08),
+    ],
 ];

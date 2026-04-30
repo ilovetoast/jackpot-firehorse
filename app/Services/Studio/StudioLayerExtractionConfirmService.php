@@ -2,6 +2,8 @@
 
 namespace App\Services\Studio;
 
+use App\Enums\AITaskType;
+use App\Exceptions\AIBudgetExceededException;
 use App\Exceptions\PlanLimitExceededException;
 use App\Models\Asset;
 use App\Models\Brand;
@@ -9,6 +11,8 @@ use App\Models\Composition;
 use App\Models\StudioLayerExtractionSession;
 use App\Models\Tenant;
 use App\Models\User;
+use App\Services\AI\AIStudioPlatformFeatures;
+use App\Services\AI\StudioTaskBudgetGate;
 use App\Services\AiUsageService;
 use App\Studio\LayerExtraction\Contracts\StudioLayerExtractionInpaintBackgroundInterface;
 use App\Studio\LayerExtraction\Contracts\StudioLayerExtractionProviderInterface;
@@ -29,6 +33,8 @@ final class StudioLayerExtractionConfirmService
         protected StudioLayerExtractionProviderInterface $extractionProvider,
         protected StudioLayerExtractionInpaintBackgroundInterface $inpaint,
         protected AiUsageService $aiUsageService,
+        protected AIStudioPlatformFeatures $studioPlatformFeatures,
+        protected StudioTaskBudgetGate $studioTaskBudgetGate,
     ) {}
 
     /**
@@ -139,6 +145,22 @@ final class StudioLayerExtractionConfirmService
         $filledLayerDef = null;
         $combinedRel = null;
         if ($createFilledBackground) {
+            if (! $this->studioPlatformFeatures->isStudioLayerBackgroundFillEnabled()) {
+                throw new InvalidArgumentException(
+                    'Filled background is temporarily disabled by the platform administrator.'
+                );
+            }
+            $fillUsd = (float) config('studio_layer_extraction.cost_tracking.background_fill_estimated_usd', 0.08);
+            try {
+                $this->studioTaskBudgetGate->assertTaskAllowsEstimatedSpend(
+                    AITaskType::STUDIO_LAYER_BACKGROUND_FILL,
+                    $fillUsd,
+                );
+            } catch (AIBudgetExceededException) {
+                throw new InvalidArgumentException(
+                    'Monthly background-fill service budget (USD) would be exceeded. Raise the cap in Admin → AI → Budgets or continue without a filled background.'
+                );
+            }
             if ((bool) config('studio_layer_extraction.background_fill_credits_enabled', true)) {
                 $this->aiUsageService->checkUsage($tenant, 'studio_layer_background_fill', 1);
             }

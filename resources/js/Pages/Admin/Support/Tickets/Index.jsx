@@ -1,7 +1,10 @@
 import { Link, router, usePage, useForm } from '@inertiajs/react'
 import { useState, useEffect } from 'react'
+import AppHead from '../../../../Components/AppHead'
 import AppNav from '../../../../Components/AppNav'
 import AppFooter from '../../../../Components/AppFooter'
+import AdminShell from '../../../../Components/Admin/AdminShell'
+import AdminSupportSectionSidebar from '../../../../Components/Admin/AdminSupportSectionSidebar'
 import Avatar from '../../../../Components/Avatar'
 import BrandAvatar from '../../../../Components/BrandAvatar'
 import { 
@@ -268,31 +271,37 @@ export default function AdminTicketsIndex({
         : !isSupportDefaultView
 
     return (
-        <div className="min-h-full bg-gray-50">
+        <div className="min-h-full">
+            <AppHead title={engineeringQueueView ? 'Engineering tickets' : 'Support tickets'} suffix="Admin" />
             <AppNav brand={auth.activeBrand} tenant={auth.tenant} />
-            <main className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
-                <div className="mb-6">
-                    <div className="mb-4 flex items-center justify-between">
-                        <div>
-                            <h1 className="text-3xl font-bold tracking-tight text-gray-900">
-                                {engineeringQueueView ? 'Engineering tickets' : 'Support tickets'}
-                            </h1>
-                            <p className="mt-2 text-sm text-gray-700">
-                                {engineeringQueueView
-                                    ? 'Internal tickets assigned to the engineering team'
-                                    : 'Customer-facing and internal support queue (tenant tickets)'}
-                            </p>
-                        </div>
-                        {canCreateEngineering && engineeringQueueView && (
+            <main className="min-h-0">
+                <AdminShell
+                    centerKey="support"
+                    breadcrumbs={[
+                        { label: 'Admin', href: '/app/admin' },
+                        { label: 'Support', href: '/app/admin/support' },
+                        engineeringQueueView ? { label: 'Engineering queue' } : { label: 'Support tickets' },
+                    ]}
+                    title={engineeringQueueView ? 'Engineering tickets' : 'Support tickets'}
+                    description={
+                        engineeringQueueView
+                            ? 'Internal tickets assigned to the engineering team'
+                            : 'Customer-facing and internal support queue (tenant tickets)'
+                    }
+                    sidebar={<AdminSupportSectionSidebar />}
+                >
+                    {canCreateEngineering && engineeringQueueView && (
+                        <div className="mb-6 flex justify-end">
                             <button
+                                type="button"
                                 onClick={() => setShowCreateModal(true)}
                                 className="inline-flex items-center rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
                             >
                                 <PlusIcon className="h-5 w-5 mr-2" />
                                 Create Engineering Ticket
                             </button>
-                        )}
-                    </div>
+                        </div>
+                    )}
 
                     {/* Round-Robin — support (tenant) tickets */}
                     {canManageRoundRobin && !engineeringQueueView && (
@@ -653,7 +662,6 @@ export default function AdminTicketsIndex({
                             )}
                         </div>
                     </div>
-                </div>
 
                 {showEngineeringBulkUi && selectableTickets.length > 0 && (
                     <div className="mb-4 rounded-lg border border-indigo-200 bg-indigo-50/80 px-4 py-3 shadow-sm">
@@ -933,6 +941,7 @@ export default function AdminTicketsIndex({
                         )}
                     </div>
                 )}
+                </AdminShell>
             </main>
             <AppFooter />
             

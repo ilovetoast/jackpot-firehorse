@@ -1,9 +1,7 @@
-import { Link, router, usePage } from '@inertiajs/react'
+import { Link, router } from '@inertiajs/react'
 import { useEffect, useState } from 'react'
-import AppNav from '../../../Components/AppNav'
-import AppFooter from '../../../Components/AppFooter'
 import AppHead from '../../../Components/AppHead'
-import AdminAiServicesNav from '../../../Components/Admin/AdminAiServicesNav'
+import AdminAiCenterPage from '../../../Components/Admin/AdminAiCenterPage'
 import {
     CheckCircleIcon,
     XCircleIcon,
@@ -147,7 +145,6 @@ function buildRequestResponsePayload(run) {
 }
 
 export default function EditorImageAudit({ runs, filters, filterOptions }) {
-    const { auth } = usePage().props
     const [localFilters, setLocalFilters] = useState(filters || {})
     const [selectedRun, setSelectedRun] = useState(null)
     const [runDetails, setRunDetails] = useState(null)
@@ -287,28 +284,27 @@ export default function EditorImageAudit({ runs, filters, filterOptions }) {
     }
 
     return (
-        <div className="min-h-full">
-            <AppHead title="Editor & Studio generative AI audit" suffix="Admin" />
-            <AppNav brand={auth.activeBrand} tenant={null} />
-            <main className="bg-gray-50">
-                <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
-                    <div className="mb-2">
-                        <AdminAiServicesNav />
-                    </div>
-                    {/* Header */}
-                    <div className="mb-6">
-                        <h1 className="text-3xl font-bold tracking-tight text-gray-900">Editor &amp; Studio generative AI audit</h1>
-                        <p className="mt-2 text-sm text-gray-700">
-                            Canvas text-to-image, canvas image edit, DAM <strong>presentation preview</strong>, and{' '}
-                            <strong>Studio composition video</strong> (Kling, direct API) completions. Structured fields for images live in{' '}
-                            <code className="text-xs bg-gray-100 px-1 rounded">generative_audit</code>; video rows include{' '}
-                            <code className="text-xs bg-gray-100 px-1 rounded">audit_kind: studio_composition_animation</code>, prompt,
-                            credits, <strong>estimated provider USD</strong> (config-based COGS), output asset id, and model id.{' '}
-                            <strong>Tokens</strong> are N/A for video. List <strong>Cost (USD)</strong> is the internal estimate; see also
-                            plan <strong>credits</strong> in the table when shown.
+        <>
+            <AppHead title="AI generation audit" suffix="Admin" />
+            <AdminAiCenterPage
+                breadcrumbs={[
+                    { label: 'Admin', href: '/app/admin' },
+                    { label: 'AI Control Center', href: '/app/admin/ai' },
+                    { label: 'AI generation audit' },
+                ]}
+                title="AI generation audit"
+                description="Review editor, presentation preview, and Studio video generations: who ran what, model, credits, and estimated provider cost. Open Details for prompts and audit payloads."
+                technicalNote={
+                    <details className="mt-2 max-w-3xl text-xs text-slate-500">
+                        <summary className="cursor-pointer font-medium text-slate-700">Technical notes</summary>
+                        <p className="mt-1 leading-relaxed">
+                            Image rows expose <code className="rounded bg-slate-100 px-1">generative_audit</code>; Studio video rows use{' '}
+                            <code className="rounded bg-slate-100 px-1">audit_kind: studio_composition_animation</code>. Token counts are
+                            not applicable for image-to-video runs.
                         </p>
-                    </div>
-
+                    </details>
+                }
+            >
                     {/* Filters */}
                     <div className="mb-6 bg-white shadow-sm ring-1 ring-gray-200 rounded-lg p-4">
                         <div className="flex flex-wrap items-center gap-3">
@@ -1486,9 +1482,7 @@ export default function EditorImageAudit({ runs, filters, filterOptions }) {
                             </div>
                         </div>
                     )}
-                </div>
-            </main>
-            <AppFooter />
-        </div>
+            </AdminAiCenterPage>
+        </>
     )
 }

@@ -11,10 +11,12 @@ use App\Models\DetectionRule;
 use App\Models\Ticket;
 use App\Services\AIBudgetService;
 use App\Services\AIConfigService;
+use App\Services\AI\AIStudioPlatformFeatures;
 use App\Services\AICostReportingService;
 use App\Support\AssetVariant;
 use App\Support\DeliveryContext;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -75,9 +77,51 @@ class AIDashboardController extends Controller
     }
 
     /**
+     * @return array<string, mixed>
+     */
+    protected function formatAdminAiActivityRun(AIAgentRun $run): array
+    {
+        $relatedTickets = $this->relatedTicketsForAiAgentRun($run);
+
+        return [
+            'id' => $run->id,
+            'timestamp' => $run->started_at->format('Y-m-d H:i:s'),
+            'agent_id' => $run->agent_id,
+            'agent_name' => $this->getAgentName($run->agent_id),
+            'task_type' => $run->task_type,
+            'triggering_context' => $run->triggering_context,
+            'model_used' => $run->model_used,
+            'tokens_in' => $run->tokens_in,
+            'tokens_out' => $run->tokens_out,
+            'estimated_cost' => $run->estimated_cost,
+            'status' => $run->status,
+            'error_message' => $run->error_message,
+            'blocked_reason' => $run->blocked_reason,
+            'duration' => $run->formatted_duration,
+            'tenant' => $run->tenant ? [
+                'id' => $run->tenant->id,
+                'name' => $run->tenant->name,
+            ] : null,
+            'user' => $run->user ? [
+                'id' => $run->user->id,
+                'name' => $run->user->name,
+                'email' => $run->user->email,
+            ] : null,
+            'environment' => $run->environment,
+            'related_tickets' => $relatedTickets->map(function ($ticket) {
+                return [
+                    'id' => $ticket->id,
+                    'ticket_number' => $ticket->ticket_number,
+                    'subject' => $ticket->subject,
+                ];
+            })->values(),
+        ];
+    }
+
+    /**
      * Display the main AI Dashboard with tabs.
      */
-    public function index(): Response
+    public function index(): Response|RedirectResponse
     {
         if (! Auth::user()->can('ai.dashboard.view')) {
             abort(403);
@@ -120,105 +164,63 @@ class AIDashboardController extends Controller
             $costSpikes = $this->reportingService->detectCostSpikes(50);
         }
 
-        // Get tab parameter to determine which tab content to load
-        $activeTab = request()->get('tab', 'activity');
+        // Legacy ?tab= URLs -> canonical routes (preserve other query params).
+        $tabQuery = request()->query('tab');
+        $legacyTabRedirects = [
+            'activity' => 'admin.ai.activity',
+            'models' => 'admin.ai.models',
+            'agents' => 'admin.ai.agents',
+            'automations' => 'admin.ai.automations',
+            'reports' => 'admin.ai.reports',
+        ];
+        if (is_string($tabQuery) && isset($legacyTabRedirects[$tabQuery])) {
+            return redirect()->route($legacyTabRedirects[$tabQuery], request()->except('tab'));
+        }
+        if ($tabQuery === 'budgets') {
+            if (! Auth::user()->can('ai.budgets.view')) {
+                return redirect()->route('admin.ai.index', request()->except('tab'));
+            }
 
-        // Load tab-specific data
+            return redirect()->route('admin.ai.budgets', request()->except('tab'));
+        }
+
+        $activeTab = request()->get('tab', 'overview');
+        if (! is_string($activeTab)) {
+            $activeTab = 'overview';
+        }
+        if (! in_array($activeTab, ['overview', 'alerts'], true)) {
+            return redirect()->route('admin.ai.index', request()->except('tab'));
+        }
+
         $tabContent = [];
 
-        if ($activeTab === 'activity') {
-            // Load activity data (first page only for initial load)
-            $query = AIAgentRun::query()
+        if ($activeTab === 'overview') {
+            $overviewRuns = AIAgentRun::query()
                 ->forAdminActivityList()
                 ->with($this->eagerLoadsForAdminAiRunList())
-                ->orderByDesc('id');
+                ->orderByDesc('id')
+                ->paginate(12)
+                ->through(fn (AIAgentRun $run) => $this->formatAdminAiActivityRun($run));
 
-            // Apply filters from request
-            $request = request();
-            if ($request->filled('agent_id')) {
-                $query->where('agent_id', $request->agent_id);
-            }
-            if ($request->filled('model_used')) {
-                $query->where('model_used', 'like', '%'.$request->model_used.'%');
-            }
-            if ($request->filled('task_type')) {
-                $query->where('task_type', $request->task_type);
-            }
-            if ($request->filled('status')) {
-                $query->where('status', $request->status);
-            }
-            if ($request->filled('environment')) {
-                $query->where('environment', $request->environment);
-            }
-            if ($request->filled('date_from')) {
-                $query->where('started_at', '>=', $request->date_from);
-            }
-            if ($request->filled('date_to')) {
-                $query->where('started_at', '<=', $request->date_to.' 23:59:59');
-            }
-
-            $runs = $query->paginate(50)->through(function ($run) {
-                $relatedTickets = $this->relatedTicketsForAiAgentRun($run);
-
-                return [
-                    'id' => $run->id,
-                    'timestamp' => $run->started_at->format('Y-m-d H:i:s'),
-                    'agent_id' => $run->agent_id,
-                    'agent_name' => $this->getAgentName($run->agent_id),
-                    'task_type' => $run->task_type,
-                    'triggering_context' => $run->triggering_context,
-                    'model_used' => $run->model_used,
-                    'tokens_in' => $run->tokens_in,
-                    'tokens_out' => $run->tokens_out,
-                    'estimated_cost' => $run->estimated_cost,
-                    'status' => $run->status,
-                    'error_message' => $run->error_message,
-                    'blocked_reason' => $run->blocked_reason,
-                    'duration' => $run->formatted_duration,
-                    'tenant' => $run->tenant ? [
-                        'id' => $run->tenant->id,
-                        'name' => $run->tenant->name,
-                    ] : null,
-                    'user' => $run->user ? [
-                        'id' => $run->user->id,
-                        'name' => $run->user->name,
-                        'email' => $run->user->email,
-                    ] : null,
-                    'environment' => $run->environment,
-                    'related_tickets' => $relatedTickets->map(function ($ticket) {
-                        return [
-                            'id' => $ticket->id,
-                            'ticket_number' => $ticket->ticket_number,
-                            'subject' => $ticket->subject,
-                        ];
-                    })->values(),
-                ];
-            });
-
-            // Load failed automation jobs
             $failedJobs = \Illuminate\Support\Facades\DB::table('failed_jobs')
                 ->where('queue', 'default')
                 ->orderBy('failed_at', 'desc')
-                ->limit(20)
+                ->limit(10)
                 ->get()
                 ->map(function ($job) {
                     $payload = json_decode($job->payload, true);
                     $displayName = $payload['displayName'] ?? 'Unknown Job';
 
-                    // Only show automation jobs
                     if (! str_contains($displayName, 'App\\Jobs\\Automation\\')) {
                         return null;
                     }
 
-                    // Extract job class name
                     $jobClass = str_replace('App\\Jobs\\Automation\\', '', $displayName);
 
-                    // Extract exception message (first line)
                     $exception = $job->exception;
                     $exceptionLines = explode("\n", $exception);
                     $errorMessage = $exceptionLines[0] ?? 'Unknown error';
 
-                    // Try to extract ticket ID or other context from payload
                     $command = $payload['data']['command'] ?? null;
                     $ticketId = null;
                     if ($command) {
@@ -235,7 +237,6 @@ class AIDashboardController extends Controller
                         'job_name' => $displayName,
                         'failed_at' => \Carbon\Carbon::parse($job->failed_at)->format('Y-m-d H:i:s'),
                         'error_message' => $errorMessage,
-                        // Cap size — exception blobs can be huge and inflate Inertia payload / memory.
                         'full_exception' => mb_substr($exception, 0, 12000),
                         'ticket_id' => $ticketId,
                     ];
@@ -244,82 +245,13 @@ class AIDashboardController extends Controller
                 ->values();
 
             $tabContent['activity'] = [
-                'runs' => $runs,
+                'runs' => $overviewRuns,
                 'failedJobs' => $failedJobs,
                 'filterOptions' => [
                     'agents' => $this->getAgentOptions(),
                     'models' => $this->getModelOptions(),
                     'task_types' => $this->getTaskTypeOptions(),
                     'environments' => $this->getEnvironmentOptions(),
-                ],
-            ];
-        } elseif ($activeTab === 'models') {
-            $tabContent['models'] = [
-                'models' => $this->configService->getAllModelsWithOverrides($environment),
-            ];
-        } elseif ($activeTab === 'agents') {
-            $tabContent['agents'] = [
-                'agents' => $this->configService->getAllAgentsWithOverrides($environment),
-                'availableModels' => array_keys(config('ai.models', [])),
-            ];
-        } elseif ($activeTab === 'automations') {
-            $automations = $this->configService->getAllAutomationsWithOverrides($environment);
-            foreach ($automations as &$automation) {
-                $agentId = $this->getAgentIdForTrigger($automation['key']);
-                if ($agentId) {
-                    // value() avoids select * + hydrate; composite index (agent_id, started_at) avoids filesort OOM on huge tables.
-                    $startedAt = AIAgentRun::query()
-                        ->where('agent_id', $agentId)
-                        ->orderByDesc('started_at')
-                        ->value('started_at');
-                    $automation['last_triggered_at'] = $startedAt
-                        ? \Carbon\Carbon::parse($startedAt)->toISOString()
-                        : null;
-                } else {
-                    $automation['last_triggered_at'] = null;
-                }
-            }
-            $tabContent['automations'] = [
-                'automations' => $automations,
-            ];
-        } elseif ($activeTab === 'reports') {
-            $filters = request()->only([
-                'start_date',
-                'end_date',
-                'agent_id',
-                'model_used',
-                'task_type',
-                'triggering_context',
-                'environment',
-                'group_by',
-            ]);
-
-            // Remove null/empty values
-            $filters = array_filter($filters, fn ($value) => $value !== null && $value !== '');
-
-            // Default to last 30 days if no date range specified
-            if (! isset($filters['start_date'])) {
-                $filters['start_date'] = now()->subDays(30)->format('Y-m-d');
-            }
-            if (! isset($filters['end_date'])) {
-                $filters['end_date'] = now()->format('Y-m-d');
-            }
-
-            $report = $this->reportingService->generateReport($filters);
-
-            $tabContent['reports'] = [
-                'report' => $report,
-                'filters' => $filters,
-                'filterOptions' => [
-                    'agents' => $this->getAgentOptions(),
-                    'models' => $this->getModelOptions(),
-                    'task_types' => $this->getTaskTypeOptions(),
-                    'environments' => $this->getEnvironmentOptions(),
-                    'contexts' => [
-                        ['value' => 'system', 'label' => 'System'],
-                        ['value' => 'tenant', 'label' => 'Tenant'],
-                        ['value' => 'user', 'label' => 'User'],
-                    ],
                 ],
             ];
         } elseif ($activeTab === 'alerts') {
@@ -374,7 +306,6 @@ class AIDashboardController extends Controller
             }
 
             // Sort by severity (critical > warning > info) then last_detected_at (desc)
-            $severityOrder = ['critical' => 3, 'warning' => 2, 'info' => 1];
             $query->orderByRaw("FIELD(severity, 'critical', 'warning', 'info') DESC")
                 ->orderBy('last_detected_at', 'desc');
 
@@ -444,24 +375,6 @@ class AIDashboardController extends Controller
                     'tenants' => $tenants->map(fn ($tenant) => ['value' => $tenant->id, 'label' => $tenant->name])->toArray(),
                 ],
             ];
-        } elseif ($activeTab === 'budgets' && Auth::user()->can('ai.budgets.view')) {
-            $budgets = $this->configService->getAllBudgetsWithOverrides($environment);
-            foreach ($budgets as &$budget) {
-                if ($budget['id']) {
-                    $budgetModel = \App\Models\AIBudget::find($budget['id']);
-                    if ($budgetModel) {
-                        $budget['status'] = $this->budgetService->getBudgetStatus($budgetModel, $environment);
-                        $budget['current_usage'] = $budgetModel->getCurrentUsage($environment);
-                        $budget['effective_amount'] = $budgetModel->getEffectiveAmount($environment);
-                        $budget['remaining'] = $budgetModel->getRemaining($environment);
-                        $budget['warning_threshold'] = $budgetModel->getEffectiveWarningThreshold($environment);
-                        $budget['hard_limit_enabled'] = $budgetModel->isHardLimitEnabled($environment);
-                    }
-                }
-            }
-            $tabContent['budgets'] = [
-                'budgets' => $budgets,
-            ];
         }
 
         return Inertia::render('Admin/AI/Index', [
@@ -522,42 +435,7 @@ class AIDashboardController extends Controller
             $query->where('started_at', '<=', $request->date_to.' 23:59:59');
         }
 
-        $runs = $query->paginate(50)->through(function ($run) {
-            $relatedTickets = $this->relatedTicketsForAiAgentRun($run);
-
-            return [
-                'id' => $run->id,
-                'timestamp' => $run->started_at->format('Y-m-d H:i:s'),
-                'agent_id' => $run->agent_id,
-                'agent_name' => $this->getAgentName($run->agent_id),
-                'task_type' => $run->task_type,
-                'triggering_context' => $run->triggering_context,
-                'model_used' => $run->model_used,
-                'tokens_in' => $run->tokens_in,
-                'tokens_out' => $run->tokens_out,
-                'estimated_cost' => $run->estimated_cost,
-                'status' => $run->status,
-                'error_message' => $run->error_message,
-                'duration' => $run->formatted_duration,
-                'tenant' => $run->tenant ? [
-                    'id' => $run->tenant->id,
-                    'name' => $run->tenant->name,
-                ] : null,
-                'user' => $run->user ? [
-                    'id' => $run->user->id,
-                    'name' => $run->user->name,
-                    'email' => $run->user->email,
-                ] : null,
-                'environment' => $run->environment,
-                'related_tickets' => $relatedTickets->map(function ($ticket) {
-                    return [
-                        'id' => $ticket->id,
-                        'ticket_number' => $ticket->ticket_number,
-                        'subject' => $ticket->subject,
-                    ];
-                })->values(),
-            ];
-        });
+        $runs = $query->paginate(50)->through(fn (AIAgentRun $run) => $this->formatAdminAiActivityRun($run));
 
         // Get filter options
         $filterOptions = [
@@ -1031,6 +909,56 @@ class AIDashboardController extends Controller
             'filterOptions' => $filterOptions,
             'environment' => app()->environment(),
         ]);
+    }
+
+    /**
+     * Studio platform feature toggles (segmentation, background fill, still → video).
+     */
+    public function studioPlatformFeatures(Request $request): Response
+    {
+        if (! Auth::user()->can('ai.dashboard.view')) {
+            abort(403);
+        }
+
+        $environment = $request->get('environment', app()->environment());
+        $features = app(AIStudioPlatformFeatures::class)->adminPayload($environment);
+
+        return Inertia::render('Admin/AI/StudioPlatformFeatures', [
+            'features' => $features,
+            'environment' => $environment,
+            'canManage' => Auth::user()->can('ai.dashboard.manage'),
+        ]);
+    }
+
+    /**
+     * Persist a Studio platform feature toggle for the given environment.
+     */
+    public function updateStudioPlatformFeature(Request $request): RedirectResponse
+    {
+        if (! Auth::user()->can('ai.dashboard.manage')) {
+            abort(403);
+        }
+
+        $validated = $request->validate([
+            'feature_key' => 'required|string|max:96',
+            'enabled' => 'required|boolean',
+            'environment' => 'nullable|string|max:64',
+        ]);
+
+        $allowed = array_keys(config('ai_studio_platform_features.features', []));
+        if (! in_array($validated['feature_key'], $allowed, true)) {
+            abort(422, 'Unknown feature key.');
+        }
+
+        $environment = $validated['environment'] ?? app()->environment();
+        app(AIStudioPlatformFeatures::class)->setEnabled(
+            $validated['feature_key'],
+            (bool) $validated['enabled'],
+            Auth::user(),
+            $environment
+        );
+
+        return redirect()->back()->with('success', 'Studio feature setting saved.');
     }
 
     /**
