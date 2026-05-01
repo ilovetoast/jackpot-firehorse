@@ -2,7 +2,6 @@
 
 namespace Tests\Feature;
 
-use App\Models\Brand;
 use App\Models\Collection;
 use App\Models\Tenant;
 use App\Models\User;
@@ -20,7 +19,10 @@ class CollectionShareLinkTest extends TestCase
     protected function makeTenantBrand(): array
     {
         $tenant = Tenant::create(['name' => 'T', 'slug' => 't']);
-        $brand = Brand::create(['tenant_id' => $tenant->id, 'name' => 'B', 'slug' => 'b']);
+        // Tenant::created creates a default brand; do not add a second brand — free plan max_brands=1
+        // would mark the extra brand disabled and /app/* would redirect to errors.brand-disabled.
+        $brand = $tenant->brands()->where('is_default', true)->firstOrFail();
+        $brand->update(['name' => 'B', 'slug' => 'b']);
 
         return [$tenant, $brand];
     }
@@ -89,6 +91,7 @@ class CollectionShareLinkTest extends TestCase
             'first_name' => 'A',
             'last_name' => 'A',
         ]);
+        $user->forceFill(['email_verified_at' => now()])->save();
         $user->tenants()->attach($tenant->id, ['role' => 'member']);
         $user->brands()->attach($brand->id, ['role' => 'admin', 'removed_at' => null]);
 
@@ -100,11 +103,17 @@ class CollectionShareLinkTest extends TestCase
                 'is_public' => true,
                 'public_password' => 'password1x',
                 'public_password_confirmation' => 'password1x',
-            ])->assertCreated();
+            ], [
+                'Accept' => 'application/json',
+                'X-Requested-With' => 'XMLHttpRequest',
+            ])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('is_public');
 
-        $c = Collection::query()->where('name', 'C')->first();
-        $this->assertNotNull($c);
-        $this->assertFalse($c->is_public);
+        $this->assertDatabaseMissing('collections', [
+            'brand_id' => $brand->id,
+            'name' => 'C',
+        ]);
     }
 
     public function test_store_sets_password_hash_and_token(): void
@@ -118,6 +127,7 @@ class CollectionShareLinkTest extends TestCase
             'first_name' => 'A',
             'last_name' => 'A',
         ]);
+        $user->forceFill(['email_verified_at' => now()])->save();
         $user->tenants()->attach($tenant->id, ['role' => 'member']);
         $user->brands()->attach($brand->id, ['role' => 'admin', 'removed_at' => null]);
 
@@ -130,6 +140,9 @@ class CollectionShareLinkTest extends TestCase
                 'public_password' => 'password1x',
                 'public_password_confirmation' => 'password1x',
                 'public_downloads_enabled' => true,
+            ], [
+                'Accept' => 'application/json',
+                'X-Requested-With' => 'XMLHttpRequest',
             ])->assertCreated();
 
         $c = Collection::query()->where('name', 'Shared create')->first();

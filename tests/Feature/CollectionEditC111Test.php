@@ -2,7 +2,7 @@
 
 namespace Tests\Feature;
 
-use App\Models\Brand;
+use App\Models\BrandOnboardingProgress;
 use App\Models\Collection;
 use App\Models\Tenant;
 use App\Models\User;
@@ -20,13 +20,15 @@ class CollectionEditC111Test extends TestCase
     public function test_authorized_user_can_update_collection_name_and_description(): void
     {
         $tenant = Tenant::create(['name' => 'T', 'slug' => 't']);
-        $brand = Brand::create(['tenant_id' => $tenant->id, 'name' => 'B', 'slug' => 'b']);
+        $brand = $tenant->brands()->where('is_default', true)->firstOrFail();
+        $brand->update(['name' => 'B', 'slug' => 'b']);
         $user = User::create([
             'email' => 'admin@example.com',
             'password' => bcrypt('password'),
             'first_name' => 'A',
             'last_name' => 'dmin',
         ]);
+        $user->forceFill(['email_verified_at' => now()])->save();
         $user->tenants()->attach($tenant->id, ['role' => 'member']);
         $user->brands()->attach($brand->id, ['role' => 'admin', 'removed_at' => null]);
 
@@ -61,13 +63,15 @@ class CollectionEditC111Test extends TestCase
     public function test_unauthorized_user_cannot_update_collection(): void
     {
         $tenant = Tenant::create(['name' => 'T', 'slug' => 't']);
-        $brand = Brand::create(['tenant_id' => $tenant->id, 'name' => 'B', 'slug' => 'b']);
+        $brand = $tenant->brands()->where('is_default', true)->firstOrFail();
+        $brand->update(['name' => 'B', 'slug' => 'b']);
         $viewer = User::create([
             'email' => 'viewer@example.com',
             'password' => bcrypt('password'),
             'first_name' => 'V',
             'last_name' => 'iewer',
         ]);
+        $viewer->forceFill(['email_verified_at' => now()])->save();
         $viewer->tenants()->attach($tenant->id, ['role' => 'member']);
         $viewer->brands()->attach($brand->id, ['role' => 'viewer', 'removed_at' => null]);
 
@@ -98,13 +102,15 @@ class CollectionEditC111Test extends TestCase
     public function test_is_public_cannot_be_enabled_when_feature_disabled(): void
     {
         $tenant = Tenant::create(['name' => 'T', 'slug' => 't']);
-        $brand = Brand::create(['tenant_id' => $tenant->id, 'name' => 'B', 'slug' => 'b']);
+        $brand = $tenant->brands()->where('is_default', true)->firstOrFail();
+        $brand->update(['name' => 'B', 'slug' => 'b']);
         $user = User::create([
             'email' => 'admin@example.com',
             'password' => bcrypt('password'),
             'first_name' => 'A',
             'last_name' => 'dmin',
         ]);
+        $user->forceFill(['email_verified_at' => now()])->save();
         $user->tenants()->attach($tenant->id, ['role' => 'member']);
         $user->brands()->attach($brand->id, ['role' => 'admin', 'removed_at' => null]);
 
@@ -127,8 +133,8 @@ class CollectionEditC111Test extends TestCase
                 'X-Requested-With' => 'XMLHttpRequest',
             ]);
 
-        $response->assertStatus(200);
-        $response->assertJsonPath('collection.is_public', false);
+        $response->assertUnprocessable();
+        $response->assertJsonValidationErrors('is_public');
 
         $collection->refresh();
         $this->assertFalse($collection->is_public);
@@ -137,7 +143,8 @@ class CollectionEditC111Test extends TestCase
     public function test_collections_index_passes_can_update_collection(): void
     {
         $tenant = Tenant::create(['name' => 'T', 'slug' => 't']);
-        $brand = Brand::create(['tenant_id' => $tenant->id, 'name' => 'B', 'slug' => 'b']);
+        $brand = $tenant->brands()->where('is_default', true)->firstOrFail();
+        $brand->update(['name' => 'B', 'slug' => 'b']);
         $collection = Collection::create([
             'tenant_id' => $tenant->id,
             'brand_id' => $brand->id,
@@ -152,6 +159,7 @@ class CollectionEditC111Test extends TestCase
             'first_name' => 'A',
             'last_name' => 'dmin',
         ]);
+        $admin->forceFill(['email_verified_at' => now()])->save();
         $admin->tenants()->attach($tenant->id, ['role' => 'member']);
         $admin->brands()->attach($brand->id, ['role' => 'admin', 'removed_at' => null]);
 
@@ -161,8 +169,17 @@ class CollectionEditC111Test extends TestCase
             'first_name' => 'V',
             'last_name' => 'iewer',
         ]);
+        $viewer->forceFill(['email_verified_at' => now()])->save();
         $viewer->tenants()->attach($tenant->id, ['role' => 'member']);
         $viewer->brands()->attach($brand->id, ['role' => 'viewer', 'removed_at' => null]);
+
+        BrandOnboardingProgress::query()->updateOrCreate(
+            ['brand_id' => $brand->id],
+            [
+                'tenant_id' => $tenant->id,
+                'activated_at' => now(),
+            ]
+        );
 
         $adminResponse = $this->actingAs($admin)
             ->withSession(['tenant_id' => $tenant->id, 'brand_id' => $brand->id])

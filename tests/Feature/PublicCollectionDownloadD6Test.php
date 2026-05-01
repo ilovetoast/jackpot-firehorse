@@ -15,7 +15,10 @@ use App\Models\Download;
 use App\Models\StorageBucket;
 use App\Models\Tenant;
 use App\Models\UploadSession;
+use Aws\Command;
 use Aws\S3\S3Client;
+use GuzzleHttp\Psr7\Request;
+use GuzzleHttp\Psr7\Utils;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\URL;
@@ -84,6 +87,18 @@ class PublicCollectionDownloadD6Test extends TestCase
 
     public function test_public_collection_redirects_to_signed_zip_url_and_creates_no_download(): void
     {
+        $mockS3 = Mockery::mock(S3Client::class);
+        $mockS3->shouldReceive('doesObjectExist')->byDefault()->andReturnUsing(function ($bucket, $key) {
+            return ! str_contains((string) $key, 'collection-download.zip');
+        });
+        $mockS3->shouldReceive('getObject')->byDefault()->andReturn(['Body' => Utils::streamFor('fake-asset-bytes')]);
+        $mockS3->shouldReceive('putObject')->byDefault()->andReturn([]);
+        $mockS3->shouldReceive('getCommand')->byDefault()->andReturnUsing(static fn (string $name, array $args = []) => new Command($name, $args));
+        $mockS3->shouldReceive('createPresignedRequest')->byDefault()->andReturnUsing(
+            static fn () => new Request('GET', 'https://example.test/signed-public-collection.zip')
+        );
+        $this->app->instance(S3Client::class, $mockS3);
+
         $this->tenant->update(['manual_plan_override' => 'enterprise']);
 
         $collection = Collection::create([

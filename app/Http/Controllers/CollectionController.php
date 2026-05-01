@@ -738,17 +738,23 @@ class CollectionController extends Controller
             'allows_external_guests' => ['nullable', 'boolean'],
             'is_public' => ['nullable', 'boolean'],
             'public_password' => [
-                Rule::excludeUnless($sharePasswordApplies),
+                Rule::excludeIf(! $sharePasswordApplies),
                 'required',
                 'string',
                 'min:8',
                 'max:255',
                 'confirmed',
             ],
-            'public_password_confirmation' => [Rule::excludeUnless($sharePasswordApplies), 'nullable', 'string'],
+            'public_password_confirmation' => [Rule::excludeIf(! $sharePasswordApplies), 'nullable', 'string'],
             'clear_public_password' => ['nullable', 'boolean'],
             'public_downloads_enabled' => ['nullable', 'boolean'],
         ]);
+
+        if ($request->boolean('is_public') && ! $publicCollectionsEnabledForStore) {
+            throw ValidationException::withMessages([
+                'is_public' => ['Share links are not available on your current plan.'],
+            ]);
+        }
 
         $exists = Collection::query()
             ->where('brand_id', $brand->id)
@@ -844,6 +850,12 @@ class CollectionController extends Controller
             'public_downloads_enabled' => ['nullable', 'boolean'],
         ]);
 
+        if (array_key_exists('is_public', $validated) && $validated['is_public'] && ! $publicCollectionsEnabled) {
+            throw ValidationException::withMessages([
+                'is_public' => ['Share links are not available on your current plan.'],
+            ]);
+        }
+
         if (array_key_exists('access_mode', $validated)) {
             $collection->access_mode = $validated['access_mode'];
         }
@@ -876,7 +888,7 @@ class CollectionController extends Controller
             $collection->description = $validated['description'];
         }
         if (array_key_exists('is_public', $validated)) {
-            $newIsPublic = $publicCollectionsEnabled && $validated['is_public'];
+            $newIsPublic = (bool) $validated['is_public'];
             $collection->is_public = $newIsPublic;
             // C10: When making public, ensure slug exists for legacy /b/... URL (token URL is primary)
             if ($newIsPublic && (empty($collection->slug))) {

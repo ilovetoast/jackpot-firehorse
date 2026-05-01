@@ -37,6 +37,13 @@ use Illuminate\Support\Facades\Log;
 class UploadController extends Controller
 {
     /**
+     * One S3 client per finalize HTTP request — constructing Aws\S3\S3Client repeatedly
+     * loads endpoint partition data each time and can exceed PHP max_execution_time on
+     * multi-item manifests or extension checks (see PartitionEndpointProvider).
+     */
+    private ?S3Client $finalizeS3Client = null;
+
+    /**
      * Create a new controller instance.
      */
     public function __construct(
@@ -1602,6 +1609,8 @@ class UploadController extends Controller
      */
     public function finalize(Request $request): JsonResponse
     {
+        $this->finalizeS3Client = null;
+
         $tenant = app('tenant');
         $brand = app('brand');
         $user = Auth::user();
@@ -1998,7 +2007,7 @@ class UploadController extends Controller
                         throw new \RuntimeException('Storage bucket not found for upload session');
                     }
                     
-                    $s3Client = $this->createS3ClientForFinalize(); // Reuse same client from verifyS3Upload
+                    $s3Client = $this->getS3ClientForFinalize();
                     
                     try {
                         // Get object metadata to extract original filename
@@ -2471,11 +2480,16 @@ class UploadController extends Controller
                 // Determine error code and category from exception
                 // Map to normalized error codes matching frontend expectations
                 $errorCode = UploadErrorResponse::CODE_VALIDATION_FAILED;
-                if (str_contains($errorMessage, 'does not exist in S3') || 
+                if (str_contains($errorMessage, 'does not exist in S3') ||
                     str_contains($errorMessage, 'not found in S3') ||
                     str_contains($errorMessage, 'Upload does not exist')) {
                     $errorCode = UploadErrorResponse::CODE_FILE_MISSING;
-                } elseif (str_contains($errorMessage, 'not found') || 
+                } elseif (str_contains($errorMessage, 'no longer exists') ||
+                    str_contains($errorMessage, 'was deleted while') ||
+                    str_contains($errorMessage, 'was removed while')) {
+                    // Replace flow: target asset hard-deleted or soft-deleted mid-upload
+                    $errorCode = UploadErrorResponse::CODE_PIPELINE_CONFLICT;
+                } elseif (str_contains($errorMessage, 'not found') ||
                          str_contains($errorMessage, 'does not exist')) {
                     $errorCode = UploadErrorResponse::CODE_SESSION_NOT_FOUND;
                 }
@@ -2667,7 +2681,7 @@ class UploadController extends Controller
 
         // Create S3 client using reflection to access protected method
         // Or create our own instance using the same configuration
-        $s3Client = $this->createS3ClientForFinalize();
+        $s3Client = $this->getS3ClientForFinalize();
 
         try {
             // Verify object exists in S3
@@ -2790,6 +2804,20 @@ class UploadController extends Controller
                 'logged' => false,
             ], 200);
         }
+    }
+
+    /**
+     * S3 client reused for all verify/head calls within a single finalize request.
+     */
+    protected function getS3ClientForFinalize(): S3Client
+    {
+        if ($this->finalizeS3Client instanceof S3Client) {
+            return $this->finalizeS3Client;
+        }
+
+        $this->finalizeS3Client = $this->createS3ClientForFinalize();
+
+        return $this->finalizeS3Client;
     }
 
     /**

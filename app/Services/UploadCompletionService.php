@@ -139,13 +139,13 @@ class UploadCompletionService
             if (is_array($metadata) && isset($metadata['comment'])) {
                 $comment = $metadata['comment'];
             }
-            $asset = Asset::findOrFail($uploadSession->asset_id);
+            $asset = $this->resolveAssetForReplaceUpload($uploadSession);
             $planAllowsVersions = app(PlanService::class)->planAllowsVersions($asset->tenant);
             if ($planAllowsVersions) {
-                return $this->completeReplaceWithVersion($uploadSession, $s3Key, $userId, $comment, $filename);
+                return $this->completeReplaceWithVersion($uploadSession, $asset, $s3Key, $userId, $comment, $filename);
             }
 
-            return $this->completeReplaceInPlace($uploadSession, $s3Key, $userId, $comment, $filename);
+            return $this->completeReplaceInPlace($uploadSession, $asset, $s3Key, $userId, $comment, $filename);
         }
 
         // IDEMPOTENT CHECK: If upload session is already COMPLETED, check for existing asset
@@ -1451,12 +1451,40 @@ class UploadCompletionService
     }
 
     /**
+     * Load the asset targeted by a replace-mode upload session, including soft-deleted rows,
+     * and fail with a clear message if it was removed while the user was uploading.
+     */
+    protected function resolveAssetForReplaceUpload(UploadSession $uploadSession): Asset
+    {
+        $assetId = (int) $uploadSession->asset_id;
+        $asset = Asset::withTrashed()
+            ->where('id', $assetId)
+            ->where('tenant_id', $uploadSession->tenant_id)
+            ->first();
+
+        if ($asset === null) {
+            throw new \RuntimeException(
+                'The asset you are replacing no longer exists. It may have been permanently deleted. Cancel this upload and start again.'
+            );
+        }
+
+        if ($asset->trashed()) {
+            throw new \RuntimeException(
+                'The asset you are replacing was deleted while the file was uploading. Cancel this upload and start again.'
+            );
+        }
+
+        return $asset;
+    }
+
+    /**
      * Complete replace with new version (Pro/Enterprise).
      *
      * Phase 6.5: MUST create new version. Never overwrite current version in place.
      * Version history must remain intact.
      *
      * @param  UploadSession  $uploadSession  Upload session with mode='replace' and asset_id set
+     * @param  Asset  $asset  Active (non-trashed) asset resolved for this replace session
      * @param  string|null  $s3Key  Optional S3 key if known
      * @param  int|null  $userId  User ID performing the replacement
      * @param  string|null  $comment  Optional comment for resubmission
@@ -1467,6 +1495,7 @@ class UploadCompletionService
      */
     protected function completeReplaceWithVersion(
         UploadSession $uploadSession,
+        Asset $asset,
         ?string $s3Key = null,
         ?int $userId = null,
         ?string $comment = null,
@@ -1477,9 +1506,6 @@ class UploadCompletionService
             'asset_id' => $uploadSession->asset_id,
             'user_id' => $userId,
         ]);
-
-        // Load the asset being replaced
-        $asset = Asset::findOrFail($uploadSession->asset_id);
 
         // Verify asset belongs to same tenant/brand as upload session
         if ($asset->tenant_id !== $uploadSession->tenant_id || $asset->brand_id !== $uploadSession->brand_id) {
@@ -1687,6 +1713,7 @@ class UploadCompletionService
      * Phase 6.5: Overwrites file at storage_root_path. No new version record.
      *
      * @param  UploadSession  $uploadSession  Upload session with mode='replace' and asset_id set
+     * @param  Asset  $asset  Active (non-trashed) asset resolved for this replace session
      * @param  string|null  $s3Key  Optional S3 key if known
      * @param  int|null  $userId  User ID performing the replacement
      * @param  string|null  $comment  Optional comment for resubmission
@@ -1697,13 +1724,12 @@ class UploadCompletionService
      */
     protected function completeReplaceInPlace(
         UploadSession $uploadSession,
+        Asset $asset,
         ?string $s3Key = null,
         ?int $userId = null,
         ?string $comment = null,
         ?string $resolvedFilename = null
     ): Asset {
-        $asset = Asset::findOrFail($uploadSession->asset_id);
-
         // Phase 6.5: Hard protection - in-place replace forbidden when versioning enabled
         if (app(PlanService::class)->planAllowsVersions($asset->tenant)) {
             throw new \LogicException('In-place replace is forbidden when versioning is enabled.');
