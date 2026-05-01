@@ -166,7 +166,8 @@ export default function EnterTransition({ suppressAutoRedirect = false }) {
                     )}
                 </div>
 
-                {!isJackpotDefault && !(compactIdentity && hasLogo) && (
+                {/* Single-brand (compact) welcome already shows the title in the block above — do not repeat company/brand name. */}
+                {!isJackpotDefault && !compactIdentity && (
                     <h1
                         className="text-5xl md:text-6xl font-semibold tracking-tight leading-tight text-white/95 mb-2 transition-opacity duration-500"
                         style={{ opacity: stage !== 'init' ? 1 : 0 }}

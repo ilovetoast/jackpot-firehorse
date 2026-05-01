@@ -245,7 +245,7 @@ class CompanyBrandSeeder extends Seeder
                         'show_in_selector' => true,
                         'primary_color' => '#000000',
                         'secondary_color' => '#ffffff',
-                        'accent_color' => '#6366f1',
+                        'accent_color' => '#7c3aed',
                     ]);
                 } else {
                     // If it doesn't match, update it to be the first brand we want
@@ -255,7 +255,7 @@ class CompanyBrandSeeder extends Seeder
                         'show_in_selector' => true,
                         'primary_color' => '#000000',
                         'secondary_color' => '#ffffff',
-                        'accent_color' => '#6366f1',
+                        'accent_color' => '#7c3aed',
                     ]);
                 }
             } else {
@@ -268,7 +268,7 @@ class CompanyBrandSeeder extends Seeder
                     'show_in_selector' => true,
                     'primary_color' => '#000000',
                     'secondary_color' => '#ffffff',
-                    'accent_color' => '#6366f1',
+                    'accent_color' => '#7c3aed',
                     'settings' => [],
                 ]);
             }
@@ -285,7 +285,7 @@ class CompanyBrandSeeder extends Seeder
                         'show_in_selector' => true,
                         'primary_color' => '#000000',
                         'secondary_color' => '#ffffff',
-                        'accent_color' => '#6366f1',
+                        'accent_color' => '#7c3aed',
                         'settings' => [],
                     ]
                 );

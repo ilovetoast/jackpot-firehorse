@@ -38,7 +38,7 @@ export default function VerifyEmail({ email }) {
                 className="fixed inset-0 pointer-events-none"
                 style={{
                     background: `
-                        radial-gradient(ellipse 80% 50% at 50% 0%, rgba(99, 102, 241, 0.08) 0%, transparent 50%),
+                        radial-gradient(ellipse 80% 50% at 50% 0%, rgba(124, 58, 237, 0.1) 0%, transparent 50%),
                         #0B0B0D
                     `,
                 }}
@@ -81,11 +81,11 @@ export default function VerifyEmail({ email }) {
                             <div
                                 className="h-20 w-20 rounded-2xl flex items-center justify-center"
                                 style={{
-                                    background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.2), rgba(99, 102, 241, 0.08))',
-                                    boxShadow: '0 0 40px rgba(99, 102, 241, 0.1)',
+                                    background: 'linear-gradient(135deg, rgba(124, 58, 237, 0.22), rgba(124, 58, 237, 0.08))',
+                                    boxShadow: '0 0 40px rgba(124, 58, 237, 0.14)',
                                 }}
                             >
-                                <EnvelopeIcon className="h-9 w-9 text-indigo-400" />
+                                <EnvelopeIcon className="h-9 w-9 text-violet-400" />
                             </div>
                         </div>
 
@@ -120,10 +120,10 @@ export default function VerifyEmail({ email }) {
                                 type="button"
                                 onClick={handleResend}
                                 disabled={resending}
-                                className="w-full py-3.5 px-6 rounded-xl font-semibold text-white transition-all duration-300 disabled:opacity-40"
+                                className="w-full py-3.5 px-6 rounded-xl font-semibold text-white transition-all duration-300 disabled:opacity-40 hover:brightness-110 active:brightness-95"
                                 style={{
-                                    background: 'linear-gradient(135deg, #6366f1, #4f46e5)',
-                                    boxShadow: '0 4px 20px rgba(99, 102, 241, 0.3)',
+                                    background: 'linear-gradient(135deg, #8b5cf6, #6d28d9)',
+                                    boxShadow: '0 4px 24px rgba(124, 58, 237, 0.35)',
                                 }}
                             >
                                 {resending ? 'Sending…' : 'Resend verification email'}

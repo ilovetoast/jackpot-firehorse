@@ -1,6 +1,6 @@
 {{-- MODE: tenant (paid plan) | Download Share — branded --}}
 @php
-    $accentColor = $branding['branding_options']['accent_color'] ?? '#4f46e5';
+    $accentColor = $branding['branding_options']['accent_color'] ?? config('mail.branding.primary', '#7c3aed');
     $logoUrl     = $branding['branding_options']['logo_url'] ?? null;
 @endphp
 <x-email.layout

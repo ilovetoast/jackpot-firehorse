@@ -7,6 +7,7 @@ use App\Models\Collection;
 use App\Models\Tenant;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Hash;
 use Tests\TestCase;
 
 /**
@@ -79,9 +80,13 @@ class CollectionSignalsC11Test extends TestCase
             'slug' => 'empty-public',
             'visibility' => 'brand',
             'is_public' => true,
+            'public_share_token' => 'emptypublictok01',
+            'public_password_hash' => Hash::make('secret'),
+            'public_password_set_at' => now(),
         ]);
 
-        $response = $this->get('/b/' . $brand->slug . '/collections/empty-public');
+        $response = $this->withSession([$collection->sessionUnlockKey() => true])
+            ->get('/b/' . $brand->slug . '/collections/empty-public');
 
         $response->assertStatus(200);
         $response->assertInertia(fn ($page) => $page

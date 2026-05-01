@@ -12,6 +12,7 @@ use App\Models\BrandPipelineRun;
 use App\Models\Tenant;
 use App\Models\User;
 use App\Services\BrandDNA\BrandVersionService;
+use Illuminate\Database\UniqueConstraintViolationException;
 
 class OnboardingService
 {
@@ -119,17 +120,27 @@ class OnboardingService
 
     public function getOrCreateProgress(Brand $brand): BrandOnboardingProgress
     {
-        $progress = $brand->onboardingProgress;
+        $progress = $brand->onboardingProgress
+            ?? BrandOnboardingProgress::query()->where('brand_id', $brand->id)->first();
 
         if ($progress) {
+            $brand->setRelation('onboardingProgress', $progress);
+
             return $progress;
         }
 
-        $progress = BrandOnboardingProgress::create([
-            'brand_id' => $brand->id,
-            'tenant_id' => $brand->tenant_id,
-            'current_step' => self::STEP_WELCOME,
-        ]);
+        try {
+            $progress = BrandOnboardingProgress::create([
+                'brand_id' => $brand->id,
+                'tenant_id' => $brand->tenant_id,
+                'current_step' => self::STEP_WELCOME,
+            ]);
+        } catch (UniqueConstraintViolationException) {
+            // Parallel requests (e.g. double hit after signup) can both pass the existence check.
+            $progress = BrandOnboardingProgress::query()
+                ->where('brand_id', $brand->id)
+                ->firstOrFail();
+        }
 
         $this->syncProgressFromBrand($progress, $brand);
 

@@ -3,6 +3,14 @@ import { useEffect, useMemo, useState } from 'react'
 import { firstError } from '../../utils/inertiaErrors'
 import { refreshCsrfTokenFromServer } from '../../utils/csrf'
 
+function isDuplicateRegistrationEmail(message) {
+    if (!message || typeof message !== 'string') {
+        return false
+    }
+    const m = message.toLowerCase()
+    return m.includes('already been taken') || m.includes('already registered')
+}
+
 export default function RegisterForm({ context, onToggleLogin }) {
     const { theme, errors: sharedErrors = {}, old = {} } = usePage().props
 
@@ -51,6 +59,8 @@ export default function RegisterForm({ context, onToggleLogin }) {
     const inputClass = 'w-full px-4 py-3.5 bg-white/[0.04] border rounded-lg text-white placeholder-white/35 focus:outline-none transition-all duration-500'
 
     const isJackpotDefault = theme?.mode === 'default'
+
+    const emailError = firstError(errors.email)
 
     return (
         <div className="w-full max-w-sm animate-fade-in" style={{ animationDuration: '500ms' }}>
@@ -137,8 +147,31 @@ export default function RegisterForm({ context, onToggleLogin }) {
                         className={inputClass}
                         style={{ borderColor: inputBorder('email') }}
                     />
-                    {firstError(errors.email) && (
-                        <p className="mt-1 text-xs text-red-400/90">{firstError(errors.email)}</p>
+                    {emailError && (
+                        <div className="mt-1 text-xs" role="alert">
+                            <p className="text-red-400/90">{emailError}</p>
+                            {isDuplicateRegistrationEmail(emailError) && (
+                                <p className="mt-2 text-white/45 leading-relaxed">
+                                    If this is your account,{' '}
+                                    <a
+                                        href="/forgot-password"
+                                        className="text-white/70 hover:text-white underline underline-offset-2 decoration-white/25 hover:decoration-white/50 transition-colors"
+                                    >
+                                        request a password reset link
+                                    </a>
+                                    {' '}
+                                    or{' '}
+                                    <button
+                                        type="button"
+                                        onClick={onToggleLogin}
+                                        className="text-white/70 hover:text-white underline underline-offset-2 decoration-white/25 hover:decoration-white/50 transition-colors"
+                                    >
+                                        sign in
+                                    </button>
+                                    .
+                                </p>
+                            )}
+                        </div>
                     )}
                 </div>
 

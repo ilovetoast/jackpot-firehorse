@@ -14,10 +14,11 @@
     $year    = date('Y');
     $isTenant = $mode === 'tenant';
 
-    $jackpotIndigo = '#4f46e5';
+    $jackpotPrimary = config('mail.branding.primary', '#7c3aed');
+    $jackpotAccentRule = config('mail.branding.accent_rule_gradient', 'linear-gradient(90deg,#5b21b6 0%,#7c3aed 50%,#06b6d4 100%)');
 
     // Tenant accent: validate hex + contrast safety (must be dark enough for white text)
-    $accent = $jackpotIndigo;
+    $accent = $jackpotPrimary;
     if ($isTenant && $tenantAccentColor) {
         $hex = ltrim($tenantAccentColor, '#');
         if (preg_match('/^[0-9a-fA-F]{6}$/', $hex)) {
@@ -78,7 +79,7 @@
             <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #e5e7eb;">
               {{-- Accent rule --}}
               <tr>
-                <td style="height:3px;background:{{ $isTenant ? $accent : 'linear-gradient(90deg,'.$jackpotIndigo.' 0%,#7c3aed 50%,#06b6d4 100%)' }};font-size:0;line-height:0;">&nbsp;</td>
+                <td style="height:3px;background:{{ $isTenant ? $accent : $jackpotAccentRule }};font-size:0;line-height:0;">&nbsp;</td>
               </tr>
               {{-- Content --}}
               <tr>

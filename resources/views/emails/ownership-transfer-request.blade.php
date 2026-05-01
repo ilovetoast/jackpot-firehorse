@@ -1,7 +1,7 @@
 {{-- MODE: system | Ownership Transfer Request (to new owner) --}}
 <x-email.layout title="Ownership transfer request" preheader="{{ $currentOwner->name }} wants to transfer {{ $tenant->name }} to you">
 
-    <x-email.eyebrow color="#7c3aed">Ownership Transfer</x-email.eyebrow>
+    <x-email.eyebrow>Ownership Transfer</x-email.eyebrow>
     <x-email.heading>Ownership transfer request</x-email.heading>
 
     <x-email.text>Hi {{ $newOwner->name }},</x-email.text>

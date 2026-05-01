@@ -15,6 +15,7 @@ use App\Models\Tenant;
 use App\Models\UploadSession;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Hash;
 use Tests\TestCase;
 
 /**
@@ -80,9 +81,13 @@ class PublicCollectionTest extends TestCase
             'slug' => 'press-kit',
             'visibility' => 'brand',
             'is_public' => true,
+            'public_share_token' => 'presskittoken01',
+            'public_password_hash' => Hash::make('secret'),
+            'public_password_set_at' => now(),
         ]);
 
-        $response = $this->get('/b/' . $this->brand->slug . '/collections/press-kit');
+        $response = $this->withSession([$collection->sessionUnlockKey() => true])
+            ->get('/b/' . $this->brand->slug . '/collections/press-kit');
 
         $response->assertStatus(200);
         $response->assertInertia(fn ($page) => $page
@@ -121,12 +126,16 @@ class PublicCollectionTest extends TestCase
             'slug' => 'public-collection',
             'visibility' => 'brand',
             'is_public' => true,
+            'public_share_token' => 'publiccolltoken01',
+            'public_password_hash' => Hash::make('secret'),
+            'public_password_set_at' => now(),
         ]);
 
         $asset = $this->createAsset(['title' => 'Test Asset', 'published_at' => now()]);
         $collection->assets()->attach($asset->id);
 
-        $response = $this->get('/b/' . $this->brand->slug . '/collections/public-collection');
+        $response = $this->withSession([$collection->sessionUnlockKey() => true])
+            ->get('/b/' . $this->brand->slug . '/collections/public-collection');
 
         $response->assertStatus(200);
         $response->assertInertia(fn ($page) => $page
@@ -150,6 +159,9 @@ class PublicCollectionTest extends TestCase
             'slug' => 'public-collection',
             'visibility' => 'brand',
             'is_public' => true,
+            'public_share_token' => 'publiccolltoken02',
+            'public_password_hash' => Hash::make('secret'),
+            'public_password_set_at' => now(),
         ]);
 
         $assetSameBrand = $this->createAsset(['title' => 'Same Brand', 'original_filename' => 'same.jpg', 'storage_root_path' => 'same/path.jpg', 'published_at' => now()]);
@@ -186,7 +198,8 @@ class PublicCollectionTest extends TestCase
             'updated_at' => now(),
         ]);
 
-        $response = $this->get('/b/' . $this->brand->slug . '/collections/public-collection');
+        $response = $this->withSession([$collection->sessionUnlockKey() => true])
+            ->get('/b/' . $this->brand->slug . '/collections/public-collection');
 
         $response->assertStatus(200);
         // Only same-brand asset must appear (queryPublic filters by collection brand)
@@ -221,5 +234,149 @@ class PublicCollectionTest extends TestCase
             ->get('/b/' . $this->brand->slug . '/collections/restricted-collection');
 
         $response->assertStatus(404);
+    }
+
+    public function test_password_gate_does_not_render_public_collection_grid(): void
+    {
+        $this->tenant->update(['manual_plan_override' => 'enterprise']);
+
+        $collection = Collection::create([
+            'tenant_id' => $this->tenant->id,
+            'brand_id' => $this->brand->id,
+            'name' => 'Gated',
+            'slug' => 'gated',
+            'visibility' => 'brand',
+            'is_public' => true,
+            'public_share_token' => 'gatedcolltoken001',
+            'public_password_hash' => Hash::make('secret'),
+            'public_password_set_at' => now(),
+        ]);
+
+        $asset = $this->createAsset(['title' => 'Secret Asset', 'published_at' => now()]);
+        $collection->assets()->attach($asset->id);
+
+        $this->get('/b/'.$this->brand->slug.'/collections/gated')
+            ->assertOk()
+            ->assertInertia(fn ($page) => $page
+                ->component('Public/ShareCollectionGate'));
+    }
+
+    public function test_unlocked_search_only_returns_matching_collection_assets(): void
+    {
+        $this->tenant->update(['manual_plan_override' => 'enterprise']);
+
+        $collection = Collection::create([
+            'tenant_id' => $this->tenant->id,
+            'brand_id' => $this->brand->id,
+            'name' => 'Searchable',
+            'slug' => 'searchable',
+            'visibility' => 'brand',
+            'is_public' => true,
+            'public_share_token' => 'searchcolltoken01',
+            'public_password_hash' => Hash::make('secret'),
+            'public_password_set_at' => now(),
+        ]);
+
+        $a1 = $this->createAsset(['title' => 'Alpha Wolf', 'published_at' => now()]);
+        $a2 = $this->createAsset(['title' => 'Beta Fish', 'published_at' => now()]);
+        $collection->assets()->attach([$a1->id, $a2->id]);
+
+        $this->withSession([$collection->sessionUnlockKey() => true])
+            ->get('/b/'.$this->brand->slug.'/collections/searchable?q='.rawurlencode('Alpha'))
+            ->assertOk()
+            ->assertInertia(fn ($page) => $page
+                ->component('Public/Collection')
+                ->has('assets', 1)
+                ->where('assets.0.id', $a1->id)
+                ->where('guest_filtered_total', 1)
+                ->where('guest_query.q', 'Alpha'));
+    }
+
+    public function test_unlocked_type_filter_images_only(): void
+    {
+        $this->tenant->update(['manual_plan_override' => 'enterprise']);
+
+        $collection = Collection::create([
+            'tenant_id' => $this->tenant->id,
+            'brand_id' => $this->brand->id,
+            'name' => 'Types',
+            'slug' => 'types',
+            'visibility' => 'brand',
+            'is_public' => true,
+            'public_share_token' => 'typescolltoken001',
+            'public_password_hash' => Hash::make('secret'),
+            'public_password_set_at' => now(),
+        ]);
+
+        $img = $this->createAsset(['title' => 'Photo', 'mime_type' => 'image/png', 'published_at' => now()]);
+        $vid = $this->createAsset(['title' => 'Clip', 'mime_type' => 'video/mp4', 'published_at' => now()]);
+        $collection->assets()->attach([$img->id, $vid->id]);
+
+        $this->withSession([$collection->sessionUnlockKey() => true])
+            ->get('/b/'.$this->brand->slug.'/collections/types?type=images')
+            ->assertOk()
+            ->assertInertia(fn ($page) => $page
+                ->component('Public/Collection')
+                ->has('assets', 1)
+                ->where('assets.0.id', $img->id)
+                ->where('guest_query.type', 'images'));
+    }
+
+    public function test_unlocked_sort_name_orders_alphabetically(): void
+    {
+        $this->tenant->update(['manual_plan_override' => 'enterprise']);
+
+        $collection = Collection::create([
+            'tenant_id' => $this->tenant->id,
+            'brand_id' => $this->brand->id,
+            'name' => 'Sort',
+            'slug' => 'sort',
+            'visibility' => 'brand',
+            'is_public' => true,
+            'public_share_token' => 'sortcolltoken0001',
+            'public_password_hash' => Hash::make('secret'),
+            'public_password_set_at' => now(),
+        ]);
+
+        $z = $this->createAsset(['title' => 'Zebra', 'published_at' => now()]);
+        $a = $this->createAsset(['title' => 'Apple', 'published_at' => now()]);
+        $collection->assets()->attach([$z->id, $a->id]);
+
+        $this->withSession([$collection->sessionUnlockKey() => true])
+            ->get('/b/'.$this->brand->slug.'/collections/sort?sort=name')
+            ->assertOk()
+            ->assertInertia(fn ($page) => $page
+                ->component('Public/Collection')
+                ->where('assets.0.id', $a->id)
+                ->where('assets.1.id', $z->id));
+    }
+
+    public function test_public_downloads_disabled_omits_download_urls(): void
+    {
+        $this->tenant->update(['manual_plan_override' => 'enterprise']);
+
+        $collection = Collection::create([
+            'tenant_id' => $this->tenant->id,
+            'brand_id' => $this->brand->id,
+            'name' => 'No DL',
+            'slug' => 'no-dl',
+            'visibility' => 'brand',
+            'is_public' => true,
+            'public_share_token' => 'nodlcolltoken0001',
+            'public_password_hash' => Hash::make('secret'),
+            'public_password_set_at' => now(),
+            'public_downloads_enabled' => false,
+        ]);
+
+        $asset = $this->createAsset(['title' => 'File', 'published_at' => now()]);
+        $collection->assets()->attach($asset->id);
+
+        $this->withSession([$collection->sessionUnlockKey() => true])
+            ->get('/b/'.$this->brand->slug.'/collections/no-dl')
+            ->assertOk()
+            ->assertInertia(fn ($page) => $page
+                ->component('Public/Collection')
+                ->where('public_collection_downloads_enabled', false)
+                ->where('assets.0.download_url', null));
     }
 }

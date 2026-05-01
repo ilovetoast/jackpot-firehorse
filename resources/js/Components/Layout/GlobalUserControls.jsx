@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Link, useForm, usePage } from '@inertiajs/react'
-import { Cog6ToothIcon } from '@heroicons/react/24/outline'
+import { Cog6ToothIcon, CreditCardIcon, UserCircleIcon } from '@heroicons/react/24/outline'
 import PermissionGate from '../PermissionGate'
 import Avatar from '../Avatar'
 import NotificationBell from '../NotificationBell'
@@ -16,7 +16,6 @@ export default function GlobalUserControls({
     effectiveCollection = null,
     collectionOnly = false,
     workspaceBrandColor = '#6366f1',
-    companySettingsLabel = 'Company admin',
     brandSettingsLabel = 'Brand settings',
 }) {
     const page = usePage()
@@ -78,6 +77,12 @@ export default function GlobalUserControls({
         (hasBrands && (hasAdminOrOwnerRole || hasMultipleBrands || hasBrandSettingsAccess)) ||
         (activeBrand && hasBrandSettingsAccess)
 
+    const hasBillingAccess = can('billing.view')
+    const showWorkspaceCard =
+        hasAnyCompanyAccess ||
+        (activeBrand && hasAnyBrandAccess && !collectionOnly) ||
+        hasBillingAccess
+
     return (
         <div className="flex items-center gap-2 lg:gap-4">
             <div className="hidden sm:block">
@@ -132,36 +137,56 @@ export default function GlobalUserControls({
                         <div className="absolute right-0 z-[61] mt-2 w-[min(20rem,calc(100vw-1.5rem))] origin-top-right rounded-md bg-white py-1 shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none">
                             <div className="px-4 py-2 border-b border-gray-200">
                                 <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Account</p>
-                                <Link
-                                    href="/app/profile"
-                                    className="group flex items-center gap-3 rounded-lg px-2 py-2 text-left transition-colors hover:bg-gray-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2"
-                                    onClick={() => setUserMenuOpen(false)}
-                                    aria-label="Profile and account settings"
-                                    title="Profile and account settings"
-                                >
-                                    <Avatar
-                                        avatarUrl={auth.user?.avatar_url}
-                                        firstName={auth.user?.first_name}
-                                        lastName={auth.user?.last_name}
-                                        email={auth.user?.email}
-                                        size="sm"
-                                    />
-                                    <div className="flex-1 min-w-0">
-                                        <p className="text-xs font-medium text-gray-900 truncate">
-                                            {auth.user?.first_name && auth.user?.last_name
-                                                ? `${auth.user.first_name} ${auth.user.last_name}`
-                                                : auth.user?.first_name || auth.user?.email}
-                                        </p>
-                                        <p className="text-xs text-gray-500 truncate">{auth.user?.email}</p>
+                                {showWorkspaceCard ? (
+                                    <div className="flex items-center gap-3 rounded-lg px-2 py-2 text-left">
+                                        <Avatar
+                                            avatarUrl={auth.user?.avatar_url}
+                                            firstName={auth.user?.first_name}
+                                            lastName={auth.user?.last_name}
+                                            email={auth.user?.email}
+                                            size="sm"
+                                        />
+                                        <div className="flex-1 min-w-0">
+                                            <p className="text-xs font-medium text-gray-900 truncate">
+                                                {auth.user?.first_name && auth.user?.last_name
+                                                    ? `${auth.user.first_name} ${auth.user.last_name}`
+                                                    : auth.user?.first_name || auth.user?.email}
+                                            </p>
+                                            <p className="text-xs text-gray-500 truncate">{auth.user?.email}</p>
+                                        </div>
                                     </div>
-                                    <Cog6ToothIcon
-                                        className="h-4 w-4 shrink-0 text-gray-400 transition-colors group-hover:text-gray-600"
-                                        aria-hidden
-                                    />
-                                </Link>
+                                ) : (
+                                    <Link
+                                        href="/app/profile"
+                                        className="group flex items-center gap-3 rounded-lg px-2 py-2 text-left transition-colors hover:bg-gray-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2"
+                                        onClick={() => setUserMenuOpen(false)}
+                                        aria-label="Account settings"
+                                        title="Account settings"
+                                    >
+                                        <Avatar
+                                            avatarUrl={auth.user?.avatar_url}
+                                            firstName={auth.user?.first_name}
+                                            lastName={auth.user?.last_name}
+                                            email={auth.user?.email}
+                                            size="sm"
+                                        />
+                                        <div className="flex-1 min-w-0">
+                                            <p className="text-xs font-medium text-gray-900 truncate">
+                                                {auth.user?.first_name && auth.user?.last_name
+                                                    ? `${auth.user.first_name} ${auth.user.last_name}`
+                                                    : auth.user?.first_name || auth.user?.email}
+                                            </p>
+                                            <p className="text-xs text-gray-500 truncate">{auth.user?.email}</p>
+                                        </div>
+                                        <Cog6ToothIcon
+                                            className="h-4 w-4 shrink-0 text-gray-400 transition-colors group-hover:text-gray-600"
+                                            aria-hidden
+                                        />
+                                    </Link>
+                                )}
                             </div>
 
-                            {(hasAnyCompanyAccess || (activeBrand && hasAnyBrandAccess && !collectionOnly)) && (
+                            {showWorkspaceCard && (
                                 <div className="px-4 py-2 border-b border-gray-200">
                                     <div
                                         className="overflow-hidden rounded-xl border border-gray-200/95 bg-white shadow-sm"
@@ -272,29 +297,15 @@ export default function GlobalUserControls({
                                                 This workspace
                                             </p>
                                             <div className="px-1 pb-2">
-                                                <PermissionGate permission="company_settings.view">
-                                                    <Link
-                                                        href="/app"
-                                                        className="flex min-w-0 items-center rounded-md px-2 py-1.5 text-sm text-gray-800 hover:bg-white/80"
-                                                        onClick={() => setUserMenuOpen(false)}
-                                                        title={companySettingsLabel}
-                                                    >
-                                                        <svg
-                                                            className="mr-2 h-4 w-4 flex-shrink-0 text-gray-400"
-                                                            fill="none"
-                                                            viewBox="0 0 24 24"
-                                                            strokeWidth="1.5"
-                                                            stroke="currentColor"
-                                                        >
-                                                            <path
-                                                                strokeLinecap="round"
-                                                                strokeLinejoin="round"
-                                                                d="M2.25 21h19.5m-18-18v18m10.5-18v18m6-13.5V21M6.75 6.75h.75m-.75 3h.75m-.75 3h.75m3-6h.75m-.75 3h.75m-.75 3h.75M6.75 21v-3.375c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21M3 3h12m-.75 4.5H21m-3.75 3.75h.008v.008h-.008v-.008zm0 3h.008v.008h-.008v-.008zm0 3h.008v.008h-.008v-.008z"
-                                                            />
-                                                        </svg>
-                                                        <span className="min-w-0 flex-1 truncate font-medium">{companySettingsLabel}</span>
-                                                    </Link>
-                                                </PermissionGate>
+                                                <Link
+                                                    href="/app/profile"
+                                                    className="flex min-w-0 items-center rounded-md px-2 py-1.5 text-sm text-gray-800 hover:bg-white/80"
+                                                    onClick={() => setUserMenuOpen(false)}
+                                                    title="Account settings"
+                                                >
+                                                    <UserCircleIcon className="mr-2 h-4 w-4 flex-shrink-0 text-gray-400" aria-hidden />
+                                                    <span className="min-w-0 flex-1 truncate font-medium">Account settings</span>
+                                                </Link>
                                                 {activeBrand && hasAnyBrandAccess && !collectionOnly && (
                                                     <PermissionGate permission="brand_settings.manage">
                                                         <Link
@@ -331,6 +342,17 @@ export default function GlobalUserControls({
                                                         </Link>
                                                     </PermissionGate>
                                                 )}
+                                                <PermissionGate permission="billing.view">
+                                                    <Link
+                                                        href={typeof route === 'function' ? route('billing') : '/app/billing'}
+                                                        className="flex min-w-0 items-center rounded-md px-2 py-1.5 text-sm text-gray-800 hover:bg-white/80"
+                                                        onClick={() => setUserMenuOpen(false)}
+                                                        title="Billing"
+                                                    >
+                                                        <CreditCardIcon className="mr-2 h-4 w-4 flex-shrink-0 text-gray-400" aria-hidden />
+                                                        <span className="min-w-0 flex-1 truncate font-medium">Billing</span>
+                                                    </Link>
+                                                </PermissionGate>
                                             </div>
                                         </div>
                                     </div>

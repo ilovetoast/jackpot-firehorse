@@ -24,8 +24,8 @@ class NotificationTemplateSeeder extends Seeder
 <p style="margin:0 0 16px;">Hi there,</p>
 <p style="margin:0 0 20px;"><strong>{{inviter_name}}</strong> has invited you to join <strong>{{tenant_name}}</strong> on {{app_name}}.</p>
 <p style="margin:0 0 12px;">Click the button below to accept the invitation and create your account:</p>
-<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:20px 0;"><tr><td align="left" style="border-radius:9999px;background:linear-gradient(180deg,#4f46e5 0%,#4338ca 100%);box-shadow:0 1px 2px rgba(0,0,0,0.08);"><a href="{{invite_url}}" style="display:inline-block;padding:12px 22px;font-size:14px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:9999px;">Accept invitation</a></td></tr></table>
-<p style="margin:20px 0 0;font-size:13px;color:#64748b;">Or copy and paste this link into your browser:<br><a href="{{invite_url}}" style="color:#4f46e5;word-break:break-all;">{{invite_url}}</a></p>
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:20px 0;"><tr><td align="left" style="border-radius:9999px;background:linear-gradient(180deg,#7c3aed 0%,#5b21b6 100%);box-shadow:0 1px 2px rgba(0,0,0,0.08);"><a href="{{invite_url}}" style="display:inline-block;padding:12px 22px;font-size:14px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:9999px;">Accept invitation</a></td></tr></table>
+<p style="margin:20px 0 0;font-size:13px;color:#64748b;">Or copy and paste this link into your browser:<br><a href="{{invite_url}}" style="color:#7c3aed;word-break:break-all;">{{invite_url}}</a></p>
 <p style="margin:24px 0 0;font-size:13px;color:#94a3b8;">If you didn't expect this invitation, you can safely ignore this email.</p>
 HTML),
                 'body_text' => "You've been invited!\n\nHi there,\n\n{{inviter_name}} has invited you to join {{tenant_name}} on {{app_name}}.\n\nAccept your invitation by visiting: {{invite_url}}\n\nIf you didn't expect this invitation, you can safely ignore this email.",
@@ -42,8 +42,8 @@ HTML),
 <p style="margin:0 0 16px;">Hi there,</p>
 <p style="margin:0 0 20px;"><strong>{{inviter_name}}</strong> has invited you to view the collection <strong>{{collection_name}}</strong> for <strong>{{brand_name}}</strong> on {{app_name}}.</p>
 <p style="margin:0 0 12px;">Click the button below to accept and sign in (or create your account):</p>
-<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:20px 0;"><tr><td align="left" style="border-radius:9999px;background:linear-gradient(180deg,#4f46e5 0%,#4338ca 100%);box-shadow:0 1px 2px rgba(0,0,0,0.08);"><a href="{{invite_url}}" style="display:inline-block;padding:12px 22px;font-size:14px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:9999px;">View collection invitation</a></td></tr></table>
-<p style="margin:20px 0 0;font-size:13px;color:#64748b;">Or copy and paste this link into your browser:<br><a href="{{invite_url}}" style="color:#4f46e5;word-break:break-all;">{{invite_url}}</a></p>
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:20px 0;"><tr><td align="left" style="border-radius:9999px;background:linear-gradient(180deg,#7c3aed 0%,#5b21b6 100%);box-shadow:0 1px 2px rgba(0,0,0,0.08);"><a href="{{invite_url}}" style="display:inline-block;padding:12px 22px;font-size:14px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:9999px;">View collection invitation</a></td></tr></table>
+<p style="margin:20px 0 0;font-size:13px;color:#64748b;">Or copy and paste this link into your browser:<br><a href="{{invite_url}}" style="color:#7c3aed;word-break:break-all;">{{invite_url}}</a></p>
 <p style="margin:24px 0 0;font-size:13px;color:#94a3b8;">If you didn't expect this invitation, you can safely ignore this email.</p>
 HTML, null, 'Collection access · {{brand_name}}'),
                 'body_text' => "You're invited to a collection\n\nHi there,\n\n{{inviter_name}} has invited you to view the collection \"{{collection_name}}\" for {{brand_name}} on {{app_name}}.\n\nOpen the invitation: {{invite_url}}\n\nIf you didn't expect this invitation, you can safely ignore this email.",
@@ -86,7 +86,7 @@ HTML, null, 'Collection access · {{brand_name}}'),
         <div style="background-color: #f9fafb; padding: 24px; text-align: center; border-top: 1px solid #e5e7eb; font-size: 12px; color: #6b7280;">
             <p>© ' . date('Y') . ' {{app_name}}. All rights reserved.</p>
             <p style="margin-top: 8px;">
-                <a href="{{app_url}}" style="color: #6366f1; text-decoration: none;">Visit our website</a>
+                <a href="{{app_url}}" style="color: #7c3aed; text-decoration: none;">Visit our website</a>
             </p>
         </div>
     </div>
@@ -133,7 +133,7 @@ HTML, null, 'Collection access · {{brand_name}}'),
         <div style="background-color: #f9fafb; padding: 24px; text-align: center; border-top: 1px solid #e5e7eb; font-size: 12px; color: #6b7280;">
             <p>© ' . date('Y') . ' {{app_name}}. All rights reserved.</p>
             <p style="margin-top: 8px;">
-                <a href="{{app_url}}" style="color: #6366f1; text-decoration: none;">Visit our website</a>
+                <a href="{{app_url}}" style="color: #7c3aed; text-decoration: none;">Visit our website</a>
             </p>
         </div>
     </div>
@@ -169,7 +169,7 @@ HTML, null, 'Collection access · {{brand_name}}'),
             </p>
             
             <div style="text-align: center; margin: 24px 0;">
-                <a href="{{support_url}}" style="display: inline-block; padding: 12px 24px; background-color: #6366f1; color: #ffffff; text-decoration: none; border-radius: 6px; font-weight: 500;">Submit Support Ticket</a>
+                <a href="{{support_url}}" style="display: inline-block; padding: 12px 24px; background-color: #7c3aed; color: #ffffff; text-decoration: none; border-radius: 6px; font-weight: 500;">Submit Support Ticket</a>
             </div>
             
             <p style="margin-top: 24px; font-size: 14px; color: #6b7280;">
@@ -179,7 +179,7 @@ HTML, null, 'Collection access · {{brand_name}}'),
         <div style="background-color: #f9fafb; padding: 24px; text-align: center; border-top: 1px solid #e5e7eb; font-size: 12px; color: #6b7280;">
             <p>© ' . date('Y') . ' {{app_name}}. All rights reserved.</p>
             <p style="margin-top: 8px;">
-                <a href="{{app_url}}" style="color: #6366f1; text-decoration: none;">Visit our website</a>
+                <a href="{{app_url}}" style="color: #7c3aed; text-decoration: none;">Visit our website</a>
             </p>
         </div>
     </div>
@@ -194,7 +194,7 @@ HTML, null, 'Collection access · {{brand_name}}'),
                 'subject' => 'Ownership Transfer Request - {{tenant_name}}',
                 'body_html' => '<div style="font-family: -apple-system, BlinkMacSystemFont, \'Segoe UI\', Roboto, \'Helvetica Neue\', Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 0;">
     <div style="background-color: #ffffff; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden;">
-        <div style="background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%); color: #ffffff; padding: 24px; text-align: center;">
+        <div style="background: linear-gradient(135deg, #7c3aed 0%, #8b5cf6 100%); color: #ffffff; padding: 24px; text-align: center;">
             <h1 style="margin: 0; font-size: 24px; font-weight: 600;">{{app_name}}</h1>
         </div>
         <div style="padding: 32px 24px;">
@@ -207,7 +207,7 @@ HTML, null, 'Collection access · {{brand_name}}'),
                 ownership of <strong>{{tenant_name}}</strong> to you.
             </p>
             
-            <p style="margin-top: 24px; padding: 16px; background-color: #f0f9ff; border-left: 4px solid #6366f1; border-radius: 4px;">
+            <p style="margin-top: 24px; padding: 16px; background-color: #f5f3ff; border-left: 4px solid #7c3aed; border-radius: 4px;">
                 <strong>What happens next:</strong><br>
                 1. The current owner must confirm this transfer via email<br>
                 2. Once confirmed, you will receive an acceptance email<br>
@@ -222,7 +222,7 @@ HTML, null, 'Collection access · {{brand_name}}'),
         <div style="background-color: #f9fafb; padding: 24px; text-align: center; border-top: 1px solid #e5e7eb; font-size: 12px; color: #6b7280;">
             <p>© ' . date('Y') . ' {{app_name}}. All rights reserved.</p>
             <p style="margin-top: 8px;">
-                <a href="{{app_url}}" style="color: #6366f1; text-decoration: none;">Visit our website</a>
+                <a href="{{app_url}}" style="color: #7c3aed; text-decoration: none;">Visit our website</a>
             </p>
         </div>
     </div>
@@ -266,7 +266,7 @@ HTML, null, 'Collection access · {{brand_name}}'),
             
             <p style="margin-top: 24px; font-size: 14px; color: #6b7280;">
                 Or copy and paste this link into your browser:<br>
-                <a href="{{confirmation_url}}" style="color: #6366f1; word-break: break-all;">{{confirmation_url}}</a>
+                <a href="{{confirmation_url}}" style="color: #7c3aed; word-break: break-all;">{{confirmation_url}}</a>
             </p>
             
             <p style="margin-top: 24px; padding: 16px; background-color: #fef2f2; border-left: 4px solid #dc2626; border-radius: 4px; font-size: 14px;">
@@ -277,7 +277,7 @@ HTML, null, 'Collection access · {{brand_name}}'),
         <div style="background-color: #f9fafb; padding: 24px; text-align: center; border-top: 1px solid #e5e7eb; font-size: 12px; color: #6b7280;">
             <p>© ' . date('Y') . ' {{app_name}}. All rights reserved.</p>
             <p style="margin-top: 8px;">
-                <a href="{{app_url}}" style="color: #6366f1; text-decoration: none;">Visit our website</a>
+                <a href="{{app_url}}" style="color: #7c3aed; text-decoration: none;">Visit our website</a>
             </p>
         </div>
     </div>
@@ -322,7 +322,7 @@ HTML, null, 'Collection access · {{brand_name}}'),
             
             <p style="margin-top: 24px; font-size: 14px; color: #6b7280;">
                 Or copy and paste this link into your browser:<br>
-                <a href="{{acceptance_url}}" style="color: #6366f1; word-break: break-all;">{{acceptance_url}}</a>
+                <a href="{{acceptance_url}}" style="color: #7c3aed; word-break: break-all;">{{acceptance_url}}</a>
             </p>
             
             <p style="margin-top: 24px; padding: 16px; background-color: #fef2f2; border-left: 4px solid #dc2626; border-radius: 4px; font-size: 14px;">
@@ -333,7 +333,7 @@ HTML, null, 'Collection access · {{brand_name}}'),
         <div style="background-color: #f9fafb; padding: 24px; text-align: center; border-top: 1px solid #e5e7eb; font-size: 12px; color: #6b7280;">
             <p>© ' . date('Y') . ' {{app_name}}. All rights reserved.</p>
             <p style="margin-top: 8px;">
-                <a href="{{app_url}}" style="color: #6366f1; text-decoration: none;">Visit our website</a>
+                <a href="{{app_url}}" style="color: #7c3aed; text-decoration: none;">Visit our website</a>
             </p>
         </div>
     </div>
@@ -379,7 +379,7 @@ HTML, null, 'Collection access · {{brand_name}}'),
         <div style="background-color: #f9fafb; padding: 24px; text-align: center; border-top: 1px solid #e5e7eb; font-size: 12px; color: #6b7280;">
             <p>© ' . date('Y') . ' {{app_name}}. All rights reserved.</p>
             <p style="margin-top: 8px;">
-                <a href="{{app_url}}" style="color: #6366f1; text-decoration: none;">Visit our website</a>
+                <a href="{{app_url}}" style="color: #7c3aed; text-decoration: none;">Visit our website</a>
             </p>
         </div>
     </div>
@@ -398,8 +398,8 @@ HTML, null, 'Collection access · {{brand_name}}'),
 <p style="margin:0 0 16px;">Hi {{user_name}},</p>
 <p style="margin:0 0 20px;">We received a request to reset your password for your account. If you didn't make this request, you can safely ignore this email.</p>
 <p style="margin:0 0 12px;">Click the button below to reset your password:</p>
-<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:20px 0;"><tr><td align="left" style="border-radius:9999px;background:linear-gradient(180deg,#4f46e5 0%,#4338ca 100%);box-shadow:0 1px 2px rgba(0,0,0,0.08);"><a href="{{reset_url}}" style="display:inline-block;padding:12px 22px;font-size:14px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:9999px;">Reset password</a></td></tr></table>
-<p style="margin:20px 0 0;font-size:13px;color:#64748b;">Or copy and paste this link into your browser:<br><a href="{{reset_url}}" style="color:#4f46e5;word-break:break-all;">{{reset_url}}</a></p>
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:20px 0;"><tr><td align="left" style="border-radius:9999px;background:linear-gradient(180deg,#7c3aed 0%,#5b21b6 100%);box-shadow:0 1px 2px rgba(0,0,0,0.08);"><a href="{{reset_url}}" style="display:inline-block;padding:12px 22px;font-size:14px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:9999px;">Reset password</a></td></tr></table>
+<p style="margin:20px 0 0;font-size:13px;color:#64748b;">Or copy and paste this link into your browser:<br><a href="{{reset_url}}" style="color:#7c3aed;word-break:break-all;">{{reset_url}}</a></p>
 <div style="margin-top:24px;padding:14px 16px;background-color:#fef2f2;border-left:4px solid #dc2626;border-radius:6px;font-size:13px;color:#64748b;">
 <strong style="color:#991b1b;">Security</strong> &mdash; This password reset link expires in 60 minutes. If you didn't request a reset, ignore this email; your password will stay the same.
 </div>
@@ -434,7 +434,7 @@ HTML),
             </p>
             
             <div style="text-align: center; margin: 24px 0;">
-                <a href="{{billing_url}}" style="display: inline-block; padding: 12px 24px; background-color: #6366f1; color: #ffffff; text-decoration: none; border-radius: 6px; font-weight: 500;">Upgrade Plan</a>
+                <a href="{{billing_url}}" style="display: inline-block; padding: 12px 24px; background-color: #7c3aed; color: #ffffff; text-decoration: none; border-radius: 6px; font-weight: 500;">Upgrade Plan</a>
             </div>
             
             <p style="margin-top: 24px; font-size: 14px; color: #6b7280;">
@@ -444,7 +444,7 @@ HTML),
         <div style="background-color: #f9fafb; padding: 24px; text-align: center; border-top: 1px solid #e5e7eb; font-size: 12px; color: #6b7280;">
             <p>© ' . date('Y') . ' {{app_name}}. All rights reserved.</p>
             <p style="margin-top: 8px;">
-                <a href="{{app_url}}" style="color: #6366f1; text-decoration: none;">Visit our website</a>
+                <a href="{{app_url}}" style="color: #7c3aed; text-decoration: none;">Visit our website</a>
             </p>
         </div>
     </div>
@@ -483,7 +483,7 @@ HTML),
             </p>
             
             <div style="text-align: center; margin: 24px 0;">
-                <a href="{{billing_url}}" style="display: inline-block; padding: 12px 24px; background-color: #6366f1; color: #ffffff; text-decoration: none; border-radius: 6px; font-weight: 500;">Upgrade Plan</a>
+                <a href="{{billing_url}}" style="display: inline-block; padding: 12px 24px; background-color: #7c3aed; color: #ffffff; text-decoration: none; border-radius: 6px; font-weight: 500;">Upgrade Plan</a>
             </div>
             
             <p style="margin-top: 24px; font-size: 14px; color: #6b7280;">
@@ -493,7 +493,7 @@ HTML),
         <div style="background-color: #f9fafb; padding: 24px; text-align: center; border-top: 1px solid #e5e7eb; font-size: 12px; color: #6b7280;">
             <p>© ' . date('Y') . ' {{app_name}}. All rights reserved.</p>
             <p style="margin-top: 8px;">
-                <a href="{{app_url}}" style="color: #6366f1; text-decoration: none;">Visit our website</a>
+                <a href="{{app_url}}" style="color: #7c3aed; text-decoration: none;">Visit our website</a>
             </p>
         </div>
     </div>
@@ -528,7 +528,7 @@ HTML),
             </p>
             
             <div style="text-align: center; margin: 24px 0;">
-                <a href="{{billing_url}}" style="display: inline-block; padding: 12px 24px; background-color: #6366f1; color: #ffffff; text-decoration: none; border-radius: 6px; font-weight: 500;">Upgrade Plan</a>
+                <a href="{{billing_url}}" style="display: inline-block; padding: 12px 24px; background-color: #7c3aed; color: #ffffff; text-decoration: none; border-radius: 6px; font-weight: 500;">Upgrade Plan</a>
             </div>
             
             <p style="margin-top: 24px; font-size: 14px; color: #6b7280;">
@@ -538,7 +538,7 @@ HTML),
         <div style="background-color: #f9fafb; padding: 24px; text-align: center; border-top: 1px solid #e5e7eb; font-size: 12px; color: #6b7280;">
             <p>© ' . date('Y') . ' {{app_name}}. All rights reserved.</p>
             <p style="margin-top: 8px;">
-                <a href="{{app_url}}" style="color: #6366f1; text-decoration: none;">Visit our website</a>
+                <a href="{{app_url}}" style="color: #7c3aed; text-decoration: none;">Visit our website</a>
             </p>
         </div>
     </div>
@@ -576,7 +576,7 @@ HTML),
             </p>
             
             <div style="text-align: center; margin: 24px 0;">
-                <a href="{{billing_url}}" style="display: inline-block; padding: 12px 24px; background-color: #6366f1; color: #ffffff; text-decoration: none; border-radius: 6px; font-weight: 500;">Upgrade Plan</a>
+                <a href="{{billing_url}}" style="display: inline-block; padding: 12px 24px; background-color: #7c3aed; color: #ffffff; text-decoration: none; border-radius: 6px; font-weight: 500;">Upgrade Plan</a>
             </div>
             
             <p style="margin-top: 24px; font-size: 14px; color: #6b7280;">
@@ -586,7 +586,7 @@ HTML),
         <div style="background-color: #f9fafb; padding: 24px; text-align: center; border-top: 1px solid #e5e7eb; font-size: 12px; color: #6b7280;">
             <p>© ' . date('Y') . ' {{app_name}}. All rights reserved.</p>
             <p style="margin-top: 8px;">
-                <a href="{{app_url}}" style="color: #6366f1; text-decoration: none;">Visit our website</a>
+                <a href="{{app_url}}" style="color: #7c3aed; text-decoration: none;">Visit our website</a>
             </p>
         </div>
     </div>
@@ -611,8 +611,8 @@ HTML),
   <tr><td style="padding:0 16px 14px;font-size:14px;"><strong style="color:#0f172a;">Tenant</strong><br /><span style="color:#334155;">{{tenant_name}}</span></td></tr>
   <tr><td style="padding:0 16px 16px;font-size:14px;"><strong style="color:#0f172a;">Created by</strong><br /><span style="color:#334155;">{{creator_name}}</span></td></tr>
 </table>
-<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:20px 0;"><tr><td align="left" style="border-radius:9999px;background:linear-gradient(180deg,#4f46e5 0%,#4338ca 100%);box-shadow:0 1px 2px rgba(0,0,0,0.08);"><a href="{{ticket_url}}" style="display:inline-block;padding:12px 22px;font-size:14px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:9999px;">Open in admin</a></td></tr></table>
-<p style="margin:20px 0 0;font-size:13px;color:#64748b;">Or copy this link:<br /><a href="{{ticket_url}}" style="color:#4f46e5;word-break:break-all;">{{ticket_url}}</a></p>
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:20px 0;"><tr><td align="left" style="border-radius:9999px;background:linear-gradient(180deg,#7c3aed 0%,#5b21b6 100%);box-shadow:0 1px 2px rgba(0,0,0,0.08);"><a href="{{ticket_url}}" style="display:inline-block;padding:12px 22px;font-size:14px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:9999px;">Open in admin</a></td></tr></table>
+<p style="margin:20px 0 0;font-size:13px;color:#64748b;">Or copy this link:<br /><a href="{{ticket_url}}" style="color:#7c3aed;word-break:break-all;">{{ticket_url}}</a></p>
 HTML),
                 'body_text' => "New ticket assigned to you\n\nHi {{assignee_name}},\n\nA new support ticket was created and assigned to you.\n\nTicket: {{ticket_number}}\nSubject: {{ticket_subject}}\nCategory: {{category_label}}\nTenant: {{tenant_name}}\nCreated by: {{creator_name}}\n\nOpen: {{ticket_url}}",
                 'variables' => ['assignee_name', 'ticket_number', 'ticket_subject', 'category_label', 'tenant_name', 'creator_name', 'ticket_url', 'app_name', 'app_url'],
@@ -632,8 +632,8 @@ HTML),
   <tr><td style="padding:0 16px 14px;font-size:14px;"><strong style="color:#0f172a;">Subject</strong><br /><span style="color:#334155;">{{ticket_subject}}</span></td></tr>
   <tr><td style="padding:0 16px 16px;font-size:14px;"><strong style="color:#0f172a;">Company</strong><br /><span style="color:#334155;">{{tenant_name}}</span></td></tr>
 </table>
-<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:20px 0;"><tr><td align="left" style="border-radius:9999px;background:linear-gradient(180deg,#4f46e5 0%,#4338ca 100%);box-shadow:0 1px 2px rgba(0,0,0,0.08);"><a href="{{ticket_url}}" style="display:inline-block;padding:12px 22px;font-size:14px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:9999px;">View your ticket</a></td></tr></table>
-<p style="margin:20px 0 0;font-size:13px;color:#64748b;">Or copy this link:<br /><a href="{{ticket_url}}" style="color:#4f46e5;word-break:break-all;">{{ticket_url}}</a></p>
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:20px 0;"><tr><td align="left" style="border-radius:9999px;background:linear-gradient(180deg,#7c3aed 0%,#5b21b6 100%);box-shadow:0 1px 2px rgba(0,0,0,0.08);"><a href="{{ticket_url}}" style="display:inline-block;padding:12px 22px;font-size:14px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:9999px;">View your ticket</a></td></tr></table>
+<p style="margin:20px 0 0;font-size:13px;color:#64748b;">Or copy this link:<br /><a href="{{ticket_url}}" style="color:#7c3aed;word-break:break-all;">{{ticket_url}}</a></p>
 HTML),
                 'body_text' => "Your support ticket was created\n\nHi {{recipient_name}},\n\nWe received your request — {{ticket_number}}.\nSubject: {{ticket_subject}}\nCompany: {{tenant_name}}\n\nView ticket: {{ticket_url}}",
                 'variables' => ['recipient_name', 'ticket_number', 'ticket_subject', 'category_label', 'tenant_name', 'ticket_url', 'app_name', 'app_url'],
@@ -649,8 +649,8 @@ HTML),
 <p style="margin:0 0 16px;">Hi {{recipient_name}},</p>
 <p style="margin:0 0 12px;"><strong>{{replier_name}}</strong> added a message to <strong>{{ticket_number}}</strong>:</p>
 <p style="margin:0 0 20px;padding:14px 16px;background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0;color:#334155;font-size:14px;line-height:1.5;">{{reply_excerpt}}</p>
-<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:20px 0;"><tr><td align="left" style="border-radius:9999px;background:linear-gradient(180deg,#4f46e5 0%,#4338ca 100%);box-shadow:0 1px 2px rgba(0,0,0,0.08);"><a href="{{ticket_url}}" style="display:inline-block;padding:12px 22px;font-size:14px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:9999px;">View conversation</a></td></tr></table>
-<p style="margin:20px 0 0;font-size:13px;color:#64748b;">Or copy this link:<br /><a href="{{ticket_url}}" style="color:#4f46e5;word-break:break-all;">{{ticket_url}}</a></p>
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:20px 0;"><tr><td align="left" style="border-radius:9999px;background:linear-gradient(180deg,#7c3aed 0%,#5b21b6 100%);box-shadow:0 1px 2px rgba(0,0,0,0.08);"><a href="{{ticket_url}}" style="display:inline-block;padding:12px 22px;font-size:14px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:9999px;">View conversation</a></td></tr></table>
+<p style="margin:20px 0 0;font-size:13px;color:#64748b;">Or copy this link:<br /><a href="{{ticket_url}}" style="color:#7c3aed;word-break:break-all;">{{ticket_url}}</a></p>
 HTML),
                 'body_text' => "New reply on your ticket\n\nHi {{recipient_name}},\n\n{{replier_name}} replied to {{ticket_number}}:\n\n{{reply_excerpt}}\n\nView: {{ticket_url}}",
                 'variables' => ['recipient_name', 'replier_name', 'reply_excerpt', 'ticket_number', 'ticket_subject', 'category_label', 'tenant_name', 'ticket_url', 'app_name', 'app_url'],
@@ -669,8 +669,8 @@ HTML),
   <tr><td style="padding:14px 16px;font-size:14px;"><strong style="color:#0f172a;">Subject</strong><br /><span style="color:#334155;">{{ticket_subject}}</span></td></tr>
   <tr><td style="padding:0 16px 16px;font-size:14px;"><strong style="color:#0f172a;">Company</strong><br /><span style="color:#334155;">{{tenant_name}}</span></td></tr>
 </table>
-<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:20px 0;"><tr><td align="left" style="border-radius:9999px;background:linear-gradient(180deg,#4f46e5 0%,#4338ca 100%);box-shadow:0 1px 2px rgba(0,0,0,0.08);"><a href="{{ticket_url}}" style="display:inline-block;padding:12px 22px;font-size:14px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:9999px;">View your ticket</a></td></tr></table>
-<p style="margin:20px 0 0;font-size:13px;color:#64748b;">Or copy this link:<br /><a href="{{ticket_url}}" style="color:#4f46e5;word-break:break-all;">{{ticket_url}}</a></p>
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:20px 0;"><tr><td align="left" style="border-radius:9999px;background:linear-gradient(180deg,#7c3aed 0%,#5b21b6 100%);box-shadow:0 1px 2px rgba(0,0,0,0.08);"><a href="{{ticket_url}}" style="display:inline-block;padding:12px 22px;font-size:14px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:9999px;">View your ticket</a></td></tr></table>
+<p style="margin:20px 0 0;font-size:13px;color:#64748b;">Or copy this link:<br /><a href="{{ticket_url}}" style="color:#7c3aed;word-break:break-all;">{{ticket_url}}</a></p>
 HTML),
                 'body_text' => "Ticket {{ticket_number}} — {{status_label}}\n\nHi {{recipient_name}},\n\nYour ticket was {{status_label}}.\nSubject: {{ticket_subject}}\nCompany: {{tenant_name}}\n\nView: {{ticket_url}}",
                 'variables' => ['recipient_name', 'status_label', 'ticket_number', 'ticket_subject', 'category_label', 'tenant_name', 'ticket_url', 'app_name', 'app_url'],

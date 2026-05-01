@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Str;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -43,6 +44,10 @@ class Collection extends Model
         'allowed_brand_roles',
         'allows_external_guests',
         'is_public',
+        'public_share_token',
+        'public_password_hash',
+        'public_password_set_at',
+        'public_downloads_enabled',
         'created_by',
         'public_zip_path',
         'public_zip_built_at',
@@ -52,15 +57,74 @@ class Collection extends Model
     /**
      * @return array<string, string>
      */
+    /**
+     * @var list<string>
+     */
+    protected $hidden = [
+        'public_password_hash',
+    ];
+
     protected function casts(): array
     {
         return [
             'is_public' => 'boolean',
             'allows_external_guests' => 'boolean',
             'allowed_brand_roles' => 'array',
+            'public_password_set_at' => 'datetime',
+            'public_downloads_enabled' => 'boolean',
             'public_zip_built_at' => 'datetime',
             'public_zip_asset_count' => 'integer',
         ];
+    }
+
+    public function sessionUnlockKey(): string
+    {
+        return 'collection_share_unlocked.'.$this->id;
+    }
+
+    public function isUnlockedInShareSession(): bool
+    {
+        return session()->get($this->sessionUnlockKey()) === true;
+    }
+
+    public function hasPublicPassword(): bool
+    {
+        return $this->public_password_hash !== null && $this->public_password_hash !== '';
+    }
+
+    /**
+     * V1: Anonymous share pages require a password. Legacy rows with is_public and no hash
+     * are not served until the owner sets a password (see controllers).
+     */
+    public function isShareableByGuests(): bool
+    {
+        return (bool) $this->is_public && $this->hasPublicPassword();
+    }
+
+    public function ensurePublicShareToken(): string
+    {
+        if ($this->public_share_token) {
+            return $this->public_share_token;
+        }
+        do {
+            $token = Str::lower(Str::random(40));
+        } while (static::query()
+            ->where('public_share_token', $token)
+            ->when($this->exists, fn ($q) => $q->where('id', '!=', $this->id))
+            ->exists());
+
+        $this->public_share_token = $token;
+
+        return $token;
+    }
+
+    public function publicShareUrl(): ?string
+    {
+        if (! $this->is_public || ! $this->public_share_token) {
+            return null;
+        }
+
+        return route('share.collections.show', ['token' => $this->public_share_token], absolute: true);
     }
 
     /**

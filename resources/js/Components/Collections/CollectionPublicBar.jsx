@@ -1,16 +1,18 @@
 /**
- * C10: Inline bar above collection grid: collection name + Edit + count + Public toggle.
- * Compact single-row treatment matching the campaign identity banner style.
+ * Collection header bar: name, Edit, asset count, share link status + copy (when configured).
  */
 import { useState } from 'react'
-import { LinkIcon, ClipboardDocumentIcon, CheckIcon, PencilSquareIcon } from '@heroicons/react/24/outline'
+import { LinkIcon, ClipboardDocumentIcon, CheckIcon, PencilSquareIcon, LockClosedIcon } from '@heroicons/react/24/outline'
 
-const PUBLIC_TOOLTIP = 'Viewable via a shareable link. Collections do not grant access to assets outside this view.'
+const SHARE_TOOLTIP = 'Password-protected link for clients and partners. Does not grant access to your library or other brands.'
 
 export default function CollectionPublicBar({
     collection = null,
     publicCollectionsEnabled = false,
+    billingUpgradeUrl = '/app/billing',
     onPublicChange = null,
+    onShareLinkConfigure = null,
+    onPlanUpgradeRequest = null,
     assetCount = null,
     canUpdateCollection = false,
     onEditClick = null,
@@ -21,20 +23,19 @@ export default function CollectionPublicBar({
 
     if (!collection) return null
 
-    const brandSlug = collection.brand_slug ?? ''
-    const publicUrl = collection.slug && brandSlug
-        ? `${typeof window !== 'undefined' ? window.location.origin : ''}/b/${brandSlug}/collections/${collection.slug}`
-        : null
+    const shareUrl = collection.public_share_url || null
+    const shared = !!collection.is_public
+    const needsSetup = !!collection.needs_share_password_setup
 
-    const handleTogglePublic = async (checked) => {
-        if (!publicCollectionsEnabled || updating || !collection?.id) return
+    const putIsPublic = async (checked) => {
+        if (!collection?.id) return
         setUpdating(true)
         try {
             const res = await fetch(`/app/collections/${collection.id}`, {
                 method: 'PUT',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Accept': 'application/json',
+                    Accept: 'application/json',
                     'X-Requested-With': 'XMLHttpRequest',
                     'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || '',
                 },
@@ -47,18 +48,47 @@ export default function CollectionPublicBar({
         }
     }
 
-    const copyPublicLink = () => {
-        if (!publicUrl) return
-        const onSuccess = () => { setCopied(true); setTimeout(() => setCopied(false), 2000) }
+    const handleSwitchClick = () => {
+        if (updating) return
+
+        if (!publicCollectionsEnabled) {
+            onPlanUpgradeRequest?.()
+            if (billingUpgradeUrl) {
+                window.location.assign(billingUpgradeUrl)
+            }
+            return
+        }
+
+        if (needsSetup || !shared) {
+            onShareLinkConfigure?.()
+            return
+        }
+
+        if (
+            !window.confirm(
+                'Turn off the share link? People with the link will no longer be able to open this collection until you turn it on again and set a password.'
+            )
+        ) {
+            return
+        }
+        putIsPublic(false)
+    }
+
+    const copyShareUrl = () => {
+        if (!shareUrl) return
+        const onSuccess = () => {
+            setCopied(true)
+            setTimeout(() => setCopied(false), 2000)
+        }
         const onFailure = () => {
             try {
                 const input = document.createElement('textarea')
-                input.value = publicUrl
+                input.value = shareUrl
                 input.style.position = 'fixed'
                 input.style.opacity = '0'
                 document.body.appendChild(input)
                 input.select()
-                input.setSelectionRange(0, publicUrl.length)
+                input.setSelectionRange(0, shareUrl.length)
                 const ok = document.execCommand('copy')
                 document.body.removeChild(input)
                 if (ok) onSuccess()
@@ -67,11 +97,13 @@ export default function CollectionPublicBar({
             }
         }
         if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
-            navigator.clipboard.writeText(publicUrl).then(onSuccess).catch(onFailure)
+            navigator.clipboard.writeText(shareUrl).then(onSuccess).catch(onFailure)
         } else {
             onFailure()
         }
     }
+
+    const switchAriaChecked = publicCollectionsEnabled && shared && !needsSetup
 
     return (
         <div className="mb-3 flex flex-wrap items-center gap-3 rounded-lg border border-gray-200 bg-white px-4 py-2.5 shadow-sm">
@@ -95,43 +127,54 @@ export default function CollectionPublicBar({
                 </span>
             )}
 
-            {publicCollectionsEnabled && (
-                <div className="flex items-center gap-2.5 ml-auto">
-                    <div className="flex items-center gap-1.5" title={PUBLIC_TOOLTIP}>
+            <div className="flex items-center gap-2.5 ml-auto" title={SHARE_TOOLTIP}>
+                <div className="flex items-center gap-1.5">
+                    <button
+                        type="button"
+                        role="switch"
+                        aria-checked={switchAriaChecked}
+                        aria-describedby="share-desc"
+                        disabled={updating}
+                        onClick={handleSwitchClick}
+                        className={`relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed ${
+                            switchAriaChecked && !primaryColor ? 'bg-indigo-600' : switchAriaChecked ? '' : 'bg-gray-200'
+                        }`}
+                        style={switchAriaChecked && primaryColor ? { backgroundColor: primaryColor } : undefined}
+                    >
+                        <span
+                            className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${switchAriaChecked ? 'translate-x-4' : 'translate-x-0'}`}
+                        />
+                    </button>
+                    <span id="share-desc" className="text-xs font-medium text-gray-600">
+                        {!publicCollectionsEnabled
+                            ? 'Share link'
+                            : needsSetup
+                              ? 'Password setup required'
+                              : shared
+                                ? 'Shared'
+                                : 'Share link'}
+                    </span>
+                    {shared && !needsSetup ? (
+                        <LockClosedIcon className="h-3.5 w-3.5 text-gray-400" title="Password-protected" aria-hidden="true" />
+                    ) : null}
+                </div>
+                {publicCollectionsEnabled && shared && shareUrl && !needsSetup ? (
+                    <div className="flex items-center gap-1 rounded border border-gray-200 bg-gray-50 px-1.5 py-0.5">
+                        <LinkIcon className="h-3.5 w-3.5 text-gray-400 flex-shrink-0" aria-hidden="true" />
+                        <span className="text-[11px] text-gray-500 truncate max-w-[160px]" title={shareUrl}>
+                            {shareUrl.replace(/^https?:\/\//, '')}
+                        </span>
                         <button
                             type="button"
-                            role="switch"
-                            aria-checked={!!collection.is_public}
-                            aria-describedby="public-desc"
-                            disabled={updating}
-                            onClick={() => handleTogglePublic(!collection.is_public)}
-                            className={`relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed ${
-                                collection.is_public && !primaryColor ? 'bg-indigo-600' : collection.is_public ? '' : 'bg-gray-200'
-                            }`}
-                            style={collection.is_public && primaryColor ? { backgroundColor: primaryColor } : undefined}
+                            onClick={copyShareUrl}
+                            className="p-0.5 rounded hover:bg-gray-200 text-gray-400 hover:text-gray-600"
+                            title={copied ? 'Copied!' : 'Copy link'}
                         >
-                            <span className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${collection.is_public ? 'translate-x-4' : 'translate-x-0'}`} />
+                            {copied ? <CheckIcon className="h-3.5 w-3.5 text-green-600" /> : <ClipboardDocumentIcon className="h-3.5 w-3.5" />}
                         </button>
-                        <span id="public-desc" className="text-xs font-medium text-gray-600" title={PUBLIC_TOOLTIP}>Public</span>
                     </div>
-                    {collection.is_public && publicUrl && (
-                        <div className="flex items-center gap-1 rounded border border-gray-200 bg-gray-50 px-1.5 py-0.5">
-                            <LinkIcon className="h-3.5 w-3.5 text-gray-400 flex-shrink-0" aria-hidden="true" />
-                            <span className="text-[11px] text-gray-500 truncate max-w-[160px]" title={publicUrl}>
-                                {publicUrl.replace(/^https?:\/\//, '')}
-                            </span>
-                            <button
-                                type="button"
-                                onClick={copyPublicLink}
-                                className="p-0.5 rounded hover:bg-gray-200 text-gray-400 hover:text-gray-600"
-                                title={copied ? 'Copied!' : 'Copy link'}
-                            >
-                                {copied ? <CheckIcon className="h-3.5 w-3.5 text-green-600" /> : <ClipboardDocumentIcon className="h-3.5 w-3.5" />}
-                            </button>
-                        </div>
-                    )}
-                </div>
-            )}
+                ) : null}
+            </div>
         </div>
     )
 }

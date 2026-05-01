@@ -2,7 +2,7 @@
  * Collection edit: Settings (name, description), Access & team (visibility, roles, teammates, guests),
  * Stats (composition + download links from this collection).
  */
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useLayoutEffect } from 'react'
 import { createPortal } from 'react-dom'
 import {
     XMarkIcon,
@@ -12,16 +12,16 @@ import {
     BuildingOffice2Icon,
     LockClosedIcon,
     EnvelopeIcon,
-    GlobeAltIcon,
     ChartBarIcon,
     Cog6ToothIcon,
     UserGroupIcon,
     SparklesIcon,
+    ClipboardDocumentIcon,
+    CheckIcon,
+    LinkIcon,
 } from '@heroicons/react/24/outline'
 import { Link } from '@inertiajs/react'
 import Avatar from '../Avatar'
-
-const PUBLIC_TOOLTIP = 'Viewable via a shareable link. Collections do not grant access to assets outside this view.'
 
 const BRAND_ROLE_OPTIONS = [
     { id: 'admin', label: 'Brand admin' },
@@ -83,6 +83,9 @@ export default function EditCollectionModal({
     open,
     collection = null,
     publicCollectionsEnabled = false,
+    billingUpgradeUrl = '/app/billing',
+    initialFocusShareLinkSection = false,
+    onShareLinkFocusConsumed = null,
     onClose,
     onSaved,
 }) {
@@ -92,6 +95,11 @@ export default function EditCollectionModal({
     const [allowedBrandRoles, setAllowedBrandRoles] = useState([])
     const [allowsExternalGuests, setAllowsExternalGuests] = useState(false)
     const [isPublic, setIsPublic] = useState(false)
+    const [shareDownloadsEnabled, setShareDownloadsEnabled] = useState(true)
+    const [sharePassword, setSharePassword] = useState('')
+    const [sharePasswordConfirmation, setSharePasswordConfirmation] = useState('')
+    const [changingSharePassword, setChangingSharePassword] = useState(false)
+    const [shareCopied, setShareCopied] = useState(false)
     const [submitting, setSubmitting] = useState(false)
     const [error, setError] = useState(null)
 
@@ -112,6 +120,16 @@ export default function EditCollectionModal({
     const [activeTab, setActiveTab] = useState('settings')
     const [stats, setStats] = useState({ loading: false, error: null, data: null })
     const statsFetchedRef = useRef(false)
+
+    useLayoutEffect(() => {
+        if (!open || !initialFocusShareLinkSection) return
+        setActiveTab('access')
+        const id = requestAnimationFrame(() => {
+            document.getElementById('share-link-section')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+            onShareLinkFocusConsumed?.()
+        })
+        return () => cancelAnimationFrame(id)
+    }, [open, initialFocusShareLinkSection, onShareLinkFocusConsumed])
     const [externalAccessCountsHydrated, setExternalAccessCountsHydrated] = useState(false)
     const [campaignData, setCampaignData] = useState({ loading: false, data: null })
     const campaignFetchedRef = useRef(false)
@@ -177,6 +195,11 @@ export default function EditCollectionModal({
         )
         setAllowsExternalGuests(!!collection.allows_external_guests)
         setIsPublic(!!collection.is_public)
+        setShareDownloadsEnabled(collection.public_downloads_enabled !== false)
+        setSharePassword('')
+        setSharePasswordConfirmation('')
+        setChangingSharePassword(false)
+        setShareCopied(false)
         setError(null)
         setInviteError(null)
         setInternalError(null)
@@ -258,6 +281,20 @@ export default function EditCollectionModal({
             setError('Select at least one brand role, or choose another access option.')
             return
         }
+        if (publicCollectionsEnabled && isPublic) {
+            if (collection?.needs_share_password_setup && !sharePassword.trim()) {
+                setError('Set a password for the share link.')
+                return
+            }
+            if (changingSharePassword && !sharePassword.trim()) {
+                setError('Enter a new password or cancel changing password.')
+                return
+            }
+            if (sharePassword.trim() && sharePassword !== sharePasswordConfirmation) {
+                setError('Password confirmation does not match.')
+                return
+            }
+        }
         setSubmitting(true)
         try {
             const rolesPayload =
@@ -270,7 +307,12 @@ export default function EditCollectionModal({
                 allows_external_guests: accessMode !== 'all_brand' && allowsExternalGuests,
             }
             if (publicCollectionsEnabled) {
-                body.is_public = accessMode === 'all_brand' ? isPublic : false
+                body.is_public = isPublic
+                body.public_downloads_enabled = shareDownloadsEnabled
+                if (isPublic && sharePassword.trim()) {
+                    body.public_password = sharePassword
+                    body.public_password_confirmation = sharePasswordConfirmation
+                }
             }
             const response = await fetch(`/app/collections/${collection.id}`, {
                 method: 'PUT',
@@ -572,9 +614,6 @@ export default function EditCollectionModal({
                                                         checked={selected}
                                                         onChange={() => {
                                                             setAccessMode(value)
-                                                            if (value === 'all_brand') {
-                                                                setIsPublic(false)
-                                                            }
                                                         }}
                                                         className="mt-1 h-4 w-4 shrink-0 border-gray-300 text-indigo-600 focus:ring-indigo-500"
                                                     />
@@ -616,33 +655,162 @@ export default function EditCollectionModal({
                                     </div>
                                 )}
 
-                                {publicCollectionsEnabled && accessMode === 'all_brand' && (
-                                    <div className="flex items-center gap-3 rounded-lg border border-gray-200 bg-gray-50/80 px-3 py-2.5">
-                                        <span className="flex h-9 w-9 items-center justify-center rounded-md bg-white shadow-sm ring-1 ring-gray-200">
-                                            <GlobeAltIcon className="h-5 w-5 text-gray-600" aria-hidden="true" />
+                                <SectionDivider>Share link</SectionDivider>
+                                <div id="share-link-section" className={`rounded-xl border p-4 ${publicCollectionsEnabled ? 'border-gray-200 bg-gray-50/80' : 'border-gray-200 bg-gray-50'}`}>
+                                    <div className="flex gap-3">
+                                        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
+                                            <LinkIcon className="h-5 w-5 text-gray-600" aria-hidden="true" />
                                         </span>
                                         <div className="min-w-0 flex-1">
-                                            <span className="text-sm font-medium text-gray-900">Public link</span>
-                                            <p className="text-xs text-gray-500">{PUBLIC_TOOLTIP}</p>
+                                            <h4 className="text-sm font-semibold text-gray-900">Password-protected share link</h4>
+                                            <p className="mt-1 text-xs text-gray-600">
+                                                Create a simple external page for this collection. Visitors must enter the password before they can view or download files.
+                                            </p>
                                         </div>
-                                        <button
-                                            type="button"
-                                            role="switch"
-                                            aria-checked={isPublic}
-                                            disabled={submitting}
-                                            onClick={() => setIsPublic((v) => !v)}
-                                            className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed ${
-                                                isPublic ? 'bg-indigo-600' : 'bg-gray-200'
-                                            }`}
-                                        >
-                                            <span
-                                                className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                                                    isPublic ? 'translate-x-5' : 'translate-x-1'
-                                                }`}
-                                            />
-                                        </button>
                                     </div>
-                                )}
+                                    {!publicCollectionsEnabled ? (
+                                        <p className="mt-3 text-xs text-gray-600">
+                                            Share links are available on higher plans.{' '}
+                                            <Link href={billingUpgradeUrl} className="font-medium text-indigo-600 hover:text-indigo-500">
+                                                Upgrade
+                                            </Link>
+                                            {' '}to send password-protected collection links to clients, partners, and outside teams.
+                                        </p>
+                                    ) : (
+                                        <div className="mt-4 space-y-3">
+                                            {collection?.needs_share_password_setup ? (
+                                                <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                                                    Password setup required before this link can be used. Set a password below to restore access for visitors; until then, the external page stays unavailable.
+                                                </div>
+                                            ) : null}
+                                            <label className="flex items-center justify-between gap-3">
+                                                <span className="text-sm text-gray-800">Enable share link</span>
+                                                <button
+                                                    type="button"
+                                                    role="switch"
+                                                    aria-checked={isPublic}
+                                                    disabled={submitting}
+                                                    onClick={() => setIsPublic((v) => !v)}
+                                                    className={`relative inline-flex h-6 w-11 shrink-0 rounded-full border-2 border-transparent transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:opacity-50 ${
+                                                        isPublic ? 'bg-indigo-600' : 'bg-gray-200'
+                                                    }`}
+                                                >
+                                                    <span
+                                                        className={`pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow transition ${
+                                                            isPublic ? 'translate-x-5' : 'translate-x-1'
+                                                        }`}
+                                                    />
+                                                </button>
+                                            </label>
+                                            {isPublic ? (
+                                                <>
+                                                    <label className="flex items-center gap-2">
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={shareDownloadsEnabled}
+                                                            onChange={() => setShareDownloadsEnabled((v) => !v)}
+                                                            disabled={submitting}
+                                                            className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                                        />
+                                                        <span className="text-sm text-gray-800">Allow downloads</span>
+                                                    </label>
+                                                    {collection?.has_public_password && !changingSharePassword ? (
+                                                        <div className="flex flex-wrap items-center gap-2">
+                                                            <span className="text-sm text-gray-700">Password set</span>
+                                                            <button
+                                                                type="button"
+                                                                className="text-sm font-medium text-indigo-600 hover:text-indigo-500"
+                                                                onClick={() => {
+                                                                    setChangingSharePassword(true)
+                                                                    setSharePassword('')
+                                                                    setSharePasswordConfirmation('')
+                                                                }}
+                                                            >
+                                                                Change password
+                                                            </button>
+                                                        </div>
+                                                    ) : null}
+                                                    {(changingSharePassword || !collection?.has_public_password) && isPublic ? (
+                                                        <>
+                                                            <div>
+                                                                <label htmlFor="edit-share-password" className="block text-xs font-medium text-gray-700">
+                                                                    {collection?.has_public_password ? 'New password' : 'Password'} <span className="text-red-500">*</span>
+                                                                </label>
+                                                                <input
+                                                                    id="edit-share-password"
+                                                                    type="password"
+                                                                    autoComplete="new-password"
+                                                                    value={sharePassword}
+                                                                    onChange={(e) => setSharePassword(e.target.value)}
+                                                                    className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+                                                                    disabled={submitting}
+                                                                />
+                                                            </div>
+                                                            <div>
+                                                                <label htmlFor="edit-share-password2" className="block text-xs font-medium text-gray-700">
+                                                                    Confirm password <span className="text-red-500">*</span>
+                                                                </label>
+                                                                <input
+                                                                    id="edit-share-password2"
+                                                                    type="password"
+                                                                    autoComplete="new-password"
+                                                                    value={sharePasswordConfirmation}
+                                                                    onChange={(e) => setSharePasswordConfirmation(e.target.value)}
+                                                                    className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+                                                                    disabled={submitting}
+                                                                />
+                                                            </div>
+                                                            {changingSharePassword ? (
+                                                                <button
+                                                                    type="button"
+                                                                    className="text-xs text-gray-600 underline"
+                                                                    onClick={() => {
+                                                                        setChangingSharePassword(false)
+                                                                        setSharePassword('')
+                                                                        setSharePasswordConfirmation('')
+                                                                    }}
+                                                                >
+                                                                    Cancel
+                                                                </button>
+                                                            ) : null}
+                                                        </>
+                                                    ) : null}
+                                                    {collection?.public_share_url ? (
+                                                        <div className="flex flex-wrap items-center gap-2">
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    const u = collection.public_share_url
+                                                                    if (!u) return
+                                                                    const done = () => {
+                                                                        setShareCopied(true)
+                                                                        setTimeout(() => setShareCopied(false), 2000)
+                                                                    }
+                                                                    if (navigator.clipboard?.writeText) {
+                                                                        navigator.clipboard.writeText(u).then(done).catch(done)
+                                                                    } else {
+                                                                        done()
+                                                                    }
+                                                                }}
+                                                                className="inline-flex items-center gap-1 rounded-md border border-gray-300 bg-white px-2 py-1 text-xs font-medium text-gray-700 shadow-sm hover:bg-gray-50"
+                                                            >
+                                                                {shareCopied ? (
+                                                                    <CheckIcon className="h-3.5 w-3.5 text-green-600" />
+                                                                ) : (
+                                                                    <ClipboardDocumentIcon className="h-3.5 w-3.5 text-gray-500" />
+                                                                )}
+                                                                {shareCopied ? 'Copied' : 'Copy link'}
+                                                            </button>
+                                                        </div>
+                                                    ) : null}
+                                                    <p className="text-xs text-gray-500">
+                                                        People with the link and password can view this collection only. They will not get access to your library, dashboard, brand settings, or other collections.
+                                                    </p>
+                                                </>
+                                            ) : null}
+                                        </div>
+                                    )}
+                                </div>
 
                                 {showInternalSection && (
                                     <>
@@ -921,7 +1089,7 @@ export default function EditCollectionModal({
                                                 <dd className="font-medium text-gray-900 tabular-nums">
                                                     {stats.data.assets_visible_count ?? 0}
                                                 </dd>
-                                                <dt className="text-gray-600">Public link</dt>
+                                                <dt className="text-gray-600">Share link</dt>
                                                 <dd className="font-medium text-gray-900">
                                                     {stats.data.is_public ? 'On' : 'Off'}
                                                 </dd>

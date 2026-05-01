@@ -17,6 +17,7 @@ use App\Models\Tenant;
 use App\Models\UploadSession;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Session;
 use Tests\TestCase;
@@ -147,19 +148,22 @@ class AssetEligibilityD61Test extends TestCase
             'slug' => 'kit',
             'visibility' => 'brand',
             'is_public' => true,
+            'public_share_token' => 'eligdlkit01',
+            'public_password_hash' => Hash::make('secret'),
+            'public_password_set_at' => now(),
         ]);
         $published = $this->createAsset(['published_at' => now(), 'title' => 'Published']);
         $pending = $this->createAsset(['published_at' => null, 'title' => 'Pending']);
         $collection->assets()->attach([$published->id, $pending->id]);
 
-        $response = $this->post(route('public.collections.download', [
-            'brand_slug' => $this->brand->slug,
-            'collection_slug' => $collection->slug,
-        ]), ['_token' => csrf_token()]);
+        $response = $this->withSession([$collection->sessionUnlockKey() => true])
+            ->postJson(route('public.collections.download', [
+                'brand_slug' => $this->brand->slug,
+                'collection_slug' => $collection->slug,
+            ]));
 
-        $response->assertRedirect();
-        $location = $response->headers->get('Location');
-        $this->assertStringContainsString('/zip', $location);
+        $response->assertOk();
+        $this->assertNotEmpty($response->json('zip_url'));
         $this->assertNull(Download::query()->where('source', DownloadSource::PUBLIC_COLLECTION)->first());
         // On-the-fly zip uses queryPublic() which excludes unpublished assets; only published is included when zip is streamed.
     }

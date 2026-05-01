@@ -20,7 +20,7 @@ const ROLE_LABELS = {
     body: 'Body',
 }
 
-const PUBLIC_TOOLTIP = 'Viewable via a shareable link. Collections do not grant access to assets outside this view.'
+const SHARE_LINK_TOOLTIP = 'Password-protected link for outside viewers. Does not grant access to your library or other brands.'
 
 function StatusBadge({ status }) {
     const cls = STATUS_STYLES[status] || STATUS_STYLES.draft
@@ -74,18 +74,24 @@ function getContrastText(hex) {
     return (0.299 * r + 0.587 * g + 0.114 * b) / 255 > 0.55 ? '#1f2937' : '#ffffff'
 }
 
-function PublicToggle({ collection, publicCollectionsEnabled, onPublicChange, primaryColor }) {
+function PublicToggle({
+    collection,
+    publicCollectionsEnabled,
+    billingUpgradeUrl = '/app/billing',
+    onPublicChange,
+    onShareLinkConfigure,
+    onPlanUpgradeRequest,
+    primaryColor,
+}) {
     const [updating, setUpdating] = useState(false)
     const [copied, setCopied] = useState(false)
-    if (!publicCollectionsEnabled) return null
 
-    const brandSlug = collection.brand_slug ?? ''
-    const publicUrl = collection.slug && brandSlug
-        ? `${typeof window !== 'undefined' ? window.location.origin : ''}/b/${brandSlug}/collections/${collection.slug}`
-        : null
+    const shareUrl = collection.public_share_url || null
+    const needsSetup = !!collection.needs_share_password_setup
+    const shared = !!collection.is_public
 
-    const handleToggle = async (checked) => {
-        if (updating || !collection?.id) return
+    const putIsPublic = async (checked) => {
+        if (!collection?.id) return
         setUpdating(true)
         try {
             const res = await fetch(`/app/collections/${collection.id}`, {
@@ -102,49 +108,72 @@ function PublicToggle({ collection, publicCollectionsEnabled, onPublicChange, pr
         } finally { setUpdating(false) }
     }
 
+    const handleSwitchClick = () => {
+        if (updating) return
+        if (!publicCollectionsEnabled) {
+            onPlanUpgradeRequest?.()
+            if (billingUpgradeUrl) window.location.assign(billingUpgradeUrl)
+            return
+        }
+        if (needsSetup || !shared) {
+            onShareLinkConfigure?.()
+            return
+        }
+        if (!window.confirm(
+            'Turn off the share link? People with the link will no longer be able to open this collection until you turn it on again and set a password.'
+        )) return
+        putIsPublic(false)
+    }
+
+    const switchOn = publicCollectionsEnabled && shared && !needsSetup
+
     const copyLink = () => {
-        if (!publicUrl) return
+        if (!shareUrl) return
         const onSuccess = () => { setCopied(true); setTimeout(() => setCopied(false), 2000) }
         const onFailure = () => {
             try {
                 const input = document.createElement('textarea')
-                input.value = publicUrl
+                input.value = shareUrl
                 input.style.position = 'fixed'
                 input.style.opacity = '0'
                 document.body.appendChild(input)
                 input.select()
-                input.setSelectionRange(0, publicUrl.length)
+                input.setSelectionRange(0, shareUrl.length)
                 const ok = document.execCommand('copy')
                 document.body.removeChild(input)
                 if (ok) onSuccess()
             } catch (e) { /* silent */ }
         }
         if (navigator.clipboard?.writeText) {
-            navigator.clipboard.writeText(publicUrl).then(onSuccess).catch(onFailure)
+            navigator.clipboard.writeText(shareUrl).then(onSuccess).catch(onFailure)
         } else { onFailure() }
     }
 
     return (
         <div className="flex items-center gap-2">
-            <div className="flex items-center gap-1.5" title={PUBLIC_TOOLTIP}>
+            <div className="flex items-center gap-1.5" title={SHARE_LINK_TOOLTIP}>
                 <button
-                    type="button" role="switch" aria-checked={!!collection.is_public}
+                    type="button" role="switch" aria-checked={switchOn}
                     disabled={updating}
-                    onClick={() => handleToggle(!collection.is_public)}
+                    onClick={handleSwitchClick}
                     className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed ${
-                        collection.is_public && !primaryColor ? 'bg-indigo-600' : collection.is_public ? '' : 'bg-gray-200'
+                        switchOn && !primaryColor ? 'bg-indigo-600' : switchOn ? '' : 'bg-gray-200'
                     }`}
-                    style={collection.is_public && primaryColor ? { backgroundColor: primaryColor } : undefined}
+                    style={switchOn && primaryColor ? { backgroundColor: primaryColor } : undefined}
                 >
-                    <span className={`pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${collection.is_public ? 'translate-x-4' : 'translate-x-0'}`} />
+                    <span className={`pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${switchOn ? 'translate-x-4' : 'translate-x-0'}`} />
                 </button>
-                <span className="text-xs font-medium text-gray-500">Public</span>
+                <span className="text-xs font-medium text-gray-500">
+                    {!publicCollectionsEnabled
+                        ? 'Share link'
+                        : needsSetup ? 'Password setup required' : shared ? 'Shared' : 'Share link'}
+                </span>
             </div>
-            {collection.is_public && publicUrl && (
+            {publicCollectionsEnabled && shared && shareUrl && !needsSetup && (
                 <div className="flex items-center gap-1 rounded border border-gray-200 bg-gray-50 px-1.5 py-0.5">
                     <LinkIcon className="h-3.5 w-3.5 text-gray-400 shrink-0" />
-                    <span className="text-[11px] text-gray-500 truncate max-w-[140px]" title={publicUrl}>
-                        {publicUrl.replace(/^https?:\/\//, '')}
+                    <span className="text-[11px] text-gray-500 truncate max-w-[140px]" title={shareUrl}>
+                        {shareUrl.replace(/^https?:\/\//, '')}
                     </span>
                     <button type="button" onClick={copyLink} className="p-0.5 rounded hover:bg-gray-200 text-gray-400 hover:text-gray-600" title={copied ? 'Copied!' : 'Copy link'}>
                         {copied ? <CheckIcon className="h-3.5 w-3.5 text-green-600" /> : <ClipboardDocumentIcon className="h-3.5 w-3.5" />}
@@ -191,6 +220,9 @@ export default function CampaignIdentityBanner({
     canUpdateCollection = false,
     collection = null,
     publicCollectionsEnabled = false,
+    billingUpgradeUrl = '/app/billing',
+    onShareLinkConfigure = null,
+    onPlanUpgradeRequest = null,
     assetCount = null,
     onEditClick = null,
     onPublicChange = null,
@@ -260,7 +292,15 @@ export default function CampaignIdentityBanner({
                 )}
                 <div className="ml-auto flex items-center gap-3">
                     {collection && (
-                        <PublicToggle collection={collection} publicCollectionsEnabled={publicCollectionsEnabled} onPublicChange={onPublicChange} primaryColor={primaryColor} />
+                        <PublicToggle
+                            collection={collection}
+                            publicCollectionsEnabled={publicCollectionsEnabled}
+                            billingUpgradeUrl={billingUpgradeUrl}
+                            onPublicChange={onPublicChange}
+                            onShareLinkConfigure={onShareLinkConfigure}
+                            onPlanUpgradeRequest={onPlanUpgradeRequest}
+                            primaryColor={primaryColor}
+                        />
                     )}
                 </div>
             </div>

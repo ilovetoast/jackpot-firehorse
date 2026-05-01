@@ -21,13 +21,11 @@ use Illuminate\Http\Request;
 use Inertia\Response;
 
 /**
- * Password-protected collection share links (V1): is_public + public_password_hash + optional token URL.
- * Legacy is_public without a password hash is not served to guests until a password is set.
+ * Token-based share URLs: /share/collections/{public_share_token}
  *
- * C10: Gated by tenant feature; when disabled, return 404 (not unauthorized).
- * D6: createDownload — collection-scoped ZIP from share page.
+ * Does not extend PublicCollectionController — route action signatures differ (PHP LSP).
  */
-class PublicCollectionController extends Controller
+class ShareCollectionController extends Controller
 {
     use HandlesGuestCollectionShare;
 
@@ -44,38 +42,39 @@ class PublicCollectionController extends Controller
         protected CollectionPublicShareGuestAccess $shareGuestAccess,
     ) {}
 
-    /**
-     * Show share collection page by brand slug + collection slug (legacy URL; still supported).
-     */
-    public function show(Request $request, string $brand_slug, string $collection_slug): Response|RedirectResponse
+    public function show(Request $request, string $token): Response|RedirectResponse
     {
-        $collection = $this->resolveCollectionByPublicSlug($brand_slug, $collection_slug);
+        $collection = Collection::query()
+            ->where('public_share_token', $token)
+            ->with(['brand', 'tenant'])
+            ->first();
+
         if (! $collection) {
             abort(404, 'Collection not found.');
         }
 
         return $this->respondGuestShareCollectionPage($collection, $request, [
-            'kind' => 'slug',
-            'brand_slug' => $brand_slug,
-            'collection_slug' => $collection_slug,
+            'kind' => 'token',
+            'token' => $token,
         ]);
     }
 
-    public function unlockSlug(Request $request, string $brand_slug, string $collection_slug): RedirectResponse
+    public function unlock(Request $request, string $token): RedirectResponse
     {
         $request->validate([
             'password' => ['required', 'string', 'max:500'],
         ]);
 
-        $collection = $this->resolveCollectionByPublicSlug($brand_slug, $collection_slug);
+        $collection = Collection::query()
+            ->where('public_share_token', $token)
+            ->with(['brand', 'tenant'])
+            ->first();
+
         if (! $collection) {
             abort(404, 'Collection not found.');
         }
 
-        $target = route('public.collections.show', [
-            'brand_slug' => $brand_slug,
-            'collection_slug' => $collection_slug,
-        ], false);
+        $target = route('share.collections.show', ['token' => $token], false);
         $qs = $request->getQueryString();
         if (is_string($qs) && $qs !== '') {
             $target .= '?'.$qs;
@@ -88,26 +87,28 @@ class PublicCollectionController extends Controller
         );
     }
 
-    public function lockSlug(string $brand_slug, string $collection_slug): RedirectResponse
+    public function lock(Request $request, string $token): RedirectResponse
     {
-        $collection = $this->resolveCollectionByPublicSlug($brand_slug, $collection_slug);
+        $collection = Collection::query()
+            ->where('public_share_token', $token)
+            ->first();
+
         if (! $collection) {
             abort(404, 'Collection not found.');
         }
+
         $this->shareGuestAccess->lock($collection);
 
-        return redirect()->route('public.collections.show', [
-            'brand_slug' => $brand_slug,
-            'collection_slug' => $collection_slug,
-        ]);
+        return redirect()->route('share.collections.show', ['token' => $token]);
     }
 
-    /**
-     * D6: Create a download (ZIP) for the public collection. No auth.
-     */
-    public function createDownload(string $brand_slug, string $collection_slug, Request $request): RedirectResponse|JsonResponse
+    public function createDownload(Request $request, string $token): RedirectResponse|JsonResponse
     {
-        $collection = $this->resolveCollectionByPublicSlug($brand_slug, $collection_slug);
+        $collection = Collection::query()
+            ->where('public_share_token', $token)
+            ->with(['brand', 'tenant'])
+            ->first();
+
         if (! $collection) {
             abort(404, 'Collection not found.');
         }
@@ -115,12 +116,13 @@ class PublicCollectionController extends Controller
         return $this->performCreateDownload($collection, $request);
     }
 
-    /**
-     * D6: Stream collection ZIP. Signed URL required; no Download record.
-     */
-    public function streamZip(string $brand_slug, string $collection_slug, Request $request): \Symfony\Component\HttpFoundation\BinaryFileResponse|RedirectResponse
+    public function streamZip(Request $request, string $token): \Symfony\Component\HttpFoundation\BinaryFileResponse|RedirectResponse
     {
-        $collection = $this->resolveCollectionByPublicSlug($brand_slug, $collection_slug);
+        $collection = Collection::query()
+            ->where('public_share_token', $token)
+            ->with(['brand', 'tenant'])
+            ->first();
+
         if (! $collection) {
             abort(404, 'Collection not found.');
         }
@@ -128,16 +130,17 @@ class PublicCollectionController extends Controller
         return $this->performStreamZip($collection, $request);
     }
 
-    /**
-     * Download a single asset from a share collection. No auth.
-     */
-    public function download(string $brand_slug, string $collection_slug, Asset $asset): RedirectResponse
+    public function download(Request $request, string $token, Asset $asset): RedirectResponse
     {
-        $collection = $this->resolveCollectionByPublicSlug($brand_slug, $collection_slug);
+        $collection = Collection::query()
+            ->where('public_share_token', $token)
+            ->with(['brand', 'tenant'])
+            ->first();
+
         if (! $collection) {
             abort(404, 'Collection not found.');
         }
 
-        return $this->performAssetDownload($collection, $asset, $brand_slug);
+        return $this->performAssetDownload($collection, $asset, $collection->brand?->slug ?? '');
     }
 }

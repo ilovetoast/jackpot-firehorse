@@ -70,6 +70,7 @@ export default function CollectionsIndex({
     can_add_to_collection = false,
     can_remove_from_collection = false,
     public_collections_enabled = false,
+    billing_upgrade_url = '/app/billing',
     sort = 'created',
     sort_direction = 'desc',
     q: searchQuery = '',
@@ -157,6 +158,13 @@ export default function CollectionsIndex({
 
     const [showCreateModal, setShowCreateModal] = useState(false)
     const [showEditModal, setShowEditModal] = useState(false)
+    const [editModalFocusShareLink, setEditModalFocusShareLink] = useState(false)
+
+    const consumeShareLinkFocus = useCallback(() => setEditModalFocusShareLink(false), [])
+    const openEditToShareLink = useCallback(() => {
+        setEditModalFocusShareLink(true)
+        setShowEditModal(true)
+    }, [])
     const [mobileContentTranslateX, setMobileContentTranslateX] = useState(0)
     const [mobileContentAnimating, setMobileContentAnimating] = useState(false)
     const mobileContentAnimationTimeoutRef = useRef(null)
@@ -449,11 +457,16 @@ export default function CollectionsIndex({
                     open={showCreateModal}
                     onClose={() => setShowCreateModal(false)}
                     onCreated={handleCollectionCreated}
+                    publicCollectionsEnabled={public_collections_enabled}
+                    billingUpgradeUrl={billing_upgrade_url}
                 />
                 <EditCollectionModal
                     open={showEditModal}
                     collection={selected_collection}
                     publicCollectionsEnabled={public_collections_enabled}
+                    billingUpgradeUrl={billing_upgrade_url}
+                    initialFocusShareLinkSection={editModalFocusShareLink}
+                    onShareLinkFocusConsumed={consumeShareLinkFocus}
                     onClose={() => setShowEditModal(false)}
                     onSaved={() => {
                         setShowEditModal(false)
@@ -632,6 +645,8 @@ export default function CollectionsIndex({
                                                 canUpdateCollection={can_update_collection}
                                                 collection={selected_collection}
                                                 publicCollectionsEnabled={public_collections_enabled}
+                                                billingUpgradeUrl={billing_upgrade_url}
+                                                onShareLinkConfigure={openEditToShareLink}
                                                 assetCount={assetsList.length}
                                                 onEditClick={() => setShowEditModal(true)}
                                                 onPublicChange={() => { router.reload() }}
@@ -646,6 +661,8 @@ export default function CollectionsIndex({
                                             <CollectionPublicBar
                                                 collection={selected_collection}
                                                 publicCollectionsEnabled={public_collections_enabled}
+                                                billingUpgradeUrl={billing_upgrade_url}
+                                                onShareLinkConfigure={openEditToShareLink}
                                                 assetCount={assetsList.length}
                                                 canUpdateCollection={can_update_collection}
                                                 onEditClick={() => setShowEditModal(true)}

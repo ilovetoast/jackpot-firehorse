@@ -169,6 +169,32 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Product branding (system / default transactional email)
+    |--------------------------------------------------------------------------
+    |
+    | Aligns with app “Jackpot purple” (Tailwind violet-600, #7c3aed). Blade
+    | mail components, TransactionalEmailHtml shells, and seed defaults use
+    | these keys for buttons, links, eyebrow labels, card accent rules, and
+    | neutral info callouts. Override for white-label via env when needed.
+    |
+    */
+
+    'branding' => [
+        'primary' => env('MAIL_BRANDING_PRIMARY', '#7c3aed'),
+        'primary_dark' => env('MAIL_BRANDING_PRIMARY_DARK', '#5b21b6'),
+        'eyebrow' => env('MAIL_BRANDING_EYEBROW', '#6d28d9'),
+        'link' => env('MAIL_BRANDING_LINK', '#7c3aed'),
+        'accent_rule_gradient' => env(
+            'MAIL_BRANDING_ACCENT_GRADIENT',
+            'linear-gradient(90deg,#5b21b6 0%,#7c3aed 50%,#06b6d4 100%)'
+        ),
+        'info_bg' => env('MAIL_BRANDING_INFO_BG', '#f5f3ff'),
+        'info_border' => env('MAIL_BRANDING_INFO_BORDER', '#7c3aed'),
+        'info_label' => env('MAIL_BRANDING_INFO_LABEL', '#5b21b6'),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Tenant mail branding (staging)
     |--------------------------------------------------------------------------
     |

@@ -17,6 +17,7 @@ use App\Models\Tenant;
 use App\Models\UploadSession;
 use Aws\S3\S3Client;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\URL;
 use Mockery;
 use Tests\TestCase;
@@ -92,20 +93,21 @@ class PublicCollectionDownloadD6Test extends TestCase
             'slug' => 'press-kit',
             'visibility' => 'brand',
             'is_public' => true,
+            'public_share_token' => 'dltesttokenpress01',
+            'public_password_hash' => Hash::make('secret'),
+            'public_password_set_at' => now(),
         ]);
         $asset = $this->createAsset();
         $collection->assets()->attach($asset->id);
 
-        $response = $this->post(route('public.collections.download', [
-            'brand_slug' => $this->brand->slug,
-            'collection_slug' => $collection->slug,
-        ]), ['_token' => csrf_token()]);
+        $response = $this->withSession([$collection->sessionUnlockKey() => true])
+            ->postJson(route('public.collections.download', [
+                'brand_slug' => $this->brand->slug,
+                'collection_slug' => $collection->slug,
+            ]));
 
-        $response->assertRedirect();
-        $location = $response->headers->get('Location');
-        $this->assertStringContainsString('/b/' . $this->brand->slug . '/collections/' . $collection->slug . '/zip', $location);
-        $this->assertStringContainsString('signature=', $location);
-        $this->assertStringContainsString('expires=', $location);
+        $response->assertOk();
+        $this->assertNotEmpty($response->json('zip_url'));
 
         $this->assertNull(Download::query()->where('source', DownloadSource::PUBLIC_COLLECTION)->first());
     }
@@ -145,6 +147,9 @@ class PublicCollectionDownloadD6Test extends TestCase
             'slug' => 'kit',
             'visibility' => 'brand',
             'is_public' => true,
+            'public_share_token' => 'dltesttokenkit01',
+            'public_password_hash' => Hash::make('secret'),
+            'public_password_set_at' => now(),
         ]);
         $a1 = $this->createAsset(['title' => 'A1']);
         $a2 = $this->createAsset(['title' => 'A2']);
@@ -163,7 +168,7 @@ class PublicCollectionDownloadD6Test extends TestCase
             ['brand_slug' => $this->brand->slug, 'collection_slug' => $collection->slug]
         );
 
-        $response = $this->get($zipUrl);
+        $response = $this->withSession([$collection->sessionUnlockKey() => true])->get($zipUrl);
 
         $response->assertOk();
         $response->assertHeader('content-type', 'application/zip');
@@ -181,16 +186,74 @@ class PublicCollectionDownloadD6Test extends TestCase
             'slug' => 'public-collection',
             'visibility' => 'brand',
             'is_public' => true,
+            'public_share_token' => 'dltesttokenfree01',
+            'public_password_hash' => Hash::make('secret'),
+            'public_password_set_at' => now(),
         ]);
         $asset = $this->createAsset();
         $collection->assets()->attach($asset->id);
 
-        $response = $this->post(route('public.collections.download', [
-            'brand_slug' => $this->brand->slug,
-            'collection_slug' => $collection->slug,
-        ]), ['_token' => csrf_token()]);
+        $response = $this->withSession([$collection->sessionUnlockKey() => true])
+            ->post(route('public.collections.download', [
+                'brand_slug' => $this->brand->slug,
+                'collection_slug' => $collection->slug,
+            ]), ['_token' => csrf_token()]);
 
         $response->assertStatus(404);
         $this->assertNull(Download::query()->where('source', DownloadSource::PUBLIC_COLLECTION)->first());
+    }
+
+    public function test_public_zip_rejects_asset_id_outside_collection(): void
+    {
+        $this->tenant->update(['manual_plan_override' => 'enterprise']);
+
+        $collection = Collection::create([
+            'tenant_id' => $this->tenant->id,
+            'brand_id' => $this->brand->id,
+            'name' => 'Scoped',
+            'slug' => 'scoped',
+            'visibility' => 'brand',
+            'is_public' => true,
+            'public_share_token' => 'dltesttokenscope1',
+            'public_password_hash' => Hash::make('secret'),
+            'public_password_set_at' => now(),
+        ]);
+        $in = $this->createAsset(['title' => 'In']);
+        $out = $this->createAsset(['title' => 'Out']);
+        $collection->assets()->attach($in->id);
+
+        $this->withSession([$collection->sessionUnlockKey() => true])
+            ->postJson(route('public.collections.download', [
+                'brand_slug' => $this->brand->slug,
+                'collection_slug' => $collection->slug,
+            ]), ['asset_ids' => [(string) $in->id, (string) $out->id]])
+            ->assertStatus(422);
+    }
+
+    public function test_public_zip_blocked_when_public_downloads_disabled(): void
+    {
+        $this->tenant->update(['manual_plan_override' => 'enterprise']);
+
+        $collection = Collection::create([
+            'tenant_id' => $this->tenant->id,
+            'brand_id' => $this->brand->id,
+            'name' => 'No zip',
+            'slug' => 'no-zip',
+            'visibility' => 'brand',
+            'is_public' => true,
+            'public_share_token' => 'dltesttokennozip1',
+            'public_password_hash' => Hash::make('secret'),
+            'public_password_set_at' => now(),
+            'public_downloads_enabled' => false,
+        ]);
+        $asset = $this->createAsset();
+        $collection->assets()->attach($asset->id);
+
+        $this->withSession([$collection->sessionUnlockKey() => true])
+            ->postJson(route('public.collections.download', [
+                'brand_slug' => $this->brand->slug,
+                'collection_slug' => $collection->slug,
+            ]))
+            ->assertStatus(404);
     }
 }

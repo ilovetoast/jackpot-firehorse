@@ -28,6 +28,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
@@ -268,7 +269,7 @@ class CollectionController extends Controller
                     ];
                 }
 
-                $selectedCollection = [
+                $selectedCollection = array_merge([
                     'id' => $collection->id,
                     'name' => $collection->name,
                     'description' => $collection->description,
@@ -282,7 +283,7 @@ class CollectionController extends Controller
                     'brand_slug' => $collectionBrand?->slug,
                     'is_public' => $collection->is_public,
                     'campaign_summary' => $campaignSummary,
-                ];
+                ], $this->shareLinkPropsForCollection($collection));
 
                 try {
                     $query = $this->collectionAssetQueryService->query($user, $collection);
@@ -472,6 +473,7 @@ class CollectionController extends Controller
             'can_add_to_collection' => $canAddToCollection,
             'can_remove_from_collection' => $canRemoveFromCollection,
             'public_collections_enabled' => $publicCollectionsEnabled,
+            'billing_upgrade_url' => '/app/billing',
             'sort' => $sort,
             'sort_direction' => $sortDirection,
             'q' => $request->input('q', ''),
@@ -723,6 +725,9 @@ class CollectionController extends Controller
         // C9: Use Collection policy with brand explicitly so uploader and collections page behave the same
         Gate::forUser($user)->authorize('create', [Collection::class, $brand]);
 
+        $publicCollectionsEnabledForStore = $this->featureGate->publicCollectionsEnabled($tenant);
+        $sharePasswordApplies = $request->boolean('is_public') && $publicCollectionsEnabledForStore;
+
         $validated = $request->validate([
             'name' => ['required', 'string', 'max:255'],
             'description' => ['nullable', 'string', 'max:65535'],
@@ -732,6 +737,17 @@ class CollectionController extends Controller
             'allowed_brand_roles.*' => ['string', Rule::in(RoleRegistry::brandRoles())],
             'allows_external_guests' => ['nullable', 'boolean'],
             'is_public' => ['nullable', 'boolean'],
+            'public_password' => [
+                Rule::excludeUnless($sharePasswordApplies),
+                'required',
+                'string',
+                'min:8',
+                'max:255',
+                'confirmed',
+            ],
+            'public_password_confirmation' => [Rule::excludeUnless($sharePasswordApplies), 'nullable', 'string'],
+            'clear_public_password' => ['nullable', 'boolean'],
+            'public_downloads_enabled' => ['nullable', 'boolean'],
         ]);
 
         $exists = Collection::query()
@@ -769,7 +785,13 @@ class CollectionController extends Controller
 
         // C10: Only allow is_public = true when tenant has Public Collections feature
         $isPublic = isset($validated['is_public']) && $validated['is_public']
-            && $this->featureGate->publicCollectionsEnabled($tenant);
+            && $publicCollectionsEnabledForStore;
+
+        if ($request->boolean('clear_public_password') && $isPublic) {
+            throw ValidationException::withMessages([
+                'clear_public_password' => ['Removing the password is not allowed while the share link is enabled.'],
+            ]);
+        }
 
         $collection = new Collection([
             'tenant_id' => $tenant->id,
@@ -780,9 +802,15 @@ class CollectionController extends Controller
             'allowed_brand_roles' => $roles,
             'allows_external_guests' => $allowsExternal,
             'is_public' => $isPublic,
+            'public_downloads_enabled' => (bool) ($validated['public_downloads_enabled'] ?? true),
             'created_by' => $user->id,
         ]);
         $this->syncCollectionVisibilityFromAccessMode($collection);
+        if ($isPublic) {
+            $collection->ensurePublicShareToken();
+            $collection->public_password_hash = Hash::make($validated['public_password']);
+            $collection->public_password_set_at = now();
+        }
         $collection->save();
 
         return response()->json([
@@ -800,6 +828,7 @@ class CollectionController extends Controller
 
         $tenant = $collection->tenant;
         $publicCollectionsEnabled = $tenant && $this->featureGate->publicCollectionsEnabled($tenant);
+        $passwordExistedAtStart = $collection->hasPublicPassword();
 
         $validated = $request->validate([
             'name' => ['sometimes', 'string', 'max:255'],
@@ -809,6 +838,10 @@ class CollectionController extends Controller
             'allowed_brand_roles.*' => ['string', Rule::in(RoleRegistry::brandRoles())],
             'allows_external_guests' => ['nullable', 'boolean'],
             'is_public' => ['nullable', 'boolean'],
+            'public_password' => ['nullable', 'string', 'min:8', 'max:255', 'confirmed'],
+            'public_password_confirmation' => ['nullable', 'string'],
+            'clear_public_password' => ['nullable', 'boolean'],
+            'public_downloads_enabled' => ['nullable', 'boolean'],
         ]);
 
         if (array_key_exists('access_mode', $validated)) {
@@ -845,7 +878,7 @@ class CollectionController extends Controller
         if (array_key_exists('is_public', $validated)) {
             $newIsPublic = $publicCollectionsEnabled && $validated['is_public'];
             $collection->is_public = $newIsPublic;
-            // C10: When making public, ensure slug exists for public URL
+            // C10: When making public, ensure slug exists for legacy /b/... URL (token URL is primary)
             if ($newIsPublic && (empty($collection->slug))) {
                 $baseSlug = Str::slug($collection->name);
                 $slug = $baseSlug;
@@ -857,10 +890,34 @@ class CollectionController extends Controller
                 $collection->slug = $slug;
             }
         }
-        // Restricted/private collections cannot be public share links
-        if (in_array($collection->visibility, ['restricted', 'private'], true)) {
-            $collection->is_public = false;
+
+        if ($request->boolean('clear_public_password') && $collection->is_public) {
+            throw ValidationException::withMessages([
+                'clear_public_password' => ['Removing the password is not allowed while the share link is enabled.'],
+            ]);
         }
+
+        $newPassword = isset($validated['public_password']) && is_string($validated['public_password']) && trim($validated['public_password']) !== ''
+            ? $validated['public_password']
+            : null;
+
+        if ($collection->is_public && $publicCollectionsEnabled) {
+            if (! $passwordExistedAtStart && ! $newPassword) {
+                throw ValidationException::withMessages([
+                    'public_password' => ['Set a password to enable the share link.'],
+                ]);
+            }
+            if ($newPassword) {
+                $collection->public_password_hash = Hash::make($newPassword);
+                $collection->public_password_set_at = now();
+            }
+            $collection->ensurePublicShareToken();
+        }
+
+        if (array_key_exists('public_downloads_enabled', $validated)) {
+            $collection->public_downloads_enabled = (bool) $validated['public_downloads_enabled'];
+        }
+
         $collection->save();
 
         return response()->json([
@@ -1006,10 +1063,28 @@ class CollectionController extends Controller
     }
 
     /**
+     * Safe client props for password-protected share links (never exposes hash).
+     *
+     * @return array<string, mixed>
+     */
+    private function shareLinkPropsForCollection(Collection $collection): array
+    {
+        return [
+            'has_public_password' => $collection->hasPublicPassword(),
+            'public_password_set_at' => $collection->public_password_set_at?->toIso8601String(),
+            'public_downloads_enabled' => (bool) ($collection->public_downloads_enabled ?? true),
+            'public_share_url' => $collection->publicShareUrl(),
+            'needs_share_password_setup' => (bool) ($collection->is_public && ! $collection->hasPublicPassword()),
+            'billing_upgrade_url' => '/app/billing',
+        ];
+    }
+
+    /**
      * @return array<string, mixed>
      */
     private function collectionJsonForEdit(Collection $collection): array
     {
+        $collection->loadMissing('brand');
         $collection->loadCount([
             'collectionAccessGrants as external_guest_grants_count' => function ($q) {
                 $q->whereNotNull('accepted_at');
@@ -1017,7 +1092,7 @@ class CollectionController extends Controller
             'collectionInvitations as external_guest_invites_count',
         ]);
 
-        return [
+        return array_merge([
             'id' => $collection->id,
             'name' => $collection->name,
             'description' => $collection->description,
@@ -1029,7 +1104,8 @@ class CollectionController extends Controller
             'external_guest_invites_count' => (int) ($collection->external_guest_invites_count ?? 0),
             'is_public' => $collection->is_public,
             'slug' => $collection->slug,
-        ];
+            'brand_slug' => $collection->brand?->slug,
+        ], $this->shareLinkPropsForCollection($collection));
     }
 
     /**

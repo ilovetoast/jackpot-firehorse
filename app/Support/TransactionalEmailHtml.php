@@ -8,13 +8,21 @@ namespace App\Support;
  * Uses {{app_url}}, {{app_name}} placeholders — replaced by {@see \App\Models\NotificationTemplate::render()}.
  *
  * Design system: light card layout on #f5f6f8 background, white card with 3px accent rule,
- * clean typography, indigo/violet accent (system) or tenant color (tenant mode).
+ * clean typography, Jackpot violet accent (system) or tenant color (tenant mode).
  */
 final class TransactionalEmailHtml
 {
     private const FONT_STACK = "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif";
-    private const INDIGO     = '#4f46e5';
-    private const GRADIENT   = 'linear-gradient(90deg,#4f46e5 0%,#7c3aed 50%,#06b6d4 100%)';
+
+    private static function primary(): string
+    {
+        return (string) config('mail.branding.primary', '#7c3aed');
+    }
+
+    private static function accentRuleGradient(): string
+    {
+        return (string) config('mail.branding.accent_rule_gradient', 'linear-gradient(90deg,#5b21b6 0%,#7c3aed 50%,#06b6d4 100%)');
+    }
 
     /**
      * System emails: Jackpot branding — cherry icon + wordmark header, gradient accent.
@@ -23,7 +31,7 @@ final class TransactionalEmailHtml
     {
         $y    = $copyrightYear ?? date('Y');
         $font = self::FONT_STACK;
-        $grad = self::GRADIENT;
+        $grad = self::accentRuleGradient();
 
         return <<<HTML
 <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color:#f5f6f8;margin:0;padding:0;font-family:{$font};">
@@ -85,9 +93,9 @@ HTML;
      */
     public static function tenantShell(string $cardInnerHtml, ?string $copyrightYear = null, ?string $headerCaptionLine = null): string
     {
-        $y       = $copyrightYear ?? date('Y');
-        $font    = self::FONT_STACK;
-        $indigo  = self::INDIGO;
+        $y        = $copyrightYear ?? date('Y');
+        $font     = self::FONT_STACK;
+        $cardRule = self::accentRuleGradient();
 
         return <<<HTML
 <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color:#f5f6f8;margin:0;padding:0;font-family:{$font};">
@@ -124,7 +132,7 @@ HTML;
         <tr>
           <td>
             <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #e5e7eb;">
-              <tr><td style="height:3px;background:{$indigo};font-size:0;line-height:0;">&nbsp;</td></tr>
+              <tr><td style="height:3px;background:{$cardRule};font-size:0;line-height:0;">&nbsp;</td></tr>
               <tr>
                 <td style="padding:36px 40px 40px;color:#374151;font-size:15px;line-height:1.65;">
                   {$cardInnerHtml}

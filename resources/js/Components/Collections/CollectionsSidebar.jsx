@@ -1,10 +1,10 @@
 /**
  * Collections Sidebar (C4 read-only; C5 add Create button).
- * C11: Public indicator and asset count signals (read-only; no permission implication).
+ * C11: Share-link indicator and asset count signals (read-only; no permission implication).
  * Lists collections for the current brand; selection is URL-driven (?collection=id).
  */
 import { router } from '@inertiajs/react'
-import { RectangleStackIcon, PlusIcon, GlobeAltIcon, UserGroupIcon, SparklesIcon } from '@heroicons/react/24/outline'
+import { RectangleStackIcon, PlusIcon, LinkIcon, UserGroupIcon, SparklesIcon } from '@heroicons/react/24/outline'
 
 export default function CollectionsSidebar({
     collections = [],
@@ -113,10 +113,10 @@ export default function CollectionsSidebar({
                                             <RectangleStackIcon className="h-4 w-4 flex-shrink-0" style={{ color: itemTextColor }} />
                                             <span className="truncate flex-1 min-w-0">{c.name}</span>
                                             {showPublic && (
-                                                <GlobeAltIcon
+                                                <LinkIcon
                                                     className="h-4 w-4 flex-shrink-0 opacity-80"
                                                     style={{ color: itemTextColor }}
-                                                    title="Public collection — viewable via shareable link"
+                                                    title="Share link enabled"
                                                     aria-hidden="true"
                                                 />
                                             )}

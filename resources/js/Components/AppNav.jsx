@@ -218,8 +218,6 @@ export default function AppNav({
     const brandNmForMenu = (activeBrand?.name?.trim() || companyNm) || ''
     const overviewNavTitle = companyNm ? `Overview (${companyNm})` : 'Overview'
     const brandGuidelinesNavTitle = companyNm ? `Brand Guidelines (${companyNm})` : 'Brand Guidelines'
-    /** Account menu: tenant / company scope (team, billing, workspace admins) — not the brand creative hub. */
-    const companySettingsLabel = 'Company admin'
     /** Account menu: brand identity, guidelines, portal */
     const brandSettingsLabel = brandNmForMenu ? `${brandNmForMenu} Settings` : 'Brand settings'
 
@@ -712,7 +710,6 @@ export default function AppNav({
             effectiveCollection={effectiveCollection}
             collectionOnly={collectionOnly || isCollectionGuestExperience}
             workspaceBrandColor={workspaceBrandColor}
-            companySettingsLabel={companySettingsLabel}
             brandSettingsLabel={brandSettingsLabel}
         />
     )
@@ -979,31 +976,59 @@ export default function AppNav({
                         )}
                         {/* Brand Logo Component — max width keeps main nav from overlapping wide wordmarks */}
                         <div className="flex min-h-12 min-w-0 max-w-[200px] sm:max-w-[220px] md:max-w-[240px] shrink-0 items-center">
-                            {isAppPage ? (isExternalCollectionChrome && collectionBrandForLogo && effectiveCollection?.id ? (
-                                <AppBrandLogo
-                                    activeBrand={collectionBrandForLogo}
-                                    brands={effectiveCollectionsList.length > 1 ? [...new Map(effectiveCollectionsList.filter(c => c.brand).map(c => [c.brand.id, { ...c.brand, is_active: c.brand.id === collectionBrandForLogo?.id }])).values()] : []}
-                                    textColor={textColor}
-                                    logoFilterStyle={computeLogoFilterStyle(collectionBrandForLogo?.logo_filter, collectionBrandForLogo?.primary_color)}
-                                    onSwitchBrand={(brandId) => {
-                                        const col = effectiveCollectionsList.find(c => c.brand?.id === brandId)
-                                        if (col) router.post(route('collection-invite.switch', { collection: col.id }))
-                                    }}
-                                    rootLinkHref={route('collection-invite.landing', { collection: effectiveCollection.id })}
-                                />
-                            ) : isExternalCollectionChrome && effectiveCollection ? (
-                                <span className="text-base font-semibold text-gray-900" title="Collection-only access">
-                                    {effectiveCollection.name}
-                                </span>
+                            {isAppPage ? (
+                                isAdminPage ? (
+                                    <Link
+                                        href="/app/admin"
+                                        className={`flex min-w-0 flex-col justify-center rounded-md focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 ${
+                                            textColor === '#ffffff'
+                                                ? 'focus-visible:ring-white/50 focus-visible:ring-offset-transparent'
+                                                : 'focus-visible:ring-slate-400 focus-visible:ring-offset-white'
+                                        }`}
+                                        title="Site admin — Command Center"
+                                    >
+                                        <JackpotLogo
+                                            className="h-7 w-auto sm:h-8"
+                                            textClassName={
+                                                textColor === '#ffffff'
+                                                    ? 'text-base font-bold text-white sm:text-lg'
+                                                    : 'text-base font-bold text-slate-900 sm:text-lg'
+                                            }
+                                        />
+                                        <span
+                                            className={`mt-0.5 hidden truncate text-[9px] font-semibold uppercase tracking-[0.12em] sm:block ${
+                                                textColor === '#ffffff' ? 'text-white/55' : 'text-slate-500'
+                                            }`}
+                                        >
+                                            Site admin
+                                        </span>
+                                    </Link>
+                                ) : isExternalCollectionChrome && collectionBrandForLogo && effectiveCollection?.id ? (
+                                    <AppBrandLogo
+                                        activeBrand={collectionBrandForLogo}
+                                        brands={effectiveCollectionsList.length > 1 ? [...new Map(effectiveCollectionsList.filter(c => c.brand).map(c => [c.brand.id, { ...c.brand, is_active: c.brand.id === collectionBrandForLogo?.id }])).values()] : []}
+                                        textColor={textColor}
+                                        logoFilterStyle={computeLogoFilterStyle(collectionBrandForLogo?.logo_filter, collectionBrandForLogo?.primary_color)}
+                                        onSwitchBrand={(brandId) => {
+                                            const col = effectiveCollectionsList.find(c => c.brand?.id === brandId)
+                                            if (col) router.post(route('collection-invite.switch', { collection: col.id }))
+                                        }}
+                                        rootLinkHref={route('collection-invite.landing', { collection: effectiveCollection.id })}
+                                    />
+                                ) : isExternalCollectionChrome && effectiveCollection ? (
+                                    <span className="text-base font-semibold text-gray-900" title="Collection-only access">
+                                        {effectiveCollection.name}
+                                    </span>
+                                ) : (
+                                    <AppBrandLogo
+                                        activeBrand={activeBrand}
+                                        brands={brands}
+                                        textColor={textColor}
+                                        logoFilterStyle={logoFilterStyle}
+                                        onSwitchBrand={handleSwitchBrand}
+                                    />
+                                )
                             ) : (
-                                <AppBrandLogo
-                                    activeBrand={activeBrand}
-                                    brands={brands}
-                                    textColor={textColor}
-                                    logoFilterStyle={logoFilterStyle}
-                                    onSwitchBrand={handleSwitchBrand}
-                                />
-                            )) : (
                                 <Link href="/" className="flex items-center">
                                     <JackpotLogo className="h-8 w-auto" />
                                 </Link>

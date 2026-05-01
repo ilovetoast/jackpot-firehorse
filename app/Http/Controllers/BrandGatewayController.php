@@ -22,6 +22,7 @@ use Illuminate\Validation\Rules\Password as PasswordRule;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
+use Symfony\Component\HttpFoundation\Response as SymfonyResponse;
 
 class BrandGatewayController extends Controller
 {
@@ -667,7 +668,7 @@ class BrandGatewayController extends Controller
      * Redirect to the URL the user originally requested, or the portal default destination.
      * Consumes the intended_url stored by EnsureGatewayEntry middleware.
      */
-    protected function redirectToGatewayIntended(): \Illuminate\Http\RedirectResponse
+    protected function redirectToGatewayIntended(): RedirectResponse|SymfonyResponse
     {
         $intended = session()->pull('intended_url');
 
@@ -680,6 +681,12 @@ class BrandGatewayController extends Controller
 
         if (! $intended) {
             $intended = $this->resolveDefaultDestination();
+        }
+
+        // Inertia POST+redirect: following 302 with XHR can end on a non-Inertia response (e.g. empty body),
+        // which triggers router "invalid" and surfaces as a misleading 204 in the global error modal.
+        if (request()->header('X-Inertia')) {
+            return Inertia::location($intended);
         }
 
         return redirect()->to($intended);

@@ -125,7 +125,17 @@ Route::get('/invite/collection/{token}', [\App\Http\Controllers\CollectionAccess
 Route::post('/invite/collection/{token}/accept', [\App\Http\Controllers\CollectionAccessInviteController::class, 'accept'])->middleware('auth')->name('collection-invite.accept.submit');
 Route::post('/invite/collection/{token}/complete', [\App\Http\Controllers\CollectionAccessInviteController::class, 'complete'])->name('collection-invite.complete');
 
+// Password-protected collection share links (token URL; copied link for guests)
+Route::get('/share/collections/{token}', [\App\Http\Controllers\ShareCollectionController::class, 'show'])->name('share.collections.show');
+Route::post('/share/collections/{token}/unlock', [\App\Http\Controllers\ShareCollectionController::class, 'unlock'])->name('share.collections.unlock')->middleware(['throttle:20,1']);
+Route::post('/share/collections/{token}/lock', [\App\Http\Controllers\ShareCollectionController::class, 'lock'])->name('share.collections.lock');
+Route::post('/share/collections/{token}/download', [\App\Http\Controllers\ShareCollectionController::class, 'createDownload'])->name('share.collections.download');
+Route::get('/share/collections/{token}/zip', [\App\Http\Controllers\ShareCollectionController::class, 'streamZip'])->name('share.collections.zip')->middleware(['signed', 'throttle:10,1']);
+Route::get('/share/collections/{token}/assets/{asset}/download', [\App\Http\Controllers\ShareCollectionController::class, 'download'])->name('share.collections.assets.download');
+
 // Public collections (C8) — no auth, is_public only; brand-namespaced for uniqueness
+Route::post('/b/{brand_slug}/collections/{collection_slug}/unlock', [\App\Http\Controllers\PublicCollectionController::class, 'unlockSlug'])->name('public.collections.unlock')->middleware(['throttle:20,1']);
+Route::post('/b/{brand_slug}/collections/{collection_slug}/lock', [\App\Http\Controllers\PublicCollectionController::class, 'lockSlug'])->name('public.collections.lock');
 Route::get('/b/{brand_slug}/collections/{collection_slug}', [\App\Http\Controllers\PublicCollectionController::class, 'show'])->name('public.collections.show');
 Route::post('/b/{brand_slug}/collections/{collection_slug}/download', [\App\Http\Controllers\PublicCollectionController::class, 'createDownload'])->name('public.collections.download');
 // D6: On-the-fly collection ZIP — signed URL, no Download record; throttle to prevent abuse

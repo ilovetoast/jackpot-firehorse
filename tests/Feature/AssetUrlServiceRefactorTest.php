@@ -16,6 +16,7 @@ use App\Models\Tenant;
 use App\Models\UploadSession;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 use Inertia\Testing\AssertableInertia as Assert;
 use Tests\TestCase;
@@ -100,13 +101,17 @@ class AssetUrlServiceRefactorTest extends TestCase
             'slug' => 'public-collection',
             'visibility' => 'brand',
             'is_public' => true,
+            'public_share_token' => 'asseturlrefactor01',
+            'public_password_hash' => Hash::make('secret'),
+            'public_password_set_at' => now(),
         ]);
         $collection->assets()->attach($asset->id);
 
-        $response = $this->get(route('public.collections.show', [
-            'brand_slug' => $brand->slug,
-            'collection_slug' => $collection->slug,
-        ]));
+        $response = $this->withSession([$collection->sessionUnlockKey() => true])
+            ->get(route('public.collections.show', [
+                'brand_slug' => $brand->slug,
+                'collection_slug' => $collection->slug,
+            ]));
 
         $response->assertStatus(200);
         $response->assertInertia(fn (Assert $page) => $page
