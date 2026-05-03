@@ -37,16 +37,11 @@ const POLL_SCHEDULE = [3000, 4000, 5000, 10000, 20000] // milliseconds
 const MAX_POLL_ATTEMPTS = POLL_SCHEDULE.length
 
 /**
- * HARD STABILIZATION: Thumbnail polling is disabled to prevent flashing and visual instability.
- * 
- * NOTE: Thumbnails intentionally do NOT live-update on the grid.
- * Stability > real-time updates.
- * 
- * Live thumbnail upgrades can be reintroduced later via explicit user action (refresh / reopen page).
+ * Grid batch polling: merges thumbnail fields into local asset state. {@link ThumbnailPreview}
+ * must allow preview → final URL upgrades when `effectiveFinalUrl` appears (see grid shouldUpdate).
  */
 export function useThumbnailSmartPoll({ assets, onAssetUpdate, selectedCategoryId = null, isPaused = false }) {
-    // Re-enabled: Grid polling for fade-in thumbnails (same as drawer)
-    // Async updates only - no view refreshes
+    // Async updates only — no full Inertia reloads
 
     // Initialize refs
     const assetsRef = useRef(assets)

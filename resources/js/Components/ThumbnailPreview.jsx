@@ -226,10 +226,14 @@ export default function ThumbnailPreview({
             const assetIdChanged = prevAssetIdRef.current !== asset?.id
             
             // In drawer context: always allow updates (including when preview is removed)
-            // In grid context: only update if thumbnail becomes available (was null, now has URL)
-            const shouldUpdate = isDrawerContext 
+            // In grid context: first paint locks preview/LQIP or blob; when polling merges final_thumbnail_url
+            // or legacy thumbnail_url + completed, we must upgrade (preview→final). The old rule
+            // `!lockedUrl && newUrl` blocked that forever once a preview URL was locked.
+            const shouldUpdate = isDrawerContext
                 ? (assetIdChanged || (newUrl && newUrl !== lockedUrl) || (!newUrl && lockedUrl && prevAssetIdRef.current === asset?.id))
-                : (assetIdChanged || (!lockedUrl && newUrl)) // Grid: only update if we didn't have a URL and now we do
+                : assetIdChanged ||
+                  (!lockedUrl && newUrl) ||
+                  (!!newFinal && newFinal !== lockedUrl)
             
             if (shouldUpdate) {
                 const nextType = newFinal ? 'final' : newPreview ? 'preview' : null
@@ -285,8 +289,8 @@ export default function ThumbnailPreview({
     const isPreview = lockedIsPreview
     
     // Get state for icon rendering (but don't use it to change URLs)
-    // NOTE: Thumbnails intentionally do NOT live-update on the grid.
-    // Stability > real-time updates.
+    // Grid: first locked URL is stable; preview/LQIP/blob may upgrade once to the server final
+    // (see shouldUpdate above). Arbitrary URL churn is still avoided.
     const { state } = useMemo(() => {
         return getThumbnailState(asset, retryCount)
     }, [asset?.id, retryCount])
