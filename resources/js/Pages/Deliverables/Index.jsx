@@ -22,6 +22,11 @@ import SelectionActionBar from '../../Components/SelectionActionBar'
 import { useSelection } from '../../contexts/SelectionContext'
 import { useBucketOptional } from '../../contexts/BucketContext'
 import { mergeAsset, warnIfOverwritingCompletedThumbnail } from '../../utils/assetUtils'
+import { computeThumbnailPipelineGridSummary } from '../../utils/assetGridPipelineSummary'
+import {
+    clearUploadPreviewsOlderThan,
+    revokeUploadPreviewIfServerRasterPresent,
+} from '../../utils/uploadPreviewRegistry'
 import { DELIVERABLES_ITEM_LABEL, DELIVERABLES_ITEM_LABEL_PLURAL } from '../../utils/uiLabels'
 import {
     getWorkspaceButtonColor,
@@ -90,6 +95,7 @@ function DeliverablesIndexPage({ categories, bulk_categories_by_asset_type = nul
     // Phase 2 invariant: UploadAssetDialog is controlled via conditional mounting only.
     // Do not convert back to prop-based visibility.
     const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false)
+    const [gridThumbnailPollPausedForUploadTransfer, setGridThumbnailPollPausedForUploadTransfer] = useState(false)
     
     // Prevent reopening dialog during auto-close timeout (400-700ms delay)
     const [isAutoClosing, setIsAutoClosing] = useState(false)
@@ -163,6 +169,10 @@ function DeliverablesIndexPage({ categories, bulk_categories_by_asset_type = nul
     // CRITICAL: Drawer identity is based ONLY on activeAssetId, not asset object identity
     // Asset object mutations (async updates, thumbnail swaps, etc.) must NOT close the drawer
     const safeAssetsList = (assetsList || []).filter(Boolean)
+    const thumbnailPipelineSummary = useMemo(
+        () => computeThumbnailPipelineGridSummary(safeAssetsList),
+        [safeAssetsList],
+    )
     const activeAsset = activeAssetId ? safeAssetsList.find(asset => asset?.id === activeAssetId) : null
     
     // Close drawer ONLY if active asset ID truly doesn't exist in current assets array
@@ -179,7 +189,7 @@ function DeliverablesIndexPage({ categories, bulk_categories_by_asset_type = nul
     const { selectedCount, clearSelection, getSelectedOnPage } = useSelection()
     const bucket = useBucketOptional()
     const bucketAssetIds = bucket?.bucketAssetIds ?? []
-    const handleBucketToggle = useCallback((assetId) => {
+    const handleBucketToggle = useCallback((assetId, _ev) => {
         if (!bucket) return
         if (bucketAssetIds.includes(assetId)) {
             bucket.bucketRemove(assetId)
@@ -257,6 +267,7 @@ function DeliverablesIndexPage({ categories, bulk_categories_by_asset_type = nul
     // Grid thumbnail polling: Async updates for fade-in (same as drawer)
     // No view refreshes - only local state updates
     const handleThumbnailUpdate = useCallback((updatedAsset) => {
+        revokeUploadPreviewIfServerRasterPresent(updatedAsset)
         setAssetsList(prevAssets => {
             return (prevAssets || []).filter(Boolean).map(asset => {
                 if (asset?.id === updatedAsset?.id) {
@@ -286,7 +297,16 @@ function DeliverablesIndexPage({ categories, bulk_categories_by_asset_type = nul
         assets: safeAssetsList,
         onAssetUpdate: handleThumbnailUpdate,
         selectedCategoryId,
+        isPaused: gridThumbnailPollPausedForUploadTransfer,
     })
+
+    useEffect(() => {
+        if (typeof window === 'undefined') return undefined
+        const id = window.setInterval(() => {
+            clearUploadPreviewsOlderThan(45 * 60 * 1000)
+        }, 10 * 60 * 1000)
+        return () => window.clearInterval(id)
+    }, [])
     
     // Load toolbar settings from localStorage
     const getStoredCardSize = () => {
@@ -541,6 +561,15 @@ function DeliverablesIndexPage({ categories, bulk_categories_by_asset_type = nul
     // Assets does not use a category-dependent key; matching that here fixes Executions flashing twice.
     const pageKey = `deliverables-${remountKey}`
     
+    /** Soft refresh while upload dialog stays open (minimized tray after Finalize). */
+    const handleFinalizeAccepted = useCallback(() => {
+        router.reload({
+            only: [...DELIVERABLE_GRID_QUERY_KEYS, ...DELIVERABLE_SIDEBAR_COUNTS_ONLY, 'trash_count'],
+            preserveScroll: true,
+            preserveState: true,
+        })
+    }, [])
+
     // Handle finalize complete - refresh asset grid after successful upload finalize
     // Match Assets/Index behavior: preserve drawer state by only reloading assets prop
     const handleFinalizeComplete = useCallback(() => {
@@ -840,6 +869,7 @@ function DeliverablesIndexPage({ categories, bulk_categories_by_asset_type = nul
                                 onCardSizeChange={setCardSize}
                                 layoutMode={layoutMode}
                                 onLayoutModeChange={setLayoutMode}
+                                thumbnailPipelineSummary={thumbnailPipelineSummary}
                                 primaryColor={workspaceAccentColor}
                                 primaryMetadataFiltersAssetType="deliverable"
                                 filterable_schema={filterable_schema}
@@ -1105,6 +1135,8 @@ function DeliverablesIndexPage({ categories, bulk_categories_by_asset_type = nul
                     categories={categories || []}
                     initialCategoryId={selectedCategoryId}
                     onFinalizeComplete={handleFinalizeComplete}
+                    onFinalizeAccepted={handleFinalizeAccepted}
+                    onGridTransferActiveChange={setGridThumbnailPollPausedForUploadTransfer}
                     initialFiles={droppedFiles}
                 />
             )}

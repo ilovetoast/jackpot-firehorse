@@ -42,7 +42,7 @@
  * @param {Array} props.assets - Array of all assets (for carousel navigation)
  * @param {number|null} props.currentAssetIndex - Current asset index in carousel
  */
-import { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
 import { XMarkIcon, ArrowPathIcon, ChevronLeftIcon, ChevronRightIcon, ChevronDownIcon, ExclamationTriangleIcon, EyeIcon, ArrowDownTrayIcon, CheckCircleIcon, CheckIcon, ArrowUturnLeftIcon, ClockIcon, XCircleIcon, CloudArrowUpIcon, RectangleStackIcon, TicketIcon, InformationCircleIcon, PhotoIcon, SparklesIcon, TagIcon } from '@heroicons/react/24/outline'
 import { usePage, router, Link } from '@inertiajs/react'
@@ -54,6 +54,10 @@ import AssetEmbeddedMetadataPanel from './AssetEmbeddedMetadataPanel'
 import PendingMetadataList from './PendingMetadataList'
 import ManageAssetModal from './ManageAssetModal'
 import ThumbnailPreview from './ThumbnailPreview'
+import {
+    getUploadPreviewSnapshotForAsset,
+    subscribeUploadPreviewRegistry,
+} from '../utils/uploadPreviewRegistry'
 import UploadedFontSpecimenPreview, { isUploadedFontFileAsset } from './UploadedFontSpecimenPreview'
 import ReplaceFileModal from './ReplaceFileModal'
 import CollapsibleSection from './CollapsibleSection'
@@ -74,6 +78,7 @@ import {
     getThumbnailVersion,
     supportsThumbnail,
 } from '../utils/thumbnailUtils'
+import { getAssetCardVisualState } from '../utils/assetCardVisualState'
 import {
     ENHANCED_SKIP_REASON_TOO_SMALL,
     formatIsoDateTimeLocal,
@@ -863,6 +868,19 @@ export default function AssetDrawer({
     // CRITICAL: Drawer must tolerate undefined asset during async updates
     // Asset may be temporarily undefined while localAssets array is being updated
     const displayAsset = drawerAsset || asset || null
+
+    const drawerUploadPreviewSnapshot = useSyncExternalStore(
+        subscribeUploadPreviewRegistry,
+        () => getUploadPreviewSnapshotForAsset(displayAsset?.id),
+        () => getUploadPreviewSnapshotForAsset(displayAsset?.id),
+    )
+    const drawerEphemeralLocalPreviewUrl = useMemo(() => {
+        const sep = '\u0001'
+        const i = drawerUploadPreviewSnapshot.indexOf(sep)
+        if (i < 0) return null
+        const url = drawerUploadPreviewSnapshot.slice(i + sep.length)
+        return url.length > 0 ? url : null
+    }, [drawerUploadPreviewSnapshot])
 
     // Reset Asset Data embedded cache + tab on asset switch so we never briefly show a previous asset's EXIF.
     useEffect(() => {
@@ -3140,72 +3158,7 @@ export default function AssetDrawer({
         thumbnailsFailed,
     ])
 
-    /**
-     * Quick View accordion: Metadata stays collapsed by default; open Preview & Styles and Processing & Automation
-     * when previews/AI/video/execution need attention (matches “expand when there are processing issues”).
-     */
-    const drawerExpandPreviewOrProcessingSections = useMemo(() => {
-        const ts = String(thumbnailStatusForPanel || '').toLowerCase()
-        const thumbNeedsAttention =
-            ts === 'pending' ||
-            ts === 'processing' ||
-            ts === 'failed' ||
-            ts === 'queued' ||
-            (ts === 'skipped' && Boolean(canRegeneratePreviewInProcessingSection))
-
-        const analysisNeedsAttention = !aiPipelineCompleteForDrawer
-
-        const videoNeedsAttention =
-            isVideo &&
-            ['queued', 'processing', 'failed'].includes(
-                String(displayAsset?.metadata?.ai_video_status || ''),
-            )
-
-        const pipelineNeedsAttention =
-            isProcessingDrawerBusy ||
-            isAssetAnalysisPipelineRunning ||
-            Boolean(generateError) ||
-            showPreviewMissingInfo
-
-        const executionNeedsAttention =
-            showExecutionPreviewChrome &&
-            (preferredPipelineStatus === 'processing' ||
-                enhancedPipelineStatus === 'processing' ||
-                presentationPipelineStatus === 'processing' ||
-                enhancedPipelineStatus === 'failed' ||
-                presentationPipelineStatus === 'failed')
-
-        return (
-            thumbNeedsAttention ||
-            analysisNeedsAttention ||
-            videoNeedsAttention ||
-            pipelineNeedsAttention ||
-            executionNeedsAttention
-        )
-    }, [
-        thumbnailStatusForPanel,
-        canRegeneratePreviewInProcessingSection,
-        aiPipelineCompleteForDrawer,
-        isVideo,
-        displayAsset?.metadata?.ai_video_status,
-        isProcessingDrawerBusy,
-        isAssetAnalysisPipelineRunning,
-        generateError,
-        showPreviewMissingInfo,
-        showExecutionPreviewChrome,
-        preferredPipelineStatus,
-        enhancedPipelineStatus,
-        presentationPipelineStatus,
-    ])
-
-    /**
-     * Executions (deliverables): Preview & Styles + Processing & Automation start collapsed so Quick View
-     * stays scannable. Library assets keep attention-based auto-expand from drawerExpandPreviewOrProcessingSections.
-     */
-    const drawerPreviewProcessingDefaultExpanded = useMemo(
-        () => (isExecutionDrawer ? false : drawerExpandPreviewOrProcessingSections),
-        [isExecutionDrawer, drawerExpandPreviewOrProcessingSections],
-    )
+    // Preview & Styles and Processing & Automation stay collapsed by default (status remains visible in section headers).
 
     // Handle manual thumbnail generation (for previously skipped assets)
     const handleGenerateThumbnail = async () => {
@@ -4152,6 +4105,7 @@ export default function AssetDrawer({
                                         forceObjectFit={drawerPreviewForceObjectFit || 'cover'}
                                         forcedImageUrl={drawerForcedPreviewUrl}
                                         forcedImageSpinnerOverlay={drawerForcedModeSpinnerOverlay}
+                                        ephemeralLocalPreviewUrl={drawerEphemeralLocalPreviewUrl}
                                     />
                                     
                                     {/* Zoom overlay (only shown when hovering) */}
@@ -4263,15 +4217,44 @@ export default function AssetDrawer({
                                 // Assets with thumbnail support (images and PDFs): Use ThumbnailPreview with state machine
                                 // Use displayAsset (with live updates) instead of prop asset
                                 <div
-                                    className="w-full h-full cursor-pointer group"
+                                    className="relative h-full w-full cursor-pointer group"
                                     onClick={() => {
-                                        // Only allow zoom if thumbnail is available
                                         const { state } = getThumbnailState(displayAsset, thumbnailRetryCount)
-                                        if (state === 'AVAILABLE') {
+                                        if (state === 'AVAILABLE' || drawerEphemeralLocalPreviewUrl) {
                                             setShowZoomModal(true)
                                         }
                                     }}
                                 >
+                                    {(() => {
+                                        const vs = getAssetCardVisualState(displayAsset, {
+                                            ephemeralLocalPreviewUrl: drawerEphemeralLocalPreviewUrl,
+                                        })
+                                        if (vs.kind === 'ready' || vs.kind === 'local_preview') return null
+                                        return (
+                                            <div
+                                                className="pointer-events-none absolute left-2 right-2 top-2 z-10 rounded-md bg-white/95 px-2 py-1.5 text-center shadow-sm ring-1 ring-slate-200/90 backdrop-blur-[2px]"
+                                                role="status"
+                                            >
+                                                <span className="text-[11px] font-semibold text-slate-800">
+                                                    {vs.label}
+                                                </span>
+                                                <span className="mt-0.5 block text-[10px] leading-snug text-slate-600">
+                                                    {vs.description}
+                                                </span>
+                                                {[
+                                                    'generating_preview',
+                                                    'raw_processing',
+                                                    'document_processing',
+                                                    'video_processing',
+                                                    'unknown_processing',
+                                                ].includes(vs.kind) ? (
+                                                    <span className="mt-1 block text-[10px] text-slate-500">
+                                                        Preview is still processing. The original file is saved.
+                                                    </span>
+                                                ) : null}
+                                            </div>
+                                        )
+                                    })()}
                                     {showExecutionPreviewChrome &&
                                     previewStyleMode === 'presentation' &&
                                     executionPresentationBaseUrl ? (
@@ -4305,10 +4288,14 @@ export default function AssetDrawer({
                                             forceObjectFit={drawerPreviewForceObjectFit || undefined}
                                             forcedImageUrl={drawerForcedPreviewUrl}
                                             forcedImageSpinnerOverlay={drawerForcedModeSpinnerOverlay}
+                                            ephemeralLocalPreviewUrl={drawerEphemeralLocalPreviewUrl}
                                         />
                                     )}
                                     {/* Zoom overlay (only shown when thumbnail is available) */}
-                                    {(displayAsset.thumbnail_url || displayAsset.final_thumbnail_url || displayAsset.preview_thumbnail_url) && (
+                                    {(displayAsset.thumbnail_url ||
+                                        displayAsset.final_thumbnail_url ||
+                                        displayAsset.preview_thumbnail_url ||
+                                        drawerEphemeralLocalPreviewUrl) && (
                                         <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100 pointer-events-none">
                                             <span className="text-white text-sm font-medium">Click to zoom</span>
                                         </div>
@@ -4331,10 +4318,25 @@ export default function AssetDrawer({
                                     thumbnailVersion={thumbnailVersion}
                                     shouldAnimateThumbnail={shouldAnimateThumbnail}
                                     preferLargeForVector
+                                    ephemeralLocalPreviewUrl={drawerEphemeralLocalPreviewUrl}
                                 />
                             )}
                         </div>
                     </div>
+
+                    {displayAsset?.id &&
+                        !isVirtualGoogleFont &&
+                        (drawerEphemeralLocalPreviewUrl || thumbnailsProcessing) &&
+                        (hasThumbnailSupport || isVideo) && (
+                            <div className="rounded-md border border-violet-100 bg-violet-50/90 px-3 py-2">
+                                <p className="text-xs font-semibold text-violet-900">Preview processing</p>
+                                <p className="mt-1 text-xs leading-snug text-violet-900/85">
+                                    {drawerEphemeralLocalPreviewUrl
+                                        ? 'Showing your local preview until the library thumbnail is ready. You can edit fields below while this finishes.'
+                                        : 'You can view and edit metadata and fields below while the library preview finishes.'}
+                                </p>
+                            </div>
+                        )}
 
                     {isPdf && displayAsset?.id && showPreviewContentSection && (
                         <div className="rounded-md border border-slate-200/80 bg-slate-50/70 px-2.5 py-2 shadow-sm shadow-slate-900/[0.02]">
@@ -5540,7 +5542,7 @@ export default function AssetDrawer({
                             <CollapsibleSection
                                 contentInset="flush"
                                 title="Preview & Styles"
-                                defaultExpanded={drawerPreviewProcessingDefaultExpanded}
+                                defaultExpanded={false}
                             >
                                 <div className="space-y-2">
                                     {(canRegeneratePreviewInProcessingSection || showExecutionPreviewChrome) && (
@@ -5847,7 +5849,7 @@ export default function AssetDrawer({
                                 <CollapsibleSection
                                     contentInset="flush"
                                     title="Processing & Automation"
-                                    defaultExpanded={drawerPreviewProcessingDefaultExpanded}
+                                    defaultExpanded={false}
                                 >
                                     <div className="space-y-3">
                                         <div className="text-xs leading-snug text-gray-500">

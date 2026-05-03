@@ -4,6 +4,8 @@
  */
 import { useState, useCallback, useMemo, useRef, useEffect } from 'react'
 import { Head, router } from '@inertiajs/react'
+import axios from 'axios'
+import LoadMoreFooter from '../../Components/LoadMoreFooter'
 import {
     DocumentIcon,
     ArrowDownTrayIcon,
@@ -13,7 +15,14 @@ import {
     ListBulletIcon,
 } from '@heroicons/react/24/outline'
 import AssetGrid from '../../Components/AssetGrid'
+import PublicShareAssetLightbox from '../../Components/Public/PublicShareAssetLightbox'
+import FilmGrainOverlay from '../../Components/FilmGrainOverlay'
 import { useCdn403Recovery } from '../../hooks/useCdn403Recovery'
+import { contrastTextOnPrimary } from '../../utils/contrastTextOnPrimary'
+import { publicShareCinemaLayers } from '../../utils/publicShareCinemaBackground'
+
+/** Show a “may take a while” notice in the ZIP modal above this file count (full collection or selected). */
+const LARGE_PUBLIC_ZIP_WARNING_THRESHOLD = 25
 
 function formatBytes(n) {
     if (n == null || Number.isNaN(Number(n))) return ''
@@ -27,24 +36,25 @@ export default function PublicCollection({
     collection = {},
     assets = [],
     public_collection_downloads_enabled: downloadCollectionEnabled = false,
-    branding_options = {},
-    cdn_domain = null,
+    branding_options: brandingOptions = {},
+    public_share_theme: publicShareThemeProp = null,
+    cdn_domain: cdnDomain = null,
     share_download_post_path: shareDownloadPostPath = null,
     guest_collection_path: guestCollectionPath = '',
     guest_query: guestQueryProp = {},
     guest_collection_asset_total: collectionAssetTotal = 0,
     guest_filtered_total: filteredTotal = 0,
-    guest_showing_count: showingCount = 0,
-    guest_asset_limit: guestAssetLimit = 500,
+    next_page_url = null,
 }) {
-    useCdn403Recovery(cdn_domain)
+    useCdn403Recovery(cdnDomain)
     const { name, description, brand_name } = collection
-    const accentColor = branding_options?.accent_color || branding_options?.primary_color || '#4F46E5'
-    const primaryColor = branding_options?.primary_color || accentColor
-    const logoUrl = branding_options?.logo_url || null
-    const backgroundImageUrl = branding_options?.background_image_url || null
-    const themeDark = branding_options?.theme_dark ?? false
-    const hasBackground = !!backgroundImageUrl
+    const theme = publicShareThemeProp || brandingOptions || {}
+    const accentColor = theme.accent_color || theme.primary_color || '#7c3aed'
+    const primaryColor = theme.primary_color || accentColor
+    const logoUrl = theme.logo_url || null
+    const backgroundImageUrl = theme.background_image_url || null
+    const { color: onPrimaryBtn } = contrastTextOnPrimary(primaryColor)
+    const { color: onAccentBtn } = contrastTextOnPrimary(accentColor)
 
     const q = typeof guestQueryProp?.q === 'string' ? guestQueryProp.q : ''
     const type = typeof guestQueryProp?.type === 'string' ? guestQueryProp.type : 'all'
@@ -52,21 +62,76 @@ export default function PublicCollection({
     const view = guestQueryProp?.view === 'list' ? 'list' : 'grid'
 
     const [downloadPanelOpen, setDownloadPanelOpen] = useState(false)
-    const [downloadPanelMode, setDownloadPanelMode] = useState('all') // 'all' | 'selected'
+    const [downloadPanelMode, setDownloadPanelMode] = useState('all')
     const [downloadSubmitting, setDownloadSubmitting] = useState(false)
     const [downloadError, setDownloadError] = useState(null)
     const [selectedIds, setSelectedIds] = useState(() => new Set())
+    const [lightboxIndex, setLightboxIndex] = useState(null)
     const searchInputRef = useRef(null)
+    /** Index in `assetsList` for Shift-click range select (download checkboxes). */
+    const lastBucketAnchorIndexRef = useRef(null)
+
+    const [assetsList, setAssetsList] = useState(() => (Array.isArray(assets) ? assets.filter(Boolean) : []))
+    const [nextPageUrl, setNextPageUrl] = useState(next_page_url ?? null)
+    const [loadingMore, setLoadingMore] = useState(false)
+    const loadMoreRef = useRef(null)
+    const loadMoreAbortRef = useRef(null)
 
     useEffect(() => {
         setSelectedIds(new Set())
+        lastBucketAnchorIndexRef.current = null
     }, [q, type, sort, view, guestCollectionPath])
+
+    useEffect(() => {
+        if (loadMoreAbortRef.current) {
+            loadMoreAbortRef.current.abort()
+            loadMoreAbortRef.current = null
+        }
+        setAssetsList(Array.isArray(assets) ? assets.filter(Boolean) : [])
+        setNextPageUrl(next_page_url ?? null)
+    }, [assets, next_page_url, q, type, sort, view, guestCollectionPath])
 
     useEffect(() => {
         if (searchInputRef.current) {
             searchInputRef.current.value = q
         }
     }, [q])
+
+    const loadMore = useCallback(async () => {
+        if (!nextPageUrl || loadingMore) return
+        setLoadingMore(true)
+        const ac = new AbortController()
+        loadMoreAbortRef.current = ac
+        try {
+            const separator = nextPageUrl.includes('?') ? '&' : '?'
+            const url = `${nextPageUrl}${separator}load_more=1`
+            const response = await axios.get(url, { signal: ac.signal })
+            const data = response.data?.data ?? []
+            setAssetsList((prev) => [...prev, ...(Array.isArray(data) ? data : [])])
+            setNextPageUrl(response.data?.next_page_url ?? null)
+        } catch (e) {
+            if (e.name === 'CanceledError' || e.code === 'ERR_CANCELED') return
+            console.error('Guest collection infinite scroll failed', e)
+            if (e.response?.status === 500) setNextPageUrl(null)
+        } finally {
+            if (loadMoreAbortRef.current === ac) loadMoreAbortRef.current = null
+            setLoadingMore(false)
+        }
+    }, [nextPageUrl, loadingMore])
+
+    useEffect(() => {
+        if (!loadMoreRef.current) return
+        const observer = new IntersectionObserver(
+            (entries) => {
+                if (entries[0]?.isIntersecting && nextPageUrl && !loadingMore) {
+                    loadMore()
+                }
+            },
+            { rootMargin: '200px' }
+        )
+        observer.observe(loadMoreRef.current)
+        return () => observer.disconnect()
+    }, [nextPageUrl, loadingMore, loadMore])
 
     const navigateGuestQuery = useCallback(
         (patch) => {
@@ -122,7 +187,13 @@ export default function PublicCollection({
                 })
                 const data = await res.json().catch(() => ({}))
                 if (!res.ok) {
-                    throw new Error(data.message || 'Download failed')
+                    const msg =
+                        typeof data.message === 'string' && data.message.trim()
+                            ? data.message
+                            : res.status === 404
+                              ? 'This shared collection is no longer available.'
+                              : 'Download failed. Please try again.'
+                    throw new Error(msg)
                 }
                 if (data.zip_url) {
                     window.open(data.zip_url, '_blank', 'noopener,noreferrer')
@@ -155,10 +226,32 @@ export default function PublicCollection({
 
     const bucketIdsList = useMemo(() => {
         const set = selectedIds
-        return (assets || []).filter((a) => set.has(String(a.id))).map((a) => a.id)
-    }, [assets, selectedIds])
+        return (assetsList || []).filter((a) => set.has(String(a.id))).map((a) => a.id)
+    }, [assetsList, selectedIds])
 
-    const toggleBucket = useCallback((id) => {
+    const toggleBucket = useCallback((id, ev) => {
+        const list = assetsList || []
+        const idx = list.findIndex((a) => String(a.id) === String(id))
+        if (idx < 0) return
+
+        if (ev?.shiftKey && lastBucketAnchorIndexRef.current != null) {
+            const anchor = lastBucketAnchorIndexRef.current
+            const lo = Math.min(anchor, idx)
+            const hi = Math.max(anchor, idx)
+            setSelectedIds((prev) => {
+                const clickedSelected = prev.has(String(id))
+                const targetOn = !clickedSelected
+                const n = new Set(prev)
+                for (let k = lo; k <= hi; k++) {
+                    const aid = String(list[k].id)
+                    if (targetOn) n.add(aid)
+                    else n.delete(aid)
+                }
+                return n
+            })
+            return
+        }
+
         const sid = String(id)
         setSelectedIds((prev) => {
             const n = new Set(prev)
@@ -166,306 +259,381 @@ export default function PublicCollection({
             else n.add(sid)
             return n
         })
-    }, [])
+        lastBucketAnchorIndexRef.current = idx
+    }, [assetsList])
 
     const selectAllVisible = () => {
-        setSelectedIds(new Set((assets || []).map((a) => String(a.id))))
+        setSelectedIds(new Set((assetsList || []).map((a) => String(a.id))))
+        lastBucketAnchorIndexRef.current = null
     }
 
-    const clearSelection = () => setSelectedIds(new Set())
+    const clearSelection = () => {
+        setSelectedIds(new Set())
+        lastBucketAnchorIndexRef.current = null
+    }
 
     const emptyCollection = collectionAssetTotal === 0
     const noMatches = !emptyCollection && filteredTotal === 0
-    const cappedList = filteredTotal > guestAssetLimit
 
-    const baseBg = themeDark ? '#0a0a0a' : '#ffffff'
-    const gradientFrom = themeDark ? 'rgba(10,10,10,0.3)' : 'rgba(255,255,255,0.4)'
-    const gradientTo = themeDark ? 'rgba(10,10,10,0.95)' : 'rgba(255,255,255,0.95)'
-    const textColor = themeDark ? 'text-white' : 'text-gray-900'
-    const textMuted = themeDark ? 'text-white/80' : 'text-gray-600'
-    const textMutedLight = themeDark ? 'text-white/60' : 'text-gray-500'
-    const chromeBorder = themeDark ? 'border-white/15' : 'border-gray-200'
-    const chromeBg = themeDark ? 'bg-white/5' : 'bg-white'
+    const downloadZipAssetCount =
+        downloadPanelMode === 'selected' ? selectedIds.size : collectionAssetTotal
+    const showLargePublicDownloadWarning =
+        downloadZipAssetCount > LARGE_PUBLIC_ZIP_WARNING_THRESHOLD
+    const hasMoreInFilter = filteredTotal > (assetsList?.length ?? 0)
 
-    const handleAssetClick = (asset) => {
-        if (!downloadCollectionEnabled || !asset.download_url) return
-        const a = document.createElement('a')
-        a.href = asset.download_url
-        a.download = asset.original_filename || asset.title || 'download'
-        a.style.display = 'none'
-        document.body.appendChild(a)
-        a.click()
-        document.body.removeChild(a)
-    }
+    const openLightboxForAsset = useCallback(
+        (asset) => {
+            const list = assetsList || []
+            const i = list.findIndex((a) => String(a.id) === String(asset.id))
+            if (i >= 0) setLightboxIndex(i)
+        },
+        [assetsList]
+    )
+
+    const closeLightbox = useCallback(() => setLightboxIndex(null), [])
+
+    const goLightboxPrev = useCallback(() => {
+        setLightboxIndex((i) => {
+            if (i == null || !(assetsList || []).length) return i
+            return i <= 0 ? assetsList.length - 1 : i - 1
+        })
+    }, [assetsList])
+
+    const goLightboxNext = useCallback(() => {
+        setLightboxIndex((i) => {
+            if (i == null || !(assetsList || []).length) return i
+            return i >= assetsList.length - 1 ? 0 : i + 1
+        })
+    }, [assetsList])
 
     const countLabel =
-        cappedList && filteredTotal > 0
-            ? `Showing ${showingCount} of ${filteredTotal}`
+        hasMoreInFilter && filteredTotal > 0
+            ? `Showing ${assetsList.length} of ${filteredTotal}`
             : `${filteredTotal} file${filteredTotal !== 1 ? 's' : ''}`
 
+    const hasBackground = !!backgroundImageUrl
+    const lightboxAsset = lightboxIndex != null && assetsList?.[lightboxIndex] ? assetsList[lightboxIndex] : null
+
+    const { cinemaBase, noPhoto: cinemaStackNoPhoto, withPhotoOverlay: cinemaStackWithPhoto } = publicShareCinemaLayers(
+        primaryColor,
+        accentColor
+    )
+
     return (
-        <div className="min-h-screen relative" style={{ backgroundColor: baseBg, '--accent': accentColor }}>
+        <div
+            className="min-h-screen relative overflow-hidden text-white"
+            style={{
+                backgroundColor: cinemaBase,
+                '--share-primary': primaryColor,
+                '--share-accent': accentColor,
+            }}
+        >
             <Head>
                 <title>{name ? `${name} — Shared collection` : 'Shared collection'}</title>
                 <meta name="robots" content="noindex, nofollow" />
             </Head>
-            {hasBackground && (
-                <>
-                    <div
-                        className="fixed inset-0 bg-cover bg-center bg-no-repeat blur-2xl scale-105"
-                        style={{
-                            backgroundImage: `url(${backgroundImageUrl})`,
-                            opacity: 0.5,
-                        }}
-                        aria-hidden
-                    />
-                    <div
-                        className="fixed inset-0"
-                        style={{
-                            background: `linear-gradient(to bottom, ${gradientFrom} 0%, transparent 25%, transparent 60%, ${gradientTo} 100%)`,
-                        }}
-                        aria-hidden
-                    />
-                </>
-            )}
 
-            <header className={`relative z-10 pt-10 pb-6 px-4 sm:px-6 max-w-5xl mx-auto ${view === 'list' ? '' : 'text-center'}`}>
-                {logoUrl && (
-                    <div className={`mb-5 ${view === 'list' ? '' : 'flex justify-center'}`}>
-                        <img
-                            src={logoUrl}
-                            alt=""
-                            className="h-14 w-auto object-contain max-h-20"
-                            onError={(e) => {
-                                e.target.style.display = 'none'
-                            }}
+            <div className="fixed inset-0 pointer-events-none" aria-hidden>
+                {hasBackground ? (
+                    <>
+                        <div
+                            className="absolute inset-0 bg-cover bg-center bg-no-repeat opacity-[0.38] blur-3xl scale-105"
+                            style={{ backgroundImage: `url(${backgroundImageUrl})` }}
                         />
-                    </div>
+                        <div className="absolute inset-0" style={{ background: cinemaStackWithPhoto }} />
+                    </>
+                ) : (
+                    <div className="absolute inset-0" style={{ background: cinemaStackNoPhoto }} />
                 )}
-                <p className={`text-sm font-medium ${textMuted}`}>{brand_name || 'Brand'}</p>
-                <h1 className={`mt-1 text-3xl font-bold tracking-tight ${textColor}`}>{name || 'Collection'}</h1>
-                <div className={`mt-2 flex flex-wrap items-center gap-2 ${view === 'list' ? '' : 'justify-center'}`}>
-                    <span
-                        className="inline-flex items-center gap-1 rounded-md px-2.5 py-0.5 text-xs font-medium text-white"
-                        style={{ backgroundColor: primaryColor }}
-                    >
-                        Shared collection
-                    </span>
-                    <span className={`inline-flex items-center gap-1 text-xs ${textMuted}`} title="Visitors need the link and password.">
-                        <LockClosedIcon className="h-3.5 w-3.5 shrink-0 opacity-70" aria-hidden />
-                        Protected link
-                    </span>
-                </div>
-                {description ? <p className={`mt-3 text-sm max-w-2xl ${view === 'list' ? '' : 'mx-auto'} ${textMuted}`}>{description}</p> : null}
-            </header>
-
-            <div className={`relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-4`}>
-                {!downloadCollectionEnabled && !emptyCollection ? (
-                    <div
-                        className={`mb-4 rounded-lg border px-4 py-3 text-sm ${chromeBorder} ${themeDark ? 'bg-amber-500/10 text-amber-100 border-amber-400/30' : 'bg-amber-50 text-amber-900 border-amber-200'}`}
-                    >
-                        Downloads are disabled for this shared collection.
-                    </div>
-                ) : null}
-
-                {!emptyCollection && (
-                    <div
-                        className={`rounded-xl border p-3 sm:p-4 shadow-sm space-y-3 ${chromeBorder} ${chromeBg} ${themeDark ? 'backdrop-blur-md' : ''}`}
-                    >
-                        <div className="flex flex-col lg:flex-row lg:items-end gap-3">
-                            <div className="flex-1 min-w-0">
-                                <label htmlFor="guest-share-search" className={`sr-only ${textColor}`}>
-                                    Search files
-                                </label>
-                                <input
-                                    id="guest-share-search"
-                                    ref={searchInputRef}
-                                    type="search"
-                                    defaultValue={q}
-                                    placeholder="Search by name or tags…"
-                                    className={`w-full rounded-lg border px-3 py-2 text-sm ${themeDark ? 'border-white/20 bg-black/30 text-white placeholder:text-white/40' : 'border-gray-300 bg-white text-gray-900'}`}
-                                    onKeyDown={(e) => {
-                                        if (e.key === 'Enter') {
-                                            navigateGuestQuery({ q: e.currentTarget.value })
-                                        }
-                                    }}
-                                />
-                            </div>
-                            <div className="flex flex-wrap gap-2 items-center">
-                                <select
-                                    value={type}
-                                    onChange={(e) => navigateGuestQuery({ type: e.target.value })}
-                                    className={`rounded-lg border px-2 py-2 text-sm ${themeDark ? 'border-white/20 bg-black/30 text-white' : 'border-gray-300 bg-white'}`}
-                                    aria-label="Filter by type"
-                                >
-                                    <option value="all">All types</option>
-                                    <option value="images">Images</option>
-                                    <option value="videos">Videos</option>
-                                    <option value="documents">Documents</option>
-                                    <option value="other">Other</option>
-                                </select>
-                                <select
-                                    value={sort}
-                                    onChange={(e) => navigateGuestQuery({ sort: e.target.value })}
-                                    className={`rounded-lg border px-2 py-2 text-sm ${themeDark ? 'border-white/20 bg-black/30 text-white' : 'border-gray-300 bg-white'}`}
-                                    aria-label="Sort"
-                                >
-                                    <option value="newest">Newest</option>
-                                    <option value="name">Name A–Z</option>
-                                    <option value="type">Type</option>
-                                </select>
-                                <div className={`inline-flex rounded-lg border overflow-hidden ${chromeBorder}`}>
-                                    <button
-                                        type="button"
-                                        onClick={() => navigateGuestQuery({ view: 'grid' })}
-                                        className={`p-2 ${view === 'grid' ? 'bg-indigo-600 text-white' : themeDark ? 'text-white/70 hover:bg-white/10' : 'text-gray-600 hover:bg-gray-50'}`}
-                                        aria-pressed={view === 'grid'}
-                                        title="Grid"
-                                    >
-                                        <Squares2X2Icon className="h-5 w-5" />
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => navigateGuestQuery({ view: 'list' })}
-                                        className={`p-2 ${view === 'list' ? 'bg-indigo-600 text-white' : themeDark ? 'text-white/70 hover:bg-white/10' : 'text-gray-600 hover:bg-gray-50'}`}
-                                        aria-pressed={view === 'list'}
-                                        title="List"
-                                    >
-                                        <ListBulletIcon className="h-5 w-5" />
-                                    </button>
-                                </div>
-                                <button
-                                    type="button"
-                                    onClick={() => navigateGuestQuery({ q: searchInputRef.current?.value ?? '' })}
-                                    className="rounded-lg px-3 py-2 text-sm font-medium text-white shadow-sm"
-                                    style={{ backgroundColor: accentColor }}
-                                >
-                                    Search
-                                </button>
-                            </div>
-                        </div>
-                        <div className={`flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-2 sm:gap-3 text-sm ${textMuted}`}>
-                            <span className={textColor}>{countLabel}</span>
-                            {downloadCollectionEnabled ? (
-                                <>
-                                    <button
-                                        type="button"
-                                        onClick={selectAllVisible}
-                                        disabled={!assets?.length}
-                                        className="text-left font-medium disabled:opacity-40 hover:underline"
-                                        style={{ color: accentColor }}
-                                    >
-                                        Select all visible
-                                    </button>
-                                    <button type="button" onClick={clearSelection} disabled={selectedIds.size === 0} className="text-left font-medium disabled:opacity-40 hover:underline">
-                                        Clear selection
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => openDownloadPanel('selected')}
-                                        disabled={selectedIds.size === 0 || !assets?.length}
-                                        className="inline-flex items-center gap-1 rounded-md border px-3 py-1.5 font-medium disabled:opacity-40"
-                                        style={{ borderColor: accentColor, color: accentColor }}
-                                    >
-                                        <ArrowDownTrayIcon className="h-4 w-4" />
-                                        Download selected
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => openDownloadPanel('all')}
-                                        disabled={collectionAssetTotal === 0}
-                                        className="inline-flex items-center gap-1 rounded-md px-3 py-1.5 font-medium text-white shadow-sm disabled:opacity-40"
-                                        style={{ backgroundColor: accentColor }}
-                                    >
-                                        <ArrowDownTrayIcon className="h-4 w-4" />
-                                        Download all
-                                    </button>
-                                </>
-                            ) : null}
-                        </div>
-                    </div>
-                )}
+                {/* Top read fade + side vignette so hero text pops like the reference */}
+                <div className="absolute inset-0 bg-[radial-gradient(ellipse_85%_55%_at_50%_0%,rgba(255,255,255,0.04)_0%,transparent_55%)]" />
+                <div className="absolute inset-0 bg-gradient-to-b from-black/25 via-transparent to-black/70" />
+                <div className="absolute inset-0 bg-gradient-to-r from-black/50 via-transparent to-black/50 opacity-80" />
             </div>
 
-            <main className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-20">
-                {emptyCollection ? (
-                    <div className={`text-center py-16 ${textMuted}`}>
-                        <DocumentIcon className={`mx-auto h-14 w-14 ${textMutedLight}`} aria-hidden />
-                        <p className={`mt-3 font-medium ${textColor}`}>This shared collection is empty.</p>
+            <div className="relative z-10">
+                <header className="pt-12 pb-8 px-4 sm:px-6 max-w-5xl mx-auto text-center">
+                    {logoUrl ? (
+                        <div className="mb-6 flex justify-center">
+                            <img
+                                src={logoUrl}
+                                alt=""
+                                className="h-16 w-auto max-h-24 object-contain drop-shadow-lg"
+                                onError={(e) => {
+                                    e.target.style.display = 'none'
+                                }}
+                            />
+                        </div>
+                    ) : null}
+                    <p className="text-xs font-medium uppercase tracking-[0.2em] text-white/45">{brand_name || 'Brand'}</p>
+                    <h1 className="mt-2 text-3xl sm:text-4xl font-bold tracking-tight text-white drop-shadow-sm">{name || 'Collection'}</h1>
+                    {description ? <p className="mt-4 text-sm sm:text-base text-white/65 max-w-2xl mx-auto leading-relaxed">{description}</p> : null}
+                    <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
+                        <span
+                            className="inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold shadow-lg"
+                            style={{ backgroundColor: primaryColor, color: onPrimaryBtn }}
+                        >
+                            Shared collection
+                        </span>
+                        <span
+                            className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-zinc-900/55 px-3 py-1 text-xs text-white/75 shadow-inner shadow-white/[0.03]"
+                            title="Visitors need the link and password."
+                        >
+                            <LockClosedIcon className="h-3.5 w-3.5 shrink-0 opacity-80" aria-hidden />
+                            Protected link
+                        </span>
                     </div>
-                ) : noMatches ? (
-                    <div className={`text-center py-16 ${textMuted}`}>
-                        <DocumentIcon className={`mx-auto h-14 w-14 ${textMutedLight}`} aria-hidden />
-                        <p className={`mt-3 font-medium ${textColor}`}>No files match your search.</p>
-                    </div>
-                ) : view === 'grid' && assets?.length > 0 ? (
-                    <AssetGrid
-                        assets={assets}
-                        onAssetClick={handleAssetClick}
-                        cardSize={220}
-                        showInfo
-                        selectedAssetId={null}
-                        primaryColor={accentColor}
-                        cardVariant={hasBackground ? 'cinematic' : 'default'}
-                        bucketAssetIds={bucketIdsList}
-                        onBucketToggle={toggleBucket}
-                        layoutMode="grid"
-                        gridSearchQuery={q}
-                    />
-                ) : view === 'list' && assets?.length > 0 ? (
-                    <ul className={`rounded-xl border divide-y overflow-hidden ${chromeBorder} ${themeDark ? 'divide-white/10 bg-white/5' : 'divide-gray-200 bg-white'}`}>
-                        {assets.map((asset) => {
-                            const sid = String(asset.id)
-                            const checked = selectedIds.has(sid)
-                            return (
-                                <li key={asset.id} className={`flex items-center gap-3 px-3 py-2 ${themeDark ? 'hover:bg-white/5' : 'hover:bg-gray-50'}`}>
+                </header>
+
+                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-4">
+                    {!downloadCollectionEnabled && !emptyCollection ? (
+                        <div className="mb-4 rounded-xl border border-amber-400/25 bg-amber-500/10 px-4 py-3 text-sm text-amber-100/95">
+                            Downloads are disabled for this shared collection.
+                        </div>
+                    ) : null}
+
+                    {!emptyCollection && (
+                        <div className="rounded-2xl border border-white/[0.08] bg-zinc-950/35 p-4 sm:p-5 shadow-xl shadow-black/40 backdrop-blur-xl space-y-4 ring-1 ring-white/[0.04]">
+                            <div className="flex flex-col lg:flex-row lg:items-end gap-3">
+                                <div className="flex-1 min-w-0">
+                                    <label htmlFor="guest-share-search" className="sr-only">
+                                        Search files
+                                    </label>
                                     <input
-                                        type="checkbox"
-                                        className="h-4 w-4 rounded border-gray-300"
-                                        checked={checked}
-                                        onChange={() => toggleBucket(asset.id)}
-                                        aria-label={`Select ${asset.title || asset.original_filename || 'file'}`}
+                                        id="guest-share-search"
+                                        ref={searchInputRef}
+                                        type="search"
+                                        defaultValue={q}
+                                        placeholder="Search by name or tags…"
+                                        className="w-full rounded-xl border border-white/15 bg-black/30 px-3 py-2.5 text-sm text-white placeholder:text-white/35 focus:border-white/25 focus:outline-none focus:ring-2 focus:ring-white/15"
+                                        onKeyDown={(e) => {
+                                            if (e.key === 'Enter') {
+                                                navigateGuestQuery({ q: e.currentTarget.value })
+                                            }
+                                        }}
                                     />
-                                    <div className="h-12 w-12 shrink-0 rounded bg-gray-100 overflow-hidden">
-                                        {asset.final_thumbnail_url || asset.thumbnail_url ? (
-                                            <img src={asset.final_thumbnail_url || asset.thumbnail_url} alt="" className="h-full w-full object-cover" />
-                                        ) : (
-                                            <div className="h-full w-full flex items-center justify-center text-gray-400">
-                                                <DocumentIcon className="h-6 w-6" />
-                                            </div>
-                                        )}
+                                </div>
+                                <div className="flex flex-wrap gap-2 items-center">
+                                    <select
+                                        value={type}
+                                        onChange={(e) => navigateGuestQuery({ type: e.target.value })}
+                                        className="rounded-xl border border-white/15 bg-black/30 px-2 py-2.5 text-sm text-white"
+                                        aria-label="Filter by type"
+                                    >
+                                        <option value="all">All types</option>
+                                        <option value="images">Images</option>
+                                        <option value="videos">Videos</option>
+                                        <option value="documents">Documents</option>
+                                        <option value="other">Other</option>
+                                    </select>
+                                    <select
+                                        value={sort}
+                                        onChange={(e) => navigateGuestQuery({ sort: e.target.value })}
+                                        className="rounded-xl border border-white/15 bg-black/30 px-2 py-2.5 text-sm text-white"
+                                        aria-label="Sort"
+                                    >
+                                        <option value="newest">Newest</option>
+                                        <option value="name">Name A–Z</option>
+                                        <option value="type">Type</option>
+                                    </select>
+                                    <div className="inline-flex rounded-xl border border-white/15 overflow-hidden">
+                                        <button
+                                            type="button"
+                                            onClick={() => navigateGuestQuery({ view: 'grid' })}
+                                            className="p-2.5 transition"
+                                            style={
+                                                view === 'grid'
+                                                    ? { backgroundColor: primaryColor, color: onPrimaryBtn }
+                                                    : { color: 'rgba(255,255,255,0.65)' }
+                                            }
+                                            aria-pressed={view === 'grid'}
+                                            title="Grid"
+                                        >
+                                            <Squares2X2Icon className="h-5 w-5" />
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => navigateGuestQuery({ view: 'list' })}
+                                            className="p-2.5 transition"
+                                            style={
+                                                view === 'list'
+                                                    ? { backgroundColor: primaryColor, color: onPrimaryBtn }
+                                                    : { color: 'rgba(255,255,255,0.65)' }
+                                            }
+                                            aria-pressed={view === 'list'}
+                                            title="List"
+                                        >
+                                            <ListBulletIcon className="h-5 w-5" />
+                                        </button>
                                     </div>
-                                    <div className="min-w-0 flex-1">
-                                        <p className={`text-sm font-medium truncate ${textColor}`}>{asset.title || asset.original_filename || 'Untitled'}</p>
-                                        <p className={`text-xs truncate ${textMuted}`}>{asset.mime_type || ''}</p>
-                                    </div>
-                                    <span className={`hidden sm:block text-xs shrink-0 ${textMutedLight}`}>{formatBytes(asset.size_bytes)}</span>
-                                    {downloadCollectionEnabled && asset.download_url ? (
-                                        <a
-                                            href={asset.download_url}
-                                            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-semibold text-white shrink-0"
-                                            style={{ backgroundColor: accentColor }}
+                                    <button
+                                        type="button"
+                                        onClick={() => navigateGuestQuery({ q: searchInputRef.current?.value ?? '' })}
+                                        className="rounded-xl px-4 py-2.5 text-sm font-semibold shadow-lg transition hover:opacity-95"
+                                        style={{ backgroundColor: accentColor, color: onAccentBtn }}
+                                    >
+                                        Search
+                                    </button>
+                                </div>
+                            </div>
+                            <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-2 sm:gap-3 text-sm text-white/60">
+                                <span className="text-white/90 font-medium">{countLabel}</span>
+                                {downloadCollectionEnabled ? (
+                                    <>
+                                        <button
+                                            type="button"
+                                            onClick={selectAllVisible}
+                                            disabled={!assetsList?.length}
+                                            className="text-left font-medium disabled:opacity-40 hover:underline"
+                                            style={{ color: accentColor }}
+                                            title="Select every file on this page. Shift-click two checkboxes to select the range between them."
+                                        >
+                                            Select all visible
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={clearSelection}
+                                            disabled={selectedIds.size === 0}
+                                            className="text-left font-medium disabled:opacity-40 hover:underline text-white/80"
+                                        >
+                                            Clear selection
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => openDownloadPanel('selected')}
+                                            disabled={selectedIds.size === 0 || !assetsList?.length}
+                                            className="inline-flex items-center gap-1 rounded-xl border border-white/20 px-3 py-2 font-medium disabled:opacity-40 text-white/90 hover:bg-white/5"
                                         >
                                             <ArrowDownTrayIcon className="h-4 w-4" />
-                                            Download
-                                        </a>
-                                    ) : null}
-                                </li>
-                            )
-                        })}
-                    </ul>
-                ) : null}
-            </main>
+                                            Download selected
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => openDownloadPanel('all')}
+                                            disabled={collectionAssetTotal === 0}
+                                            className="inline-flex items-center gap-1 rounded-xl px-3 py-2 font-semibold shadow-lg disabled:opacity-40 transition hover:opacity-95"
+                                            style={{ backgroundColor: primaryColor, color: onPrimaryBtn }}
+                                        >
+                                            <ArrowDownTrayIcon className="h-4 w-4" />
+                                            Download all
+                                        </button>
+                                    </>
+                                ) : null}
+                            </div>
+                        </div>
+                    )}
+                </div>
+
+                <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-24">
+                    {emptyCollection ? (
+                        <div className="text-center py-20 text-white/55">
+                            <DocumentIcon className="mx-auto h-14 w-14 text-white/25" aria-hidden />
+                            <p className="mt-4 font-medium text-white/80">This shared collection is empty.</p>
+                        </div>
+                    ) : noMatches ? (
+                        <div className="text-center py-20 text-white/55">
+                            <DocumentIcon className="mx-auto h-14 w-14 text-white/25" aria-hidden />
+                            <p className="mt-4 font-medium text-white/80">No files match your search.</p>
+                        </div>
+                    ) : view === 'grid' && assetsList?.length > 0 ? (
+                        <AssetGrid
+                            assets={assetsList}
+                            onAssetClick={openLightboxForAsset}
+                            cardSize={220}
+                            showInfo
+                            selectedAssetId={null}
+                            primaryColor={primaryColor}
+                            cardVariant="cinematic"
+                            bucketAssetIds={bucketIdsList}
+                            onBucketToggle={toggleBucket}
+                            layoutMode="grid"
+                            gridSearchQuery={q}
+                        />
+                    ) : view === 'list' && assetsList?.length > 0 ? (
+                        <ul className="rounded-2xl border border-white/[0.08] divide-y divide-white/10 overflow-hidden bg-zinc-950/35 backdrop-blur-md ring-1 ring-white/[0.04]">
+                            {assetsList.map((asset) => {
+                                const sid = String(asset.id)
+                                const checked = selectedIds.has(sid)
+                                return (
+                                    <li
+                                        key={asset.id}
+                                        className="flex items-center gap-3 px-3 py-2.5 hover:bg-white/5 cursor-pointer"
+                                        onClick={(e) => {
+                                            if (e.target.closest('input, a, button')) return
+                                            openLightboxForAsset(asset)
+                                        }}
+                                    >
+                                        <span onClick={(e) => e.stopPropagation()}>
+                                            <input
+                                                type="checkbox"
+                                                className="h-4 w-4 rounded border-white/30 bg-black/40"
+                                                checked={checked}
+                                                onChange={(e) => {
+                                                    e.stopPropagation()
+                                                    toggleBucket(asset.id, e)
+                                                }}
+                                                aria-label={`Select ${asset.title || asset.original_filename || 'file'}`}
+                                            />
+                                        </span>
+                                        <div className="h-12 w-12 shrink-0 rounded-lg bg-white/10 overflow-hidden">
+                                            {asset.final_thumbnail_url || asset.thumbnail_url ? (
+                                                <img src={asset.final_thumbnail_url || asset.thumbnail_url} alt="" className="h-full w-full object-cover" />
+                                            ) : (
+                                                <div className="h-full w-full flex items-center justify-center text-white/35">
+                                                    <DocumentIcon className="h-6 w-6" />
+                                                </div>
+                                            )}
+                                        </div>
+                                        <div className="min-w-0 flex-1">
+                                            <p className="text-sm font-medium truncate text-white/95">{asset.title || asset.original_filename || 'Untitled'}</p>
+                                            <p className="text-xs truncate text-white/45">{asset.mime_type || ''}</p>
+                                        </div>
+                                        <span className="hidden sm:block text-xs shrink-0 text-white/35">{formatBytes(asset.size_bytes)}</span>
+                                        {downloadCollectionEnabled && asset.download_url ? (
+                                            <a
+                                                href={asset.download_url}
+                                                download={
+                                                    String(asset.original_filename || asset.title || 'download')
+                                                        .split(/[/\\]/)
+                                                        .pop()
+                                                        ?.replace(/["\\]/g, '_')
+                                                        ?.slice(0, 200) || 'download'
+                                                }
+                                                onClick={(e) => e.stopPropagation()}
+                                                className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-semibold shrink-0 shadow-md transition hover:opacity-95"
+                                                style={{ backgroundColor: accentColor, color: onAccentBtn }}
+                                            >
+                                                <ArrowDownTrayIcon className="h-4 w-4" />
+                                                Download
+                                            </a>
+                                        ) : null}
+                                    </li>
+                                )
+                            })}
+                        </ul>
+                    ) : null}
+                    {!emptyCollection && !noMatches && assetsList?.length > 0 && nextPageUrl ? (
+                        <>
+                            <div ref={loadMoreRef} className="h-10" aria-hidden="true" />
+                            <LoadMoreFooter
+                                onLoadMore={loadMore}
+                                hasMore={!!nextPageUrl}
+                                isLoading={loadingMore}
+                            />
+                        </>
+                    ) : null}
+                </main>
+            </div>
 
             {downloadPanelOpen && (
                 <div className="fixed inset-0 z-50 overflow-y-auto" aria-labelledby="download-panel-title" role="dialog" aria-modal="true">
                     <div className="flex min-h-full items-end justify-center p-4 text-center sm:items-center sm:p-0">
-                        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm transition-opacity" aria-hidden onClick={() => !downloadSubmitting && setDownloadPanelOpen(false)} />
-                        <div className="relative transform overflow-hidden rounded-xl bg-white px-4 pb-4 pt-5 text-left shadow-2xl transition-all sm:my-8 sm:w-full sm:max-w-lg sm:p-6">
+                        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm transition-opacity" aria-hidden onClick={() => !downloadSubmitting && setDownloadPanelOpen(false)} />
+                        <div className="relative transform overflow-hidden rounded-2xl border border-white/10 bg-zinc-950 px-4 pb-5 pt-5 text-left shadow-2xl transition-all sm:my-8 sm:w-full sm:max-w-lg sm:p-6">
                             <div className="absolute right-0 top-0 pr-4 pt-4">
                                 <button
                                     type="button"
-                                    className="rounded-md text-gray-400 hover:text-gray-600 focus:outline-none"
+                                    className="rounded-md text-white/50 hover:text-white focus:outline-none"
                                     onClick={() => !downloadSubmitting && setDownloadPanelOpen(false)}
                                     disabled={downloadSubmitting}
                                 >
@@ -473,23 +641,33 @@ export default function PublicCollection({
                                 </button>
                             </div>
                             <div className="sm:flex sm:items-start">
-                                <div className="mt-3 w-full text-center sm:mt-0 sm:text-left">
-                                    <h3 className="text-base font-semibold leading-6 text-gray-900" id="download-panel-title">
+                                <div className="mt-2 w-full text-center sm:mt-0 sm:text-left">
+                                    <h3 className="text-base font-semibold leading-6 text-white" id="download-panel-title">
                                         {downloadPanelMode === 'selected' ? 'Download selected' : 'Download all'}
                                     </h3>
-                                    <p className="mt-1 text-sm text-gray-500">
+                                    <p className="mt-2 text-sm text-white/55">
                                         {downloadPanelMode === 'selected'
-                                            ? `ZIP with ${selectedIds.size} selected file${selectedIds.size !== 1 ? 's' : ''}.`
-                                            : 'Download all assets in this collection as a ZIP file (respects your plan limits).'}
+                                            ? `ZIP with ${selectedIds.size} selected file${selectedIds.size !== 1 ? 's' : ''} (visible selection only).`
+                                            : 'ZIP with all assets in this collection (entire collection, not only the current filter).'}
                                     </p>
-                                    {downloadError && <p className="mt-2 text-sm text-red-600">{downloadError}</p>}
-                                    <div className="mt-5 sm:mt-6 sm:grid sm:grid-flow-row-dense sm:grid-cols-2 sm:gap-3">
+                                    {showLargePublicDownloadWarning ? (
+                                        <p
+                                            className="mt-3 rounded-lg border border-amber-500/35 bg-amber-500/10 px-3 py-2 text-left text-sm text-amber-100/95"
+                                            role="status"
+                                        >
+                                            {downloadPanelMode === 'all'
+                                                ? `This collection has ${collectionAssetTotal.toLocaleString()} files. Building the ZIP can take a little while—please stay on this step until the download begins.`
+                                                : `You are downloading ${selectedIds.size.toLocaleString()} files. Building the ZIP can take a little while—please stay on this step until the download begins.`}
+                                        </p>
+                                    ) : null}
+                                    {downloadError && <p className="mt-3 text-sm text-red-300">{downloadError}</p>}
+                                    <div className="mt-6 sm:mt-6 sm:grid sm:grid-flow-row-dense sm:grid-cols-2 sm:gap-3">
                                         <button
                                             type="button"
                                             onClick={handleDownloadPanelConfirm}
                                             disabled={downloadSubmitting || (downloadPanelMode === 'selected' && selectedIds.size === 0)}
-                                            className="inline-flex w-full justify-center rounded-lg px-4 py-3 text-sm font-semibold text-white shadow-md hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 disabled:opacity-50 sm:col-start-2"
-                                            style={{ backgroundColor: accentColor }}
+                                            className="inline-flex w-full justify-center rounded-xl px-4 py-3 text-sm font-semibold shadow-lg transition hover:opacity-95 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 disabled:opacity-50 sm:col-start-2"
+                                            style={{ backgroundColor: primaryColor, color: onPrimaryBtn }}
                                         >
                                             {downloadSubmitting ? 'Preparing…' : 'Download ZIP'}
                                         </button>
@@ -497,7 +675,7 @@ export default function PublicCollection({
                                             type="button"
                                             onClick={() => setDownloadPanelOpen(false)}
                                             disabled={downloadSubmitting}
-                                            className="mt-3 inline-flex w-full justify-center rounded-lg bg-white px-4 py-3 text-sm font-semibold text-gray-900 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 sm:col-start-1 sm:mt-0 disabled:opacity-50"
+                                            className="mt-3 inline-flex w-full justify-center rounded-xl border border-white/15 bg-white/5 px-4 py-3 text-sm font-semibold text-white hover:bg-white/10 sm:col-start-1 sm:mt-0 disabled:opacity-50"
                                         >
                                             Cancel
                                         </button>
@@ -508,6 +686,21 @@ export default function PublicCollection({
                     </div>
                 </div>
             )}
+
+            {lightboxAsset ? (
+                <PublicShareAssetLightbox
+                    asset={lightboxAsset}
+                    index={lightboxIndex}
+                    total={assetsList.length}
+                    primaryHex={primaryColor}
+                    downloadsEnabled={downloadCollectionEnabled}
+                    onClose={closeLightbox}
+                    onPrev={goLightboxPrev}
+                    onNext={goLightboxNext}
+                />
+            ) : null}
+
+            <FilmGrainOverlay />
         </div>
     )
 }

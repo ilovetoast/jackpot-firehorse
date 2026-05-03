@@ -502,6 +502,45 @@ class AssetUrlService
     }
 
     /**
+     * Same as {@see getPublicDownloadUrl} but signs with {@see getSignedCloudFrontUrlForDownload} so the
+     * CDN/S3 response uses Content-Disposition: attachment (browsers save instead of displaying inline).
+     *
+     * @param  string|null  $downloadFilename  Basename hint; falls back to {@see Asset::$original_filename} or "download"
+     */
+    public function getPublicDownloadUrlAsAttachment(Asset $asset, ?string $downloadFilename = null): ?string
+    {
+        $start = null;
+        if ($this->metricsEnabled()) {
+            $start = microtime(true);
+        }
+
+        try {
+            if (! $this->isAssetPublic($asset)) {
+                return null;
+            }
+
+            $tenant = $this->resolveTenantForAsset($asset);
+            if (! $tenant) {
+                return null;
+            }
+
+            $path = $this->runInTenantContext($tenant, function () use ($asset) {
+                return $this->pathResolver->resolve($asset, AssetVariant::ORIGINAL->value);
+            });
+
+            if ($path === '') {
+                return null;
+            }
+
+            $filename = $downloadFilename ?? $asset->original_filename ?? 'download';
+
+            return $this->getSignedCloudFrontUrlForDownload($path, $filename, 1800);
+        } finally {
+            $this->recordTimedCall($start, 'public_download_calls');
+        }
+    }
+
+    /**
      * Try variants in order, returning the first URL that can be generated.
      *
      * @param  array<int, AssetVariant>  $variants

@@ -10,6 +10,7 @@ use App\Models\AssetMetadata;
 use App\Models\AssetVersion;
 use App\Services\AssetProcessingFailureService;
 use App\Support\Logging\PipelineStepTimer;
+use App\Support\Logging\ThumbnailProfilingRecorder;
 use App\Support\VideoDisplayProbe;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -58,6 +59,14 @@ class ExtractMetadataJob implements ShouldQueue
         $version = $this->versionId ? AssetVersion::find($this->versionId) : null;
         $timer = PipelineStepTimer::start('ExtractMetadataJob', (string) $this->assetId, $this->versionId);
         $timer->lap('asset_loaded', $asset, $version);
+
+        ThumbnailProfilingRecorder::logPipelineJob(
+            static::class,
+            $this->assetId,
+            $this->versionId,
+            'started',
+            $this->job
+        );
 
         // Phase 7: When version-aware, delete existing metadata for this version (idempotent rerun)
         if ($version) {
@@ -134,6 +143,15 @@ class ExtractMetadataJob implements ShouldQueue
             \App\Support\Logging\AssetPipelineTimingLogger::EVENT_METADATA_COMPLETED,
             $asset->fresh(),
             $version?->fresh(),
+            ['metadata_keys_count' => count($metadata)]
+        );
+
+        ThumbnailProfilingRecorder::logPipelineJob(
+            static::class,
+            $this->assetId,
+            $this->versionId,
+            'finished',
+            $this->job,
             ['metadata_keys_count' => count($metadata)]
         );
 

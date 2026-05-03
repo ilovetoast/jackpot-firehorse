@@ -14,6 +14,7 @@ use App\Services\ActivityRecorder;
 use App\Services\AiMetadataGenerationService;
 use App\Services\AiUsageService;
 use App\Support\AiErrorSanitizer;
+use App\Support\Logging\ThumbnailProfilingRecorder;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -87,6 +88,14 @@ class AiMetadataGenerationJob implements ShouldQueue
         AiUsageService $usageService
     ): void {
         $asset = Asset::findOrFail($this->assetId);
+
+        ThumbnailProfilingRecorder::logPipelineJob(
+            static::class,
+            $this->assetId,
+            $asset->current_asset_version_id,
+            'started',
+            $this->job
+        );
 
         // 1. Check if already generated (unless manual rerun)
         // Auto-generation runs once per asset

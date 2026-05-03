@@ -25,8 +25,9 @@ export async function parseUploadJsonResponse(response, context = 'upload') {
         (trimmed.startsWith('<') && (head.includes('<html') || head.includes('<head') || head.includes('<body')))
 
     if (looksHtml) {
+        const st = typeof response?.status === 'number' ? ` HTTP ${response.status}` : ''
         throw new Error(
-            'The server returned an error page instead of upload data. Refresh the page and try again. If you dragged a file from a ZIP archive without extracting it, extract the file to your computer first, then upload that file.'
+            `The server returned an error page instead of upload data (${context}${st}). Refresh the page and try again. If you dragged a file from a ZIP archive without extracting it, extract the file to your computer first, then upload that file.`
         )
     }
 

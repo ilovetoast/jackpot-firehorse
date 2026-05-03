@@ -10,8 +10,7 @@ class PublicDownloadController extends Controller
 {
     public function __construct(
         protected AssetUrlService $assetUrlService
-    ) {
-    }
+    ) {}
 
     public function __invoke(Asset $asset): RedirectResponse
     {
@@ -19,7 +18,7 @@ class PublicDownloadController extends Controller
             abort(403, 'Asset is not publicly accessible.');
         }
 
-        $downloadUrl = $this->assetUrlService->getPublicDownloadUrl($asset);
+        $downloadUrl = $this->assetUrlService->getPublicDownloadUrlAsAttachment($asset);
         if (! $downloadUrl) {
             abort(403, 'Asset is not publicly accessible.');
         }

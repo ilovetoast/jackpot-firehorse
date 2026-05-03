@@ -33,6 +33,19 @@ return [
     | they load without CORS. TTL in seconds (default 900 = 15 min).
     |
     */
+    /*
+    |--------------------------------------------------------------------------
+    | Thumbnail profiling (local / staging diagnostics)
+    |--------------------------------------------------------------------------
+    |
+    | When ASSET_THUMBNAIL_PROFILING=true, emits [thumbnail_profiling] structured logs and
+    | optionally persists a summary on asset version metadata (thumbnail_profiling key).
+    */
+    'thumbnail_profiling' => [
+        'enabled' => (bool) env('ASSET_THUMBNAIL_PROFILING', false),
+        'store_in_version_metadata' => (bool) env('ASSET_THUMBNAIL_PROFILING_STORE_METADATA', true),
+    ],
+
     'delivery' => [
         'local_presign_ttl' => (int) env('ASSET_DELIVERY_LOCAL_PRESIGN_TTL', 900),
         // Placeholder URL when VIDEO_PREVIEW or PDF_PAGE variant has no file (1x1 transparent PNG data URL)
@@ -56,6 +69,17 @@ return [
         */
         'include_soft_deleted' => false,
     ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Upload batch size (preflight, validate, initiate-batch)
+    |--------------------------------------------------------------------------
+    |
+    | Maximum file rows per HTTP preflight / initiate-batch request and per in-modal
+    | queue. Must match validation in UploadController. Env allows ops tuning without code.
+    |
+    */
+    'upload_max_files_per_batch' => max(1, min(10000, (int) env('UPLOAD_MAX_FILES_PER_BATCH', 500))),
 
     /*
     |--------------------------------------------------------------------------
@@ -456,6 +480,23 @@ return [
          * supervisor-images-psd (HORIZON_IMAGES_PSD_WORKER_TIMEOUT). Large PSD flatten can run long.
          */
         'process_asset_job_timeout_psd_seconds' => (int) env('PROCESS_ASSET_JOB_TIMEOUT_PSD_SECONDS', 7200),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Quick grid thumbnails (feature-flagged stub)
+    |--------------------------------------------------------------------------
+    |
+    | When enabled, {@see \App\Jobs\ProcessAssetJob} dispatches {@see \App\Jobs\QuickGridThumbnailJob}
+    | right after the main pipeline chain is queued. The job is a no-op until real
+    | grid-thumb generation + dedupe with {@see \App\Jobs\GenerateThumbnailsJob} is implemented.
+    | Set QUEUE_IMAGES_FAST_QUEUE and add a Horizon supervisor before enabling in production.
+    |
+    */
+    'quick_grid_thumbnails' => [
+        'enabled' => (bool) env('ASSET_QUICK_GRID_THUMBNAILS', false),
+        /** Null/empty falls back to queue.images_fast_queue */
+        'queue' => env('ASSET_QUICK_GRID_THUMBNAIL_QUEUE'),
     ],
 
     /*

@@ -26,12 +26,18 @@
  * @param {number|null} props.selectedAssetId - ID of currently selected asset
  * @param {string} props.primaryColor - Brand primary color for selected highlight
  */
-import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react'
+import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo, useSyncExternalStore } from 'react'
 import AssetCard from './AssetCard'
 import AssetGridContainer from './AssetGridContainer'
+import PendingFinalizeGridTile from './PendingFinalizeGridTile'
 import { useSelectionOptional } from '../contexts/SelectionContext'
 import { executionEnhancedGridContainerClass } from '../utils/executionEnhancedGridContainerClass'
 import { isExecutionEnhancedGridMode } from '../utils/assetCardEnhancedExecutionChrome'
+import {
+    getPendingFinalizeSnapshot,
+    prunePendingFinalizeVisibleInAssetList,
+    subscribeUploadPreviewRegistry,
+} from '../utils/uploadPreviewRegistry'
 
 const MARQUEE_DRAG_THRESHOLD_PX = 5
 /** Matches Tailwind `gap-7` (1.75rem) for column width math */
@@ -77,7 +83,8 @@ export default function AssetGrid({
     selectedAssetIds = [], // Phase 2 – Step 7: Bulk selection
     onAssetSelect = null, // Phase 2 – Step 7: Bulk selection callback
     bucketAssetIds = [], // Phase D1: Download bucket IDs
-    onBucketToggle = null, // Phase D1: Toggle single asset in bucket
+    /** `(assetId, nativeOrSyntheticEvent?)` — event optional; used for Shift-range bucket select on public share. */
+    onBucketToggle = null,
     isPendingApprovalMode = false, // Phase L.6.2: Approval inbox mode
     isPendingPublicationFilter = false, // Phase J.3.1: Pending publication filter active
     onAssetApproved = null, // Phase L.6.2: Callback when asset is approved/rejected
@@ -91,6 +98,20 @@ export default function AssetGrid({
 }) {
     const safeAssets = (assets || []).filter(Boolean)
     const selection = useSelectionOptional()
+
+    const pendingFinalizeSnapshot = useSyncExternalStore(
+        subscribeUploadPreviewRegistry,
+        getPendingFinalizeSnapshot,
+        getPendingFinalizeSnapshot,
+    )
+    const pendingClientIds = useMemo(() => {
+        const sep = '\u0001'
+        const i = pendingFinalizeSnapshot.indexOf(sep)
+        if (i < 0) return []
+        const rest = pendingFinalizeSnapshot.slice(i + sep.length)
+        if (!rest) return []
+        return rest.split('\u0002').filter(Boolean)
+    }, [pendingFinalizeSnapshot])
 
     const containerRef = useRef(null)
     const masonryMeasureRef = useRef(null)
@@ -146,6 +167,10 @@ export default function AssetGrid({
     const [visibleIds, setVisibleIds] = useState(new Set())
 
     const idsKey = safeAssets.map((a) => a.id).join(',')
+
+    useEffect(() => {
+        prunePendingFinalizeVisibleInAssetList(safeAssets)
+    }, [idsKey, safeAssets])
 
     useLayoutEffect(() => {
         const currIds = new Set(safeAssets.map((a) => a.id))
@@ -207,11 +232,21 @@ export default function AssetGrid({
         if (layoutMode !== 'masonry') return []
         const n = Math.max(1, masonryColumnCount)
         const cols = Array.from({ length: n }, () => [])
-        safeAssets.forEach((asset, index) => {
-            cols[index % n].push({ asset, index })
+        const merged = [
+            ...pendingClientIds.map((clientId, index) => ({
+                pendingClientId: clientId,
+                index,
+            })),
+            ...safeAssets.map((asset, index) => ({
+                asset,
+                index: index + pendingClientIds.length,
+            })),
+        ]
+        merged.forEach((item, index) => {
+            cols[index % n].push(item)
         })
         return cols
-    }, [layoutMode, safeAssets, masonryColumnCount])
+    }, [layoutMode, safeAssets, masonryColumnCount, pendingClientIds])
 
     const handleContainerPointerDown = useCallback(
         (e) => {
@@ -289,7 +324,7 @@ export default function AssetGrid({
         [selection, onAssetSelect, applyMarqueeSelection, clearMarqueeSession]
     )
 
-    if (safeAssets.length === 0) {
+    if (safeAssets.length === 0 && pendingClientIds.length === 0) {
         return null
     }
 
@@ -308,6 +343,25 @@ export default function AssetGrid({
             itemRefs.current.delete(key)
         }
     }
+
+    const renderPendingCell = (clientId) => (
+        <div
+            key={`pending:${clientId}`}
+            className="transition-all duration-300 ease-out opacity-100 translate-y-0 scale-100"
+            style={
+                layoutMode === 'masonry' ? { '--asset-card-size': `${clampedCardSize}px` } : undefined
+            }
+        >
+            <PendingFinalizeGridTile
+                clientFileId={clientId}
+                primaryColor={primaryColor}
+                cardStyle={cardStyle}
+                cardSize={clampedCardSize}
+                layoutMode={layoutMode}
+                masonryMaxHeightPx={masonryMaxPx}
+            />
+        </div>
+    )
 
     const renderAssetCell = (asset, index) => {
         const isEntering = animatedIds.has(asset.id)
@@ -335,7 +389,7 @@ export default function AssetGrid({
                     isBulkSelected={selectedAssetIds.includes(asset.id)}
                     onBulkSelect={onAssetSelect ? () => onAssetSelect(asset.id) : null}
                     isInBucket={bucketAssetIds.includes(asset.id)}
-                    onBucketToggle={onBucketToggle ? () => onBucketToggle(asset.id) : null}
+                    onBucketToggle={onBucketToggle ? (ev) => onBucketToggle(asset.id, ev) : null}
                     isPendingApprovalMode={isPendingApprovalMode}
                     isPendingPublicationFilter={isPendingPublicationFilter}
                     onAssetApproved={onAssetApproved ? () => onAssetApproved(asset.id) : null}
@@ -395,14 +449,21 @@ export default function AssetGrid({
                     <div className="flex w-full min-w-0 items-start gap-7">
                         {masonryColumns.map((col, ci) => (
                             <div key={ci} className="flex min-w-0 flex-1 flex-col gap-7">
-                                {col.map(({ asset, index }) => renderAssetCell(asset, index))}
+                                {col.map((item) =>
+                                    item.pendingClientId != null
+                                        ? renderPendingCell(item.pendingClientId)
+                                        : renderAssetCell(item.asset, item.index),
+                                )}
                             </div>
                         ))}
                     </div>
                 </div>
             ) : (
                 <AssetGridContainer cardSize={cardSize} layoutMode={layoutMode}>
-                    {safeAssets.map((asset, index) => renderAssetCell(asset, index))}
+                    {pendingClientIds.map((cid) => renderPendingCell(cid))}
+                    {safeAssets.map((asset, index) =>
+                        renderAssetCell(asset, index + pendingClientIds.length),
+                    )}
                 </AssetGridContainer>
             )}
         </div>

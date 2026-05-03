@@ -228,7 +228,7 @@ export default function CollectionsIndex({
     const { selectedCount, clearSelection, getSelectedOnPage } = useSelection()
     const bucket = useBucketOptional()
     const bucketAssetIds = bucket?.bucketAssetIds ?? []
-    const handleBucketToggle = useCallback((assetId) => {
+    const handleBucketToggle = useCallback((assetId, _ev) => {
         if (!bucket) return
         if (bucketAssetIds.includes(assetId)) {
             bucket.bucketRemove(assetId)

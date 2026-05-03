@@ -12,7 +12,7 @@
  * @param {string} props.primaryColor - Brand primary color for selected highlight
  * @param {string} props.cardStyle - 'default' | 'guidelines' — guidelines = flat tiles, label below (color-tile style), hover shadow
  */
-import { useMemo, useState, useEffect, useRef } from 'react'
+import { useMemo, useState, useEffect, useRef, useSyncExternalStore } from 'react'
 import { usePage } from '@inertiajs/react'
 import { useSelectionOptional } from '../contexts/SelectionContext'
 import { TrashIcon } from '@heroicons/react/24/outline'
@@ -29,6 +29,11 @@ import {
     assetCardEnhancedExecutionChromeClass,
     isExecutionEnhancedGridMode,
 } from '../utils/assetCardEnhancedExecutionChrome'
+import {
+    getUploadPreviewSnapshotForAsset,
+    subscribeUploadPreviewRegistry,
+} from '../utils/uploadPreviewRegistry'
+import { getAssetCardVisualState } from '../utils/assetCardVisualState'
 
 function searchTokensForHighlight(q) {
     if (!q || typeof q !== 'string') return []
@@ -51,6 +56,7 @@ export default function AssetCard({
     isBulkSelected = false,
     onBulkSelect = null,
     isInBucket = false,
+    /** Download bucket: parent binds asset id; call with pointer event (e.g. e.shiftKey for range select). */
     onBucketToggle = null,
     isPendingApprovalMode = false,
     isPendingPublicationFilter = false,
@@ -238,38 +244,9 @@ export default function AssetCard({
         asset?.id,
         thumbnailVersion,
     ])
-    
-    // Phase 3.1E: Processing badge only when thumbnail or analysis pipelines are actively in-flight.
-    // Do not use getThumbnailState PENDING (preview URL without final still reports PENDING — not "busy" for the badge).
-    // Do not treat every non-complete analysis_status as busy (e.g. promotion_failed is terminal).
-    const thumbStatusRaw = String(
-        asset?.thumbnail_status?.value ?? asset?.thumbnail_status ?? '',
-    ).toLowerCase()
-    const thumbnailPipelineActive =
-        thumbStatusRaw === 'pending' || thumbStatusRaw === 'processing'
-
-    const analysisStatusNorm = String(asset?.analysis_status ?? '').toLowerCase()
-    const analysisPipelineActive = [
-        'uploading',
-        'generating_thumbnails',
-        'extracting_metadata',
-        'scoring',
-        'generating_embedding',
-    ].includes(analysisStatusNorm)
-
-    const isProcessing =
-        !isVirtualGoogleFont &&
-        (thumbnailPipelineActive || analysisPipelineActive)
 
     const aiVideoBusy =
         isVideo && ['queued', 'processing'].includes(String(aiVideoStatus || ''))
-    const showProcessingDot = !isVirtualGoogleFont && (isProcessing || aiVideoBusy)
-    const processingDotTitle =
-        isProcessing && aiVideoBusy
-            ? 'Processing and analyzing video'
-            : aiVideoBusy
-              ? 'Analyzing video'
-              : 'Processing'
 
     // Phase 3.1E: Detect meaningful state transitions for thumbnail animation
     // Track previous state to detect transitions from non-AVAILABLE → AVAILABLE
@@ -341,6 +318,24 @@ export default function AssetCard({
         }
         return getExecutionGridHoverCrossfadeUrl(asset, executionThumbnailViewMode, 'medium')
     }, [asset, executionThumbnailViewMode, executionDisplayUrl, preferredTierBump])
+
+    const uploadPreviewSnapshot = useSyncExternalStore(
+        subscribeUploadPreviewRegistry,
+        () => getUploadPreviewSnapshotForAsset(asset?.id),
+        () => getUploadPreviewSnapshotForAsset(asset?.id),
+    )
+    const ephemeralLocalPreviewUrl = useMemo(() => {
+        const sep = '\u0001'
+        const i = uploadPreviewSnapshot.indexOf(sep)
+        if (i < 0) return null
+        const url = uploadPreviewSnapshot.slice(i + sep.length)
+        return url.length > 0 ? url : null
+    }, [uploadPreviewSnapshot])
+
+    const cardVisualState = useMemo(
+        () => getAssetCardVisualState(asset, { ephemeralLocalPreviewUrl }),
+        [asset, ephemeralLocalPreviewUrl],
+    )
 
     const showExecutionDualThumb = Boolean(executionDisplayUrl && executionHoverUrl)
     const showExecutionSingleThumb = Boolean(executionDisplayUrl && !executionHoverUrl)
@@ -448,6 +443,8 @@ export default function AssetCard({
             touchHandledRef.current = true
             if (onBulkSelect) {
                 onBulkSelect()
+            } else if (onBucketToggle) {
+                onBucketToggle()
             } else if (selection) {
                 selection.toggleItem({
                     id: asset.id,
@@ -456,8 +453,6 @@ export default function AssetCard({
                     thumbnail_url: asset.final_thumbnail_url ?? asset.thumbnail_url ?? asset.preview_thumbnail_url ?? null,
                     category_id: asset.metadata?.category_id ?? asset.category_id ?? null,
                 })
-            } else if (onBucketToggle) {
-                onBucketToggle(asset.id)
             }
         }
     }
@@ -586,7 +581,7 @@ export default function AssetCard({
             onMouseLeave={() => setIsCardHovering(false)}
             draggable={false}
             onDragStart={(e) => e.preventDefault()}
-            className={`group relative ${cardBgClass} rounded-2xl transition-all duration-200 cursor-pointer overflow-visible flex flex-col ${!isGuidelines && !isCinematic ? '' : `border ${cardBorderClass} ${cardShadowClass}`}`}
+            className={`group relative select-none ${cardBgClass} rounded-2xl transition-all duration-200 cursor-pointer overflow-visible flex flex-col ${!isGuidelines && !isCinematic ? '' : `border ${cardBorderClass} ${cardShadowClass}`}`}
             style={{
                 ...(isCinematic ? shadowStyle : {}),
                 '--primary-color': primaryColor,
@@ -749,6 +744,7 @@ export default function AssetCard({
                                     forceObjectFit={thumbnailForceObjectFit}
                                     masonryMaxHeight={isMasonry ? masonryMaxHeightPx : null}
                                     masonryMinHeight={isMasonry ? masonryThumbnailMinHeightPx : null}
+                                    ephemeralLocalPreviewUrl={ephemeralLocalPreviewUrl}
                                 />
                             </>
                         )}
@@ -763,6 +759,37 @@ export default function AssetCard({
                                 </div>
                             </div>
                         )}
+
+                        {!isVirtualGoogleFont &&
+                            !showFontSwatch &&
+                            cardVisualState.kind !== 'ready' &&
+                            cardVisualState.kind !== 'local_preview' &&
+                            cardVisualState.badgeShort && (
+                                <div className="pointer-events-none absolute bottom-2 left-1/2 z-[5] max-w-[calc(100%-1rem)] -translate-x-1/2">
+                                    <span
+                                        className={`inline-block max-w-full truncate rounded-md px-2 py-0.5 text-center text-[10px] font-semibold shadow-md ring-1 ring-black/10 ${
+                                            cardVisualState.badgeTone === 'danger'
+                                                ? 'bg-red-600 text-white'
+                                                : cardVisualState.badgeTone === 'warning'
+                                                  ? 'bg-amber-100 text-amber-950'
+                                                  : 'bg-violet-100 text-violet-900'
+                                        }`}
+                                        title={`${cardVisualState.label} — ${cardVisualState.description}`}
+                                    >
+                                        {cardVisualState.badgeShort}
+                                    </span>
+                                </div>
+                            )}
+                        {!isVirtualGoogleFont && aiVideoBusy && cardVisualState.kind === 'ready' ? (
+                            <div className="pointer-events-none absolute bottom-2 right-2 z-[5]">
+                                <span
+                                    className="rounded-md bg-black/60 px-1.5 py-0.5 text-[9px] font-medium text-white shadow-sm"
+                                    title="Video insights are running in the background"
+                                >
+                                    Video AI
+                                </span>
+                            </div>
+                        ) : null}
                     </>
                 )}
                 
@@ -794,20 +821,22 @@ export default function AssetCard({
 
                 {/* Phase D1/D3: Download bucket checkbox. SelectionContext is source of truth. Show when selection exists (or legacy onBucketToggle). */}
                 {!isVirtualGoogleFont && !onBulkSelect && (selection || onBucketToggle) && (
-                    <div className={`absolute top-2 left-2 z-10 flex items-center justify-center transition-all duration-150 ease-out ${isMobile || isCardHovering || (selection?.isSelected(asset.id) ?? isInBucket) ? 'opacity-100' : 'opacity-0'} ${(selection?.isSelected(asset.id) ?? isInBucket) ? 'scale-105' : 'scale-100'}`}>
+                    <div className={`absolute top-2 left-2 z-10 flex items-center justify-center transition-all duration-150 ease-out ${isMobile || isCardHovering || (onBucketToggle ? isInBucket : (selection?.isSelected(asset.id) ?? false)) ? 'opacity-100' : 'opacity-0'} ${(onBucketToggle ? isInBucket : (selection?.isSelected(asset.id) ?? false)) ? 'scale-105' : 'scale-100'}`}>
                         <div
                             className={`inline-flex items-center justify-center rounded p-0 leading-none transition-all duration-150 ease-out ${
-                                (selection?.isSelected(asset.id) ?? isInBucket) ? 'bg-[var(--primary-color)]' : 'bg-white'
-                            } ${(selection?.isSelected(asset.id) ?? isInBucket) ? 'ring-2 ring-[var(--primary-color)] ring-offset-0' : ''}`}
+                                (onBucketToggle ? isInBucket : (selection?.isSelected(asset.id) ?? false)) ? 'bg-[var(--primary-color)]' : 'bg-white'
+                            } ${(onBucketToggle ? isInBucket : (selection?.isSelected(asset.id) ?? false)) ? 'ring-2 ring-[var(--primary-color)] ring-offset-0' : ''}`}
                             style={{ '--primary-color': primaryColor }}
                         >
                             <input
                                 type="checkbox"
-                                checked={selection ? selection.isSelected(asset.id) : isInBucket}
+                                checked={onBucketToggle ? isInBucket : (selection ? selection.isSelected(asset.id) : false)}
                                 onChange={() => {}}
                                 onClick={(e) => {
                                     e.stopPropagation()
-                                    if (selection) {
+                                    if (onBucketToggle) {
+                                        onBucketToggle(e)
+                                    } else if (selection) {
                                         selection.toggleItem({
                                             id: asset.id,
                                             type: selectionAssetType,
@@ -818,10 +847,10 @@ export default function AssetCard({
                                     }
                                 }}
                                 className={`block h-4 w-4 min-h-0 min-w-0 shrink-0 aspect-square rounded p-0 m-0 cursor-pointer bg-white shadow-sm transition-all duration-150 ${
-                                    (selection?.isSelected(asset.id) ?? isInBucket) ? 'border-[var(--primary-color)]' : 'border-gray-300'
+                                    (onBucketToggle ? isInBucket : (selection?.isSelected(asset.id) ?? false)) ? 'border-[var(--primary-color)]' : 'border-gray-300'
                                 }`}
                                 style={{ accentColor: primaryColor, '--primary-color': primaryColor }}
-                                aria-label={(selection ? selection.isSelected(asset.id) : isInBucket) ? 'Remove from download' : 'Add to download'}
+                                aria-label={(onBucketToggle ? isInBucket : (selection ? selection.isSelected(asset.id) : false)) ? 'Remove from download' : 'Add to download'}
                             />
                         </div>
                     </div>
@@ -833,12 +862,19 @@ export default function AssetCard({
                         {/* Asset health badge — warning/critical (support visibility) */}
                         {asset?.health_status && asset.health_status !== 'healthy' && (
                             <span
-                                className={`inline-block h-2.5 w-2.5 flex-shrink-0 rounded-full ring-2 ring-white/80 ${
-                                    asset.health_status === 'critical' ? 'bg-red-500' : 'bg-amber-500'
+                                className={`inline-flex max-w-[9rem] shrink-0 items-center truncate rounded-md px-1.5 py-0.5 text-[9px] font-semibold ring-1 ring-white/90 ${
+                                    asset.health_status === 'critical'
+                                        ? 'bg-red-600 text-white'
+                                        : 'bg-amber-100 text-amber-950'
                                 }`}
-                                title={asset.health_status === 'critical' ? 'Critical' : 'Warning'}
-                                aria-label={asset.health_status === 'critical' ? 'Critical' : 'Warning'}
-                            />
+                                title={
+                                    asset.health_status === 'critical'
+                                        ? 'Critical — open the asset or contact support'
+                                        : 'Warning — see asset details for more information'
+                                }
+                            >
+                                {asset.health_status === 'critical' ? 'Critical' : 'Needs attention'}
+                            </span>
                         )}
                         {showInfo && !isGuidelines && (
                             <span className="inline-flex items-center rounded-md bg-black/60 backdrop-blur-sm px-2 py-1 text-xs font-medium text-white uppercase tracking-wide">

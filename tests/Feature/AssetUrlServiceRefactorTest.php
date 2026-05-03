@@ -165,6 +165,8 @@ class AssetUrlServiceRefactorTest extends TestCase
         $response->assertRedirect();
         $location = (string) $response->headers->get('Location');
         $this->assertStringContainsString('https://cdn.test/', $location);
+        $this->assertStringContainsString('response-content-disposition', $location);
+        $this->assertStringContainsString('attachment', $location);
         $this->assertStringContainsString('Expires=', $location);
         $this->assertStringContainsString('Signature=', $location);
         $this->assertStringContainsString('Key-Pair-Id=', $location);
@@ -204,14 +206,14 @@ class AssetUrlServiceRefactorTest extends TestCase
 
         $brand = $tenant->brands()->first() ?? Brand::create([
             'tenant_id' => $tenant->id,
-            'name' => $name . ' Brand',
-            'slug' => $slug . '-brand',
+            'name' => $name.' Brand',
+            'slug' => $slug.'-brand',
             'is_default' => true,
         ]);
 
         $bucket = StorageBucket::create([
             'tenant_id' => $tenant->id,
-            'name' => $slug . '-bucket',
+            'name' => $slug.'-bucket',
             'status' => StorageBucketStatus::ACTIVE,
             'region' => 'us-east-1',
         ]);
@@ -232,7 +234,7 @@ class AssetUrlServiceRefactorTest extends TestCase
         ]);
 
         $assetUuid = (string) Str::uuid();
-        $basePath = 'tenants/' . $tenant->uuid . '/assets/' . $assetUuid . '/v1';
+        $basePath = 'tenants/'.$tenant->uuid.'/assets/'.$assetUuid.'/v1';
 
         return Asset::create(array_merge([
             'tenant_id' => $tenant->id,
@@ -244,14 +246,14 @@ class AssetUrlServiceRefactorTest extends TestCase
             'mime_type' => 'image/jpeg',
             'status' => AssetStatus::VISIBLE,
             'type' => AssetType::ASSET,
-            'storage_root_path' => $basePath . '/original.jpg',
+            'storage_root_path' => $basePath.'/original.jpg',
             'size_bytes' => 1024,
             'thumbnail_status' => ThumbnailStatus::COMPLETED,
             'metadata' => [
                 'thumbnails' => [
-                    'thumb' => ['path' => $basePath . '/thumbnails/thumb/thumb.webp'],
-                    'medium' => ['path' => $basePath . '/thumbnails/medium/medium.webp'],
-                    'large' => ['path' => $basePath . '/thumbnails/large/large.webp'],
+                    'thumb' => ['path' => $basePath.'/thumbnails/thumb/thumb.webp'],
+                    'medium' => ['path' => $basePath.'/thumbnails/medium/medium.webp'],
+                    'large' => ['path' => $basePath.'/thumbnails/large/large.webp'],
                 ],
                 'thumbnails_generated_at' => now()->toIso8601String(),
             ],
@@ -267,7 +269,7 @@ class AssetUrlServiceRefactorTest extends TestCase
         ]);
 
         openssl_pkey_export($key, $keyContent);
-        $path = sys_get_temp_dir() . '/cloudfront-asset-url-test-' . uniqid() . '.pem';
+        $path = sys_get_temp_dir().'/cloudfront-asset-url-test-'.uniqid().'.pem';
         file_put_contents($path, $keyContent);
 
         return $path;

@@ -903,7 +903,9 @@ class UploadCompletionService
                                     $validFields,
                                     $userId ?? 0,
                                     'image', // Default to 'image' for metadata schema resolution
-                                    true // Auto-approve upload-time metadata (user explicitly set it during upload)
+                                    // Match UploadController::finalize: let MetadataApprovalResolver decide
+                                    // (contributors can have rows persisted with approved_at null when approval is on).
+                                    false
                                 );
                                 // CRITICAL: Verify metadata was actually persisted
                                 $expectedFieldIds = array_map(function ($key) use ($fieldKeyToIdMap) {
@@ -914,7 +916,6 @@ class UploadCompletionService
                                 $persistedCount = DB::table('asset_metadata')
                                     ->where('asset_id', $asset->id)
                                     ->whereIn('metadata_field_id', $expectedFieldIds)
-                                    ->whereNotNull('approved_at') // Must be approved (auto-approved for upload)
                                     ->count();
 
                                 if ($persistedCount < count($validFields)) {

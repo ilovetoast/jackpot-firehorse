@@ -26,7 +26,9 @@ class PublicCollectionTest extends TestCase
     use RefreshDatabase;
 
     protected Tenant $tenant;
+
     protected Brand $brand;
+
     protected StorageBucket $bucket;
 
     protected function setUp(): void
@@ -54,6 +56,7 @@ class PublicCollectionTest extends TestCase
             'expected_size' => 1024,
             'uploaded_size' => 1024,
         ]);
+
         return Asset::create(array_merge([
             'tenant_id' => $this->tenant->id,
             'brand_id' => $this->brand->id,
@@ -87,7 +90,7 @@ class PublicCollectionTest extends TestCase
         ]);
 
         $response = $this->withSession([$collection->sessionUnlockKey() => true])
-            ->get('/b/' . $this->brand->slug . '/collections/press-kit');
+            ->get('/b/'.$this->brand->slug.'/collections/press-kit');
 
         $response->assertStatus(200);
         $response->assertInertia(fn ($page) => $page
@@ -110,7 +113,7 @@ class PublicCollectionTest extends TestCase
             'is_public' => false,
         ]);
 
-        $response = $this->get('/b/' . $this->brand->slug . '/collections/private-collection');
+        $response = $this->get('/b/'.$this->brand->slug.'/collections/private-collection');
 
         $response->assertStatus(404);
     }
@@ -135,7 +138,7 @@ class PublicCollectionTest extends TestCase
         $collection->assets()->attach($asset->id);
 
         $response = $this->withSession([$collection->sessionUnlockKey() => true])
-            ->get('/b/' . $this->brand->slug . '/collections/public-collection');
+            ->get('/b/'.$this->brand->slug.'/collections/public-collection');
 
         $response->assertStatus(200);
         $response->assertInertia(fn ($page) => $page
@@ -199,7 +202,7 @@ class PublicCollectionTest extends TestCase
         ]);
 
         $response = $this->withSession([$collection->sessionUnlockKey() => true])
-            ->get('/b/' . $this->brand->slug . '/collections/public-collection');
+            ->get('/b/'.$this->brand->slug.'/collections/public-collection');
 
         $response->assertStatus(200);
         // Only same-brand asset must appear (queryPublic filters by collection brand)
@@ -231,7 +234,7 @@ class PublicCollectionTest extends TestCase
         $user->brands()->attach($this->brand->id, ['role' => 'admin', 'removed_at' => null]);
 
         $response = $this->actingAs($user)
-            ->get('/b/' . $this->brand->slug . '/collections/restricted-collection');
+            ->get('/b/'.$this->brand->slug.'/collections/restricted-collection');
 
         $response->assertStatus(404);
     }
@@ -378,5 +381,48 @@ class PublicCollectionTest extends TestCase
                 ->component('Public/Collection')
                 ->where('public_collection_downloads_enabled', false)
                 ->where('assets.0.download_url', null));
+    }
+
+    public function test_guest_collection_infinite_scroll_first_page_and_load_more_json(): void
+    {
+        $this->tenant->update(['manual_plan_override' => 'enterprise']);
+
+        $collection = Collection::create([
+            'tenant_id' => $this->tenant->id,
+            'brand_id' => $this->brand->id,
+            'name' => 'Paged',
+            'slug' => 'paged-share',
+            'visibility' => 'brand',
+            'is_public' => true,
+            'public_share_token' => 'pagedsharetoken01',
+            'public_password_hash' => Hash::make('secret'),
+            'public_password_set_at' => now(),
+        ]);
+
+        for ($i = 0; $i < 38; $i++) {
+            $asset = $this->createAsset([
+                'title' => 'Paged asset '.$i,
+                'original_filename' => 'f'.$i.'.jpg',
+                'storage_root_path' => 'paged/f'.$i.'.jpg',
+                'published_at' => now()->subSeconds($i),
+            ]);
+            $collection->assets()->attach($asset->id);
+        }
+
+        $unlock = $collection->sessionUnlockKey();
+
+        $this->withSession([$unlock => true])
+            ->get('/b/'.$this->brand->slug.'/collections/paged-share')
+            ->assertOk()
+            ->assertInertia(fn ($page) => $page
+                ->component('Public/Collection')
+                ->has('assets', 36)
+                ->where('next_page_url', fn ($url) => is_string($url) && str_contains($url, 'page=2')));
+
+        $this->withSession([$unlock => true])
+            ->getJson('/b/'.$this->brand->slug.'/collections/paged-share?page=2&load_more=1')
+            ->assertOk()
+            ->assertJsonCount(2, 'data')
+            ->assertJsonPath('next_page_url', null);
     }
 }

@@ -29,6 +29,36 @@ export function getLuminance(hexColor) {
 }
 
 /**
+ * CSS variables for `.jp-upload-modal-scroll` (Add Asset / upload tray): brand-tinted thumb on a light track.
+ * Firefox uses `scrollbar-color`; Chromium/Safari/Edge use `::-webkit-scrollbar*` (see app.css).
+ *
+ * @param {string} [brandHex='#6366f1'] — #RRGGBB or #RGB
+ * @returns {Record<string, string>}
+ */
+export function uploadModalScrollbarCssVars(brandHex) {
+    let hex = String(brandHex || '#6366f1')
+        .trim()
+        .replace(/^#/, '')
+    if (hex.length === 3) {
+        hex = hex
+            .split('')
+            .map((c) => c + c)
+            .join('')
+    }
+    if (hex.length !== 6 || !/^[0-9a-fA-F]+$/.test(hex)) {
+        hex = '6366f1'
+    }
+    const r = parseInt(hex.slice(0, 2), 16)
+    const g = parseInt(hex.slice(2, 4), 16)
+    const b = parseInt(hex.slice(4, 6), 16)
+    return {
+        '--jp-upload-sb-thumb': `rgba(${r},${g},${b},0.48)`,
+        '--jp-upload-sb-thumb-hover': `rgba(${r},${g},${b},0.72)`,
+        '--jp-upload-sb-track': 'rgb(241 245 249)',
+    }
+}
+
+/**
  * Get the workspace button/accent color based on workspace_button_style setting.
  * Used for Add Asset button and primary actions in DAM (Assets, Deliverables, Collections).
  * @param {Object} brand - Brand object with workspace_button_style, primary_color, secondary_color, accent_color

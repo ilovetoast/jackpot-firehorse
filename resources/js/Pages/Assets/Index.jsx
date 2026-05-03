@@ -15,6 +15,11 @@ import BulkMetadataEditModal from '../../Components/BulkMetadataEditModal'
 import SelectionActionBar from '../../Components/SelectionActionBar'
 import { useSelection } from '../../contexts/SelectionContext'
 import { mergeAsset, warnIfOverwritingCompletedThumbnail } from '../../utils/assetUtils'
+import { computeThumbnailPipelineGridSummary } from '../../utils/assetGridPipelineSummary'
+import {
+    clearUploadPreviewsOlderThan,
+    revokeUploadPreviewIfServerRasterPresent,
+} from '../../utils/uploadPreviewRegistry'
 import { useAssetReconciliation } from '../../hooks/useAssetReconciliation'
 import { useThumbnailSmartPoll } from '../../hooks/useThumbnailSmartPoll'
 import { filterActiveCategories } from '../../utils/categoryUtils'
@@ -118,6 +123,8 @@ export default function AssetsIndex({
     // Phase 2 invariant: UploadAssetDialog is controlled via conditional mounting only.
     // Do not convert back to prop-based visibility.
     const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false)
+    /** While Add Asset is transferring bytes to S3, pause grid thumbnail polling to avoid rapid merges re-rendering the open modal. */
+    const [gridThumbnailPollPausedForUploadTransfer, setGridThumbnailPollPausedForUploadTransfer] = useState(false)
     
     // Prevent reopening dialog during auto-close timeout (400-700ms delay)
     const [isAutoClosing, setIsAutoClosing] = useState(false)
@@ -235,6 +242,10 @@ export default function AssetsIndex({
     // CRITICAL: Drawer identity is based ONLY on activeAssetId, not asset object identity
     // Asset object mutations (async updates, thumbnail swaps, etc.) must NOT close the drawer
     const safeAssetsList = (assetsList || []).filter(Boolean)
+    const thumbnailPipelineSummary = useMemo(
+        () => computeThumbnailPipelineGridSummary(safeAssetsList),
+        [safeAssetsList],
+    )
     const activeAsset = activeAssetId ? safeAssetsList.find(asset => asset?.id === activeAssetId) : null
     
     // Close drawer ONLY if active asset ID truly doesn't exist in current assets array
@@ -467,6 +478,7 @@ export default function AssetsIndex({
     // Grid thumbnail polling: Async updates for fade-in (same as drawer)
     // No view refreshes - only local state updates
     const handleThumbnailUpdate = useCallback((updatedAsset) => {
+        revokeUploadPreviewIfServerRasterPresent(updatedAsset)
         setAssetsList(prevAssets => {
             return (prevAssets || []).filter(Boolean).map(asset => {
                 if (asset?.id === updatedAsset?.id) {
@@ -496,7 +508,16 @@ export default function AssetsIndex({
         assets: safeAssetsList,
         onAssetUpdate: handleThumbnailUpdate,
         selectedCategoryId,
+        isPaused: gridThumbnailPollPausedForUploadTransfer,
     })
+
+    useEffect(() => {
+        if (typeof window === 'undefined') return undefined
+        const id = window.setInterval(() => {
+            clearUploadPreviewsOlderThan(45 * 60 * 1000)
+        }, 10 * 60 * 1000)
+        return () => window.clearInterval(id)
+    }, [])
 
     // Single consolidated filter debug log (opt-in: set window.__DEBUG_FILTERS__ = true in console)
     useEffect(() => {
@@ -763,6 +784,15 @@ export default function AssetsIndex({
             setMobileCategoriesOpen(false)
         }
     }, [mobileCategoryTabs, handleCategorySelect, handleReferenceMaterialsClick])
+
+    /** Soft refresh while upload dialog stays open (e.g. minimized tray after Finalize). */
+    const handleFinalizeAccepted = useCallback(() => {
+        router.reload({
+            only: [...ASSET_GRID_QUERY_KEYS, ...ASSET_INDEX_SIDEBAR_COUNT_PROPS],
+            preserveScroll: true,
+            preserveState: true,
+        })
+    }, [])
 
     // Handle finalize complete - refresh asset grid after successful upload finalize
     const handleFinalizeComplete = useCallback(() => {
@@ -1331,6 +1361,7 @@ export default function AssetsIndex({
                                 onLayoutModeChange={setLayoutMode}
                                 gridImageFit={gridImageFit}
                                 onGridImageFitChange={setGridImageFit}
+                                thumbnailPipelineSummary={thumbnailPipelineSummary}
                                 primaryColor={workspaceAccentColor}
                                 selectedCount={selectedCount}
                                 filterable_schema={filterable_schema}
@@ -1609,6 +1640,8 @@ export default function AssetsIndex({
                     categories={categories || []}
                     initialCategoryId={selectedCategoryId}
                     onFinalizeComplete={handleFinalizeComplete}
+                    onFinalizeAccepted={handleFinalizeAccepted}
+                    onGridTransferActiveChange={setGridThumbnailPollPausedForUploadTransfer}
                     initialFiles={droppedFiles}
                 />
             )}

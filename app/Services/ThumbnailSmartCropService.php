@@ -42,6 +42,11 @@ final class ThumbnailSmartCropService
         }
 
         try {
+            if ($im->getNumberImages() > 1) {
+                $im->setIteratorIndex(0);
+            }
+            ImageOrientationNormalizer::imagickAutoOrientAndResetOrientation($im);
+
             $w0 = $im->getImageWidth();
             $h0 = $im->getImageHeight();
             if ($w0 < 1 || $h0 < 1) {
@@ -58,7 +63,7 @@ final class ThumbnailSmartCropService
             $q = $im->getQuantumRange();
             $fuzz = $fuzzFrac * (float) ($q['quantumRangeLong'] ?? 65535);
 
-            $probe = new Imagick($imagePath);
+            $probe = clone $im;
             try {
                 if ($probe->getImageAlphaChannel() !== Imagick::ALPHACHANNEL_UNDEFINED) {
                     $probe->setImageAlphaChannel(Imagick::ALPHACHANNEL_ACTIVATE);

@@ -11,7 +11,7 @@
  *   - are NOT unsupported format
  *   - have no thumbnail_error
  * - Poll stops automatically when no assets qualify
- * - Uses exponential backoff between polls: 2s → 3s → 5s → 10s → 20s → stop
+ * - Uses exponential backoff between polls: 3s → 4s → 5s → 10s → 20s → stop
  * - First batch request runs immediately; short early gaps so the grid catches “ready” soon after the job finishes
  * - Max duration ~1–2 minutes of follow-up polling
  * 
@@ -25,15 +25,15 @@
  * @param {Array} options.assets - Assets currently rendered in grid
  * @param {Function} options.onAssetUpdate - Callback when asset is updated (receives updated asset)
  * @param {number|null} options.selectedCategoryId - Current category ID (stops polling on change)
+ * @param {boolean} [options.isPaused] - When true, polling timers are cleared (e.g. Add Asset modal actively uploading)
  * @returns {void} - Hook manages polling internally
  */
 import { useEffect, useRef } from 'react'
-import { getThumbnailState, supportsThumbnail } from '../utils/thumbnailUtils'
 import { mergeAsset } from '../utils/assetUtils'
+import { assetThumbnailPollEligible } from '../utils/assetCardVisualState'
 
-// Gaps between batch polls (first poll is immediate). Previously 10s first gap — felt slow vs server times.
-// Aligned with useDrawerThumbnailPoll’s early cadence so the grid updates soon after thumbnails land in the API.
-const POLL_SCHEDULE = [2000, 3000, 5000, 10000, 20000] // milliseconds
+// Gaps between batch polls (first poll is immediate). 3–5s early cadence after refresh while previews generate.
+const POLL_SCHEDULE = [3000, 4000, 5000, 10000, 20000] // milliseconds
 const MAX_POLL_ATTEMPTS = POLL_SCHEDULE.length
 
 /**
@@ -44,7 +44,7 @@ const MAX_POLL_ATTEMPTS = POLL_SCHEDULE.length
  * 
  * Live thumbnail upgrades can be reintroduced later via explicit user action (refresh / reopen page).
  */
-export function useThumbnailSmartPoll({ assets, onAssetUpdate, selectedCategoryId = null }) {
+export function useThumbnailSmartPoll({ assets, onAssetUpdate, selectedCategoryId = null, isPaused = false }) {
     // Re-enabled: Grid polling for fade-in thumbnails (same as drawer)
     // Async updates only - no view refreshes
 
@@ -70,38 +70,7 @@ export function useThumbnailSmartPoll({ assets, onAssetUpdate, selectedCategoryI
     const getPollTargets = () => {
         const currentAssets = assetsRef.current || []
         
-        return currentAssets.filter(asset => {
-            if (!asset || !asset.id) return false
-            
-            // Must NOT have final thumbnail URL (if it exists, no need to poll)
-            if (asset.final_thumbnail_url) return false
-            
-            // Must NOT be unsupported format
-            const { state } = getThumbnailState(asset)
-            if (state === 'NOT_SUPPORTED') return false
-            
-            // Must NOT have thumbnail error (failed assets don't poll)
-            if (asset.thumbnail_error) return false
-            
-            // Must NOT be failed status (failed assets don't poll)
-            const thumbnailStatus = asset.thumbnail_status?.value || asset.thumbnail_status
-            if (thumbnailStatus === 'failed') return false
-            
-            // Must NOT be skipped status (skipped assets don't poll)
-            if (thumbnailStatus === 'skipped') return false
-            
-            // Must be pending OR processing (or null status for legacy)
-            const isPendingOrProcessing = thumbnailStatus === 'pending' || thumbnailStatus === 'processing' || !thumbnailStatus
-            if (!isPendingOrProcessing) return false
-            
-            // Must support thumbnails (expected to have thumbnails)
-            const thumbnailExpected = supportsThumbnail(asset?.mime_type, asset?.file_extension)
-            if (!thumbnailExpected) return false
-            
-            // Poll for all assets that meet the above criteria
-            // Do NOT depend on preview_thumbnail_url existence
-            return true
-        })
+        return currentAssets.filter((asset) => assetThumbnailPollEligible(asset))
     }
 
     // Perform a single poll
@@ -261,6 +230,16 @@ export function useThumbnailSmartPoll({ assets, onAssetUpdate, selectedCategoryI
 
     // Main polling effect
     useEffect(() => {
+        if (isPaused) {
+            if (timeoutIdRef.current) {
+                clearTimeout(timeoutIdRef.current)
+                timeoutIdRef.current = null
+            }
+            isActiveRef.current = false
+            pollAttemptRef.current = 0
+            return undefined
+        }
+
         // Reset on category change
         if (prevCategoryIdRef.current !== selectedCategoryId) {
             if (timeoutIdRef.current) {
@@ -300,5 +279,5 @@ export function useThumbnailSmartPoll({ assets, onAssetUpdate, selectedCategoryI
             isActiveRef.current = false
             pollAttemptRef.current = 0
         }
-    }, [assets, selectedCategoryId]) // Note: onAssetUpdate is stable via useCallback in parent
+    }, [assets, selectedCategoryId, isPaused]) // Note: onAssetUpdate is stable via useCallback in parent
 }

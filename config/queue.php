@@ -67,6 +67,18 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Fast images queue (optional — quick grid thumbnail path)
+    |--------------------------------------------------------------------------
+    |
+    | Not wired into Horizon by default. When ASSET_QUICK_GRID_THUMBNAILS is enabled
+    | and {@see \App\Jobs\QuickGridThumbnailJob} is implemented, add a supervisor that
+    | listens to this queue name so fast thumbs do not sit behind heavy pipeline work.
+    |
+    */
+    'images_fast_queue' => env('QUEUE_IMAGES_FAST_QUEUE', 'images-fast'),
+
+    /*
+    |--------------------------------------------------------------------------
     | PDF Processing Queue Name
     |--------------------------------------------------------------------------
     |

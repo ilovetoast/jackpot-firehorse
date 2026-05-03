@@ -6,6 +6,7 @@ use App\Models\Asset;
 use App\Models\AssetVersion;
 use App\Models\StorageBucket;
 use App\Support\EditorAssetOriginalBytesLoader;
+use App\Support\Logging\ThumbnailProfilingRecorder;
 use App\Support\ThumbnailMode;
 use App\Support\VideoDisplayProbe;
 use Aws\S3\Exception\S3Exception;
@@ -84,6 +85,26 @@ class ThumbnailGenerationService
 
     protected ?string $preferredVideoRasterCachePath = null;
 
+    /** @var array<string, mixed>|null First raster orientation profile for this generateThumbnails run (profiling). */
+    protected ?array $rasterOrientationProfile = null;
+
+    /** Cached upright PNG path for GD raster thumbnails (one physical source per temp download). */
+    protected ?string $gdOrientCacheKey = null;
+
+    protected ?string $gdOrientWorkPath = null;
+
+    protected bool $gdOrientWorkCleanup = false;
+
+    /**
+     * When set, {@see generateImageThumbnail} records per-phase timings for diagnostics (assets:profile-thumbnail).
+     *
+     * @var array<string, float>|null
+     */
+    protected ?array $diagnosticThumbnailSegmentMs = null;
+
+    /** @var array<string, mixed>|null */
+    protected ?array $thumbnailProfilingRun = null;
+
     /**
      * Convert technical error messages to user-friendly messages.
      *
@@ -110,6 +131,373 @@ class ThumbnailGenerationService
         ?S3Client $s3Client = null
     ) {
         $this->s3Client = $s3Client ?? $this->createS3Client();
+    }
+
+    /**
+     * Enable per-segment timing inside {@see generateImageThumbnail} (GD raster path only).
+     *
+     * @internal Used by {@see \App\Services\ThumbnailProfilingService}
+     */
+    public function beginDiagnosticThumbnailTimings(): void
+    {
+        $this->diagnosticThumbnailSegmentMs = [
+            'file_meta_ms' => 0.0,
+            'decode_ms' => 0.0,
+            'normalize_ms' => 0.0,
+            'resize_ms' => 0.0,
+            'encode_ms' => 0.0,
+        ];
+    }
+
+    /**
+     * @return array<string, float>|null
+     */
+    public function takeDiagnosticThumbnailTimings(): ?array
+    {
+        $out = $this->diagnosticThumbnailSegmentMs;
+        $this->diagnosticThumbnailSegmentMs = null;
+
+        return $out;
+    }
+
+    protected function thumbnailProfilingEnabled(): bool
+    {
+        return ThumbnailProfilingRecorder::enabled();
+    }
+
+    protected function resetGdRasterOrientationCache(): void
+    {
+        if ($this->gdOrientWorkCleanup && is_string($this->gdOrientWorkPath) && is_file($this->gdOrientWorkPath)) {
+            @unlink($this->gdOrientWorkPath);
+        }
+        $this->gdOrientCacheKey = null;
+        $this->gdOrientWorkPath = null;
+        $this->gdOrientWorkCleanup = false;
+    }
+
+    /**
+     * @param  array<string, mixed>  $profile
+     */
+    protected function mergeRasterOrientationProfileOnce(array $profile): void
+    {
+        if ($this->rasterOrientationProfile !== null) {
+            return;
+        }
+        $enriched = $profile;
+        if ($this->thumbnailProfilingRun !== null) {
+            $enriched['profiling_asset_id'] = $this->thumbnailProfilingRun['asset_id'] ?? null;
+            $enriched['original_filename'] = $this->thumbnailProfilingRun['original_filename'] ?? null;
+            $enriched['mime_type'] = $this->thumbnailProfilingRun['mime_type'] ?? null;
+        }
+        $this->rasterOrientationProfile = $enriched;
+    }
+
+    /**
+     * @return array{0: \Imagick, 1: array<string, mixed>}
+     */
+    protected function normalizePrintTiffFrameForWebThumbnail(\Imagick $frame): array
+    {
+        $orient = ImageOrientationNormalizer::imagickAutoOrientAndResetOrientation($frame);
+
+        if (! (bool) config('assets.thumbnail.tiff.normalize_for_web', true)) {
+            $orient['width_after'] = (int) $frame->getImageWidth();
+            $orient['height_after'] = (int) $frame->getImageHeight();
+
+            return [$frame, $orient];
+        }
+
+        try {
+            $frame->setImageBackgroundColor(new \ImagickPixel('#ffffff'));
+        } catch (\Throwable) {
+        }
+
+        if (method_exists($frame, 'mergeImageLayers') && defined('Imagick::LAYERMETHOD_FLATTEN')) {
+            try {
+                $flat = $frame->mergeImageLayers(\Imagick::LAYERMETHOD_FLATTEN);
+                if ($flat instanceof \Imagick) {
+                    $frame->clear();
+                    $frame->destroy();
+                    $frame = $flat;
+                }
+            } catch (\Throwable $e) {
+                Log::debug('[ThumbnailGenerationService] TIFF mergeImageLayers skipped', [
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
+        try {
+            if (defined('Imagick::COLORSPACE_SRGB')) {
+                $frame->setImageColorspace(\Imagick::COLORSPACE_SRGB);
+            }
+            if (method_exists($frame, 'transformImageColorspace') && defined('Imagick::COLORSPACE_SRGB')) {
+                $frame->transformImageColorspace(\Imagick::COLORSPACE_SRGB);
+            }
+        } catch (\Throwable $e) {
+            Log::debug('[ThumbnailGenerationService] TIFF colorspace normalize skipped', [
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        try {
+            $frame->setImageBackgroundColor(new \ImagickPixel('#ffffff'));
+            if (method_exists($frame, 'setImageAlphaChannel') && defined('Imagick::ALPHACHANNEL_FLATTEN')) {
+                $frame->setImageAlphaChannel(\Imagick::ALPHACHANNEL_FLATTEN);
+            }
+        } catch (\Throwable $e) {
+            Log::debug('[ThumbnailGenerationService] TIFF alpha flatten skipped', [
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        try {
+            if (method_exists($frame, 'stripImage')) {
+                $frame->stripImage();
+            }
+        } catch (\Throwable) {
+        }
+
+        $orient['width_after'] = (int) $frame->getImageWidth();
+        $orient['height_after'] = (int) $frame->getImageHeight();
+
+        return [$frame, $orient];
+    }
+
+    /**
+     * Cached upright raster for GD thumbnails (JPEG/PNG/WebP/GIF) — one decode per downloaded source per run.
+     *
+     * @return array{path: string, imagetype: int, profile: array<string, mixed>}
+     */
+    protected function resolveGdThumbnailRaster(string $sourcePath): array
+    {
+        if ($this->gdOrientCacheKey === $sourcePath
+            && $this->gdOrientWorkPath !== null
+            && is_file($this->gdOrientWorkPath)) {
+            $info = @getimagesize($this->gdOrientWorkPath);
+            $type = is_array($info) ? (int) $info[2] : IMAGETYPE_PNG;
+
+            return [
+                'path' => $this->gdOrientWorkPath,
+                'imagetype' => $type,
+                'profile' => [],
+            ];
+        }
+
+        $prep = ImageOrientationNormalizer::prepareFlatRasterForGdThumbnail($sourcePath);
+        $this->mergeRasterOrientationProfileOnce($prep['profile']);
+        $this->gdOrientCacheKey = $sourcePath;
+        $this->gdOrientWorkPath = $prep['path'];
+        $this->gdOrientWorkCleanup = $prep['cleanup'];
+
+        return [
+            'path' => $prep['path'],
+            'imagetype' => $prep['imagetype'],
+            'profile' => $prep['profile'],
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $extra
+     */
+    protected function imagickNormalizeThumbnailOrientation(\Imagick $imagick, string $pipeline, array $extra = []): void
+    {
+        $diag = ImageOrientationNormalizer::imagickAutoOrientAndResetOrientation($imagick);
+        $this->mergeRasterOrientationProfileOnce(array_merge(['pipeline' => $pipeline], $extra, $diag));
+    }
+
+    protected function beginThumbnailProfiling(Asset $asset, ?AssetVersion $version, string $mode): void
+    {
+        $this->resetGdRasterOrientationCache();
+        $this->rasterOrientationProfile = null;
+        if (! $this->thumbnailProfilingEnabled()) {
+            $this->thumbnailProfilingRun = null;
+
+            return;
+        }
+        $this->thumbnailProfilingRun = [
+            '_t0' => microtime(true),
+            '_mark' => microtime(true),
+            'run_id' => (string) Str::uuid(),
+            'kind' => 'thumbnail_generation',
+            'asset_id' => (string) $asset->id,
+            'tenant_id' => $asset->tenant_id,
+            'brand_id' => $asset->brand_id,
+            'upload_session_id' => $asset->upload_session_id,
+            'asset_version_id' => $version?->id,
+            'mime_type' => $version?->mime_type ?? $asset->mime_type,
+            'original_filename' => $asset->original_filename,
+            'thumbnail_mode' => $mode,
+            'segments' => [],
+            'derivatives' => [],
+        ];
+    }
+
+    protected function thumbProfilingLap(string $segmentName): void
+    {
+        if ($this->thumbnailProfilingRun === null) {
+            return;
+        }
+        $now = microtime(true);
+        $deltaMs = (int) round(($now - (float) $this->thumbnailProfilingRun['_mark']) * 1000.0);
+        $this->thumbnailProfilingRun['segments'][$segmentName] = $deltaMs;
+        $this->thumbnailProfilingRun['_mark'] = $now;
+    }
+
+    protected function thumbProfilingDerivative(string $style, int $generateMs, int $uploadMs, ?int $outputBytes, ?int $thumbOutW = null, ?int $thumbOutH = null): void
+    {
+        if ($this->thumbnailProfilingRun === null) {
+            return;
+        }
+        $row = [
+            'style' => $style,
+            'generate_ms' => $generateMs,
+            'upload_ms' => $uploadMs,
+            'output_bytes' => $outputBytes,
+        ];
+        if ($thumbOutW !== null) {
+            $row['thumb_output_width'] = $thumbOutW;
+        }
+        if ($thumbOutH !== null) {
+            $row['thumb_output_height'] = $thumbOutH;
+        }
+        $this->thumbnailProfilingRun['derivatives'][] = $row;
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    protected function completeThumbnailProfiling(
+        ?int $sourceFileSize,
+        ?int $sourceImageWidth,
+        ?int $sourceImageHeight,
+        bool $success,
+    ): ?array {
+        if ($this->thumbnailProfilingRun === null) {
+            return null;
+        }
+        $run = $this->thumbnailProfilingRun;
+        $this->thumbnailProfilingRun = null;
+        $t0 = (float) ($run['_t0'] ?? microtime(true));
+        unset($run['_t0'], $run['_mark']);
+        $run['source_file_size'] = $sourceFileSize;
+        $run['source_image_width'] = $sourceImageWidth;
+        $run['source_image_height'] = $sourceImageHeight;
+        if ($this->rasterOrientationProfile !== null) {
+            $run['raster_orientation'] = $this->rasterOrientationProfile;
+            $this->rasterOrientationProfile = null;
+        }
+        $run['total_service_ms'] = (int) round((microtime(true) - $t0) * 1000.0);
+        $run['success'] = $success;
+        $run['finished_at'] = now()->toIso8601String();
+        $run = array_merge(ThumbnailProfilingRecorder::consumeJobContext(), $run);
+        if (isset($run['raster_orientation']) && is_array($run['raster_orientation'])) {
+            foreach (['job_class', 'worker_queue', 'queue_job_id', 'queue_wait_ms'] as $jk) {
+                if (! array_key_exists($jk, $run['raster_orientation']) && array_key_exists($jk, $run)) {
+                    $run['raster_orientation'][$jk] = $run[$jk];
+                }
+            }
+        }
+        ThumbnailProfilingRecorder::log($run);
+
+        return $run;
+    }
+
+    /**
+     * Called when {@see \App\Jobs\GenerateThumbnailsJob} catches an exception so incomplete runs are logged.
+     */
+    public function abandonProfilingAfterJobFailure(): void
+    {
+        $this->abandonThumbnailProfiling();
+    }
+
+    protected function abandonThumbnailProfiling(): void
+    {
+        $this->resetGdRasterOrientationCache();
+        if ($this->thumbnailProfilingRun === null) {
+            $this->rasterOrientationProfile = null;
+            ThumbnailProfilingRecorder::consumeJobContext();
+
+            return;
+        }
+        $run = $this->thumbnailProfilingRun;
+        $this->thumbnailProfilingRun = null;
+        $t0 = (float) ($run['_t0'] ?? microtime(true));
+        unset($run['_t0'], $run['_mark']);
+        if ($this->rasterOrientationProfile !== null) {
+            $run['raster_orientation'] = $this->rasterOrientationProfile;
+        }
+        $this->rasterOrientationProfile = null;
+        $run['success'] = false;
+        $run['incomplete'] = true;
+        $run['total_service_ms'] = (int) round((microtime(true) - $t0) * 1000.0);
+        $run['finished_at'] = now()->toIso8601String();
+        $run = array_merge(ThumbnailProfilingRecorder::consumeJobContext(), $run);
+        if (isset($run['raster_orientation']) && is_array($run['raster_orientation'])) {
+            foreach (['job_class', 'worker_queue', 'queue_job_id', 'queue_wait_ms'] as $jk) {
+                if (! array_key_exists($jk, $run['raster_orientation']) && array_key_exists($jk, $run)) {
+                    $run['raster_orientation'][$jk] = $run[$jk];
+                }
+            }
+        }
+        ThumbnailProfilingRecorder::log($run);
+    }
+
+    /**
+     * Download original bytes to a temp file using the same routing as {@see generateThumbnails} (diagnostics only).
+     */
+    public function downloadOriginalToTempForDiagnostics(Asset $asset, string $sourceS3Path): string
+    {
+        $asset->loadMissing('storageBucket');
+        $bucket = $asset->storageBucket;
+        if ($bucket !== null) {
+            return $this->downloadFromS3($bucket, $sourceS3Path, $asset->id);
+        }
+
+        return $this->downloadSourceToTempForThumbnails($asset, $sourceS3Path);
+    }
+
+    /**
+     * Align internal generation state with {@see generateThumbnails} before preferred-crop / raster steps (diagnostics only).
+     */
+    public function resetDiagnosticsGenerationState(string $mode): void
+    {
+        $this->generationMode = ThumbnailMode::normalize($mode);
+        $this->preferredCropSummary = null;
+        $this->preferredPdfRasterCachePath = null;
+        $this->preferredVideoRasterCachePath = null;
+    }
+
+    /**
+     * @return array Same shape as {@see applyPreferredSmartOrPrintCrop}
+     */
+    public function applyPreferredCropForDiagnostics(string $imagePath): array
+    {
+        return $this->applyPreferredSmartOrPrintCrop($imagePath);
+    }
+
+    public function detectFileTypeForDiagnostics(Asset $asset, ?AssetVersion $version = null): string
+    {
+        return $this->detectFileType($asset, $version);
+    }
+
+    /**
+     * Generate a single configured style to a temp file (diagnostics only; does not upload or persist metadata).
+     *
+     * @throws \InvalidArgumentException|\RuntimeException
+     */
+    public function generateOneThumbnailStyleForDiagnostics(Asset $asset, string $localSourcePath, string $styleName, string $fileType): string
+    {
+        $styles = config('assets.thumbnail_styles', []);
+        if (! isset($styles[$styleName]) || ! is_array($styles[$styleName])) {
+            throw new \InvalidArgumentException("Unknown thumbnail style \"{$styleName}\" (configure assets.thumbnail_styles).");
+        }
+        $styleConfig = $styles[$styleName];
+        $out = $this->generateThumbnail($asset, $localSourcePath, $styleName, $styleConfig, $fileType, false);
+        if ($out === null || ! is_file($out)) {
+            throw new \RuntimeException('Thumbnail generation produced no output file for style '.$styleName.'.');
+        }
+
+        return $out;
     }
 
     /**
@@ -318,6 +706,8 @@ class ThumbnailGenerationService
             throw new \RuntimeException('No thumbnail styles configured');
         }
 
+        $this->beginThumbnailProfiling($asset, $version, $mode);
+
         Log::info('[ThumbnailGenerationService] Generating thumbnails from source', [
             'asset_id' => $asset->id,
             'source_s3_path' => $sourceS3Path,
@@ -337,6 +727,7 @@ class ThumbnailGenerationService
         }
 
         $sourceFileSize = filesize($tempPath);
+        $this->thumbProfilingLap('download_original_ms');
 
         // Detect file type: use version->mime_type when version-aware (from FileInspectionService)
         $fileType = $this->detectFileType($asset, $version);
@@ -513,6 +904,8 @@ class ThumbnailGenerationService
             ]);
         }
 
+        $this->thumbProfilingLap('type_probe_and_dimensions_ms');
+
         if ($mode === ThumbnailMode::Preferred->value
             && in_array($fileType, ['image', 'tiff', 'avif', 'cr2'], true)
         ) {
@@ -546,6 +939,8 @@ class ThumbnailGenerationService
                 }
             }
         }
+
+        $this->thumbProfilingLap('preferred_crop_pipeline_ms');
 
         try {
             // Determine file type and generate thumbnails
@@ -639,6 +1034,8 @@ class ThumbnailGenerationService
                 }
             }
 
+            $this->thumbProfilingLap('preview_block_ms');
+
             // Degraded mode: skip medium/large for files exceeding pixel cap (prevents OOM on 700MB+ TIFFs)
             $maxPixels = (int) config('assets.thumbnail.max_pixels', 200_000_000);
             $degradedMode = $sourceImageWidth && $sourceImageHeight
@@ -667,6 +1064,7 @@ class ThumbnailGenerationService
                     continue;
                 }
                 try {
+                    $tGen = microtime(true);
                     $thumbnailPath = $this->generateThumbnail(
                         $asset,
                         $tempPath,
@@ -675,8 +1073,10 @@ class ThumbnailGenerationService
                         $fileType,
                         false // Never force ImageMagick for normal generation
                     );
+                    $genMs = (int) round((microtime(true) - $tGen) * 1000.0);
 
                     if ($thumbnailPath) {
+                        $tUp = microtime(true);
                         // Upload thumbnail to S3
                         $s3ThumbnailPath = $this->uploadThumbnailToS3(
                             $bucket,
@@ -688,6 +1088,7 @@ class ThumbnailGenerationService
                             $mode,
                             $fallbackUploadDisk
                         );
+                        $upMs = (int) round((microtime(true) - $tUp) * 1000.0);
 
                         // Get thumbnail metadata
                         $thumbnailInfo = $this->getThumbnailMetadata($thumbnailPath);
@@ -699,6 +1100,15 @@ class ThumbnailGenerationService
                             'size_bytes' => $thumbnailInfo['size_bytes'] ?? filesize($thumbnailPath),
                             'generated_at' => now()->toIso8601String(),
                         ];
+
+                        $this->thumbProfilingDerivative(
+                            $styleName,
+                            $genMs,
+                            $upMs,
+                            isset($thumbnailInfo['size_bytes']) ? (int) $thumbnailInfo['size_bytes'] : (is_file($thumbnailPath) ? (int) filesize($thumbnailPath) : null),
+                            isset($thumbnailInfo['width']) ? (int) $thumbnailInfo['width'] : null,
+                            isset($thumbnailInfo['height']) ? (int) $thumbnailInfo['height'] : null,
+                        );
 
                         // Clean up local thumbnail
                         @unlink($thumbnailPath);
@@ -712,6 +1122,8 @@ class ThumbnailGenerationService
                     // Continue with other styles even if one fails
                 }
             }
+
+            $this->thumbProfilingLap('final_styles_loop_ms');
 
             // Build thumbnail_dimensions from generated thumbnails
             $thumbnailDimensions = [];
@@ -762,7 +1174,9 @@ class ThumbnailGenerationService
                 ]);
             }
 
-            return [
+            $this->thumbProfilingLap('post_styles_metadata_ms');
+
+            $payload = [
                 'thumbnails' => [$mode => $thumbnails],
                 'preview_thumbnails' => [$mode => $previewThumbnails],
                 'thumbnail_dimensions' => [$mode => $thumbnailDimensions],
@@ -772,7 +1186,19 @@ class ThumbnailGenerationService
                 'pdf_page_count' => $pdfPageCount,
                 'thumbnail_modes_meta' => $this->buildThumbnailModesMetaPayload(),
             ];
+            $profRow = $this->completeThumbnailProfiling(
+                is_int($sourceFileSize) ? $sourceFileSize : null,
+                $sourceImageWidth,
+                $sourceImageHeight,
+                true,
+            );
+            if ($profRow !== null) {
+                $payload['_thumbnail_profiling'] = $profRow;
+            }
+
+            return $payload;
         } finally {
+            $this->abandonThumbnailProfiling();
             $this->unlinkPreferredRasterCaches();
             // Clean up temporary file
             if (file_exists($tempPath)) {
@@ -1430,16 +1856,22 @@ class ThumbnailGenerationService
             throw new \RuntimeException('Source file is empty (size: 0 bytes)');
         }
 
-        // Load source image
-        $sourceInfo = getimagesize($sourcePath);
+        $raster = $this->resolveGdThumbnailRaster($sourcePath);
+        $workPath = $raster['path'];
+        $tFileMeta = microtime(true);
+        $sourceInfo = getimagesize($workPath);
+        if ($this->diagnosticThumbnailSegmentMs !== null) {
+            $this->diagnosticThumbnailSegmentMs['file_meta_ms'] = round((microtime(true) - $tFileMeta) * 1000, 3);
+        }
         if ($sourceInfo === false) {
-            throw new \RuntimeException("Unable to read source image: {$sourcePath} (size: {$sourceFileSize} bytes)");
+            throw new \RuntimeException("Unable to read source image: {$workPath} (size: {$sourceFileSize} bytes)");
         }
 
         [$sourceWidth, $sourceHeight, $sourceType] = $sourceInfo;
 
         Log::info('[ThumbnailGenerationService] Source image loaded', [
             'source_path' => $sourcePath,
+            'decode_path' => $workPath,
             'source_width' => $sourceWidth,
             'source_height' => $sourceHeight,
             'source_type' => $sourceType,
@@ -1447,19 +1879,24 @@ class ThumbnailGenerationService
         ]);
 
         // Create source image resource
+        $tDecode = microtime(true);
         $sourceImage = match ($sourceType) {
-            IMAGETYPE_JPEG => imagecreatefromjpeg($sourcePath),
-            IMAGETYPE_PNG => imagecreatefrompng($sourcePath),
-            IMAGETYPE_WEBP => imagecreatefromwebp($sourcePath),
-            IMAGETYPE_GIF => imagecreatefromgif($sourcePath),
+            IMAGETYPE_JPEG => imagecreatefromjpeg($workPath),
+            IMAGETYPE_PNG => imagecreatefrompng($workPath),
+            IMAGETYPE_WEBP => imagecreatefromwebp($workPath),
+            IMAGETYPE_GIF => imagecreatefromgif($workPath),
             default => throw new \RuntimeException("Unsupported image type: {$sourceType}"),
         };
+        if ($this->diagnosticThumbnailSegmentMs !== null) {
+            $this->diagnosticThumbnailSegmentMs['decode_ms'] = round((microtime(true) - $tDecode) * 1000, 3);
+        }
 
         if ($sourceImage === false) {
             throw new \RuntimeException('Failed to create source image resource');
         }
 
         try {
+            $tNormStart = microtime(true);
             // Calculate thumbnail dimensions (maintain aspect ratio)
             $targetWidth = $styleConfig['width'];
             $targetHeight = $styleConfig['height'];
@@ -1506,7 +1943,12 @@ class ThumbnailGenerationService
                 imagefill($thumbImage, 0, 0, $white);
             }
 
+            if ($this->diagnosticThumbnailSegmentMs !== null) {
+                $this->diagnosticThumbnailSegmentMs['normalize_ms'] = round((microtime(true) - $tNormStart) * 1000, 3);
+            }
+
             // Resize image — use nearest-neighbor for small sources (icons, favicons) for crisp upscaling
+            $tResizeStart = microtime(true);
             $resizeFn = $this->isSmallSource($sourceWidth, $sourceHeight) ? 'imagecopyresized' : 'imagecopyresampled';
             $resizeFn(
                 $thumbImage,
@@ -1530,11 +1972,16 @@ class ThumbnailGenerationService
                 }
             }
 
+            if ($this->diagnosticThumbnailSegmentMs !== null) {
+                $this->diagnosticThumbnailSegmentMs['resize_ms'] = round((microtime(true) - $tResizeStart) * 1000, 3);
+            }
+
             // Determine output format based on config (default to WebP for better compression)
             $outputFormat = config('assets.thumbnail.output_format', 'webp'); // 'webp' or 'jpeg'
             $quality = $styleConfig['quality'] ?? 85;
 
             // Save thumbnail to temporary file
+            $tEncode = microtime(true);
             if ($outputFormat === 'webp' && function_exists('imagewebp')) {
                 $thumbPath = tempnam(sys_get_temp_dir(), 'thumb_gen_').'.webp';
                 if (! imagewebp($thumbImage, $thumbPath, $quality)) {
@@ -1546,6 +1993,9 @@ class ThumbnailGenerationService
                 if (! imagejpeg($thumbImage, $thumbPath, $quality)) {
                     throw new \RuntimeException('Failed to save thumbnail image as JPEG');
                 }
+            }
+            if ($this->diagnosticThumbnailSegmentMs !== null) {
+                $this->diagnosticThumbnailSegmentMs['encode_ms'] = round((microtime(true) - $tEncode) * 1000, 3);
             }
 
             return $thumbPath;
@@ -1699,9 +2149,7 @@ class ThumbnailGenerationService
                 $im = $r->getImage();
                 $r->clear();
                 $r->destroy();
-                $nrm = $this->normalizePrintTiffFrameForWebThumbnail($im);
-                $im->clear();
-                $im->destroy();
+                [$nrm, $orient] = $this->normalizePrintTiffFrameForWebThumbnail($im);
                 if ($this->tiffNormalizedFrameLooksOnlyPaperWhite($nrm)) {
                     $candidatesTried[] = $label.':blank';
                     $nrm->clear();
@@ -1710,6 +2158,10 @@ class ThumbnailGenerationService
                     return null;
                 }
                 $candidatesTried[] = $label.':ok';
+                $this->mergeRasterOrientationProfileOnce(array_merge([
+                    'pipeline' => 'tiff_normalize_print',
+                    'exif_orientation_tag' => ImageOrientationNormalizer::readExifOrientationTag($sourcePath),
+                ], $orient));
 
                 return $nrm;
             } catch (\Throwable $e) {
@@ -1774,7 +2226,13 @@ class ThumbnailGenerationService
         $r->clear();
         $r->destroy();
 
-        return $this->normalizePrintTiffFrameForWebThumbnail($im);
+        [$frame, $orient] = $this->normalizePrintTiffFrameForWebThumbnail($im);
+        $this->mergeRasterOrientationProfileOnce(array_merge([
+            'pipeline' => 'tiff_fallback_normalize',
+            'exif_orientation_tag' => ImageOrientationNormalizer::readExifOrientationTag($sourcePath),
+        ], $orient));
+
+        return $frame;
     }
 
     /**
@@ -1807,7 +2265,13 @@ class ThumbnailGenerationService
                     return null;
                 }
 
-                return $this->normalizePrintTiffFrameForWebThumbnail($flat);
+                [$mergedFrame, $orient] = $this->normalizePrintTiffFrameForWebThumbnail($flat);
+                $this->mergeRasterOrientationProfileOnce(array_merge([
+                    'pipeline' => 'tiff_merged_ifd',
+                    'exif_orientation_tag' => ImageOrientationNormalizer::readExifOrientationTag($sourcePath),
+                ], $orient));
+
+                return $mergedFrame;
             }
             $reader->clear();
             $reader->destroy();
@@ -1848,71 +2312,6 @@ class ThumbnailGenerationService
     }
 
     /**
-     * Prepress/print TIFFs (CMYK, spot colors, extra channels, soft-mask alpha) often decode in ImageMagick
-     * as an empty or nearly white RGB composite until layered into sRGB. This matches what most browsers
-     * and WebP need: a single flattened sRGB frame with no stray alpha.
-     */
-    protected function normalizePrintTiffFrameForWebThumbnail(\Imagick $frame): \Imagick
-    {
-        if (! (bool) config('assets.thumbnail.tiff.normalize_for_web', true)) {
-            return $frame;
-        }
-
-        try {
-            $frame->setImageBackgroundColor(new \ImagickPixel('#ffffff'));
-        } catch (\Throwable) {
-        }
-
-        if (method_exists($frame, 'mergeImageLayers') && defined('Imagick::LAYERMETHOD_FLATTEN')) {
-            try {
-                $flat = $frame->mergeImageLayers(\Imagick::LAYERMETHOD_FLATTEN);
-                if ($flat instanceof \Imagick) {
-                    $frame->clear();
-                    $frame->destroy();
-                    $frame = $flat;
-                }
-            } catch (\Throwable $e) {
-                Log::debug('[ThumbnailGenerationService] TIFF mergeImageLayers skipped', [
-                    'error' => $e->getMessage(),
-                ]);
-            }
-        }
-
-        try {
-            if (defined('Imagick::COLORSPACE_SRGB')) {
-                $frame->setImageColorspace(\Imagick::COLORSPACE_SRGB);
-            }
-            if (method_exists($frame, 'transformImageColorspace') && defined('Imagick::COLORSPACE_SRGB')) {
-                $frame->transformImageColorspace(\Imagick::COLORSPACE_SRGB);
-            }
-        } catch (\Throwable $e) {
-            Log::debug('[ThumbnailGenerationService] TIFF colorspace normalize skipped', [
-                'error' => $e->getMessage(),
-            ]);
-        }
-
-        try {
-            $frame->setImageBackgroundColor(new \ImagickPixel('#ffffff'));
-            if (method_exists($frame, 'setImageAlphaChannel') && defined('Imagick::ALPHACHANNEL_FLATTEN')) {
-                $frame->setImageAlphaChannel(\Imagick::ALPHACHANNEL_FLATTEN);
-            }
-        } catch (\Throwable $e) {
-            Log::debug('[ThumbnailGenerationService] TIFF alpha flatten skipped', [
-                'error' => $e->getMessage(),
-            ]);
-        }
-
-        try {
-            if (method_exists($frame, 'stripImage')) {
-                $frame->stripImage();
-            }
-        } catch (\Throwable) {
-        }
-
-        return $frame;
-    }
-
-    /**
      * ImageMagick/LibRaw options that reduce green/magenta RAW decode artifacts (best-effort per IM build).
      */
     protected function applyImagickRawDelegateOptions(\Imagick $imagick): void
@@ -1938,20 +2337,7 @@ class ThumbnailGenerationService
      */
     protected function normalizeDecodedRawImageColors(\Imagick $imagick): void
     {
-        try {
-            if (method_exists($imagick, 'autoOrientImage')) {
-                $imagick->autoOrientImage();
-            }
-        } catch (\Throwable) {
-        }
-
-        // Drop embedded ICC that some RAW decoders attach incorrectly on certain IM builds (staging vs local).
-        try {
-            if (method_exists($imagick, 'stripImage')) {
-                $imagick->stripImage();
-            }
-        } catch (\Throwable) {
-        }
+        $this->imagickNormalizeThumbnailOrientation($imagick, 'cr2_raw_decode');
 
         try {
             if (defined('Imagick::COLORSPACE_SRGB')) {
@@ -2257,6 +2643,10 @@ class ThumbnailGenerationService
             // Get first image if multi-image AVIF
             $imagick->setIteratorIndex(0);
             $imagick = $imagick->getImage();
+
+            $this->imagickNormalizeThumbnailOrientation($imagick, 'avif_imagick', [
+                'exif_orientation_tag' => ImageOrientationNormalizer::readExifOrientationTag($sourcePath),
+            ]);
 
             // Get source dimensions
             $sourceWidth = $imagick->getImageWidth();
@@ -2800,6 +3190,10 @@ class ThumbnailGenerationService
             $imagick->setIteratorIndex(0);
             $imagick = $imagick->getImage();
 
+            $this->imagickNormalizeThumbnailOrientation($imagick, 'psd_imagick', [
+                'exif_orientation_tag' => ImageOrientationNormalizer::readExifOrientationTag($sourcePath),
+            ]);
+
             // Get dimensions
             $sourceWidth = $imagick->getImageWidth();
             $sourceHeight = $imagick->getImageHeight();
@@ -2923,6 +3317,10 @@ class ThumbnailGenerationService
 
             $imagick->setIteratorIndex(0);
             $imagick = $imagick->getImage();
+
+            $this->imagickNormalizeThumbnailOrientation($imagick, 'ai_imagick', [
+                'exif_orientation_tag' => ImageOrientationNormalizer::readExifOrientationTag($sourcePath),
+            ]);
 
             $sourceWidth = $imagick->getImageWidth();
             $sourceHeight = $imagick->getImageHeight();
@@ -3048,6 +3446,10 @@ class ThumbnailGenerationService
             // Get first image from potential multi-page document
             $imagick->setIteratorIndex(0);
             $imagick = $imagick->getImage();
+
+            $this->imagickNormalizeThumbnailOrientation($imagick, 'imagick_admin_override', [
+                'exif_orientation_tag' => ImageOrientationNormalizer::readExifOrientationTag($sourcePath),
+            ]);
 
             // Get dimensions
             $sourceWidth = $imagick->getImageWidth();

@@ -86,6 +86,8 @@ export default function AssetGridToolbar({
     /** Assets: uniform grid only — 'cover' | 'contain' (see AssetGridViewOptionsDropdown) */
     gridImageFit = 'contain',
     onGridImageFitChange = null,
+    /** Optional: subtle copy when many grid tiles are still on server preview pipeline */
+    thumbnailPipelineSummary = null,
 }) {
     const inertiaPage = usePage()
     const pageProps = inertiaPage.props
@@ -535,6 +537,44 @@ export default function AssetGridToolbar({
         </>
     )
 
+    const pipelineHasNote =
+        thumbnailPipelineSummary &&
+        (thumbnailPipelineSummary.processing > 0 ||
+            thumbnailPipelineSummary.attention > 0 ||
+            (thumbnailPipelineSummary.rawProcessing ?? 0) > 0)
+
+    const pipelineNote = pipelineHasNote ? (
+        <div className="text-[11px] leading-snug text-gray-500" role="status">
+            <p>
+                {thumbnailPipelineSummary.processing > 0 ? (
+                    <span>
+                        {thumbnailPipelineSummary.processing}{' '}
+                        {thumbnailPipelineSummary.processing === 1 ? 'preview is' : 'previews are'} still processing
+                    </span>
+                ) : null}
+                {thumbnailPipelineSummary.processing > 0 && thumbnailPipelineSummary.attention > 0 ? (
+                    <span aria-hidden> · </span>
+                ) : null}
+                {thumbnailPipelineSummary.attention > 0 ? (
+                    <span>
+                        {thumbnailPipelineSummary.attention}{' '}
+                        {thumbnailPipelineSummary.attention === 1 ? 'asset needs' : 'assets need'} attention
+                    </span>
+                ) : null}
+            </p>
+            {(thumbnailPipelineSummary.rawProcessing ?? 0) > 0 ? (
+                <p className="mt-0.5 text-[10px] text-gray-500">
+                    {thumbnailPipelineSummary.rawProcessing}{' '}
+                    {thumbnailPipelineSummary.rawProcessing === 1 ? 'RAW file may' : 'RAW files may'} take longer to
+                    preview.
+                </p>
+            ) : null}
+            {thumbnailPipelineSummary.processing > 0 ? (
+                <p className="mt-0.5 text-[10px] italic text-gray-400">You can keep working while previews finish.</p>
+            ) : null}
+        </div>
+    ) : null
+
     return (
         <div className={`bg-white ${showMoreFilters ? 'border-b border-gray-200' : 'border-b border-gray-200'}`}>
             {/* Pending Assets Callout - Above search bar */}
@@ -563,6 +603,10 @@ export default function AssetGridToolbar({
                     </div>
                 </div>
             )}
+
+            {pipelineNote ? (
+                <div className="border-b border-gray-100 px-3 pb-1.5 pt-0 sm:px-4">{pipelineNote}</div>
+            ) : null}
             
             {/* Primary toolbar: Query | Results | Display; mobile keeps Sort + View on the bar; Filters sheet is metadata filters only */}
             <div className="px-3 py-2 sm:py-2.5 sm:px-4">

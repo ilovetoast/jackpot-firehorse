@@ -42,7 +42,7 @@ class ShareCollectionController extends Controller
         protected CollectionPublicShareGuestAccess $shareGuestAccess,
     ) {}
 
-    public function show(Request $request, string $token): Response|RedirectResponse
+    public function show(Request $request, string $token): Response|RedirectResponse|JsonResponse
     {
         $collection = Collection::query()
             ->where('public_share_token', $token)
@@ -141,6 +141,6 @@ class ShareCollectionController extends Controller
             abort(404, 'Collection not found.');
         }
 
-        return $this->performAssetDownload($collection, $asset, $collection->brand?->slug ?? '');
+        return $this->performAssetDownload($collection, $asset, $collection->brand?->slug ?? '', $request);
     }
 }

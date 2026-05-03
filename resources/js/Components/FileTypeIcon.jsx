@@ -1,9 +1,11 @@
+import { PhotoIcon } from '@heroicons/react/24/outline'
+
 /**
  * Phase 3.0C: FileTypeIcon Component
- * 
+ *
  * Displays a consistent file-type icon based on file extension or MIME type.
  * Replaces green placeholders with standard file-type icons.
- * 
+ *
  * @param {Object} props
  * @param {string} props.fileExtension - File extension (e.g., 'pdf', 'jpg')
  * @param {string} props.mimeType - MIME type (e.g., 'application/pdf')
@@ -81,13 +83,9 @@ export default function FileTypeIcon({
             )
         }
         
-        // Image files (fallback - should use thumbnail if available)
+        // Image files (fallback — RAW and uncommon image/* MIME use a simple photo glyph, not the old “chart” path)
         if (mime.startsWith('image/')) {
-            return (
-                <svg className={`${sizeClass} ${iconClassName}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909m-6.364-8.318l6.364-6.364m2.25 0l2.25 2.25M9.75 9.75l4.5-4.5M12 12.75l-3-3" />
-                </svg>
-            )
+            return <PhotoIcon className={`${sizeClass} ${iconClassName}`} aria-hidden />
         }
         
         // Generic document icon (default)

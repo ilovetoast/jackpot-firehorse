@@ -7,7 +7,7 @@
  * @module UploadItemRow
  */
 
-import { useState, useEffect, useMemo, useRef, memo } from 'react';
+import { useState, useEffect, useMemo, useRef, memo, useSyncExternalStore, useCallback } from 'react';
 import {
     CheckCircleIcon,
     ExclamationCircleIcon,
@@ -16,12 +16,19 @@ import {
     ChevronDownIcon,
     ChevronUpIcon,
     XMarkIcon,
-    PhotoIcon,
     PencilIcon
 } from '@heroicons/react/24/outline';
 import MetadataFieldRenderer from './MetadataFieldRenderer';
 import FileTypeIcon from './FileTypeIcon';
+import UploadTrayThumbnail from './Upload/UploadTrayThumbnail';
+import { isLocalImagePreviewUnsupported } from '../utils/localImagePreview';
 import { isDev } from '../utils/environment'; // Phase 2.5 Step 4: Centralized environment detection
+import {
+    subscribeUploadPreviewRegistry,
+    getUploadPreviewSnapshotForClient,
+    revokeClientUploadPreview,
+} from '../utils/uploadPreviewRegistry';
+import { shouldRegisterGridBlobPreview } from '../utils/browserGridBlobPreview';
 
 /**
  * Phase 3.0B: Performance instrumentation
@@ -103,6 +110,7 @@ function getStatusConfig(status) {
         case 'queued':
             return {
                 label: 'Queued',
+                tooltip: 'Waiting to start upload',
                 bgColor: 'bg-gray-100',
                 textColor: 'text-gray-700',
                 icon: ClockIcon,
@@ -111,61 +119,119 @@ function getStatusConfig(status) {
             };
         case 'initiating':
             return {
-                label: 'Preparing…',
-                bgColor: 'bg-blue-50 border border-blue-200',
-                textColor: 'text-blue-700',
+                label: 'Checking',
+                tooltip: 'Checking limits and preparing upload',
+                bgColor: 'bg-sky-50 border border-sky-200',
+                textColor: 'text-sky-800',
                 icon: ArrowPathIcon,
-                iconColor: 'text-blue-600',
+                iconColor: 'text-sky-600',
                 pulse: true
             };
         case 'uploading':
             return {
                 label: 'Uploading',
+                tooltip: 'Sending file data',
                 bgColor: 'bg-blue-50 border border-blue-200',
-                textColor: 'text-blue-700',
+                textColor: 'text-blue-800',
                 icon: ArrowPathIcon,
                 iconColor: 'text-blue-600',
                 pulse: true
             };
-        case 'processing':
+        case 'uploaded_bytes':
             return {
-                label: 'Processing…',
-                bgColor: 'bg-indigo-50 border border-indigo-200',
-                textColor: 'text-indigo-700',
+                label: 'Uploaded',
+                tooltip: 'File received; ready to finalize when you are',
+                bgColor: 'bg-emerald-50 border border-emerald-200',
+                textColor: 'text-emerald-800',
+                icon: CheckCircleIcon,
+                iconColor: 'text-emerald-600',
+                pulse: false
+            };
+        case 'processing':
+        case 'processing_preview':
+            return {
+                label: 'Preview',
+                tooltip: 'Generating preview and saving to library',
+                bgColor: 'bg-violet-50 border border-violet-200',
+                textColor: 'text-violet-800',
                 icon: ArrowPathIcon,
-                iconColor: 'text-indigo-600',
+                iconColor: 'text-violet-600',
                 pulse: true
             };
         case 'completing':
             return {
-                label: 'Finalizing…',
-                bgColor: 'bg-indigo-50 border border-indigo-200',
-                textColor: 'text-indigo-700',
+                label: 'Finalizing',
+                tooltip: 'Completing upload on server',
+                bgColor: 'bg-violet-50 border border-violet-200',
+                textColor: 'text-violet-800',
                 icon: ArrowPathIcon,
-                iconColor: 'text-indigo-600',
+                iconColor: 'text-violet-600',
                 pulse: true
             };
         case 'complete':
             return {
-                label: 'Complete',
-                bgColor: 'bg-green-100 border border-green-200',
-                textColor: 'text-green-700',
+                label: 'Uploaded',
+                tooltip: 'Upload finished',
+                bgColor: 'bg-emerald-50 border border-emerald-200',
+                textColor: 'text-emerald-800',
+                icon: CheckCircleIcon,
+                iconColor: 'text-emerald-600',
+                pulse: false
+            };
+        case 'preview_failed':
+            return {
+                label: 'Preview unavailable',
+                tooltip: 'Asset is saved in the library; preview could not be generated',
+                bgColor: 'bg-amber-50 border border-amber-200',
+                textColor: 'text-amber-900',
+                icon: ExclamationCircleIcon,
+                iconColor: 'text-amber-600',
+                pulse: false
+            };
+        case 'ready':
+            return {
+                label: 'Ready',
+                tooltip: 'Saved to library',
+                bgColor: 'bg-green-50 border border-green-200',
+                textColor: 'text-green-800',
                 icon: CheckCircleIcon,
                 iconColor: 'text-green-600',
+                pulse: false
+            };
+        case 'warning':
+            return {
+                label: 'Warning',
+                tooltip: 'Needs attention before this file can finish',
+                bgColor: 'bg-amber-50 border border-amber-200',
+                textColor: 'text-amber-900',
+                icon: ExclamationCircleIcon,
+                iconColor: 'text-amber-600',
                 pulse: false
             };
         case 'failed':
             return {
                 label: 'Failed',
-                bgColor: 'bg-red-100 border border-red-200',
-                textColor: 'text-red-700',
+                tooltip: 'Upload or save did not complete',
+                bgColor: 'bg-red-50 border border-red-200',
+                textColor: 'text-red-800',
                 icon: ExclamationCircleIcon,
                 iconColor: 'text-red-600',
+                pulse: false
+            };
+        case 'skipped':
+            return {
+                label: 'Skipped',
+                tooltip: 'Removed from queue or cancelled before completion',
+                bgColor: 'bg-gray-100 border border-gray-200',
+                textColor: 'text-gray-600',
+                icon: ClockIcon,
+                iconColor: 'text-gray-400',
                 pulse: false
             };
         default:
             return {
                 label: 'Unknown',
+                tooltip: 'Status unavailable',
                 bgColor: 'bg-gray-100',
                 textColor: 'text-gray-700',
                 icon: ClockIcon,
@@ -203,7 +269,24 @@ function formatFileSize(bytes) {
  * Without memoization, updating progress on one file causes ALL rows to re-render,
  * causing janky UI with 40+ files. With memoization, only the active row re-renders.
  */
-function UploadItemRow({ item, uploadManager, onRemove, disabled = false }) {
+function deriveBadgeKey(item, displayStatus) {
+    const life = item.lifecycle || ''
+    if (item.uploadStatus === 'skipped') return 'skipped'
+    if (item.uploadStatus === 'failed' && item.error?.stage === 'finalize') return 'warning'
+    if (item.uploadStatus === 'failed') return 'failed'
+    if (life === 'finalized') {
+        const t = item.pipelineThumbStatus
+        if (t === 'failed') return 'preview_failed'
+        if (t && t !== 'completed' && t !== 'failed') return 'processing_preview'
+        return 'ready'
+    }
+    if (life === 'finalizing' || displayStatus === 'processing') return 'processing_preview'
+    if (life === 'uploaded' && item.uploadStatus === 'complete') return 'uploaded_bytes'
+    if (displayStatus === 'complete') return 'complete'
+    return displayStatus
+}
+
+function UploadItemRow({ item, uploadManager, onRemove, onRetry, disabled = false, containPerformance = false }) {
 
     // CLEAN UPLOADER V2: DEV warning for failed files
     // Phase 2.5 Step 4: Use centralized environment detection - no prod logging noise
@@ -250,6 +333,7 @@ function UploadItemRow({ item, uploadManager, onRemove, disabled = false }) {
     const [showFilenameEditIcon, setShowFilenameEditIcon] = useState(false);
     const [filenameError, setFilenameError] = useState(null);
     const filenameInputRef = useRef(null);
+    const [previewLoadError, setPreviewLoadError] = useState(false);
     
     // Heartbeat fallback for large multipart uploads (shows "Uploading..." when queued >7.5s with no progress)
     const shouldShowUploadingHeartbeat = useUploadHeartbeat(item);
@@ -264,8 +348,9 @@ function UploadItemRow({ item, uploadManager, onRemove, disabled = false }) {
     if (displayStatus === 'completing') {
         displayStatus = 'processing';
     }
-    
-    const statusConfig = getStatusConfig(displayStatus);
+
+    const badgeKey = deriveBadgeKey(item, displayStatus);
+    const statusConfig = getStatusConfig(badgeKey);
     const StatusIcon = statusConfig.icon;
     
     const extension = getFileExtension(originalFilename);
@@ -303,23 +388,71 @@ function UploadItemRow({ item, uploadManager, onRemove, disabled = false }) {
         }
     }, [filenameEditing]);
     
-    // Image preview for image files (safe access)
-    const isImage = item.file?.type?.startsWith('image/') || false;
-    const previewUrl = useMemo(() => {
-        if (isImage && item.file) {
-            return URL.createObjectURL(item.file);
-        }
-        return null;
-    }, [isImage, item.file]);
-    
-    // Cleanup object URL on unmount
+    // Image-ish files (browser may not decode RAW / PSD in <img> even when MIME is generic)
+    const isImage =
+        (item.file?.type && item.file.type.startsWith('image/')) ||
+        (extension && isLocalImagePreviewUnsupported(extension, item.file?.type));
+    const trayNoLocalBrowserPreview =
+        isImage && isLocalImagePreviewUnsupported(extension, item.file?.type);
+    /** Single blob URL per file: parent registers JPG/PNG/WebP/GIF in uploadPreviewRegistry on file pick. */
+    const registrySnapshot = useSyncExternalStore(
+        subscribeUploadPreviewRegistry,
+        () => getUploadPreviewSnapshotForClient(item.clientId),
+        () => getUploadPreviewSnapshotForClient(item.clientId),
+    );
+    const registryUrl = registrySnapshot.split('\u0001')[1] || null;
+
+    const [orphanBlobUrl, setOrphanBlobUrl] = useState(null);
     useEffect(() => {
+        if (registryUrl || trayNoLocalBrowserPreview || !isImage || !item.file) {
+            if (orphanBlobUrl) {
+                URL.revokeObjectURL(orphanBlobUrl);
+                setOrphanBlobUrl(null);
+            }
+            return undefined;
+        }
+        if (!shouldRegisterGridBlobPreview(item.file)) {
+            return undefined;
+        }
+        let u = null;
+        try {
+            u = URL.createObjectURL(item.file);
+            setOrphanBlobUrl(u);
+        } catch (_) {
+            /* ignore */
+        }
         return () => {
-            if (previewUrl) {
-                URL.revokeObjectURL(previewUrl);
+            if (u) {
+                URL.revokeObjectURL(u);
             }
         };
-    }, [previewUrl]);
+    }, [item.clientId, item.file, registryUrl, trayNoLocalBrowserPreview, isImage]);
+
+    const localPreviewUrl = registryUrl || orphanBlobUrl;
+
+    useEffect(() => {
+        setPreviewLoadError(false);
+    }, [localPreviewUrl]);
+
+    const handleReleaseLocalBlob = useCallback(() => {
+        revokeClientUploadPreview(item.clientId);
+    }, [item.clientId]);
+
+    const thumbnailOverlayMode = useMemo(() => {
+        const pt = item.pipelineThumbStatus
+        const waitingServer = pt === 'pending' || pt === 'processing'
+        const life = item.lifecycle || ''
+        if (displayStatus === 'uploading' || displayStatus === 'initiating') {
+            return 'upload'
+        }
+        if (badgeKey === 'processing_preview' && life === 'finalized' && waitingServer) {
+            return 'server_preview'
+        }
+        if (badgeKey === 'processing_preview') {
+            return 'saving'
+        }
+        return 'none'
+    }, [displayStatus, badgeKey, item.pipelineThumbStatus, item.lifecycle])
     
     // Get effective metadata (read-only) - safe access
     const effectiveMetadata = uploadManager?.getEffectiveMetadata?.(item.clientId) || {};
@@ -418,21 +551,53 @@ function UploadItemRow({ item, uploadManager, onRemove, disabled = false }) {
         }
     };
 
-    // Handle remove (only for queued/failed items)
-    const canRemove = !disabled && (item.uploadStatus === 'queued' || item.uploadStatus === 'failed');
+    const life = item.lifecycle || '';
+    const canRemove =
+        !disabled &&
+        onRemove &&
+        item.uploadStatus !== 'skipped' &&
+        life !== 'finalized' &&
+        life !== 'finalizing' &&
+        item.uploadStatus !== 'processing' &&
+        (item.uploadStatus === 'queued' ||
+            item.uploadStatus === 'failed' ||
+            item.uploadStatus === 'complete' ||
+            item.uploadStatus === 'uploading');
+
+    const canRetry =
+        Boolean(onRetry) &&
+        !disabled &&
+        item.uploadStatus === 'failed' &&
+        item.uploadStatus !== 'skipped';
+
     const handleRemove = (e) => {
         e.stopPropagation(); // Prevent row expansion
-        if (onRemove && canRemove) {
+        if (canRemove) {
             onRemove(item.clientId);
         }
     };
 
-    // Phase 3.0: Enhanced visual state indicators
-    // Phase 3.0B: Calculate isActive for animation gating
-    // Only active rows (uploading/initiating/processing) should animate to reduce CPU usage
-    const isActive = displayStatus === 'uploading' || displayStatus === 'initiating' || displayStatus === 'processing';
-    const isComplete = displayStatus === 'complete';
-    const isFailed = displayStatus === 'failed';
+    const isActive =
+        badgeKey === 'uploading' ||
+        badgeKey === 'initiating' ||
+        badgeKey === 'processing' ||
+        badgeKey === 'processing_preview';
+    const isComplete = badgeKey === 'ready' || badgeKey === 'uploaded_bytes';
+    const isFailed = badgeKey === 'failed';
+    const isWarning = badgeKey === 'warning';
+
+    const showByteProgress =
+        item.uploadStatus !== 'skipped' &&
+        item.uploadStatus !== 'failed' &&
+        life !== 'finalized' &&
+        badgeKey !== 'processing_preview' &&
+        badgeKey !== 'ready' &&
+        badgeKey !== 'uploaded_bytes' &&
+        badgeKey !== 'warning' &&
+        (displayStatus === 'uploading' ||
+            displayStatus === 'initiating' ||
+            shouldShowUploadingHeartbeat ||
+            (item.uploadStatus === 'queued' && (item.progress || 0) > 0));
     
     /**
      * Phase 3.0B: Animation gating - critical for performance
@@ -443,11 +608,12 @@ function UploadItemRow({ item, uploadManager, onRemove, disabled = false }) {
      * 
      * Completed/queued/failed rows remain visually static (no animations).
      */
-    const shouldAnimate = isActive && (
-        displayStatus === 'initiating' ||
-        displayStatus === 'uploading' ||
-        displayStatus === 'processing'
-    );
+    const shouldAnimate =
+        isActive &&
+        (badgeKey === 'initiating' ||
+            badgeKey === 'uploading' ||
+            badgeKey === 'processing' ||
+            badgeKey === 'processing_preview');
     
     // Phase 3.0: Enhanced progress bar color coding
     const getProgressBarColor = () => {
@@ -471,39 +637,34 @@ function UploadItemRow({ item, uploadManager, onRemove, disabled = false }) {
     // Phase 3.0: Animated sheen for active states (uploading, initiating, or processing)
     // Phase 3.0B: Gate sheen animation to active rows only (performance optimization)
     // Sheen indicates active work is happening even if progress hasn't updated yet
-    const shouldShowSheen = shouldAnimate;
+    const shouldShowSheen = shouldAnimate && showByteProgress;
 
     // Phase 3.0: Enhanced progress percentage calculation
     const getProgressPercentage = () => {
         if (item.uploadStatus === 'complete') return 100;
         if (item.uploadStatus === 'failed') return 0;
-        
-        // Phase 3.0: Processing state shows 95% to indicate near-completion
-        if (displayStatus === 'processing') {
-            return Math.max(item.progress || 0, 95); // Show high progress during finalization
-        }
-        
-        // If heartbeat is active, show small indeterminate progress (5% with pulse animation)
         if (shouldShowUploadingHeartbeat) {
-            return 5; // Small visual progress to show activity
+            return 5;
         }
-        
         return item.progress || 0;
     };
 
 
+    const rowPerfStyle = containPerformance
+        ? { contentVisibility: 'auto', containIntrinsicSize: 'auto 112px' }
+        : undefined;
+
     return (
-        <div className={`bg-white transition-colors ${
-            isActive ? 'border-l-2 border-l-blue-500' : 
-            isComplete ? 'border-l-2 border-l-green-500' :
-            isFailed ? 'border-l-2 border-l-red-500' : ''
-        }`}>
-            {/* Phase 3.0: Main row with enhanced visual hierarchy */}
+        <div
+            className="border-b border-gray-100 bg-white transition-colors last:border-b-0"
+            style={rowPerfStyle}
+        >
             <div
                 className={`px-4 py-3 transition-colors ${
-                    isActive ? 'bg-blue-50/30 hover:bg-blue-50/50' :
-                    isComplete ? 'bg-green-50/30 hover:bg-green-50/50' :
-                    isFailed ? 'bg-red-50/30 hover:bg-red-50/50' :
+                    isActive ? 'bg-slate-50/80 hover:bg-slate-50' :
+                    isComplete ? 'bg-white hover:bg-gray-50/80' :
+                    isFailed ? 'bg-red-50/40 hover:bg-red-50/60' :
+                    isWarning ? 'bg-amber-50/50 hover:bg-amber-50/70' :
                     'hover:bg-gray-50'
                 }`}
             >
@@ -511,45 +672,23 @@ function UploadItemRow({ item, uploadManager, onRemove, disabled = false }) {
                     {/* Left: Title and status */}
                     <div className="flex items-center flex-1 min-w-0">
                         {/* Phase 3.0C: Thumbnail preview or file-type icon */}
-                        <div className="flex-shrink-0 mr-3">
-                            {isImage && previewUrl ? (
-                                // Show file preview for images during upload (blob URL from file object)
-                                // Use gray-300 so white-on-transparent logos are visible
-                                <div className="relative h-10 w-10 rounded border border-gray-200 overflow-hidden bg-gray-300">
-                                    <img
-                                        src={previewUrl}
-                                        alt={resolvedFilename}
-                                        className="h-full w-full object-contain"
-                                        onError={(e) => {
-                                            // If preview fails to load, hide image and show icon instead
-                                            e.currentTarget.style.display = 'none'
-                                            const iconContainer = e.currentTarget.nextElementSibling
-                                            if (iconContainer) {
-                                                iconContainer.style.display = 'flex'
-                                            }
-                                        }}
-                                    />
-                                    {/* Fallback file-type icon (hidden by default, shown if image fails) */}
-                                    <div className="absolute inset-0 flex items-center justify-center" style={{ display: 'none' }}>
-                                        <FileTypeIcon
-                                            fileExtension={extension}
-                                            mimeType={item.file?.type}
-                                            size="sm"
-                                            iconClassName="text-gray-400"
-                                        />
-                                    </div>
-                                </div>
-                            ) : (
-                                // Show file-type icon for non-image files or when no preview available
-                                <div className="h-10 w-10 flex items-center justify-center">
-                                    <FileTypeIcon
-                                        fileExtension={extension}
-                                        mimeType={item.file?.type}
-                                        size="sm"
-                                        iconClassName={statusConfig.iconColor}
-                                    />
-                                </div>
-                            )}
+                        <div className="mr-3 shrink-0">
+                            <UploadTrayThumbnail
+                                localPreviewUrl={localPreviewUrl}
+                                serverPreviewUrl={item.serverPreviewUrl ?? null}
+                                serverFinalThumbUrl={item.serverFinalThumbUrl ?? null}
+                                previewLoadError={previewLoadError}
+                                trayPreviewUnsupported={trayNoLocalBrowserPreview}
+                                extension={extension}
+                                mimeType={item.file?.type}
+                                badgeKey={badgeKey}
+                                lifecycle={item.lifecycle || ''}
+                                pipelineThumbStatus={item.pipelineThumbStatus}
+                                statusIconClass={statusConfig.iconColor}
+                                onImageError={() => setPreviewLoadError(true)}
+                                onReleaseLocalBlob={handleReleaseLocalBlob}
+                                overlayMode={thumbnailOverlayMode}
+                            />
                         </div>
 
                         {/* Title (inline editable headline) and inline progress bar */}
@@ -597,56 +736,65 @@ function UploadItemRow({ item, uploadManager, onRemove, disabled = false }) {
                                     </div>
                                 )}
                             </div>
-                            <p className="text-xs text-gray-500 mt-0.5">
+                            <p className="mt-0.5 truncate text-xs text-gray-500" title={originalFilename}>
+                                {originalFilename}
+                            </p>
+                            <p className="text-xs text-gray-500">
                                 {item.file?.size ? formatFileSize(item.file.size) : 'Unknown size'}
                             </p>
-                            
-                            {/* Phase 3.0: Enhanced progress bar with percentage */}
-                            <div className="mt-2 w-full">
-                                <div className="flex items-center gap-2">
-                                    <div className="relative flex-1 h-2 overflow-hidden rounded-full bg-gray-200">
-                                        <div
-                                            className={`h-full transition-[width] duration-300 ${getProgressBarColor()}`}
-                                            style={{ width: `${getProgressPercentage()}%` }}
-                                        />
-                                        {/* Animated sheen overlay (uploading/initiating/processing only) */}
-                                        {shouldShowSheen && (
-                                            <div className="absolute inset-0 overflow-hidden rounded-full">
-                                                <div 
-                                                    className="upload-sheen"
-                                                    style={{
-                                                        position: 'absolute',
-                                                        inset: 0,
-                                                        background: 'linear-gradient(110deg, transparent 25%, rgba(255, 255, 255, 0.35) 37%, transparent 63%)',
-                                                        backgroundSize: '200% 100%',
-                                                        animation: 'upload-sheen-animation 1.6s linear infinite'
-                                                    }}
-                                                />
-                                            </div>
-                                        )}
+
+                            {showByteProgress && (
+                                <div className="mt-2 w-full">
+                                    <div className="flex items-center gap-2">
+                                        <div className="relative h-2 flex-1 overflow-hidden rounded-full bg-gray-200">
+                                            <div
+                                                className={`h-full transition-[width] duration-300 ${getProgressBarColor()}`}
+                                                style={{ width: `${getProgressPercentage()}%` }}
+                                            />
+                                            {shouldShowSheen && (
+                                                <div className="absolute inset-0 overflow-hidden rounded-full">
+                                                    <div
+                                                        className="upload-sheen"
+                                                        style={{
+                                                            position: 'absolute',
+                                                            inset: 0,
+                                                            background:
+                                                                'linear-gradient(110deg, transparent 25%, rgba(255, 255, 255, 0.35) 37%, transparent 63%)',
+                                                            backgroundSize: '200% 100%',
+                                                            animation: 'upload-sheen-animation 1.6s linear infinite',
+                                                        }}
+                                                    />
+                                                </div>
+                                            )}
+                                        </div>
+                                        <span className="min-w-[3rem] text-right text-xs font-medium tabular-nums text-gray-600">
+                                            {item.uploadStatus === 'complete'
+                                                ? '100%'
+                                                : item.uploadStatus === 'failed'
+                                                  ? '—'
+                                                  : `${Math.round(getProgressPercentage())}%`}
+                                        </span>
                                     </div>
-                                    {/* Phase 3.0: Progress percentage text */}
-                                    <span className="text-xs font-medium text-gray-600 tabular-nums min-w-[3rem] text-right">
-                                        {item.uploadStatus === 'complete' ? '100%' : 
-                                         item.uploadStatus === 'failed' ? '—' :
-                                         `${Math.round(getProgressPercentage())}%`}
-                                    </span>
                                 </div>
-                            </div>
+                            )}
                         </div>
 
                         {/* Phase 3.0: Enhanced status badge with icon */}
                         {/* Phase 3.0B: Animations gated to active rows only for performance */}
                         <div className="flex-shrink-0 mr-4 flex items-center gap-2">
                             <span
+                                title={statusConfig.tooltip || statusConfig.label}
                                 className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium ${statusConfig.bgColor} ${statusConfig.textColor} ${
                                     shouldAnimate && statusConfig.pulse ? 'animate-pulse' : ''
                                 }`}
                             >
-                                <StatusIcon className={`h-3.5 w-3.5 ${statusConfig.iconColor} ${
-                                    shouldAnimate && statusConfig.pulse ? 'animate-spin' : ''
-                                }`} />
-                                {statusConfig.label}
+                                <StatusIcon
+                                    className={`h-3.5 w-3.5 ${statusConfig.iconColor} ${
+                                        shouldAnimate && statusConfig.pulse ? 'animate-spin' : ''
+                                    }`}
+                                    aria-hidden
+                                />
+                                <span className="max-w-[7.5rem] truncate sm:max-w-none">{statusConfig.label}</span>
                             </span>
                             {/* Show "Expired" badge for rehydrated/expired uploads - safe access */}
                             {(item.error?.type === 'rehydrated_expired' || item.error?.type === 'old_upload_expired') && (
@@ -661,14 +809,26 @@ function UploadItemRow({ item, uploadManager, onRemove, disabled = false }) {
                     </div>
 
                     {/* Right: Remove button and expand */}
-                    <div className="flex items-center flex-shrink-0 gap-2">
-                        {/* Remove button (only for queued/failed) */}
-                        {canRemove && onRemove && (
+                    <div className="flex flex-shrink-0 items-center gap-2">
+                        {canRetry && (
+                            <button
+                                type="button"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    onRetry(item.clientId);
+                                }}
+                                className="rounded px-2 py-1 text-xs font-medium text-indigo-700 ring-1 ring-indigo-200 transition-colors hover:bg-indigo-50"
+                                title="Try this file again"
+                            >
+                                Retry
+                            </button>
+                        )}
+                        {canRemove && (
                             <button
                                 type="button"
                                 onClick={handleRemove}
-                                className="text-gray-400 hover:text-red-600 transition-colors p-1 rounded"
-                                title="Remove upload"
+                                className="rounded p-1 text-gray-400 transition-colors hover:text-red-600"
+                                title="Remove from this upload batch"
                             >
                                 <XMarkIcon className="h-5 w-5" />
                             </button>
@@ -693,7 +853,7 @@ function UploadItemRow({ item, uploadManager, onRemove, disabled = false }) {
                 {/* Error message (if failed) - safe access */}
                 {/* Phase 2.5 Step 1: Display normalized errors with retryability indicator */}
                 {/* Phase 2.5 Step 5: Enhanced retry-state clarity - visual indicators for retryability */}
-                {item.uploadStatus === 'failed' && item.error && (
+                {item.uploadStatus === 'failed' && item.error && badgeKey !== 'skipped' && (
                     <div className="mt-2 ml-8">
                         <div className="flex items-start">
                             <ExclamationCircleIcon className={`h-4 w-4 mr-2 flex-shrink-0 mt-0.5 ${
@@ -756,12 +916,13 @@ function UploadItemRow({ item, uploadManager, onRemove, disabled = false }) {
 
             {/* Phase 3.0: Enhanced expanded details section */}
             {isExpanded && (
-                <div 
-                    className={`px-4 py-2 border-t transition-colors ${
-                        isActive ? 'bg-blue-50/20 border-blue-100' :
-                        isComplete ? 'bg-green-50/20 border-green-100' :
-                        isFailed ? 'bg-red-50/20 border-red-100' :
-                        'bg-gray-50 border-gray-200'
+                <div
+                    className={`border-t px-4 py-2 transition-colors ${
+                        isActive ? 'border-slate-100 bg-slate-50/40' :
+                        isComplete ? 'border-gray-100 bg-gray-50/50' :
+                        isFailed ? 'border-red-100 bg-red-50/20' :
+                        isWarning ? 'border-amber-100 bg-amber-50/20' :
+                        'border-gray-200 bg-gray-50'
                     }`}
                     onClick={(e) => e.stopPropagation()} // Prevent collapse when clicking inside
                 >
@@ -1008,42 +1169,53 @@ function UploadItemRow({ item, uploadManager, onRemove, disabled = false }) {
 export default memo(UploadItemRow, (prevProps, nextProps) => {
     const prev = prevProps.item;
     const next = nextProps.item;
-    
-    // Phase 3.0B: Calculate isActive for both (needed for animation gating comparison)
+
     const prevDisplayStatus = prev.uploadStatus;
     const nextDisplayStatus = next.uploadStatus;
-    const prevIsActive = prevDisplayStatus === 'uploading' || prevDisplayStatus === 'initiating' || prevDisplayStatus === 'processing';
-    const nextIsActive = nextDisplayStatus === 'uploading' || nextDisplayStatus === 'initiating' || nextDisplayStatus === 'processing';
-    
-    // Phase 3.0B: Compare only fields that affect render output
-    // Return true if all fields are equal (skip re-render)
-    const propsEqual = (
+    const prevIsActive =
+        prevDisplayStatus === 'uploading' ||
+        prevDisplayStatus === 'initiating' ||
+        prevDisplayStatus === 'processing';
+    const nextIsActive =
+        nextDisplayStatus === 'uploading' ||
+        nextDisplayStatus === 'initiating' ||
+        nextDisplayStatus === 'processing';
+
+    const propsEqual =
         prev.clientId === next.clientId &&
         prev.uploadStatus === next.uploadStatus &&
+        (prev.lifecycle || '') === (next.lifecycle || '') &&
+        (prev.pipelineThumbStatus || '') === (next.pipelineThumbStatus || '') &&
+        (prev.serverPreviewUrl || '') === (next.serverPreviewUrl || '') &&
+        (prev.serverFinalThumbUrl || '') === (next.serverFinalThumbUrl || '') &&
         prev.progress === next.progress &&
         prev.title === next.title &&
         prev.resolvedFilename === next.resolvedFilename &&
-        // Error comparison - check both message and stage
-        ((!prev.error && !next.error) || 
-         (prev.error?.message === next.error?.message && 
-          prev.error?.stage === next.error?.stage &&
-          prev.error?.type === next.error?.type)) &&
+        ((!prev.error && !next.error) ||
+            (prev.error?.message === next.error?.message &&
+                prev.error?.stage === next.error?.stage &&
+                prev.error?.type === next.error?.type)) &&
         prevIsActive === nextIsActive &&
         prevProps.disabled === nextProps.disabled &&
-        // File object reference comparison (should be stable)
-        prev.file === next.file
-    );
-    
+        prev.file === next.file;
+
     if (!propsEqual) {
-        return false
+        return false;
     }
-    // Category / schema and global fields live on uploadManager; item shape omits metadataDraft
     if (prevProps.uploadManager !== nextProps.uploadManager) {
-        return false
+        return false;
+    }
+    if (prevProps.onRetry !== nextProps.onRetry) {
+        return false;
+    }
+    if (prevProps.onRemove !== nextProps.onRemove) {
+        return false;
+    }
+    if (prevProps.containPerformance !== nextProps.containPerformance) {
+        return false;
     }
     if (prev.metadataDraft !== next.metadataDraft) {
-        return false
+        return false;
     }
-    // Return true = skip re-render
-    return true
+    return true;
 });

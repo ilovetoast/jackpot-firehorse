@@ -52,6 +52,7 @@ import {
 } from '../utils/guidelinesFocalPoint'
 import FileTypeIcon from './FileTypeIcon'
 import AssetPlaceholder from './AssetPlaceholder'
+import { getAssetPlaceholderTheme } from '../utils/getAssetPlaceholderTheme.js'
 
 // Cache of thumbnail URLs that have failed (404, etc.) - prevents retrying across instances
 // Enables graceful fallback when thumbnails are processing or missing from S3
@@ -85,10 +86,26 @@ export default function ThumbnailPreview({
     forcedImageUrl = null,
     forcedImageSpinnerOverlay = false,
     useFocalPoint = true,
+    /** Session blob URL until server preview/final exists (asset grid only). */
+    ephemeralLocalPreviewUrl = null,
 }) {
     const { auth } = usePage().props
-    // Use current brand's primary color, fallback to default if not provided
-    const brandPrimaryColor = primaryColor || auth?.activeBrand?.primary_color || '#6366f1'
+    /**
+     * Grid chrome passes `primaryColor` from getWorkspaceButtonColor (can be white/black/context).
+     * Placeholder hue + AssetProcessingPlaceholder must anchor to **brand primary** when available
+     * so Collections, Assets, and drawer tiles match the same family as nav / Add buttons (see brand settings).
+     */
+    const placeholderBrandPrimary =
+        auth?.activeBrand?.primary_color || primaryColor || '#6366f1'
+
+    const placeholderSurfaceStyle = useMemo(
+        () =>
+            getAssetPlaceholderTheme(asset, {
+                primary_color: placeholderBrandPrimary,
+                accent_color: auth?.activeBrand?.accent_color ?? auth?.activeBrand?.secondary_color,
+            }).surfaceStyle,
+        [asset, placeholderBrandPrimary, auth?.activeBrand?.accent_color, auth?.activeBrand?.secondary_color],
+    )
     const effectiveForced =
         typeof forcedImageUrl === 'string' && forcedImageUrl.length > 0 ? forcedImageUrl : null
     const [imageLoaded, setImageLoaded] = useState(false)
@@ -123,6 +140,18 @@ export default function ThumbnailPreview({
     // (vectors render natively in <img>). Prefer the crisp vector over LQIP blobs — for SVG
     // an LQIP is usually an inferior preview and, worse, often 404s before the thumbnail job finishes.
     const lqipUrl = lqipPreviewUrlForAsset(asset)
+    const hasLocalUploadBlob =
+        typeof ephemeralLocalPreviewUrl === 'string' && ephemeralLocalPreviewUrl.length > 0
+    /**
+     * Early server LQIP often races S3/derivatives (404 or blank) while the session still has a
+     * reliable blob from the uploader. Prefer that blob on the grid until final_thumbnail_url exists.
+     * Without this, preview_thumbnail_url blocks ephemeral and the grid stays on “Processing preview”.
+     */
+    const serverLqipBlocksEphemeral = Boolean(
+        lqipUrl &&
+            !failedThumbnailUrls.has(lqipUrl) &&
+            !(hasLocalUploadBlob && !effectiveFinalUrl),
+    )
 
     const svgOriginalFallback = isSvg && !effectiveFinalUrl
         ? (asset?.original || null)
@@ -232,21 +261,54 @@ export default function ThumbnailPreview({
         if (asset?.preview_unavailable_user_message || asset?.metadata?.preview_unavailable_user_message) {
             return true
         }
-        return (
-            state === 'FAILED' ||
-            state === 'SKIPPED' ||
-            ts === 'failed' ||
-            ts === 'skipped'
-        )
+        if (state === 'FAILED' || state === 'SKIPPED' || ts === 'failed' || ts === 'skipped') {
+            return true
+        }
+        const hasLegacyCompletedThumb =
+            !!asset?.thumbnail_url && (ts === 'completed' || asset?.thumbnail_status?.value === 'completed')
+        const awaitingServerRaster =
+            state === 'PENDING' &&
+            !asset?.final_thumbnail_url &&
+            !asset?.preview_thumbnail_url &&
+            !hasLegacyCompletedThumb
+        return Boolean(awaitingServerRaster && ts !== 'failed' && ts !== 'skipped')
     }, [
         asset?.id,
         asset?.mime_type,
         asset?.thumbnail_status,
         asset?.preview_unavailable_user_message,
         asset?.metadata?.preview_unavailable_user_message,
+        asset?.final_thumbnail_url,
+        asset?.preview_thumbnail_url,
+        asset?.thumbnail_url,
         state,
         fileExtForThumb,
     ])
+
+    /** Rich grid tile copy — {@link AssetPlaceholder} */
+    const assetPlaceholderHint = useMemo(() => {
+        if (asset?.preview_unavailable_user_message || asset?.metadata?.preview_unavailable_user_message) {
+            return 'unavailable'
+        }
+        const ts = (asset?.thumbnail_status?.value || asset?.thumbnail_status || '')
+            .toString()
+            .toLowerCase()
+        if (state === 'FAILED' || ts === 'failed') return 'failed'
+        if (state === 'SKIPPED' || ts === 'skipped') return 'skipped'
+        if (state === 'PENDING') return 'processing'
+        return 'default'
+    }, [
+        asset?.id,
+        asset?.thumbnail_status,
+        asset?.preview_unavailable_user_message,
+        asset?.metadata?.preview_unavailable_user_message,
+        state,
+    ])
+
+    useEffect(() => {
+        setImageLoaded(false)
+        setImageError(false)
+    }, [ephemeralLocalPreviewUrl])
 
     // Small thumbnails (<100px): center image as-is, don't use cover (avoids blurry upscale in container)
     const isSmallThumbnail = useMemo(() => {
@@ -436,6 +498,75 @@ export default function ThumbnailPreview({
         }
     }
 
+    const showEphemeralLocalPreview =
+        typeof ephemeralLocalPreviewUrl === 'string' &&
+        ephemeralLocalPreviewUrl.length > 0 &&
+        !effectiveForced &&
+        !effectiveFinalUrl &&
+        !serverLqipBlocksEphemeral &&
+        !svgOriginalFallback &&
+        !isFailed &&
+        !hasThumbnailError &&
+        state !== 'NOT_SUPPORTED'
+
+    /* ------------------------------------------------------------
+       PRIORITY -0.5 — EPHEMERAL LOCAL BLOB (post-upload grid fallback)
+    ------------------------------------------------------------ */
+    if (showEphemeralLocalPreview) {
+        const hasFinalThumbnail = !!asset?.final_thumbnail_url
+        const ts = (thumbnailStatus || '').toString().toLowerCase()
+        const isTerminalState = ts === 'completed' || ts === 'failed' || ts === 'skipped'
+        const isActivelyProcessing =
+            (ts === 'processing' || ts === 'pending' || !thumbnailStatus) &&
+            !hasFinalThumbnail &&
+            !hasThumbnailError &&
+            !isTerminalState
+
+        return (
+            <div
+                className={`relative flex w-full min-h-0 items-center justify-center ${className} ${contrastBackdropClass}`}
+                style={masonryWrapperStyle}
+            >
+                {!imageLoaded ? (
+                    <div
+                        className="absolute inset-0 overflow-hidden rounded-[inherit] transition-opacity duration-[450ms] ease-out"
+                        style={{
+                            ...placeholderSurfaceStyle,
+                            opacity: 1,
+                        }}
+                    />
+                ) : null}
+                <img
+                    src={ephemeralLocalPreviewUrl}
+                    alt={alt}
+                    draggable={false}
+                    onDragStart={(e) => e.preventDefault()}
+                    className={`relative z-[1] ${imgFitClasses} pointer-events-none`}
+                    loading="eager"
+                    style={mergeImageStyle(
+                        {
+                            opacity: imageLoaded ? 1 : 0,
+                            transition: 'opacity 0.45s ease-out',
+                        },
+                        coverFocalStyle,
+                    )}
+                    onLoad={handleImageLoad}
+                    onError={() => {
+                        setImageLoaded(false)
+                    }}
+                />
+                {isActivelyProcessing && (
+                    <span
+                        className="pointer-events-none absolute bottom-1.5 left-1/2 z-10 -translate-x-1/2 rounded bg-black/55 px-2 py-0.5 text-[10px] font-medium text-white shadow-sm"
+                        title="Server preview is still generating"
+                    >
+                        Processing preview
+                    </span>
+                )}
+            </div>
+        )
+    }
+
     /* ------------------------------------------------------------
        PRIORITY -1 — DRAWER FORCED URL (preview style / pipeline mode)
        Keeps the previous image visible until the next URL has loaded (no empty flash).
@@ -490,10 +621,12 @@ export default function ThumbnailPreview({
                 >
                     <AssetPlaceholder
                         asset={asset}
-                        primaryColor={brandPrimaryColor}
+                        primaryColor={placeholderBrandPrimary}
                         brand={auth?.activeBrand}
                         size={size}
                         rich={showRichPlaceholder}
+                        placeholderHint={assetPlaceholderHint}
+                        ephemeralLocalPreviewUrl={ephemeralLocalPreviewUrl}
                     />
                 </div>
             )
@@ -504,9 +637,12 @@ export default function ThumbnailPreview({
                 className={`relative flex w-full min-h-0 items-center justify-center ${className}`}
                 style={masonryWrapperStyle}
             >
-                {forcedStableUrl === null && !isAnimating && (
-                    <div className="absolute inset-0 bg-gray-100" />
-                )}
+                {forcedStableUrl === null && !isAnimating ? (
+                    <div
+                        className="absolute inset-0 overflow-hidden rounded-[inherit] transition-opacity duration-[450ms] ease-out"
+                        style={placeholderSurfaceStyle}
+                    />
+                ) : null}
                 {forcedStableUrl ? (
                     <img
                         key={forcedStableUrl}
@@ -546,10 +682,11 @@ export default function ThumbnailPreview({
                 ) : null}
                 {showForcedOverlaySpinner && (
                     <span
-                        className="pointer-events-none absolute bottom-2 right-2 z-10 h-2.5 w-2.5 rounded-full bg-white/90 shadow-sm ring-2 ring-black/25 animate-pulse"
-                        title="Processing thumbnail"
-                        aria-hidden
-                    />
+                        className="pointer-events-none absolute bottom-1.5 left-1/2 z-10 -translate-x-1/2 rounded bg-black/60 px-2 py-0.5 text-[10px] font-medium text-white shadow-sm"
+                        title="Thumbnail is still processing"
+                    >
+                        Processing
+                    </span>
                 )}
             </div>
         )
@@ -571,10 +708,12 @@ export default function ThumbnailPreview({
             >
                 <AssetPlaceholder
                     asset={asset}
-                    primaryColor={brandPrimaryColor}
+                    primaryColor={placeholderBrandPrimary}
                     brand={auth?.activeBrand}
                     size={size}
                     rich={showRichPlaceholder}
+                    placeholderHint={assetPlaceholderHint}
+                    ephemeralLocalPreviewUrl={ephemeralLocalPreviewUrl}
                 />
             </div>
         )
@@ -600,10 +739,12 @@ export default function ThumbnailPreview({
                 >
                     <AssetPlaceholder
                         asset={asset}
-                        primaryColor={brandPrimaryColor}
+                        primaryColor={placeholderBrandPrimary}
                         brand={auth?.activeBrand}
                         size={size}
                         rich={showRichPlaceholder}
+                        placeholderHint={assetPlaceholderHint}
+                        ephemeralLocalPreviewUrl={ephemeralLocalPreviewUrl}
                     />
                 </div>
             )
@@ -614,10 +755,13 @@ export default function ThumbnailPreview({
                 className={`relative flex w-full min-h-0 items-center justify-center ${className} ${contrastBackdropClass}`}
                 style={masonryWrapperStyle}
             >
-                {/* Background placeholder - only show if image not loaded and not animating */}
-                {!imageLoaded && !isAnimating && (
-                    <div className="absolute inset-0 bg-gray-100" />
-                )}
+                <div
+                    className="pointer-events-none absolute inset-0 overflow-hidden rounded-[inherit] transition-opacity duration-[450ms] ease-out"
+                    style={{
+                        ...placeholderSurfaceStyle,
+                        opacity: imageLoaded ? 0 : 1,
+                    }}
+                />
 
                 <img
                     key={lockedUrl}
@@ -626,14 +770,13 @@ export default function ThumbnailPreview({
                     alt={alt}
                     draggable={false}
                     onDragStart={(e) => e.preventDefault()}
-                    className={imgFitClasses}
+                    className={`relative z-[1] ${imgFitClasses}`}
                     loading="eager"
                     style={mergeImageStyle(
                         {
                             opacity: imageLoaded ? 1 : 0,
-                            transition: isAnimating && imageLoaded
-                                ? 'opacity 500ms ease-out'
-                                : 'none',
+                            transition:
+                                isAnimating && imageLoaded ? 'opacity 500ms ease-out' : 'opacity 0.45s ease-out',
                         },
                         coverFocalStyle,
                     )}
@@ -674,8 +817,13 @@ export default function ThumbnailPreview({
                 className={`relative flex w-full min-h-0 items-center justify-center ${className} ${contrastBackdropClass}`}
                 style={masonryWrapperStyle}
             >
-                {/* Preview image always renders when preview_thumbnail_url exists */}
-                {/* imageLoaded only affects opacity, not DOM presence */}
+                <div
+                    className="pointer-events-none absolute inset-0 overflow-hidden rounded-[inherit] transition-opacity duration-[450ms] ease-out"
+                    style={{
+                        ...placeholderSurfaceStyle,
+                        opacity: imageLoaded ? 0 : 1,
+                    }}
+                />
                 <img
                     key={lockedUrl}
                     ref={imgRef}
@@ -683,16 +831,15 @@ export default function ThumbnailPreview({
                     alt={alt}
                     draggable={false}
                     onDragStart={(e) => e.preventDefault()}
-                    className={imgFitClasses}
+                    className={`relative z-[1] ${imgFitClasses}`}
                     loading="eager"
                     style={mergeImageStyle(
                         {
-                            opacity: imageLoaded ? 1 : 0.5,
+                            opacity: imageLoaded ? 1 : 0,
                             imageRendering: isPreview ? 'pixelated' : 'auto',
                             transform: isPreview ? 'scale(1.03)' : 'none',
-                            transition: isAnimating && imageLoaded
-                                ? 'opacity 500ms ease-out'
-                                : 'none',
+                            transition:
+                                isAnimating && imageLoaded ? 'opacity 500ms ease-out' : 'opacity 0.45s ease-out',
                         },
                         coverFocalStyle,
                     )}
@@ -700,14 +847,13 @@ export default function ThumbnailPreview({
                     onError={handleImageError}
                 />
 
-                {/* Preview processing: small dot (matches asset grid chrome) */}
                 {isActivelyProcessing && (
                     <span
-                        className="pointer-events-none absolute bottom-2 right-2 z-10 h-2.5 w-2.5 rounded-full shadow-sm ring-2 ring-white/80 animate-pulse"
-                        style={{ backgroundColor: brandPrimaryColor }}
-                        title="Processing thumbnail"
-                        aria-hidden
-                    />
+                        className="pointer-events-none absolute bottom-1.5 left-1/2 z-10 -translate-x-1/2 rounded bg-black/55 px-2 py-0.5 text-[10px] font-medium text-white shadow-sm"
+                        title="Final thumbnail is still generating"
+                    >
+                        Processing
+                    </span>
                 )}
             </div>
         )
@@ -749,11 +895,14 @@ export default function ThumbnailPreview({
                 className={`relative flex w-full min-h-0 items-center justify-center ${className} ${contrastBackdropClass}`}
                 style={masonryWrapperStyle}
             >
-                {/* Background placeholder - show while image loads */}
-                {!imageLoaded && (
-                    <div className="absolute inset-0 bg-gray-100" />
-                )}
-                
+                <div
+                    className="pointer-events-none absolute inset-0 overflow-hidden rounded-[inherit] transition-opacity duration-[450ms] ease-out"
+                    style={{
+                        ...placeholderSurfaceStyle,
+                        opacity: imageLoaded ? 0 : 1,
+                    }}
+                />
+
                 {/* Preview image always renders when preview_thumbnail_url exists */}
                 {/* NEVER render FileTypeIcon when preview exists */}
                 {/* imageLoaded only affects opacity, not DOM presence */}
@@ -764,16 +913,15 @@ export default function ThumbnailPreview({
                     alt={alt}
                     draggable={false}
                     onDragStart={(e) => e.preventDefault()}
-                    className={imgFitClasses}
+                    className={`relative z-[1] ${imgFitClasses}`}
                     loading="eager"
                     style={mergeImageStyle(
                         {
-                            opacity: imageLoaded ? 1 : 0.5,
+                            opacity: imageLoaded ? 1 : 0,
                             imageRendering: isPreview ? 'pixelated' : 'auto',
                             transform: isPreview ? 'scale(1.03)' : 'none',
-                            transition: isAnimating && imageLoaded
-                                ? 'opacity 500ms ease-out'
-                                : 'none',
+                            transition:
+                                isAnimating && imageLoaded ? 'opacity 500ms ease-out' : 'opacity 0.45s ease-out',
                         },
                         coverFocalStyle,
                     )}
@@ -783,11 +931,11 @@ export default function ThumbnailPreview({
 
                 {isActivelyProcessing && (
                     <span
-                        className="pointer-events-none absolute bottom-2 right-2 z-10 h-2.5 w-2.5 rounded-full shadow-sm ring-2 ring-white/80 animate-pulse"
-                        style={{ backgroundColor: brandPrimaryColor }}
-                        title="Processing thumbnail"
-                        aria-hidden
-                    />
+                        className="pointer-events-none absolute bottom-1.5 left-1/2 z-10 -translate-x-1/2 rounded bg-black/55 px-2 py-0.5 text-[10px] font-medium text-white shadow-sm"
+                        title="Final thumbnail is still generating"
+                    >
+                        Processing
+                    </span>
                 )}
             </div>
         )
@@ -817,10 +965,12 @@ export default function ThumbnailPreview({
             >
                 <AssetPlaceholder
                     asset={asset}
-                    primaryColor={brandPrimaryColor}
+                    primaryColor={placeholderBrandPrimary}
                     brand={auth?.activeBrand}
                     size={size}
                     rich={showRichPlaceholder}
+                    placeholderHint={assetPlaceholderHint}
+                    ephemeralLocalPreviewUrl={ephemeralLocalPreviewUrl}
                 />
             </div>
         )
@@ -867,10 +1017,12 @@ export default function ThumbnailPreview({
             >
                 <AssetPlaceholder
                     asset={asset}
-                    primaryColor={brandPrimaryColor}
+                    primaryColor={placeholderBrandPrimary}
                     brand={auth?.activeBrand}
                     size={size}
                     rich={showRichPlaceholder}
+                    placeholderHint={assetPlaceholderHint}
+                    ephemeralLocalPreviewUrl={ephemeralLocalPreviewUrl}
                 />
             </div>
         )
@@ -890,10 +1042,12 @@ export default function ThumbnailPreview({
             >
                 <AssetPlaceholder
                     asset={asset}
-                    primaryColor={brandPrimaryColor}
+                    primaryColor={placeholderBrandPrimary}
                     brand={auth?.activeBrand}
                     size={size}
                     rich={showRichPlaceholder}
+                    placeholderHint={assetPlaceholderHint}
+                    ephemeralLocalPreviewUrl={ephemeralLocalPreviewUrl}
                 />
             </div>
         )
@@ -911,10 +1065,12 @@ export default function ThumbnailPreview({
         >
             <AssetPlaceholder
                 asset={asset}
-                primaryColor={brandPrimaryColor}
+                primaryColor={placeholderBrandPrimary}
                 brand={auth?.activeBrand}
                 size={size}
                 rich={showRichPlaceholder}
+                placeholderHint={assetPlaceholderHint}
+                ephemeralLocalPreviewUrl={ephemeralLocalPreviewUrl}
             />
         </div>
     )

@@ -959,7 +959,7 @@ class Asset extends Model
             ->latest()
             ->first();
 
-        $interpreter = new \App\Services\BrandIntelligence\Campaign\CombinedAlignmentInterpreter();
+        $interpreter = new \App\Services\BrandIntelligence\Campaign\CombinedAlignmentInterpreter;
         $masterPayload = $this->brandIntelligencePayloadForFrontend();
 
         $interpretation = $interpreter->interpret($masterPayload, $campaignScore, $campaignIdentity);
@@ -1457,9 +1457,16 @@ class Asset extends Model
             return 'critical';
         }
 
-        if ($worstIncidentSeverity === 'warning'
-            || ($this->supportsThumbnailMetadata() && ! $this->visualMetadataReady())
-            || in_array($ts, ['pending', 'processing'], true)) {
+        if ($worstIncidentSeverity === 'warning') {
+            return 'warning';
+        }
+
+        // Thumbnails still running — expected on the grid right after upload; do not badge as "needs attention".
+        if (in_array($ts, ['pending', 'processing'], true)) {
+            return 'healthy';
+        }
+
+        if ($this->supportsThumbnailMetadata() && ! $this->visualMetadataReady()) {
             return 'warning';
         }
 

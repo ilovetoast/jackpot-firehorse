@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Enums\AssetType;
+use App\Exceptions\CreatorModuleInactiveException;
 use App\Http\Responses\UploadErrorResponse;
 use App\Models\Asset;
 use App\Models\Brand;
@@ -12,9 +13,9 @@ use App\Models\Tenant;
 use App\Models\UploadSession;
 use App\Models\User;
 use App\Services\AbandonedSessionService;
+use App\Services\ActivityRecorder;
 use App\Services\AssetEligibilityService;
 use App\Services\CollectionAssetService;
-use App\Services\ActivityRecorder;
 use App\Services\Metadata\AssetMetadataStateResolver;
 use App\Services\MetadataApprovalResolver;
 use App\Services\MetadataPersistenceService;
@@ -23,9 +24,9 @@ use App\Services\MultipartUploadUrlService;
 use App\Services\PlanService;
 use App\Services\ResumeMetadataService;
 use App\Services\UploadCompletionService;
-use App\Exceptions\CreatorModuleInactiveException;
 use App\Services\UploadInitiationService;
 use App\Services\UploadMetadataSchemaResolver;
+use App\Services\UploadPreflightService;
 use App\Support\Metadata\CategoryTypeResolver;
 use Aws\S3\S3Client;
 use Illuminate\Http\JsonResponse;
@@ -59,17 +60,14 @@ class UploadController extends Controller
         protected AssetMetadataStateResolver $metadataStateResolver,
         protected MetadataApprovalResolver $approvalResolver,
         protected CollectionAssetService $collectionAssetService,
-        protected AssetEligibilityService $assetEligibilityService
-    ) {
-    }
+        protected AssetEligibilityService $assetEligibilityService,
+        protected UploadPreflightService $uploadPreflightService,
+    ) {}
 
     /**
      * Initiate an upload session.
      *
      * POST /uploads/initiate
-     *
-     * @param Request $request
-     * @return JsonResponse
      */
     public function initiate(Request $request): JsonResponse
     {
@@ -78,7 +76,7 @@ class UploadController extends Controller
 
         // Verify user belongs to tenant
         // Phase 2.5 Step 2: Use normalized error response
-        if (!$user || !$user->tenants()->where('tenants.id', $tenant->id)->exists()) {
+        if (! $user || ! $user->tenants()->where('tenants.id', $tenant->id)->exists()) {
             return UploadErrorResponse::error(
                 UploadErrorResponse::CODE_PERMISSION_DENIED,
                 'Unauthorized. Please check your account permissions.',
@@ -88,7 +86,7 @@ class UploadController extends Controller
         }
 
         // Check upload permission - viewers cannot upload
-        if (!$user->hasPermissionForTenant($tenant, 'asset.upload')) {
+        if (! $user->hasPermissionForTenant($tenant, 'asset.upload')) {
             return UploadErrorResponse::error(
                 UploadErrorResponse::CODE_PERMISSION_DENIED,
                 'You do not have permission to upload assets.',
@@ -153,6 +151,7 @@ class UploadController extends Controller
             if ($e->limitType === 'storage') {
                 return UploadErrorResponse::storageLimitExceeded($tenant);
             }
+
             return UploadErrorResponse::fromException($e, 403, [
                 'pipeline_stage' => UploadErrorResponse::STAGE_UPLOAD,
                 'file_type' => UploadErrorResponse::extractFileType($validated['file_name'] ?? null),
@@ -170,9 +169,6 @@ class UploadController extends Controller
      * Check storage limits before upload.
      *
      * GET /uploads/storage-check
-     *
-     * @param Request $request
-     * @return JsonResponse
      */
     public function checkStorageLimits(Request $request): JsonResponse
     {
@@ -180,12 +176,12 @@ class UploadController extends Controller
         $user = Auth::user();
 
         // Verify user belongs to tenant
-        if (!$user || !$user->tenants()->where('tenants.id', $tenant->id)->exists()) {
+        if (! $user || ! $user->tenants()->where('tenants.id', $tenant->id)->exists()) {
             return response()->json(['error' => 'Unauthorized'], 403);
         }
 
         // Check upload permission - viewers cannot check storage limits (they can't upload)
-        if (!$user->hasPermissionForTenant($tenant, 'asset.upload')) {
+        if (! $user->hasPermissionForTenant($tenant, 'asset.upload')) {
             return response()->json([
                 'error' => 'You do not have permission to upload assets.',
             ], 403);
@@ -194,7 +190,7 @@ class UploadController extends Controller
         try {
             // Get storage information
             $storageInfo = $this->planService->getStorageInfo($tenant);
-            
+
             // Get plan limits for context
             $planLimits = $this->planService->getPlanLimits($tenant);
             $maxUploadSizeBytes = $this->planService->getMaxUploadSize($tenant);
@@ -224,9 +220,6 @@ class UploadController extends Controller
      * Check if specific files can be uploaded (pre-upload validation).
      *
      * POST /uploads/validate
-     *
-     * @param Request $request
-     * @return JsonResponse
      */
     public function validateUpload(Request $request): JsonResponse
     {
@@ -234,19 +227,19 @@ class UploadController extends Controller
         $user = Auth::user();
 
         // Verify user belongs to tenant
-        if (!$user || !$user->tenants()->where('tenants.id', $tenant->id)->exists()) {
+        if (! $user || ! $user->tenants()->where('tenants.id', $tenant->id)->exists()) {
             return response()->json(['error' => 'Unauthorized'], 403);
         }
 
         // Check upload permission - viewers cannot upload
-        if (!$user->hasPermissionForTenant($tenant, 'asset.upload')) {
+        if (! $user->hasPermissionForTenant($tenant, 'asset.upload')) {
             return response()->json([
                 'error' => 'You do not have permission to upload assets.',
             ], 403);
         }
 
         $validated = $request->validate([
-            'files' => 'required|array|min:1|max:100',
+            'files' => 'required|array|min:1|max:'.UploadPreflightService::maxFilesPerBatch(),
             'files.*.file_name' => 'required|string|max:255',
             'files.*.file_size' => 'required|integer|min:1',
         ]);
@@ -254,7 +247,7 @@ class UploadController extends Controller
         try {
             $results = [];
             $totalSize = 0;
-            
+
             // Get current limits
             $maxUploadSizeBytes = $this->planService->getMaxUploadSize($tenant);
             $storageInfo = $this->planService->getStorageInfo($tenant);
@@ -272,16 +265,16 @@ class UploadController extends Controller
                     $canUpload = false;
                     $errors[] = [
                         'type' => 'file_size_limit',
-                        'message' => "File size (" . round($fileSize / 1024 / 1024, 2) . " MB) exceeds maximum upload size (" . round($maxUploadSizeBytes / 1024 / 1024, 2) . " MB) for your plan.",
+                        'message' => 'File size ('.round($fileSize / 1024 / 1024, 2).' MB) exceeds maximum upload size ('.round($maxUploadSizeBytes / 1024 / 1024, 2).' MB) for your plan.',
                     ];
                 }
 
                 // Check if this file alone would exceed storage
-                if (!$this->planService->canAddFile($tenant, $fileSize)) {
+                if (! $this->planService->canAddFile($tenant, $fileSize)) {
                     $canUpload = false;
                     $errors[] = [
                         'type' => 'storage_limit',
-                        'message' => "This file would exceed your storage limit.",
+                        'message' => 'This file would exceed your storage limit.',
                     ];
                 }
 
@@ -294,7 +287,7 @@ class UploadController extends Controller
             }
 
             // Check if total batch would exceed storage
-            $batchStorageExceeded = !$this->planService->canAddFile($tenant, $totalSize);
+            $batchStorageExceeded = ! $this->planService->canAddFile($tenant, $totalSize);
 
             return response()->json([
                 'files' => $results,
@@ -302,7 +295,7 @@ class UploadController extends Controller
                     'total_files' => count($validated['files']),
                     'total_size_bytes' => $totalSize,
                     'total_size_mb' => round($totalSize / 1024 / 1024, 2),
-                    'can_upload_batch' => !$batchStorageExceeded && collect($results)->every('can_upload'),
+                    'can_upload_batch' => ! $batchStorageExceeded && collect($results)->every('can_upload'),
                     'storage_exceeded' => $batchStorageExceeded,
                 ],
                 'storage_info' => $storageInfo,
@@ -319,12 +312,76 @@ class UploadController extends Controller
     }
 
     /**
+     * Metadata-only upload preflight (no bytes, no assets, no AI billing).
+     *
+     * POST /uploads/preflight
+     */
+    public function preflight(Request $request): JsonResponse
+    {
+        $tenant = app('tenant');
+        $user = Auth::user();
+
+        if (! $user || ! $user->tenants()->where('tenants.id', $tenant->id)->exists()) {
+            return response()->json(['error' => 'Unauthorized'], 403);
+        }
+
+        if (! $user->hasPermissionForTenant($tenant, 'asset.upload')) {
+            return response()->json([
+                'error' => 'You do not have permission to upload assets.',
+            ], 403);
+        }
+
+        $validated = $request->validate([
+            'brand_id' => 'required|integer|exists:brands,id',
+            'category_id' => 'nullable|integer|exists:categories,id',
+            'collection_ids' => 'nullable|array',
+            'collection_ids.*' => 'integer|exists:collections,id',
+            'assume_auto_ai_metadata' => 'nullable|boolean',
+            'files' => 'required|array|min:1|max:'.UploadPreflightService::maxFilesPerBatch(),
+            'files.*.client_file_id' => 'required|uuid',
+            'files.*.name' => 'required|string|max:255',
+            'files.*.size' => 'required|integer|min:1',
+            'files.*.mime_type' => 'nullable|string|max:255',
+            'files.*.extension' => 'nullable|string|max:32',
+            'files.*.last_modified' => 'nullable|numeric',
+            'files.*.relative_path' => 'nullable|string|max:2048',
+        ]);
+
+        $brand = Brand::where('id', $validated['brand_id'])
+            ->where('tenant_id', $tenant->id)
+            ->firstOrFail();
+
+        $category = null;
+        if (! empty($validated['category_id'])) {
+            $category = Category::where('id', $validated['category_id'])
+                ->where('tenant_id', $tenant->id)
+                ->where('brand_id', $brand->id)
+                ->first();
+            if (! $category) {
+                return response()->json([
+                    'error' => 'invalid_category',
+                    'message' => 'Invalid category. Category must belong to this brand.',
+                ], 422);
+            }
+        }
+
+        $payload = $this->uploadPreflightService->evaluate(
+            $tenant,
+            $user,
+            $brand,
+            $category,
+            $validated['collection_ids'] ?? null,
+            $validated['files'],
+            (bool) ($validated['assume_auto_ai_metadata'] ?? false),
+        );
+
+        return response()->json($payload);
+    }
+
+    /**
      * Complete an upload session and create an asset.
      *
      * POST /assets/upload/complete
-     *
-     * @param Request $request
-     * @return JsonResponse
      */
     public function complete(Request $request): JsonResponse
     {
@@ -333,7 +390,7 @@ class UploadController extends Controller
 
         // Verify user belongs to tenant
         // Phase 2.5 Step 2: Use normalized error response
-        if (!$user || !$user->tenants()->where('tenants.id', $tenant->id)->exists()) {
+        if (! $user || ! $user->tenants()->where('tenants.id', $tenant->id)->exists()) {
             return UploadErrorResponse::error(
                 UploadErrorResponse::CODE_PERMISSION_DENIED,
                 'Unauthorized. Please check your account permissions.',
@@ -343,7 +400,7 @@ class UploadController extends Controller
         }
 
         // Check upload permission - viewers cannot upload
-        if (!$user->hasPermissionForTenant($tenant, 'asset.upload')) {
+        if (! $user->hasPermissionForTenant($tenant, 'asset.upload')) {
             return UploadErrorResponse::error(
                 UploadErrorResponse::CODE_PERMISSION_DENIED,
                 'You do not have permission to upload assets.',
@@ -351,7 +408,6 @@ class UploadController extends Controller
                 []
             );
         }
-
 
         // Validate request - enforce required fields and types
         // Note: asset_type is nullable for backward compatibility, defaults to 'asset' if not provided
@@ -364,7 +420,7 @@ class UploadController extends Controller
                 'category_id' => 'nullable|integer',
                 'metadata' => 'nullable|array',
             ]);
-            
+
             // Default asset_type to 'asset' if not provided (backward compatibility)
             if (empty($validated['asset_type'])) {
                 $validated['asset_type'] = 'asset';
@@ -375,7 +431,7 @@ class UploadController extends Controller
                 'errors' => $e->errors(),
                 'request_data' => $request->all(),
             ]);
-            
+
             // Phase 2.5 Step 2: Use normalized error response
             return UploadErrorResponse::fromException($e, 422, [
                 'upload_session_id' => $request->input('upload_session_id'),
@@ -460,9 +516,6 @@ class UploadController extends Controller
      * Initiate multiple upload sessions in parallel (batch upload).
      *
      * POST /uploads/initiate-batch
-     *
-     * @param Request $request
-     * @return JsonResponse
      */
     public function initiateBatch(Request $request): JsonResponse
     {
@@ -471,7 +524,7 @@ class UploadController extends Controller
 
         // Verify user belongs to tenant
         // Phase 2.5 Step 2: Use normalized error response
-        if (!$user || !$user->tenants()->where('tenants.id', $tenant->id)->exists()) {
+        if (! $user || ! $user->tenants()->where('tenants.id', $tenant->id)->exists()) {
             return UploadErrorResponse::error(
                 UploadErrorResponse::CODE_PERMISSION_DENIED,
                 'Unauthorized. Please check your account permissions.',
@@ -481,7 +534,7 @@ class UploadController extends Controller
         }
 
         // Check upload permission - viewers cannot upload
-        if (!$user->hasPermissionForTenant($tenant, 'asset.upload')) {
+        if (! $user->hasPermissionForTenant($tenant, 'asset.upload')) {
             return UploadErrorResponse::error(
                 UploadErrorResponse::CODE_PERMISSION_DENIED,
                 'You do not have permission to upload assets.',
@@ -492,7 +545,7 @@ class UploadController extends Controller
 
         // Validate request
         $validated = $request->validate([
-            'files' => 'required|array|min:1|max:100', // Limit batch size (hard limit for safety)
+            'files' => 'required|array|min:1|max:'.UploadPreflightService::maxFilesPerBatch(), // Same cap as preflight (large batches)
             'files.*.file_name' => 'required|string|max:255',
             'files.*.file_size' => 'required|integer|min:1',
             'files.*.mime_type' => 'nullable|string|max:255',
@@ -500,6 +553,8 @@ class UploadController extends Controller
             'brand_id' => 'nullable|exists:brands,id', // Shared brand for all files in batch
             'batch_reference' => 'nullable|uuid', // Optional batch-level correlation ID for grouping/debugging/analytics
             'category_id' => 'nullable|integer|exists:categories,id', // Category is optional for upload initiation (required for finalization)
+            /** When set, each file must match a prior {@see preflight()} acceptance (tenant, user, brand, name, size). */
+            'preflight_id' => 'nullable|uuid',
         ]);
 
         // Verify brand belongs to tenant if provided
@@ -513,7 +568,7 @@ class UploadController extends Controller
             $brand = $tenant->defaultBrand;
         }
 
-        if (!$brand) {
+        if (! $brand) {
             // Phase 2.5 Step 2: Use normalized error response
             return UploadErrorResponse::error(
                 UploadErrorResponse::CODE_VALIDATION_FAILED,
@@ -534,7 +589,7 @@ class UploadController extends Controller
                 ->where('brand_id', $brand->id)
                 ->first();
 
-            if (!$category) {
+            if (! $category) {
                 Log::warning('Upload initiation: Invalid category provided', [
                     'category_id' => $categoryId,
                     'tenant_id' => $tenant->id,
@@ -559,6 +614,41 @@ class UploadController extends Controller
                 ];
             }, $validated['files']);
 
+            if (! empty($validated['preflight_id'])) {
+                $preflightPayload = $this->uploadPreflightService->getCachedPayload($validated['preflight_id']);
+                if (
+                    ! is_array($preflightPayload)
+                    || (int) ($preflightPayload['tenant_id'] ?? 0) !== (int) $tenant->id
+                    || (int) ($preflightPayload['user_id'] ?? 0) !== (int) $user->id
+                    || (int) ($preflightPayload['brand_id'] ?? 0) !== (int) $brand->id
+                ) {
+                    return response()->json([
+                        'error' => 'preflight_invalid',
+                        'message' => 'Preflight session is missing, expired, or does not match this upload. Run upload preflight again.',
+                    ], 422);
+                }
+                $allowed = $preflightPayload['accepted'] ?? [];
+                foreach ($files as $index => $fileRow) {
+                    $ref = $fileRow['client_reference'] ?? null;
+                    if (! $ref || ! is_string($ref) || ! isset($allowed[$ref])) {
+                        return response()->json([
+                            'error' => 'preflight_mismatch',
+                            'message' => 'One or more files were not in the accepted preflight list.',
+                            'index' => $index,
+                        ], 422);
+                    }
+                    $slot = $allowed[$ref];
+                    if ((string) ($slot['file_name'] ?? '') !== (string) $fileRow['file_name']
+                        || (int) ($slot['file_size'] ?? 0) !== (int) $fileRow['file_size']) {
+                        return response()->json([
+                            'error' => 'preflight_tamper',
+                            'message' => 'File name or size does not match the preflight manifest.',
+                            'index' => $index,
+                        ], 422);
+                    }
+                }
+            }
+
             // Get optional batch_reference for correlation (helps with frontend grouping, debugging, analytics)
             $batchReference = $validated['batch_reference'] ?? null;
 
@@ -578,6 +668,7 @@ class UploadController extends Controller
             if ($e->limitType === 'storage') {
                 return UploadErrorResponse::storageLimitExceeded($tenant);
             }
+
             return UploadErrorResponse::fromException($e, 403, [
                 'pipeline_stage' => UploadErrorResponse::STAGE_UPLOAD,
             ]);
@@ -599,10 +690,6 @@ class UploadController extends Controller
      * Cancel an upload session.
      *
      * POST /uploads/{uploadSession}/cancel
-     *
-     * @param Request $request
-     * @param UploadSession $uploadSession
-     * @return JsonResponse
      */
     public function cancel(Request $request, UploadSession $uploadSession): JsonResponse
     {
@@ -611,7 +698,7 @@ class UploadController extends Controller
 
         // Verify user belongs to tenant
         // Phase 2.5 Step 2: Use normalized error response
-        if (!$user || !$user->tenants()->where('tenants.id', $tenant->id)->exists()) {
+        if (! $user || ! $user->tenants()->where('tenants.id', $tenant->id)->exists()) {
             return UploadErrorResponse::error(
                 UploadErrorResponse::CODE_PERMISSION_DENIED,
                 'Unauthorized. Please check your account permissions.',
@@ -637,20 +724,20 @@ class UploadController extends Controller
         try {
             // Refresh to get latest state
             $uploadSession->refresh();
-            
+
             // Check if already in terminal state (idempotent check)
             $isTerminal = $uploadSession->isTerminal();
-            
+
             // Attempt cancellation (idempotent - returns false if already terminal)
             $wasCancelled = $this->uploadService->cancel($uploadSession);
-            
+
             // Refresh to get updated state
             $uploadSession->refresh();
-            
+
             // Always return 200 OK with current state (idempotent behavior)
             $isExpired = $uploadSession->expires_at && $uploadSession->expires_at->isPast();
-            
-            if ($isTerminal || !$wasCancelled) {
+
+            if ($isTerminal || ! $wasCancelled) {
                 // Already in terminal state - return current state
                 return response()->json([
                     'message' => 'Upload session is already in terminal state',
@@ -660,7 +747,7 @@ class UploadController extends Controller
                     'already_terminated' => true,
                 ], 200);
             }
-            
+
             // Successfully cancelled
             return response()->json([
                 'message' => 'Upload session cancelled successfully',
@@ -694,10 +781,6 @@ class UploadController extends Controller
      *
      * This endpoint enables reload-safe, resumable uploads by providing
      * information about already uploaded parts for multipart uploads.
-     *
-     * @param Request $request
-     * @param UploadSession $uploadSession
-     * @return JsonResponse
      */
     public function resume(Request $request, UploadSession $uploadSession): JsonResponse
     {
@@ -706,7 +789,7 @@ class UploadController extends Controller
 
         // Verify user belongs to tenant
         // Phase 2.5 Step 2: Use normalized error response
-        if (!$user || !$user->tenants()->where('tenants.id', $tenant->id)->exists()) {
+        if (! $user || ! $user->tenants()->where('tenants.id', $tenant->id)->exists()) {
             return UploadErrorResponse::error(
                 UploadErrorResponse::CODE_PERMISSION_DENIED,
                 'Unauthorized. Please check your account permissions.',
@@ -716,7 +799,7 @@ class UploadController extends Controller
         }
 
         // Check upload permission - viewers cannot upload
-        if (!$user->hasPermissionForTenant($tenant, 'asset.upload')) {
+        if (! $user->hasPermissionForTenant($tenant, 'asset.upload')) {
             return UploadErrorResponse::error(
                 UploadErrorResponse::CODE_PERMISSION_DENIED,
                 'You do not have permission to upload assets.',
@@ -751,7 +834,7 @@ class UploadController extends Controller
             // This also updates last_activity_at automatically
             $metadata = $this->resumeService->getResumeMetadata($uploadSession);
 
-            if (!$metadata['can_resume'] && $metadata['error']) {
+            if (! $metadata['can_resume'] && $metadata['error']) {
                 // Resume is blocked - return error with metadata
                 // Fail loudly with actionable error message
                 Log::warning('Resume blocked for upload session', [
@@ -809,10 +892,6 @@ class UploadController extends Controller
      *
      * This endpoint should be called periodically during active uploads
      * to prevent the session from being marked as abandoned.
-     *
-     * @param Request $request
-     * @param UploadSession $uploadSession
-     * @return JsonResponse
      */
     public function updateActivity(Request $request, UploadSession $uploadSession): JsonResponse
     {
@@ -821,7 +900,7 @@ class UploadController extends Controller
 
         // Verify user belongs to tenant
         // Phase 2.5 Step 2: Use normalized error response
-        if (!$user || !$user->tenants()->where('tenants.id', $tenant->id)->exists()) {
+        if (! $user || ! $user->tenants()->where('tenants.id', $tenant->id)->exists()) {
             return UploadErrorResponse::error(
                 UploadErrorResponse::CODE_PERMISSION_DENIED,
                 'Unauthorized. Please check your account permissions.',
@@ -831,7 +910,7 @@ class UploadController extends Controller
         }
 
         // Check upload permission - viewers cannot upload
-        if (!$user->hasPermissionForTenant($tenant, 'asset.upload')) {
+        if (! $user->hasPermissionForTenant($tenant, 'asset.upload')) {
             return UploadErrorResponse::error(
                 UploadErrorResponse::CODE_PERMISSION_DENIED,
                 'You do not have permission to upload assets.',
@@ -875,7 +954,7 @@ class UploadController extends Controller
             ]);
 
             return response()->json([
-                'message' => 'Failed to update activity: ' . $e->getMessage(),
+                'message' => 'Failed to update activity: '.$e->getMessage(),
             ], 500);
         }
     }
@@ -887,10 +966,6 @@ class UploadController extends Controller
      *
      * This endpoint should be called when the client actually starts uploading data.
      * Transitions status from INITIATING to UPLOADING and updates activity timestamp.
-     *
-     * @param Request $request
-     * @param UploadSession $uploadSession
-     * @return JsonResponse
      */
     public function markAsUploading(Request $request, UploadSession $uploadSession): JsonResponse
     {
@@ -899,7 +974,7 @@ class UploadController extends Controller
 
         // Verify user belongs to tenant
         // Phase 2.5 Step 2: Use normalized error response
-        if (!$user || !$user->tenants()->where('tenants.id', $tenant->id)->exists()) {
+        if (! $user || ! $user->tenants()->where('tenants.id', $tenant->id)->exists()) {
             return UploadErrorResponse::error(
                 UploadErrorResponse::CODE_PERMISSION_DENIED,
                 'Unauthorized. Please check your account permissions.',
@@ -909,7 +984,7 @@ class UploadController extends Controller
         }
 
         // Check upload permission - viewers cannot upload
-        if (!$user->hasPermissionForTenant($tenant, 'asset.upload')) {
+        if (! $user->hasPermissionForTenant($tenant, 'asset.upload')) {
             return UploadErrorResponse::error(
                 UploadErrorResponse::CODE_PERMISSION_DENIED,
                 'You do not have permission to upload assets.',
@@ -984,10 +1059,6 @@ class UploadController extends Controller
      *
      * Generates a secure, time-limited presigned URL for uploading
      * a single part of a multipart upload directly to S3.
-     *
-     * @param Request $request
-     * @param UploadSession $uploadSession
-     * @return JsonResponse
      */
     public function getMultipartPartUrl(Request $request, UploadSession $uploadSession): JsonResponse
     {
@@ -996,7 +1067,7 @@ class UploadController extends Controller
 
         // Verify user belongs to tenant
         // Phase 2.5 Step 2: Use normalized error response
-        if (!$user || !$user->tenants()->where('tenants.id', $tenant->id)->exists()) {
+        if (! $user || ! $user->tenants()->where('tenants.id', $tenant->id)->exists()) {
             return UploadErrorResponse::error(
                 UploadErrorResponse::CODE_PERMISSION_DENIED,
                 'Unauthorized. Please check your account permissions.',
@@ -1006,7 +1077,7 @@ class UploadController extends Controller
         }
 
         // Check upload permission - viewers cannot upload
-        if (!$user->hasPermissionForTenant($tenant, 'asset.upload')) {
+        if (! $user->hasPermissionForTenant($tenant, 'asset.upload')) {
             return UploadErrorResponse::error(
                 UploadErrorResponse::CODE_PERMISSION_DENIED,
                 'You do not have permission to upload assets.',
@@ -1102,7 +1173,7 @@ class UploadController extends Controller
                     'upload_session_id' => $uploadSession->id,
                     'part_number' => $partNumber,
                     'status' => $uploadSession->status->value,
-                    'has_multipart_upload_id' => !empty($uploadSession->multipart_upload_id),
+                    'has_multipart_upload_id' => ! empty($uploadSession->multipart_upload_id),
                     'error' => $errorMessage,
                 ]);
 
@@ -1152,10 +1223,6 @@ class UploadController extends Controller
      *
      * This endpoint is idempotent - if a multipart upload is already initiated,
      * it returns the existing multipart_upload_id without creating a new one.
-     *
-     * @param Request $request
-     * @param UploadSession $uploadSession
-     * @return JsonResponse
      */
     public function initMultipart(Request $request, UploadSession $uploadSession): JsonResponse
     {
@@ -1164,7 +1231,7 @@ class UploadController extends Controller
 
         // Verify user belongs to tenant
         // Phase 2.5 Step 2: Use normalized error response
-        if (!$user || !$user->tenants()->where('tenants.id', $tenant->id)->exists()) {
+        if (! $user || ! $user->tenants()->where('tenants.id', $tenant->id)->exists()) {
             return UploadErrorResponse::error(
                 UploadErrorResponse::CODE_PERMISSION_DENIED,
                 'Unauthorized. Please check your account permissions.',
@@ -1174,7 +1241,7 @@ class UploadController extends Controller
         }
 
         // Check upload permission - viewers cannot upload
-        if (!$user->hasPermissionForTenant($tenant, 'asset.upload')) {
+        if (! $user->hasPermissionForTenant($tenant, 'asset.upload')) {
             return UploadErrorResponse::error(
                 UploadErrorResponse::CODE_PERMISSION_DENIED,
                 'You do not have permission to upload assets.',
@@ -1253,10 +1320,6 @@ class UploadController extends Controller
      * Sign a presigned URL for uploading a specific part.
      *
      * POST /uploads/{uploadSession}/multipart/sign-part
-     *
-     * @param Request $request
-     * @param UploadSession $uploadSession
-     * @return JsonResponse
      */
     public function signMultipartPart(Request $request, UploadSession $uploadSession): JsonResponse
     {
@@ -1265,7 +1328,7 @@ class UploadController extends Controller
 
         // Verify user belongs to tenant
         // Phase 2.5 Step 2: Use normalized error response
-        if (!$user || !$user->tenants()->where('tenants.id', $tenant->id)->exists()) {
+        if (! $user || ! $user->tenants()->where('tenants.id', $tenant->id)->exists()) {
             return UploadErrorResponse::error(
                 UploadErrorResponse::CODE_PERMISSION_DENIED,
                 'Unauthorized. Please check your account permissions.',
@@ -1275,7 +1338,7 @@ class UploadController extends Controller
         }
 
         // Check upload permission - viewers cannot upload
-        if (!$user->hasPermissionForTenant($tenant, 'asset.upload')) {
+        if (! $user->hasPermissionForTenant($tenant, 'asset.upload')) {
             return UploadErrorResponse::error(
                 UploadErrorResponse::CODE_PERMISSION_DENIED,
                 'You do not have permission to upload assets.',
@@ -1362,10 +1425,6 @@ class UploadController extends Controller
      *
      * This endpoint is idempotent - if the upload is already completed,
      * it returns success without re-completing.
-     *
-     * @param Request $request
-     * @param UploadSession $uploadSession
-     * @return JsonResponse
      */
     public function completeMultipart(Request $request, UploadSession $uploadSession): JsonResponse
     {
@@ -1374,7 +1433,7 @@ class UploadController extends Controller
 
         // Verify user belongs to tenant
         // Phase 2.5 Step 2: Use normalized error response
-        if (!$user || !$user->tenants()->where('tenants.id', $tenant->id)->exists()) {
+        if (! $user || ! $user->tenants()->where('tenants.id', $tenant->id)->exists()) {
             return UploadErrorResponse::error(
                 UploadErrorResponse::CODE_PERMISSION_DENIED,
                 'Unauthorized. Please check your account permissions.',
@@ -1384,7 +1443,7 @@ class UploadController extends Controller
         }
 
         // Check upload permission - viewers cannot upload
-        if (!$user->hasPermissionForTenant($tenant, 'asset.upload')) {
+        if (! $user->hasPermissionForTenant($tenant, 'asset.upload')) {
             return UploadErrorResponse::error(
                 UploadErrorResponse::CODE_PERMISSION_DENIED,
                 'You do not have permission to upload assets.',
@@ -1491,10 +1550,6 @@ class UploadController extends Controller
      *
      * This endpoint safely cleans up both S3 and database state.
      * It is idempotent - safe to call multiple times.
-     *
-     * @param Request $request
-     * @param UploadSession $uploadSession
-     * @return JsonResponse
      */
     public function abortMultipart(Request $request, UploadSession $uploadSession): JsonResponse
     {
@@ -1503,7 +1558,7 @@ class UploadController extends Controller
 
         // Verify user belongs to tenant
         // Phase 2.5 Step 2: Use normalized error response
-        if (!$user || !$user->tenants()->where('tenants.id', $tenant->id)->exists()) {
+        if (! $user || ! $user->tenants()->where('tenants.id', $tenant->id)->exists()) {
             return UploadErrorResponse::error(
                 UploadErrorResponse::CODE_PERMISSION_DENIED,
                 'Unauthorized. Please check your account permissions.',
@@ -1513,7 +1568,7 @@ class UploadController extends Controller
         }
 
         // Check upload permission - viewers cannot upload
-        if (!$user->hasPermissionForTenant($tenant, 'asset.upload')) {
+        if (! $user->hasPermissionForTenant($tenant, 'asset.upload')) {
             return UploadErrorResponse::error(
                 UploadErrorResponse::CODE_PERMISSION_DENIED,
                 'You do not have permission to upload assets.',
@@ -1603,9 +1658,6 @@ class UploadController extends Controller
      *   - Enable manual recovery of failed items
      * Cleanup is handled by S3 lifecycle rules (expected window: 7 days).
      * Orphan candidates are logged for monitoring purposes.
-     *
-     * @param Request $request
-     * @return JsonResponse
      */
     public function finalize(Request $request): JsonResponse
     {
@@ -1617,11 +1669,12 @@ class UploadController extends Controller
 
         // CRITICAL: Brand context must be available (bound by ResolveTenant middleware)
         // This ensures assets are created with the same brand_id used by UI queries
-        if (!$brand) {
+        if (! $brand) {
             Log::error('[UploadController::finalize] Brand context not bound', [
                 'tenant_id' => $tenant->id ?? null,
                 'note' => 'Brand context must be bound by ResolveTenant middleware. Ensure finalize route is in tenant middleware group.',
             ]);
+
             return response()->json([
                 'message' => 'Brand context is not available. The finalize endpoint must be accessed through the tenant middleware which binds the active brand.',
             ], 500);
@@ -1629,7 +1682,7 @@ class UploadController extends Controller
 
         // Verify user belongs to tenant
         // Phase 2.5 Step 2: Use normalized error response
-        if (!$user || !$user->tenants()->where('tenants.id', $tenant->id)->exists()) {
+        if (! $user || ! $user->tenants()->where('tenants.id', $tenant->id)->exists()) {
             return UploadErrorResponse::error(
                 UploadErrorResponse::CODE_PERMISSION_DENIED,
                 'Unauthorized. Please check your account permissions.',
@@ -1639,7 +1692,7 @@ class UploadController extends Controller
         }
 
         // Check upload permission - viewers cannot upload
-        if (!$user->hasPermissionForTenant($tenant, 'asset.upload')) {
+        if (! $user->hasPermissionForTenant($tenant, 'asset.upload')) {
             return response()->json([
                 'message' => 'You do not have permission to upload assets.',
             ], 403);
@@ -1659,6 +1712,8 @@ class UploadController extends Controller
             'manifest.*.comment' => 'nullable|string|max:1000', // Phase J.3.1: Optional comment for replace mode
             'manifest.*.collection_ids' => 'nullable|array', // C7: Attach asset to collections post-upload
             'manifest.*.collection_ids.*' => 'integer|exists:collections,id',
+            // Client-generated UUID so the browser can map finalize results to local blob previews
+            'manifest.*.client_file_id' => 'nullable|string|max:128',
             // C9.2: Upload-time AI skip controls (Admin/Brand Manager only)
             'skip_ai_tagging' => 'nullable|boolean',
             'skip_ai_metadata' => 'nullable|boolean',
@@ -1696,7 +1751,9 @@ class UploadController extends Controller
             $uploadKey = $item['upload_key'];
             $expectedSize = $item['expected_size'];
             $categoryId = $item['category_id'] ?? null; // Phase J.3.1: Optional for replace mode
-            
+            $clientFileId = isset($item['client_file_id']) ? trim((string) $item['client_file_id']) : '';
+            $clientFileId = ($clientFileId !== '') ? $clientFileId : null;
+
             // C9.1: DEBUG - Log category_id extraction
             Log::info('[UploadController::finalize] Extracted category_id from manifest', [
                 'upload_key' => $uploadKey,
@@ -1716,11 +1773,11 @@ class UploadController extends Controller
             $jackpotAiProvenance = null;
 
             $uploadSession = null; // Initialize for use in catch blocks
-            
+
             try {
                 // Extract upload_session_id from upload_key
                 // Format: temp/uploads/{upload_session_id}/original
-                if (!preg_match('#^temp/uploads/([^/]+)/original$#', $uploadKey, $matches)) {
+                if (! preg_match('#^temp/uploads/([^/]+)/original$#', $uploadKey, $matches)) {
                     throw new \RuntimeException("Invalid upload_key format: {$uploadKey}");
                 }
 
@@ -1731,7 +1788,7 @@ class UploadController extends Controller
                     ->where('tenant_id', $tenant->id)
                     ->first();
 
-                if (!$uploadSession) {
+                if (! $uploadSession) {
                     throw new \RuntimeException("Upload session not found: {$uploadSessionId}");
                 }
 
@@ -1755,7 +1812,7 @@ class UploadController extends Controller
                 // Phase J.3.1: Skip category validation for replace mode, builder staged, or existing assets
                 $category = null;
                 $categorySlug = $item['category_slug'] ?? null;
-                if (!$isReplaceMode && !$isBuilderStaged && !$existingAsset) {
+                if (! $isReplaceMode && ! $isBuilderStaged && ! $existingAsset) {
                     Log::info('[UploadController::finalize] Category validation check', [
                         'upload_key' => $uploadKey,
                         'category_id_provided' => $categoryId,
@@ -1774,14 +1831,14 @@ class UploadController extends Controller
                     }
 
                     // Fallback: resolve by slug and auto-create from system template if needed
-                    if (!$category && $categorySlug) {
+                    if (! $category && $categorySlug) {
                         $category = Category::where('tenant_id', $tenant->id)
                             ->where('brand_id', $brand->id)
                             ->where('slug', $categorySlug)
                             ->where('asset_type', \App\Enums\AssetType::ASSET)
                             ->first();
 
-                        if (!$category) {
+                        if (! $category) {
                             $template = \App\Models\SystemCategory::where('slug', $categorySlug)
                                 ->where('asset_type', \App\Enums\AssetType::ASSET)
                                 ->orderByDesc('version')
@@ -1798,8 +1855,8 @@ class UploadController extends Controller
                         }
                     }
 
-                    if (!$category) {
-                        throw new \RuntimeException("Category ID is required for new asset uploads. Please select a category before finalizing.");
+                    if (! $category) {
+                        throw new \RuntimeException('Category ID is required for new asset uploads. Please select a category before finalizing.');
                     }
                 }
 
@@ -1807,12 +1864,12 @@ class UploadController extends Controller
                     // Asset already exists - return existing asset (idempotent)
                     // C9.1: Still process collection assignment even for existing assets
                     $asset = $existingAsset;
-                    
+
                     // C9.1: Sync asset to collections post-upload (collection_ids from manifest)
                     // Handles empty arrays (deselection) and returns clear errors on failure
                     $collectionIds = $item['collection_ids'] ?? [];
                     $collectionErrors = [];
-                    
+
                     // C9.1: DEBUG - Log collection assignment attempt (existing asset path)
                     Log::info('[UploadController::finalize] Collection assignment check (EXISTING ASSET PATH)', [
                         'upload_key' => $uploadKey,
@@ -1823,7 +1880,7 @@ class UploadController extends Controller
                         'tenant_id' => $tenant->id ?? null,
                         'user_id' => $user->id ?? null,
                     ]);
-                    
+
                     // C9.1: Process collections if provided (empty array = deselect all, non-empty = sync)
                     // C9.1: Always process if collection_ids key exists (even if empty array)
                     if ($asset && $asset->id && array_key_exists('collection_ids', $item)) {
@@ -1848,11 +1905,13 @@ class UploadController extends Controller
 
                             if (! $targetCollection) {
                                 $collectionErrors[] = "Collection {$collectionId} not found or does not belong to this brand.";
+
                                 continue;
                             }
 
                             if (! Gate::forUser($user)->allows('removeAsset', $targetCollection)) {
                                 $collectionErrors[] = "You do not have permission to remove assets from collection: {$targetCollection->name}.";
+
                                 continue;
                             }
 
@@ -1885,7 +1944,7 @@ class UploadController extends Controller
                                 'tenant_id' => $tenant->id,
                                 'user_id' => $user->id,
                             ]);
-                            
+
                             $targetCollection = Collection::query()
                                 ->where('id', $collectionId)
                                 ->where('tenant_id', $tenant->id)
@@ -1901,6 +1960,7 @@ class UploadController extends Controller
                                     'brand_id' => $brand->id,
                                     'tenant_id' => $tenant->id,
                                 ]);
+
                                 continue;
                             }
 
@@ -1912,7 +1972,7 @@ class UploadController extends Controller
                                 'user_id' => $user->id,
                                 'can_add' => $canAdd,
                             ]);
-                            
+
                             if (! $canAdd) {
                                 $errorMsg = "You do not have permission to add assets to collection: {$targetCollection->name}.";
                                 $collectionErrors[] = $errorMsg;
@@ -1922,6 +1982,7 @@ class UploadController extends Controller
                                     'collection_name' => $targetCollection->name,
                                     'user_id' => $user->id,
                                 ]);
+
                                 continue;
                             }
 
@@ -1951,32 +2012,32 @@ class UploadController extends Controller
                             ]);
                         }
                     }
-                    
+
                     // TASK 1: Check approval info for existing asset (UI-only, read-only)
                     $approvalRequired = false;
                     $pendingMetadataCount = 0;
-                    
+
                     $canApprove = $this->approvalResolver->canApprove($user, $tenant);
-                    if (!$canApprove) {
+                    if (! $canApprove) {
                         $approvalEnabled = $this->approvalResolver->isApprovalEnabledForBrand($tenant, $brand);
-                        
+
                         if ($approvalEnabled) {
                             $metadataState = $this->metadataStateResolver->resolve($existingAsset);
-                            
+
                             $automaticFieldIds = \Illuminate\Support\Facades\DB::table('metadata_fields')
                                 ->where('population_mode', 'automatic')
                                 ->pluck('id')
                                 ->toArray();
-                            
+
                             foreach ($metadataState as $fieldId => $state) {
-                                if (!$state['has_pending']) {
+                                if (! $state['has_pending']) {
                                     continue;
                                 }
-                                
+
                                 if (in_array($fieldId, $automaticFieldIds)) {
                                     continue;
                                 }
-                                
+
                                 $pendingRow = $state['pending'];
                                 if ($pendingRow && in_array($pendingRow->source, ['ai', 'user'])) {
                                     $pendingMetadataCount++;
@@ -1985,8 +2046,8 @@ class UploadController extends Controller
                             }
                         }
                     }
-                    
-                    $results[] = [
+
+                    $successRow = [
                         'upload_key' => $uploadKey,
                         'status' => 'success',
                         'asset_id' => $existingAsset->id,
@@ -1994,6 +2055,11 @@ class UploadController extends Controller
                         'approval_required' => $approvalRequired,
                         'pending_metadata_count' => $pendingMetadataCount,
                     ];
+                    if ($clientFileId !== null) {
+                        $successRow['client_file_id'] = $clientFileId;
+                    }
+                    $results[] = $successRow;
+
                     continue; // Skip to next manifest item
                 }
 
@@ -2003,36 +2069,36 @@ class UploadController extends Controller
                 // Validate resolved_filename extension matches original file extension
                 if ($resolvedFilename !== null) {
                     $bucket = $uploadSession->storageBucket;
-                    if (!$bucket) {
+                    if (! $bucket) {
                         throw new \RuntimeException('Storage bucket not found for upload session');
                     }
-                    
+
                     $s3Client = $this->getS3ClientForFinalize();
-                    
+
                     try {
                         // Get object metadata to extract original filename
                         $headResult = $s3Client->headObject([
                             'Bucket' => $bucket->name,
                             'Key' => $uploadKey,
                         ]);
-                        
+
                         // Extract filename from S3 metadata (same logic as UploadCompletionService)
                         // CRITICAL: Use different variable name to avoid overwriting $metadata (which contains photo_type)
                         $s3Metadata = $headResult->get('Metadata');
                         $contentDisposition = $headResult->get('ContentDisposition');
-                        
+
                         $originalFilename = null;
                         if ($contentDisposition && preg_match('/filename[^;=\n]*=(([\'"]).*?\2|[^;\n]*)/', $contentDisposition, $matches)) {
                             $originalFilename = trim($matches[1], '"\'');
                         } elseif (isset($s3Metadata['original-filename'])) {
                             $originalFilename = $s3Metadata['original-filename'];
                         }
-                        
+
                         // If we have an original filename, validate extension
                         if ($originalFilename) {
                             $originalExt = strtolower(pathinfo($originalFilename, PATHINFO_EXTENSION));
                             $resolvedExt = strtolower(pathinfo($resolvedFilename, PATHINFO_EXTENSION));
-                            
+
                             // Extensions must match (case-insensitive)
                             if ($originalExt !== $resolvedExt) {
                                 throw new \RuntimeException(
@@ -2082,10 +2148,10 @@ class UploadController extends Controller
                     // Frontend sends: { fieldKey: value } (only valid fields, no empty values)
                     $metadataFields = [];
                     // Handle both array and object formats
-                    if (!empty($metadata)) {
+                    if (! empty($metadata)) {
                         // Convert object to array if needed
-                        $metadataArray = is_object($metadata) ? (array)$metadata : $metadata;
-                        
+                        $metadataArray = is_object($metadata) ? (array) $metadata : $metadata;
+
                         if (is_array($metadataArray)) {
                             if (isset($metadataArray['fields']) && is_array($metadataArray['fields'])) {
                                 // Legacy format: { fields: {...} }
@@ -2118,7 +2184,7 @@ class UploadController extends Controller
 
                     // Phase 2 – Step 4: Validate metadata against schema BEFORE asset creation
                     // Skip when no category (builder-staged uploads have no category)
-                    if (!empty($metadataFields) && $category) {
+                    if (! empty($metadataFields) && $category) {
                         try {
                             // Determine asset type for schema resolution (file type, not category asset_type)
                             // Default to 'image' - can be enhanced to detect from file MIME type
@@ -2145,9 +2211,9 @@ class UploadController extends Controller
 
                             // Validate remaining keys (subset of allowlist)
                             $invalidKeys = array_diff(array_keys($metadataFields), $allowedFieldKeys);
-                            if (!empty($invalidKeys)) {
+                            if (! empty($invalidKeys)) {
                                 throw new \InvalidArgumentException(
-                                    'Invalid metadata fields: ' . implode(', ', $invalidKeys) . '. ' .
+                                    'Invalid metadata fields: '.implode(', ', $invalidKeys).'. '.
                                     'Fields must be present in the resolved upload schema.'
                                 );
                             }
@@ -2162,8 +2228,9 @@ class UploadController extends Controller
                             $results[] = [
                                 'upload_key' => $uploadKey,
                                 'status' => 'error',
-                                'error' => 'Metadata validation failed: ' . $e->getMessage(),
+                                'error' => 'Metadata validation failed: '.$e->getMessage(),
                             ];
+
                             continue; // Skip to next manifest item
                         }
                     }
@@ -2216,11 +2283,11 @@ class UploadController extends Controller
                     // UX-2: CRITICAL - Metadata persistence happens AFTER asset creation
                     // This ensures approval logic runs only after asset exists, not during upload
                     // Skip when no category (builder-staged uploads have no category)
-                    if (!empty($metadataFields) && $category) {
+                    if (! empty($metadataFields) && $category) {
                         try {
                             // UX-2: Assertion - Asset must exist before metadata persistence
                             // This guard ensures approval logic runs only after asset creation
-                            if (!$asset || !$asset->id) {
+                            if (! $asset || ! $asset->id) {
                                 Log::error('[UploadController::finalize] Asset not created before metadata persistence', [
                                     'upload_key' => $uploadKey,
                                     'upload_session_id' => $uploadSessionId,
@@ -2262,7 +2329,7 @@ class UploadController extends Controller
                     // Handles empty arrays (deselection) and returns clear errors on failure
                     $collectionIds = $item['collection_ids'] ?? [];
                     $collectionErrors = [];
-                    
+
                     // C9.1: DEBUG - Log collection assignment attempt (NEW ASSET PATH)
                     Log::info('[UploadController::finalize] Collection assignment check (NEW ASSET PATH)', [
                         'upload_key' => $uploadKey,
@@ -2273,7 +2340,7 @@ class UploadController extends Controller
                         'tenant_id' => $tenant->id ?? null,
                         'user_id' => $user->id ?? null,
                     ]);
-                    
+
                     // C9.1: Process collections if provided (empty array = deselect all, non-empty = sync)
                     // C9.1: Always process if collection_ids key exists (even if empty array)
                     if ($asset && $asset->id && array_key_exists('collection_ids', $item)) {
@@ -2287,7 +2354,7 @@ class UploadController extends Controller
                         // Determine what to add and remove
                         $toAdd = array_diff($collectionIds, $currentCollectionIds);
                         $toRemove = array_diff($currentCollectionIds, $collectionIds);
-                        
+
                         // C9.1: DEBUG - Log what will be added/removed (new asset)
                         Log::info('[UploadController::finalize] Collection sync calculation (NEW ASSET)', [
                             'asset_id' => $asset->id,
@@ -2307,11 +2374,13 @@ class UploadController extends Controller
 
                             if (! $targetCollection) {
                                 $collectionErrors[] = "Collection {$collectionId} not found or does not belong to this brand.";
+
                                 continue;
                             }
 
                             if (! Gate::forUser($user)->allows('removeAsset', $targetCollection)) {
                                 $collectionErrors[] = "You do not have permission to remove assets from collection: {$targetCollection->name}.";
+
                                 continue;
                             }
 
@@ -2344,7 +2413,7 @@ class UploadController extends Controller
                                 'tenant_id' => $tenant->id,
                                 'user_id' => $user->id,
                             ]);
-                            
+
                             $targetCollection = Collection::query()
                                 ->where('id', $collectionId)
                                 ->where('tenant_id', $tenant->id)
@@ -2360,6 +2429,7 @@ class UploadController extends Controller
                                     'brand_id' => $brand->id,
                                     'tenant_id' => $tenant->id,
                                 ]);
+
                                 continue;
                             }
 
@@ -2371,7 +2441,7 @@ class UploadController extends Controller
                                 'user_id' => $user->id,
                                 'can_add' => $canAdd,
                             ]);
-                            
+
                             if (! $canAdd) {
                                 $errorMsg = "You do not have permission to add assets to collection: {$targetCollection->name}.";
                                 $collectionErrors[] = $errorMsg;
@@ -2381,6 +2451,7 @@ class UploadController extends Controller
                                     'collection_name' => $targetCollection->name,
                                     'user_id' => $user->id,
                                 ]);
+
                                 continue;
                             }
 
@@ -2416,33 +2487,33 @@ class UploadController extends Controller
                 // This does not modify approval logic or persistence - only exposes data for UI
                 $approvalRequired = false;
                 $pendingMetadataCount = 0;
-                
+
                 // Only check if approval is enabled and user is a contributor (not approver)
                 $canApprove = $this->approvalResolver->canApprove($user, $tenant);
-                if (!$canApprove) {
+                if (! $canApprove) {
                     // Check if approval workflow is enabled for this brand
                     $approvalEnabled = $this->approvalResolver->isApprovalEnabledForBrand($tenant, $brand);
-                    
+
                     if ($approvalEnabled) {
                         // Resolve metadata state to count pending fields
                         $metadataState = $this->metadataStateResolver->resolve($asset);
-                        
+
                         // Count pending metadata fields (exclude automatic fields)
                         $automaticFieldIds = \Illuminate\Support\Facades\DB::table('metadata_fields')
                             ->where('population_mode', 'automatic')
                             ->pluck('id')
                             ->toArray();
-                        
+
                         foreach ($metadataState as $fieldId => $state) {
-                            if (!$state['has_pending']) {
+                            if (! $state['has_pending']) {
                                 continue;
                             }
-                            
+
                             // Skip automatic fields (they don't require approval)
                             if (in_array($fieldId, $automaticFieldIds)) {
                                 continue;
                             }
-                            
+
                             // Check if pending row is from user or AI (requires approval)
                             $pendingRow = $state['pending'];
                             if ($pendingRow && in_array($pendingRow->source, ['ai', 'user'])) {
@@ -2454,7 +2525,7 @@ class UploadController extends Controller
                 }
 
                 // Success result
-                $results[] = [
+                $successRow = [
                     'upload_key' => $uploadKey,
                     'status' => 'success',
                     'asset_id' => $asset->id,
@@ -2462,6 +2533,10 @@ class UploadController extends Controller
                     'approval_required' => $approvalRequired,
                     'pending_metadata_count' => $pendingMetadataCount,
                 ];
+                if ($clientFileId !== null) {
+                    $successRow['client_file_id'] = $clientFileId;
+                }
+                $results[] = $successRow;
 
                 // Note: Activity logging is handled by UploadCompletionService::complete()
                 // which logs ASSET_UPLOAD_FINALIZED (the canonical event for processing start)
@@ -2476,7 +2551,7 @@ class UploadController extends Controller
             } catch (\RuntimeException $e) {
                 // Phase 2.5 Step 2: Normalize error response for finalize failures
                 $errorMessage = $e->getMessage();
-                
+
                 // Determine error code and category from exception
                 // Map to normalized error codes matching frontend expectations
                 $errorCode = UploadErrorResponse::CODE_VALIDATION_FAILED;
@@ -2493,15 +2568,15 @@ class UploadController extends Controller
                          str_contains($errorMessage, 'does not exist')) {
                     $errorCode = UploadErrorResponse::CODE_SESSION_NOT_FOUND;
                 }
-                
+
                 $category = UploadErrorResponse::getCategoryFromErrorCode($errorCode);
                 $isFileMissing = $errorCode === UploadErrorResponse::CODE_FILE_MISSING;
 
                 // Extract file type from upload session
-                $fileType = $uploadSession 
+                $fileType = $uploadSession
                     ? UploadErrorResponse::extractFileType(null, $uploadSession)
                     : null;
-                
+
                 $results[] = [
                     'upload_key' => $uploadKey,
                     'status' => 'failed',
@@ -2522,7 +2597,7 @@ class UploadController extends Controller
                 // ORPHAN HANDLING: Log orphan candidate for monitoring
                 // S3 object remains in temp/uploads/ - NOT deleted synchronously
                 // Cleanup handled by S3 lifecycle rules (7 day window)
-                if (!$isFileMissing && $uploadSession) {
+                if (! $isFileMissing && $uploadSession) {
                     Log::warning('Orphan candidate: Failed finalize item', [
                         'upload_key' => $uploadKey,
                         'upload_session_id' => $uploadSession->id ?? null,
@@ -2612,8 +2687,8 @@ class UploadController extends Controller
 
                 $errorCode = 'server_error';
                 // Include actual error message for debugging (can be made more user-friendly later)
-                $errorMessage = config('app.debug') 
-                    ? $e->getMessage() 
+                $errorMessage = config('app.debug')
+                    ? $e->getMessage()
                     : 'An unexpected error occurred';
 
                 $results[] = [
@@ -2666,16 +2741,12 @@ class UploadController extends Controller
     /**
      * Verify S3 upload exists and matches expected size.
      *
-     * @param UploadSession $uploadSession
-     * @param string $uploadKey
-     * @param int $expectedSize
-     * @return void
      * @throws \RuntimeException If verification fails
      */
     protected function verifyS3Upload(UploadSession $uploadSession, string $uploadKey, int $expectedSize): void
     {
         $bucket = $uploadSession->storageBucket;
-        if (!$bucket) {
+        if (! $bucket) {
             throw new \RuntimeException('Storage bucket not found for upload session');
         }
 
@@ -2687,7 +2758,7 @@ class UploadController extends Controller
             // Verify object exists in S3
             $exists = $s3Client->doesObjectExist($bucket->name, $uploadKey);
 
-            if (!$exists) {
+            if (! $exists) {
                 throw new \RuntimeException("Upload does not exist in S3: {$uploadKey}");
             }
 
@@ -2725,11 +2796,8 @@ class UploadController extends Controller
      *
      * This endpoint receives structured diagnostic information from the frontend
      * about upload failures. It logs the information for debugging purposes.
-     * 
-     * Phase 2.5: Dev-only observability feature
      *
-     * @param Request $request
-     * @return JsonResponse
+     * Phase 2.5: Dev-only observability feature
      */
     public function diagnostics(Request $request): JsonResponse
     {
@@ -2823,14 +2891,13 @@ class UploadController extends Controller
     /**
      * Create S3 client instance for finalize verification.
      *
-     * @return S3Client
      * @throws \RuntimeException
      */
     protected function createS3ClientForFinalize(): S3Client
     {
-        if (!class_exists(S3Client::class)) {
+        if (! class_exists(S3Client::class)) {
             throw new \RuntimeException(
-                'AWS SDK for PHP is required for upload finalization. ' .
+                'AWS SDK for PHP is required for upload finalization. '.
                 'Install it via: composer require aws/aws-sdk-php'
             );
         }
@@ -2855,9 +2922,6 @@ class UploadController extends Controller
      * GET /uploads/metadata-schema
      *
      * Phase 2 – Step 2: Returns upload metadata schema for UI rendering.
-     *
-     * @param Request $request
-     * @return JsonResponse
      */
     public function getMetadataSchema(Request $request): JsonResponse
     {
@@ -2865,12 +2929,12 @@ class UploadController extends Controller
         $brand = app()->bound('brand') ? app('brand') : null;
         $user = Auth::user();
 
-        if (!$tenant) {
+        if (! $tenant) {
             return response()->json(['error' => 'Tenant not found', 'message' => 'Tenant context is required.'], 404);
         }
 
         // Verify user belongs to tenant
-        if (!$user || !$user->tenants()->where('tenants.id', $tenant->id)->exists()) {
+        if (! $user || ! $user->tenants()->where('tenants.id', $tenant->id)->exists()) {
             return response()->json([
                 'error' => 'Unauthorized',
                 'message' => 'Unauthorized. Please check your account permissions.',
@@ -2888,16 +2952,16 @@ class UploadController extends Controller
             ->where('tenant_id', $tenant->id)
             ->first();
 
-        if (!$category) {
+        if (! $category) {
             return response()->json([
                 'error' => 'Invalid category',
                 'message' => 'Category not found or does not belong to this tenant.',
             ], 422);
         }
 
-        if (!$brand) {
+        if (! $brand) {
             $brand = $category->brand;
-            if (!$brand) {
+            if (! $brand) {
                 return response()->json([
                     'error' => 'Brand not found',
                     'message' => 'Could not resolve brand for this category.',
@@ -2958,6 +3022,78 @@ class UploadController extends Controller
                 'message' => 'An error occurred while loading metadata fields.',
             ], 500);
         }
+    }
+
+    /**
+     * GET /app/uploads/sessions/active
+     *
+     * Intended for restoring compact upload tray after refresh/navigation when durable async finalize
+     * is enabled. Today Jackpot has one `upload_sessions` row per S3 upload (not a batch parent row);
+     * batch orchestration tables/jobs are still to be added — this endpoint returns a stable contract
+     * for the frontend to poll without error.
+     */
+    public function activeFinalizeSessions(Request $request): JsonResponse
+    {
+        $tenant = app('tenant');
+        $brand = app('brand');
+        $user = Auth::user();
+
+        if (! $user || ! $tenant || ! $brand) {
+            return response()->json(['message' => 'Unauthorized'], 401);
+        }
+
+        if (! $user->tenants()->where('tenants.id', $tenant->id)->exists()) {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
+
+        if (! $user->hasPermissionForTenant($tenant, 'asset.upload')) {
+            return response()->json(['message' => 'Forbidden'], 403);
+        }
+
+        $enabled = (bool) config('features.async_upload_finalize', false);
+
+        return response()->json([
+            'feature_enabled' => $enabled,
+            'sessions' => [],
+            'message' => $enabled
+                ? 'No active finalize sessions (batch layer not yet wired).'
+                : 'Async finalize disabled; tray uses in-tab state only.',
+        ]);
+    }
+
+    /**
+     * GET /app/uploads/sessions/{batchSessionId}/status
+     *
+     * Placeholder for per-batch progress, client_file_id → asset_id mappings, and failure summaries.
+     */
+    public function finalizeSessionStatus(Request $request, string $batchSessionId): JsonResponse
+    {
+        $tenant = app('tenant');
+        $brand = app('brand');
+        $user = Auth::user();
+
+        if (! $user || ! $tenant || ! $brand) {
+            return response()->json(['message' => 'Unauthorized'], 401);
+        }
+
+        if (! $user->tenants()->where('tenants.id', $tenant->id)->exists()) {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
+
+        if (! $user->hasPermissionForTenant($tenant, 'asset.upload')) {
+            return response()->json(['message' => 'Forbidden'], 403);
+        }
+
+        $enabled = (bool) config('features.async_upload_finalize', false);
+
+        return response()->json([
+            'feature_enabled' => $enabled,
+            'upload_session_id' => $batchSessionId,
+            'status' => 'unknown',
+            'message' => 'Batch finalize status API not implemented for this session id.',
+            'items' => [],
+            'client_file_id_to_asset_id' => new \stdClass,
+        ]);
     }
 
     /**

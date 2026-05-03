@@ -39,6 +39,7 @@ function slugifyMetadataOptionValue(label) {
  * @param {boolean} [props.disabled] - Whether field is disabled
  * @param {boolean} [props.showError] - Whether to show validation error
  * @param {'default' | 'modal'} [props.layout] - "modal" = stacked label, full width, tall list in quick edit modals
+ * @param {'inline' | 'stacked'} [props.labelLayout] - stacked = label above control (upload batch grid cells)
  */
 const MetadataFieldInput = forwardRef(function MetadataFieldInput(
     {
@@ -51,10 +52,13 @@ const MetadataFieldInput = forwardRef(function MetadataFieldInput(
         collectionProps = null,
         tagsPlaceholder = null,
         layout = 'default',
+        labelLayout = 'inline',
     },
     ref
 ) {
     const { auth, currentWorkspace } = usePage().props
+    const stacked = labelLayout === 'stacked'
+    const fieldLayoutForMulti = stacked ? 'modal' : layout
     const [appendedOptions, setAppendedOptions] = useState([])
     const [addOptionOpen, setAddOptionOpen] = useState(false)
     const [addOptionLabel, setAddOptionLabel] = useState('')
@@ -222,6 +226,32 @@ const MetadataFieldInput = forwardRef(function MetadataFieldInput(
     // C9.2: Collections field — render inside General group when collectionProps provided (uploader)
     if (field.key === 'collection' && collectionProps) {
         const { collections, collectionsLoading, selectedIds, onChange: onCollectionChange, showCreateButton, onCreateClick } = collectionProps
+        if (stacked) {
+            return (
+                <div className="flex min-w-0 flex-col gap-1.5">
+                    <label className="text-sm font-medium text-gray-700">
+                        {field.display_label}
+                        {isRequired && <span className="text-red-500 ml-0.5">*</span>}
+                    </label>
+                    <div className="min-w-0">
+                        {collectionsLoading ? (
+                            <span className="text-sm text-gray-500">Loading…</span>
+                        ) : (
+                            <CollectionSelector
+                                collections={collections || []}
+                                selectedIds={selectedIds || []}
+                                onChange={onCollectionChange}
+                                disabled={isDisabled}
+                                placeholder="Select"
+                                showCreateButton={showCreateButton === true}
+                                onCreateClick={onCreateClick}
+                            />
+                        )}
+                    </div>
+                    {hasError && <span className="text-xs text-red-600">Required</span>}
+                </div>
+            )
+        }
         return (
             <div className="flex items-start gap-2 min-w-0">
                 <label className="flex-shrink-0 w-56 text-sm font-medium text-gray-700 pt-0.5">
@@ -252,6 +282,41 @@ const MetadataFieldInput = forwardRef(function MetadataFieldInput(
     if (field.key === 'tags') {
         const tenantId = auth?.activeCompany?.id ?? currentWorkspace?.id ?? null
 
+        if (stacked) {
+            return (
+                <div className="flex min-w-0 flex-col gap-1.5">
+                    <label className="text-sm font-medium text-gray-700">
+                        {field.display_label}
+                        {isRequired && <span className="text-red-500 ml-0.5">*</span>}
+                    </label>
+                    <div className="min-w-0">
+                        <TagInputUnified
+                            ref={ref}
+                            mode="upload"
+                            value={Array.isArray(value) ? value : []}
+                            onChange={handleChange}
+                            tenantId={tenantId}
+                            placeholder={tagsPlaceholder || 'Add tags...'}
+                            showTitle={false}
+                            title={field.display_label}
+                            showCounter={true}
+                            maxTags={10}
+                            compact={false}
+                            className="w-full"
+                            ariaLabel={`${field.display_label} input`}
+                            suggestedTags={
+                                Array.isArray(field.suggested_tags)
+                                    ? field.suggested_tags
+                                    : Array.isArray(field.suggested_values)
+                                      ? field.suggested_values
+                                      : null
+                            }
+                        />
+                    </div>
+                    {hasError && <span className="text-xs text-red-600">Required</span>}
+                </div>
+            )
+        }
         return (
             <div className="flex items-start gap-2 min-w-0">
                 <label className="flex-shrink-0 w-56 text-sm font-medium text-gray-700 pt-0.5">
@@ -290,6 +355,31 @@ const MetadataFieldInput = forwardRef(function MetadataFieldInput(
     // Render based on field type
     switch (field.type) {
         case 'text':
+            if (stacked) {
+                return (
+                    <div className="flex min-w-0 flex-col gap-1.5">
+                        <label htmlFor={field.key} className="text-sm font-medium text-gray-700">
+                            {field.display_label}
+                            {isRequired && <span className="text-red-500 ml-0.5">*</span>}
+                        </label>
+                        <input
+                            type="text"
+                            id={field.key}
+                            name={field.key}
+                            value={value || ''}
+                            onChange={(e) => handleChange(e.target.value)}
+                            disabled={isDisabled}
+                            title={!canEdit ? "You don't have permission to edit this field" : undefined}
+                            className={`w-full min-w-0 rounded border shadow-sm focus:ring-indigo-500 text-sm ${
+                                hasError
+                                    ? 'border-red-300 focus:border-red-500 focus:ring-red-500'
+                                    : 'border-gray-300 focus:border-indigo-500 focus:ring-indigo-500'
+                            } ${disabled ? 'bg-gray-50 text-gray-500 cursor-not-allowed opacity-60' : ''}`}
+                        />
+                        {hasError && <span className="text-xs text-red-600">Required</span>}
+                    </div>
+                )
+            }
             return (
                 <div className="flex items-center gap-2 min-w-0">
                     <label htmlFor={field.key} className="flex-shrink-0 w-56 text-sm font-medium text-gray-700">
@@ -317,6 +407,29 @@ const MetadataFieldInput = forwardRef(function MetadataFieldInput(
             )
 
         case 'number':
+            if (stacked) {
+                return (
+                    <div className="flex min-w-0 flex-col gap-1.5">
+                        <label htmlFor={field.key} className="text-sm font-medium text-gray-700">
+                            {field.display_label}
+                            {isRequired && <span className="text-red-500 ml-0.5">*</span>}
+                        </label>
+                        <input
+                            type="number"
+                            id={field.key}
+                            name={field.key}
+                            value={value || ''}
+                            onChange={(e) => handleChange(e.target.value === '' ? null : Number(e.target.value))}
+                            disabled={isDisabled}
+                            title={!canEdit ? "You don't have permission to edit this field" : undefined}
+                            className={`w-full min-w-0 rounded border shadow-sm focus:ring-indigo-500 text-sm ${
+                                hasError ? 'border-red-300 focus:border-red-500 focus:ring-red-500' : 'border-gray-300 focus:border-indigo-500 focus:ring-indigo-500'
+                            } ${disabled ? 'bg-gray-50 text-gray-500 cursor-not-allowed opacity-60' : ''}`}
+                        />
+                        {hasError && <span className="text-xs text-red-600">Required</span>}
+                    </div>
+                )
+            }
             return (
                 <div className="flex items-center gap-2 min-w-0">
                     <label htmlFor={field.key} className="flex-shrink-0 w-56 text-sm font-medium text-gray-700">
@@ -342,6 +455,27 @@ const MetadataFieldInput = forwardRef(function MetadataFieldInput(
         case 'boolean':
             // display_widget=toggle: same layout as filters/edit (stored in DB for consistency everywhere)
             if (field.display_widget === 'toggle') {
+                if (stacked) {
+                    return (
+                        <div className="flex min-w-0 flex-col gap-1.5">
+                            <span className="text-sm font-medium text-gray-700">
+                                {field.display_label}
+                                {isRequired && <span className="text-red-500 ml-0.5">*</span>}
+                            </span>
+                            <div className="relative inline-flex w-fit items-center flex-shrink-0">
+                                <input
+                                    type="checkbox"
+                                    checked={value === true || value === 'true'}
+                                    onChange={(e) => handleChange(e.target.checked)}
+                                    disabled={isDisabled}
+                                    className="sr-only peer"
+                                />
+                                <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-indigo-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed" />
+                            </div>
+                            {hasError && <span className="text-xs text-red-600">Required</span>}
+                        </div>
+                    )
+                }
                 return (
                     <div className="flex items-center gap-2 min-w-0">
                         <label className="flex-shrink-0 w-56 text-sm font-medium text-gray-700">
@@ -359,6 +493,25 @@ const MetadataFieldInput = forwardRef(function MetadataFieldInput(
                             <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-indigo-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed" />
                         </div>
                         {hasError && <span className="flex-shrink-0 text-xs text-red-600">Required</span>}
+                    </div>
+                )
+            }
+            if (stacked) {
+                return (
+                    <div className="flex min-w-0 flex-col gap-1.5">
+                        <label className="text-sm font-medium text-gray-700">
+                            {field.display_label}
+                            {isRequired && <span className="text-red-500 ml-0.5">*</span>}
+                        </label>
+                        <input
+                            type="checkbox"
+                            checked={value === true || value === 'true'}
+                            onChange={(e) => handleChange(e.target.checked)}
+                            disabled={isDisabled}
+                            title={!canEdit ? "You don't have permission to edit this field" : undefined}
+                            className={`h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded ${hasError ? 'border-red-300' : ''} ${isDisabled ? 'cursor-not-allowed opacity-60' : ''}`}
+                        />
+                        {hasError && <span className="text-xs text-red-600">Required</span>}
                     </div>
                 )
             }
@@ -381,6 +534,29 @@ const MetadataFieldInput = forwardRef(function MetadataFieldInput(
             )
 
         case 'date':
+            if (stacked) {
+                return (
+                    <div className="flex min-w-0 flex-col gap-1.5">
+                        <label htmlFor={field.key} className="text-sm font-medium text-gray-700">
+                            {field.display_label}
+                            {isRequired && <span className="text-red-500 ml-0.5">*</span>}
+                        </label>
+                        <input
+                            type="date"
+                            id={field.key}
+                            name={field.key}
+                            value={value || ''}
+                            onChange={(e) => handleChange(e.target.value)}
+                            disabled={isDisabled}
+                            title={!canEdit ? "You don't have permission to edit this field" : undefined}
+                            className={`w-full min-w-0 rounded border shadow-sm focus:ring-indigo-500 text-sm ${
+                                hasError ? 'border-red-300 focus:border-red-500 focus:ring-red-500' : 'border-gray-300 focus:border-indigo-500 focus:ring-indigo-500'
+                            } ${disabled ? 'bg-gray-50 text-gray-500 cursor-not-allowed opacity-60' : ''}`}
+                        />
+                        {hasError && <span className="text-xs text-red-600">Required</span>}
+                    </div>
+                )
+            }
             return (
                 <div className="flex items-center gap-2 min-w-0">
                     <label htmlFor={field.key} className="flex-shrink-0 w-56 text-sm font-medium text-gray-700">
@@ -426,6 +602,40 @@ const MetadataFieldInput = forwardRef(function MetadataFieldInput(
                 )
             }
 
+            if (stacked) {
+                return (
+                    <div className="min-w-0 space-y-2">
+                        <div className="flex min-w-0 flex-col gap-1.5">
+                            <label htmlFor={field.key} className="text-sm font-medium text-gray-700">
+                                {field.display_label}
+                                {isRequired && <span className="text-red-500 ml-0.5">*</span>}
+                            </label>
+                            <select
+                                id={field.key}
+                                name={field.key}
+                                value={value || ''}
+                                onChange={(e) => handleChange(e.target.value || null)}
+                                disabled={isDisabled}
+                                title={!canEdit ? "You don't have permission to edit this field" : undefined}
+                                className={`w-full min-w-0 rounded border shadow-sm focus:ring-indigo-500 text-sm text-gray-900 bg-white ${
+                                    hasError
+                                        ? 'border-red-300 focus:border-red-500 focus:ring-red-500'
+                                        : 'border-gray-300 focus:border-indigo-500 focus:ring-indigo-500'
+                                } ${isDisabled ? 'bg-gray-50 text-gray-500 cursor-not-allowed opacity-60' : ''}`}
+                            >
+                                <option value="">{mergedOptions.length ? 'Select' : 'Add a value below'}</option>
+                                {mergedOptions.map((option) => (
+                                    <option key={option.value} value={option.value}>
+                                        {option.display_label}
+                                    </option>
+                                ))}
+                            </select>
+                            {hasError && <span className="text-xs text-red-600">Required</span>}
+                        </div>
+                        {renderOptionAddRow()}
+                    </div>
+                )
+            }
             return (
                 <div className="min-w-0 space-y-2">
                     <div className="flex items-center gap-2 min-w-0">
@@ -462,7 +672,7 @@ const MetadataFieldInput = forwardRef(function MetadataFieldInput(
             )
 
         case 'multiselect': {
-            const isModalList = layout === 'modal'
+            const isModalList = fieldLayoutForMulti === 'modal'
             if (!mergedOptions.length) {
                 if (canAddOptionsOnTheFly) {
                     return (
@@ -617,6 +827,26 @@ const MetadataFieldInput = forwardRef(function MetadataFieldInput(
         }
 
         case 'rating':
+            if (stacked) {
+                return (
+                    <div className="flex min-w-0 flex-col gap-1.5">
+                        <label className="text-sm font-medium text-gray-700">
+                            {field.display_label}
+                            {isRequired && <span className="text-red-500 ml-0.5">*</span>}
+                        </label>
+                        <div className="min-w-0">
+                            <StarRating
+                                value={value || 0}
+                                onChange={handleChange}
+                                editable={!isDisabled}
+                                maxStars={5}
+                                size="md"
+                            />
+                        </div>
+                        {hasError && <span className="text-xs text-red-600">Required</span>}
+                    </div>
+                )
+            }
             return (
                 <div className="flex items-center gap-2 min-w-0">
                     <label className="flex-shrink-0 w-56 text-sm font-medium text-gray-700">

@@ -80,6 +80,79 @@ class CollectionShareLinkTest extends TestCase
             ->assertInertia(fn ($p) => $p->component('Public/Collection'));
     }
 
+    public function test_token_share_inertia_uses_token_download_post_path(): void
+    {
+        [$tenant, $brand] = $this->makeTenantBrand();
+        $tenant->update(['manual_plan_override' => 'enterprise']);
+
+        $collection = Collection::create([
+            'tenant_id' => $tenant->id,
+            'brand_id' => $brand->id,
+            'name' => 'Shared',
+            'slug' => 'shared',
+            'visibility' => 'brand',
+            'is_public' => true,
+            'public_share_token' => 'tokuniquesharetest01',
+            'public_password_hash' => Hash::make('correct-password'),
+            'public_password_set_at' => now(),
+        ]);
+
+        $this->withSession([$collection->sessionUnlockKey() => true])
+            ->get('/share/collections/tokuniquesharetest01')
+            ->assertOk()
+            ->assertInertia(fn ($p) => $p
+                ->component('Public/Collection')
+                ->has('public_share_theme')
+                ->where('share_download_post_path', fn ($path) => is_string($path) && str_contains($path, '/share/collections/tokuniquesharetest01/download')));
+    }
+
+    public function test_token_share_download_json_when_locked_returns_friendly_message(): void
+    {
+        [$tenant, $brand] = $this->makeTenantBrand();
+        $tenant->update(['manual_plan_override' => 'enterprise']);
+
+        Collection::create([
+            'tenant_id' => $tenant->id,
+            'brand_id' => $brand->id,
+            'name' => 'Shared',
+            'slug' => 'shared',
+            'visibility' => 'brand',
+            'is_public' => true,
+            'public_share_token' => 'tokuniquesharetest01',
+            'public_password_hash' => Hash::make('correct-password'),
+            'public_password_set_at' => now(),
+            'public_downloads_enabled' => true,
+        ]);
+
+        $this->postJson(route('share.collections.download', ['token' => 'tokuniquesharetest01']), [])
+            ->assertStatus(403)
+            ->assertJsonFragment(['message' => 'Unlock this collection again to download files.']);
+    }
+
+    public function test_token_share_download_json_when_downloads_disabled_returns_friendly_message(): void
+    {
+        [$tenant, $brand] = $this->makeTenantBrand();
+        $tenant->update(['manual_plan_override' => 'enterprise']);
+
+        $collection = Collection::create([
+            'tenant_id' => $tenant->id,
+            'brand_id' => $brand->id,
+            'name' => 'Shared',
+            'slug' => 'shared',
+            'visibility' => 'brand',
+            'is_public' => true,
+            'public_share_token' => 'tokuniquesharetest01',
+            'public_password_hash' => Hash::make('correct-password'),
+            'public_password_set_at' => now(),
+            'public_downloads_enabled' => false,
+        ]);
+
+        $this->withSession([$collection->sessionUnlockKey() => true])
+            ->postJson(route('share.collections.download', ['token' => 'tokuniquesharetest01']), [])
+            ->assertStatus(403)
+            ->assertJsonFragment(['message' => 'Downloads are disabled for this collection.']);
+    }
+
     public function test_cannot_enable_is_public_without_plan_feature(): void
     {
         [$tenant, $brand] = $this->makeTenantBrand();

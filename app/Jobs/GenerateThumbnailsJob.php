@@ -10,10 +10,10 @@ use App\Models\Asset;
 use App\Models\AssetEvent;
 use App\Models\AssetPdfPage;
 use App\Models\AssetVersion;
-use App\Services\Assets\AssetProcessingBudgetService;
-use App\Services\Assets\ProcessingBudgetDecision;
 use App\Services\AssetDerivativeFailureService;
 use App\Services\AssetPathGenerator;
+use App\Services\Assets\AssetProcessingBudgetService;
+use App\Services\Assets\ProcessingBudgetDecision;
 use App\Services\PdfPageRenderingService;
 use App\Services\Reliability\ReliabilityEngine;
 use App\Services\SystemIncidentService;
@@ -21,6 +21,7 @@ use App\Services\ThumbnailGenerationService;
 use App\Support\AdminLogStream;
 use App\Support\Logging\PipelineLogger;
 use App\Support\Logging\PipelineStepTimer;
+use App\Support\Logging\ThumbnailProfilingRecorder;
 use App\Support\PipelineQueueResolver;
 use App\Support\ProcessingMetrics;
 use App\Support\ThumbnailMetadata;
@@ -757,6 +758,14 @@ class GenerateThumbnailsJob implements ShouldQueue
             ]);
             $mode = ThumbnailMode::default();
             $pipelineTimer?->lap('before_thumbnail_service', $asset, $version);
+            if (ThumbnailProfilingRecorder::enabled()) {
+                ThumbnailProfilingRecorder::setJobContext([
+                    'queue_wait_ms' => ThumbnailProfilingRecorder::resolveQueueWaitMs($this->job),
+                    'worker_queue' => $this->queue ?? null,
+                    'job_class' => static::class,
+                    'queue_job_id' => $this->job?->getJobId(),
+                ]);
+            }
             $result = $version
             ? $thumbnailService->generateThumbnailsForVersion($version, $mode)
             : $thumbnailService->generateThumbnails($asset, null, null, null, $mode);
@@ -1067,6 +1076,10 @@ class GenerateThumbnailsJob implements ShouldQueue
                 $thumbnailMetadata['pdf_pages_rendered'] = $pdfPageCount <= 1;
             }
 
+            if (! empty($result['_thumbnail_profiling']) && config('assets.thumbnail_profiling.store_in_version_metadata', true)) {
+                $thumbnailMetadata['thumbnail_profiling'] = $result['_thumbnail_profiling'];
+            }
+
             if ($version) {
                 // Version path: persist metadata onto version
                 $version->update([
@@ -1242,6 +1255,10 @@ class GenerateThumbnailsJob implements ShouldQueue
             ]);
 
         } catch (\Throwable $e) {
+            try {
+                $thumbnailService->abandonProfilingAfterJobFailure();
+            } catch (\Throwable) {
+            }
             // TASK 2: Terminal state guarantee - FAILED
             // This catch block MUST set a terminal state (FAILED) to prevent PROCESSING forever
             // The catch block below will update thumbnail_status to FAILED

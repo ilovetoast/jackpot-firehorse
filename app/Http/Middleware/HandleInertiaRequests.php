@@ -422,6 +422,9 @@ class HandleInertiaRequests extends Middleware
             'signup_enabled' => ! app()->environment('staging'),
             'performance_client_metrics_enabled' => config('performance.client_metrics_enabled', false),
             // DAM file registry → uploader accept + thumbnail UI (single source: config/file_types.php via FileTypeService)
+            'upload_limits' => [
+                'max_files_per_batch' => \App\Services\UploadPreflightService::maxFilesPerBatch(),
+            ],
             'dam_file_types' => (function () {
                 $svc = app(FileTypeService::class);
                 $thumbMimes = $svc->getThumbnailCapabilityMimeTypes();

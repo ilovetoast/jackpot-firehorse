@@ -2,16 +2,15 @@
 
 namespace App\Jobs;
 
-use App\Enums\AssetStatus;
+use App\Enums\DerivativeType;
 use App\Enums\ThumbnailStatus;
+use App\Jobs\Concerns\QueuesOnImagesChannel;
 use App\Models\Asset;
 use App\Models\AssetEvent;
-use App\Enums\DerivativeProcessor;
-use App\Enums\DerivativeType;
-use App\Services\Assets\AssetProcessingBudgetService;
 use App\Services\AssetDerivativeFailureService;
-use App\Jobs\Concerns\QueuesOnImagesChannel;
 use App\Services\AssetProcessingFailureService;
+use App\Services\Assets\AssetProcessingBudgetService;
+use App\Support\Logging\ThumbnailProfilingRecorder;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -57,6 +56,14 @@ class GeneratePreviewJob implements ShouldQueue
 
         $asset = Asset::findOrFail($this->assetId);
 
+        ThumbnailProfilingRecorder::logPipelineJob(
+            static::class,
+            $this->assetId,
+            $asset->current_asset_version_id,
+            'started',
+            $this->job
+        );
+
         $version = $asset->currentVersion;
         $budget = app(AssetProcessingBudgetService::class);
         $decision = $budget->classify($asset, $version);
@@ -80,6 +87,7 @@ class GeneratePreviewJob implements ShouldQueue
                 'asset_id' => $asset->id,
             ]);
             \App\Services\UploadDiagnosticLogger::jobSkip('GeneratePreviewJob', $asset->id, 'already_generated');
+
             // Job chaining is handled by Bus::chain() in ProcessAssetJob
             // Chain will continue to next job automatically
             return;
@@ -103,6 +111,7 @@ class GeneratePreviewJob implements ShouldQueue
             $currentMetadata['preview_skipped'] = true;
             $currentMetadata['preview_skipped_reason'] = 'thumbnails_not_completed';
             $asset->update(['metadata' => $currentMetadata]);
+
             return; // Chain will continue automatically
         }
 
@@ -130,17 +139,17 @@ class GeneratePreviewJob implements ShouldQueue
             'event_type' => 'asset.preview.generated',
             'metadata' => [
                 'job' => 'GeneratePreviewJob',
-                'has_preview' => !empty($preview),
+                'has_preview' => ! empty($preview),
             ],
             'created_at' => now(),
         ]);
 
         Log::info('Preview generated', [
             'asset_id' => $asset->id,
-            'has_preview' => !empty($preview),
+            'has_preview' => ! empty($preview),
         ]);
         \App\Services\UploadDiagnosticLogger::jobComplete('GeneratePreviewJob', $asset->id, [
-            'has_preview' => !empty($preview),
+            'has_preview' => ! empty($preview),
         ]);
 
         \App\Support\Logging\AssetPipelineTimingLogger::record(
@@ -150,15 +159,21 @@ class GeneratePreviewJob implements ShouldQueue
             ['has_preview' => ! empty($preview)]
         );
 
+        ThumbnailProfilingRecorder::logPipelineJob(
+            static::class,
+            $this->assetId,
+            $asset->current_asset_version_id,
+            'finished',
+            $this->job,
+            ['has_preview' => ! empty($preview)]
+        );
+
         // Job chaining is handled by Bus::chain() in ProcessAssetJob
         // No need to dispatch next job here
     }
 
     /**
      * Generate preview for asset (stub implementation).
-     *
-     * @param Asset $asset
-     * @return array|null
      */
     protected function generatePreview(Asset $asset): ?array
     {

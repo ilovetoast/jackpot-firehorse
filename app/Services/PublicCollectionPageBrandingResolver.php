@@ -68,6 +68,46 @@ class PublicCollectionPageBrandingResolver
     }
 
     /**
+     * Safe theme payload for password-gate and unlocked public share pages (no secrets).
+     *
+     * @param  array{kind: 'slug'|'token', brand_slug?: string, collection_slug?: string, token?: string}  $routeContext
+     * @return array{
+     *   brand_name: string,
+     *   logo_url: ?string,
+     *   background_image_url: ?string,
+     *   primary_color: string,
+     *   accent_color: string,
+     *   secondary_color: string,
+     *   theme_dark: bool,
+     *   button_text_on_primary: string,
+     *   page_base_hex: string,
+     * }
+     */
+    public function resolveShareTheme(Brand $brand, Collection $collection, array $routeContext = []): array
+    {
+        $base = $this->resolve($brand, $collection);
+        $primary = $base['primary_color'];
+        $secondary = $brand->secondary_color ?? $base['accent_color'];
+        $secondary = is_string($secondary) ? $secondary : $base['accent_color'];
+
+        return array_merge($base, [
+            'brand_name' => (string) $brand->name,
+            'secondary_color' => $secondary,
+            'button_text_on_primary' => $this->contrastTextOnHex($primary),
+            /** Deep backdrop for cinematic pages (Jackpot default when brand primary is light). */
+            'page_base_hex' => $base['theme_dark'] ? '#0B0B0D' : '#0f172a',
+        ]);
+    }
+
+    /**
+     * Readable text (white or near-black) on top of a solid fill of $hex.
+     */
+    public function contrastTextOnHex(string $hex): string
+    {
+        return $this->isColorDark($hex) ? '#f8fafc' : '#0f172a';
+    }
+
+    /**
      * Infer if a hex color is dark (for gradient/theme direction).
      * Dark colors → dark base + light gradients; light colors → light base + dark gradients.
      */

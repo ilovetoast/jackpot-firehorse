@@ -72,6 +72,7 @@ function uploadSectionPresentation(groupKey, label) {
  * @param {boolean} [props.showErrors] - Whether to show validation errors
  * @param {boolean} [props.autoExpand] - Whether to auto-expand if group has errors
  * @param {boolean} [props.defaultExpanded] - Initial expanded state (default true)
+ * @param {boolean} [props.compact] - Tighter chrome + optional two-column field grid on sm+
  */
 export default function MetadataGroup({
     group,
@@ -83,6 +84,7 @@ export default function MetadataGroup({
     defaultExpanded = true,
     collectionProps = null,
     tagFieldInputRef = null,
+    compact = false,
 }) {
     const [isExpanded, setIsExpanded] = useState(defaultExpanded)
 
@@ -96,6 +98,7 @@ export default function MetadataGroup({
     }, [autoExpand, hasErrors, isExpanded])
 
     const fieldsToRender = (group.fields || []).filter((f) => f.key !== 'starred')
+    const fieldCount = fieldsToRender.length
 
     if (fieldsToRender.length === 0) {
         return null
@@ -105,7 +108,7 @@ export default function MetadataGroup({
 
     return (
         <div className={chrome.card}>
-            <div className="p-3.5">
+            <div className={compact ? 'p-2.5' : 'p-3.5'}>
                 <button
                     type="button"
                     onClick={() => setIsExpanded(!isExpanded)}
@@ -113,7 +116,9 @@ export default function MetadataGroup({
                     aria-expanded={isExpanded}
                     aria-controls={`metadata-group-${group.key}`}
                 >
-                    <div className={`flex items-start justify-between gap-2 border-b pb-2 ${chrome.bar}`}>
+                    <div
+                        className={`flex items-start justify-between gap-2 border-b ${compact ? 'pb-1.5' : 'pb-2'} ${chrome.bar}`}
+                    >
                         <div className="min-w-0 flex-1 pr-1">
                             <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
                                 {chrome.badge && chrome.badgeText ? (
@@ -127,7 +132,13 @@ export default function MetadataGroup({
                                 ) : null}
                             </div>
                             {chrome.helper ? (
-                                <p className="mt-1.5 text-[11px] leading-snug text-gray-600">{chrome.helper}</p>
+                                <p
+                                    className={`text-[11px] leading-snug text-gray-600 ${
+                                        compact ? 'mt-1' : 'mt-1.5'
+                                    }`}
+                                >
+                                    {chrome.helper}
+                                </p>
                             ) : null}
                         </div>
                         {isExpanded ? (
@@ -139,10 +150,38 @@ export default function MetadataGroup({
                 </button>
 
                 {isExpanded && (
-                    <div id={`metadata-group-${group.key}`} className="min-w-0 pt-3">
-                        <div className="flex min-w-0 flex-col gap-3">
-                            {fieldsToRender.map((field) => (
-                                <div key={field.key} className="min-w-0">
+                    <div id={`metadata-group-${group.key}`} className={`min-w-0 ${compact ? 'pt-2' : 'pt-3'}`}>
+                        <div
+                            className={
+                                compact
+                                    ? 'grid min-w-0 grid-cols-1 gap-x-4 gap-y-4 md:grid-cols-2'
+                                    : 'flex min-w-0 flex-col gap-3'
+                            }
+                        >
+                            {fieldsToRender.map((field, idx) => {
+                                const isLast = idx === fieldCount - 1
+                                const oddLastFullWidth =
+                                    compact &&
+                                    fieldCount >= 3 &&
+                                    fieldCount % 2 === 1 &&
+                                    isLast &&
+                                    field.key !== 'tags' &&
+                                    field.key !== 'collection' &&
+                                    field.type !== 'textarea'
+
+                                return (
+                                <div
+                                    key={field.key}
+                                    className={`min-w-0 ${
+                                        compact &&
+                                        (field.key === 'tags' ||
+                                            field.key === 'collection' ||
+                                            field.type === 'textarea' ||
+                                            oddLastFullWidth)
+                                            ? 'md:col-span-2'
+                                            : ''
+                                    }`}
+                                >
                                     <MetadataFieldInput
                                         ref={field.key === 'tags' ? tagFieldInputRef : undefined}
                                         field={field}
@@ -159,10 +198,12 @@ export default function MetadataGroup({
                                         disabled={disabled}
                                         showError={showErrors && !!groupErrors[field.key]}
                                         isUploadContext={true}
+                                        labelLayout={compact ? 'stacked' : 'inline'}
                                         collectionProps={field.key === 'collection' ? collectionProps : undefined}
                                     />
                                 </div>
-                            ))}
+                            )
+                            })}
                         </div>
                     </div>
                 )}

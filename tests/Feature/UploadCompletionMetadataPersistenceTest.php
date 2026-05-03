@@ -2,10 +2,8 @@
 
 namespace Tests\Feature;
 
-use App\Enums\AssetStatus;
 use App\Enums\AssetType;
 use App\Enums\StorageBucketStatus;
-use App\Enums\ThumbnailStatus;
 use App\Enums\UploadStatus;
 use App\Enums\UploadType;
 use App\Models\Asset;
@@ -21,12 +19,13 @@ use Aws\S3\S3Client;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Facades\Schema;
 use Mockery;
 use Tests\TestCase;
 
 /**
  * Test metadata persistence during upload completion.
- * 
+ *
  * CRITICAL: These tests ensure that user-entered metadata during upload
  * is ALWAYS persisted to the asset_metadata table. This is a critical
  * requirement - metadata must never be silently lost.
@@ -36,11 +35,17 @@ class UploadCompletionMetadataPersistenceTest extends TestCase
     use RefreshDatabase;
 
     protected UploadCompletionService $completionService;
+
     protected Tenant $tenant;
+
     protected Brand $brand;
+
     protected Category $category;
+
     protected User $user;
+
     protected StorageBucket $bucket;
+
     protected UploadSession $uploadSession;
 
     protected function setUp(): void
@@ -54,7 +59,7 @@ class UploadCompletionMetadataPersistenceTest extends TestCase
         $s3Client = Mockery::mock(S3Client::class);
         $s3Client->shouldReceive('doesObjectExist')
             ->andReturn(true);
-        
+
         // Mock headObject result as Aws\Result
         $headResult = Mockery::mock(Result::class);
         $headResult->shouldReceive('get')
@@ -76,7 +81,7 @@ class UploadCompletionMetadataPersistenceTest extends TestCase
         $s3Client->shouldReceive('headObject')
             ->andReturn($headResult);
         $s3Client->shouldReceive('copyObject')
-            ->andReturn(new Result());
+            ->andReturn(new Result);
         $s3Client->shouldReceive('doesObjectExist')
             ->andReturn(true);
 
@@ -86,6 +91,8 @@ class UploadCompletionMetadataPersistenceTest extends TestCase
         $this->tenant = Tenant::create([
             'name' => 'Test Tenant',
             'slug' => 'test-tenant',
+            // Enterprise bypasses free-plan upload email gate in UploadCompletionService.
+            'manual_plan_override' => 'enterprise',
         ]);
 
         $this->brand = Brand::create([
@@ -140,58 +147,54 @@ class UploadCompletionMetadataPersistenceTest extends TestCase
 
     protected function seedSystemMetadataFields(): void
     {
-        DB::table('metadata_fields')->insert([
-            [
-                'id' => 1,
-                'key' => 'photo_type',
-                'system_label' => 'Photo type',
-                'type' => 'select',
-                'scope' => 'system',
-                'applies_to' => 'image',
-                'population_mode' => 'manual',
-                'show_on_upload' => true,
-                'show_on_edit' => true,
-                'show_in_filters' => true,
-                'readonly' => false,
-                'is_user_editable' => true,
-                'created_at' => now(),
-                'updated_at' => now(),
-            ],
-            [
-                'id' => 2,
-                'key' => 'usage_rights',
-                'system_label' => 'Usage Rights',
-                'type' => 'select',
-                'scope' => 'system',
-                'applies_to' => 'image',
-                'population_mode' => 'manual',
-                'show_on_upload' => true,
-                'show_on_edit' => true,
-                'show_in_filters' => true,
-                'readonly' => false,
-                'is_user_editable' => true,
-                'created_at' => now(),
-                'updated_at' => now(),
-            ],
-        ]);
+        // Do not hard-code primary keys: migrate:fresh may already occupy low ids on metadata_fields,
+        // and RefreshDatabase migrates only once per PHPUnit process across test classes.
+        $now = now();
+        $base = [
+            'type' => 'select',
+            'scope' => 'system',
+            'applies_to' => 'image',
+            'population_mode' => 'manual',
+            'show_on_upload' => true,
+            'show_on_edit' => true,
+            'show_in_filters' => true,
+            'readonly' => false,
+            'is_user_editable' => true,
+            'created_at' => $now,
+            'updated_at' => $now,
+        ];
+        if (Schema::hasColumn('metadata_fields', 'tenant_id')) {
+            $base['tenant_id'] = null;
+        }
+        if (Schema::hasColumn('metadata_fields', 'is_active')) {
+            $base['is_active'] = true;
+        }
 
-        // Seed metadata options for photo_type
+        $photoTypeId = DB::table('metadata_fields')->insertGetId(array_merge($base, [
+            'key' => 'photo_type',
+            'system_label' => 'Photo type',
+        ]));
+        DB::table('metadata_fields')->insertGetId(array_merge($base, [
+            'key' => 'usage_rights',
+            'system_label' => 'Usage Rights',
+        ]));
+
         DB::table('metadata_options')->insert([
             [
-                'metadata_field_id' => 1,
+                'metadata_field_id' => $photoTypeId,
                 'value' => 'lifestyle',
                 'system_label' => 'Lifestyle',
                 'is_system' => true,
-                'created_at' => now(),
-                'updated_at' => now(),
+                'created_at' => $now,
+                'updated_at' => $now,
             ],
             [
-                'metadata_field_id' => 1,
+                'metadata_field_id' => $photoTypeId,
                 'value' => 'product_only',
                 'system_label' => 'Product-only',
                 'is_system' => true,
-                'created_at' => now(),
-                'updated_at' => now(),
+                'created_at' => $now,
+                'updated_at' => $now,
             ],
         ]);
     }
@@ -230,7 +233,7 @@ class UploadCompletionMetadataPersistenceTest extends TestCase
         // Verify photo_type was persisted
         $photoTypeField = DB::table('metadata_fields')->where('key', 'photo_type')->first();
         $photoTypeMetadata = $metadataRows->where('metadata_field_id', $photoTypeField->id)->first();
-        
+
         $this->assertNotNull($photoTypeMetadata, 'photo_type metadata must be persisted');
         $this->assertEquals('lifestyle', json_decode($photoTypeMetadata->value_json, true));
         $this->assertEquals('user', $photoTypeMetadata->source);
@@ -370,7 +373,7 @@ class UploadCompletionMetadataPersistenceTest extends TestCase
 
     /**
      * UX-2: Test contributor upload with metadata approval enabled.
-     * 
+     *
      * Edge case: Contributor enters metadata during upload when approval is enabled.
      * Expected: Metadata is accepted and stored, approval determined after upload.
      */
@@ -379,7 +382,7 @@ class UploadCompletionMetadataPersistenceTest extends TestCase
         // Enable metadata approval for tenant and brand
         $this->tenant->settings = ['enable_metadata_approval' => true];
         $this->tenant->save();
-        
+
         $this->brand->settings = ['metadata_approval_enabled' => true];
         $this->brand->save();
 
@@ -389,7 +392,7 @@ class UploadCompletionMetadataPersistenceTest extends TestCase
             'email' => 'contributor@example.com',
             'password' => bcrypt('password'),
         ]);
-        
+
         // Assign contributor role (no metadata.bypass_approval permission)
         $contributor->tenants()->attach($this->tenant->id, ['role' => 'contributor']);
 
@@ -423,14 +426,14 @@ class UploadCompletionMetadataPersistenceTest extends TestCase
         // Verify metadata requires approval (approved_at is null)
         $photoTypeField = DB::table('metadata_fields')->where('key', 'photo_type')->first();
         $photoTypeMetadata = $metadataRows->where('metadata_field_id', $photoTypeField->id)->first();
-        
+
         $this->assertNotNull($photoTypeMetadata, 'photo_type metadata must be persisted');
         $this->assertNull($photoTypeMetadata->approved_at, 'Contributor metadata should require approval when enabled');
     }
 
     /**
      * UX-2: Test batch upload with global metadata.
-     * 
+     *
      * Edge case: Multiple files uploaded with same global metadata.
      * Expected: All assets inherit metadata, all enter approval if required.
      */
@@ -439,7 +442,7 @@ class UploadCompletionMetadataPersistenceTest extends TestCase
         // Enable metadata approval
         $this->tenant->settings = ['enable_metadata_approval' => true];
         $this->tenant->save();
-        
+
         $this->brand->settings = ['metadata_approval_enabled' => true];
         $this->brand->save();
 
@@ -488,7 +491,7 @@ class UploadCompletionMetadataPersistenceTest extends TestCase
         $metadata1 = DB::table('asset_metadata')
             ->where('asset_id', $asset1->id)
             ->count();
-        
+
         $metadata2 = DB::table('asset_metadata')
             ->where('asset_id', $asset2->id)
             ->count();
@@ -500,7 +503,7 @@ class UploadCompletionMetadataPersistenceTest extends TestCase
 
     /**
      * UX-2: Test mixed category uploads.
-     * 
+     *
      * Edge case: Batch upload with different categories and category-specific metadata.
      * Expected: Correct schema applied per asset, no cross-category leakage.
      */
@@ -570,7 +573,7 @@ class UploadCompletionMetadataPersistenceTest extends TestCase
         $asset1Metadata = DB::table('asset_metadata')
             ->where('asset_id', $asset1->id)
             ->get();
-        
+
         $asset2Metadata = DB::table('asset_metadata')
             ->where('asset_id', $asset2->id)
             ->get();

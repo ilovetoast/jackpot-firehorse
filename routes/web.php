@@ -1038,8 +1038,12 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
 
             // Upload routes (tenant-scoped) — blocked when incubation window expired (hard lock)
             Route::middleware([EnsureIncubationWorkspaceNotLocked::class])->group(function () {
+                // Durable batch finalize (Phase 9): literal paths before /uploads/{uploadSession}/… to avoid route shadowing
+                Route::get('/uploads/sessions/active', [\App\Http\Controllers\UploadController::class, 'activeFinalizeSessions'])->name('uploads.sessions.active');
+                Route::get('/uploads/sessions/{batchSessionId}/status', [\App\Http\Controllers\UploadController::class, 'finalizeSessionStatus'])->name('uploads.sessions.status');
                 Route::get('/uploads/storage-check', [\App\Http\Controllers\UploadController::class, 'checkStorageLimits'])->name('uploads.storage-check');
                 Route::post('/uploads/validate', [\App\Http\Controllers\UploadController::class, 'validateUpload'])->name('uploads.validate');
+                Route::post('/uploads/preflight', [\App\Http\Controllers\UploadController::class, 'preflight'])->name('uploads.preflight');
                 Route::post('/uploads/initiate', [\App\Http\Controllers\UploadController::class, 'initiate'])->name('uploads.initiate');
                 Route::post('/uploads/initiate-batch', [\App\Http\Controllers\UploadController::class, 'initiateBatch'])->name('uploads.initiate-batch');
                 Route::get('/uploads/metadata-schema', [\App\Http\Controllers\UploadController::class, 'getMetadataSchema'])->name('uploads.metadata-schema');

@@ -47,7 +47,7 @@ class PublicCollectionController extends Controller
     /**
      * Show share collection page by brand slug + collection slug (legacy URL; still supported).
      */
-    public function show(Request $request, string $brand_slug, string $collection_slug): Response|RedirectResponse
+    public function show(Request $request, string $brand_slug, string $collection_slug): Response|RedirectResponse|JsonResponse
     {
         $collection = $this->resolveCollectionByPublicSlug($brand_slug, $collection_slug);
         if (! $collection) {
@@ -131,13 +131,13 @@ class PublicCollectionController extends Controller
     /**
      * Download a single asset from a share collection. No auth.
      */
-    public function download(string $brand_slug, string $collection_slug, Asset $asset): RedirectResponse
+    public function download(string $brand_slug, string $collection_slug, Asset $asset, Request $request): RedirectResponse
     {
         $collection = $this->resolveCollectionByPublicSlug($brand_slug, $collection_slug);
         if (! $collection) {
             abort(404, 'Collection not found.');
         }
 
-        return $this->performAssetDownload($collection, $asset, $brand_slug);
+        return $this->performAssetDownload($collection, $asset, $brand_slug, $request);
     }
 }

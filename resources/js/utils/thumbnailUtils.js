@@ -6,7 +6,7 @@
  * stays aligned with config/file_types.php.
  */
 
-import { getThumbnailExtensions, getThumbnailMimeTypes } from './damFileTypes'
+import { getThumbnailExtensions, getThumbnailMimeTypes } from './damFileTypes.js'
 import {
     getThumbnailUrl as getThumbnailUrlFromResolve,
     getThumbnailUrlModeOnly,

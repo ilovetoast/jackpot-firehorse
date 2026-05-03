@@ -35,7 +35,7 @@ function ExampleUsage() {
             />
 
             {/* Upload Tray - read-only display */}
-            <UploadTray uploadManager={uploadManager} />
+            <UploadTray uploadManager={uploadManager} batchStatus="idle" />
         </div>
     );
 }
@@ -75,7 +75,7 @@ function ExampleWithPhase2Integration() {
     }, [phase2Manager.uploads]);
 
     return (
-        <UploadTray uploadManager={phase3Manager} />
+        <UploadTray uploadManager={phase3Manager} batchStatus="idle" />
     );
 }
 

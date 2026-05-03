@@ -3,6 +3,8 @@
 namespace App\Jobs;
 
 use App\Enums\AssetStatus;
+use App\Enums\ThumbnailStatus;
+use App\Jobs\Concerns\QueuesOnImagesChannel;
 use App\Models\Asset;
 use App\Models\AssetEvent;
 use App\Models\AssetVersion;
@@ -12,13 +14,11 @@ use App\Services\Assets\AssetProcessingBudgetService;
 use App\Services\Assets\ProcessingBudgetDecision;
 use App\Services\FileInspectionService;
 use App\Services\SystemIncidentService;
-use App\Jobs\Concerns\QueuesOnImagesChannel;
-use App\Jobs\ProcessVideoInsightsBatchJob;
 use App\Support\Logging\AssetPipelineTimingLogger;
 use App\Support\Logging\PipelineLogger;
 use App\Support\Logging\PipelineStepTimer;
+use App\Support\Logging\ThumbnailProfilingRecorder;
 use App\Support\PipelineQueueResolver;
-use App\Enums\ThumbnailStatus;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -114,23 +114,18 @@ class ProcessAssetJob implements ShouldQueue
 
     /**
      * C9.2: Check if AI tagging should be skipped based on upload-time flag.
-     *
-     * @param Asset $asset
-     * @return bool
      */
     protected function shouldSkipAiTagging(Asset $asset): bool
     {
         $metadata = $asset->metadata ?? [];
+
         return (bool) ($metadata['_skip_ai_tagging'] ?? false);
     }
 
     /**
      * Get AI jobs conditionally based on tenant policy.
-     * 
-     * Phase J.2.2: Enforcement guard for AI tagging controls
      *
-     * @param Asset $asset
-     * @return array
+     * Phase J.2.2: Enforcement guard for AI tagging controls
      */
     protected function getConditionalAiJobs(Asset $asset): array
     {
@@ -138,7 +133,7 @@ class ProcessAssetJob implements ShouldQueue
         $metadata = $asset->metadata ?? [];
         $skipAiTagging = $metadata['_skip_ai_tagging'] ?? false;
         $skipAiMetadata = $metadata['_skip_ai_metadata'] ?? false;
-        
+
         if ($skipAiTagging && $skipAiMetadata) {
             // Both skipped - return empty array (no AI jobs)
             Log::info('[ProcessAssetJob] AI jobs skipped due to upload-time flags', [
@@ -148,13 +143,14 @@ class ProcessAssetJob implements ShouldQueue
                 'skip_ai_tagging' => true,
                 'skip_ai_metadata' => true,
             ]);
+
             return [];
         }
-        
+
         $policyService = app(\App\Services\AiTagPolicyService::class);
         $policyCheck = $policyService->shouldProceedWithAiTagging($asset);
-        
-        if (!$policyCheck['should_proceed']) {
+
+        if (! $policyCheck['should_proceed']) {
             Log::info('[ProcessAssetJob] AI tagging skipped due to policy', [
                 'asset_id' => $asset->id,
                 'user_id' => $asset->user_id,
@@ -162,6 +158,7 @@ class ProcessAssetJob implements ShouldQueue
                 'brand_id' => $asset->brand_id,
                 'reason' => $policyCheck['reason'] ?? 'policy_denied',
             ]);
+
             return []; // Skip AI jobs entirely
         }
 
@@ -185,7 +182,7 @@ class ProcessAssetJob implements ShouldQueue
         if (! $skipAiMetadata) {
             $jobs[] = new AiMetadataSuggestionJob($asset->id);
         }
-        
+
         if (empty($jobs)) {
             Log::info('[ProcessAssetJob] AI jobs skipped due to upload-time flags', [
                 'asset_id' => $asset->id,
@@ -195,7 +192,7 @@ class ProcessAssetJob implements ShouldQueue
                 'skip_ai_metadata' => $skipAiMetadata,
             ]);
         }
-        
+
         return $jobs;
     }
 
@@ -228,7 +225,7 @@ class ProcessAssetJob implements ShouldQueue
         $version = DB::transaction(fn () => AssetVersion::where('id', $this->assetId)->lockForUpdate()->first());
         $asset = $version ? $version->asset : Asset::findOrFail($this->assetId);
         // When asset ID was passed (e.g. from ProcessAssetOnUpload), resolve current version for pipeline_status updates
-        if (!$version && $asset->currentVersion) {
+        if (! $version && $asset->currentVersion) {
             $version = DB::transaction(fn () => AssetVersion::where('id', $asset->currentVersion->id)->lockForUpdate()->first());
         }
         $thumbnailJobId = $version ? $version->id : $asset->id;
@@ -337,365 +334,391 @@ class ProcessAssetJob implements ShouldQueue
     protected function runAssetProcessingPipeline(Asset $asset, ?AssetVersion $version, string $thumbnailJobId): void
     {
         try {
-        $this->pipelineStepTimer?->lap('pipeline_entry', $asset, $version);
+            $this->pipelineStepTimer?->lap('pipeline_entry', $asset, $version);
 
-        $budgetService = app(AssetProcessingBudgetService::class);
-        $fileSizeForBudget = max((int) ($version?->file_size ?? 0), (int) ($asset->size_bytes ?? 0));
-        $mimeForBudget = $version?->mime_type ?? $asset->mime_type;
-        if ($version && $fileSizeForBudget <= 0 && $asset->storageBucket) {
-            try {
-                $peek = app(FileInspectionService::class)->peekRemoteMetadata($version->file_path, $asset->storageBucket);
-                $fileSizeForBudget = max($fileSizeForBudget, (int) ($peek['file_size'] ?? 0));
-                if (! $mimeForBudget && ! empty($peek['mime_type'])) {
-                    $mimeForBudget = $peek['mime_type'];
+            $budgetService = app(AssetProcessingBudgetService::class);
+            $fileSizeForBudget = max((int) ($version?->file_size ?? 0), (int) ($asset->size_bytes ?? 0));
+            $mimeForBudget = $version?->mime_type ?? $asset->mime_type;
+            if ($version && $fileSizeForBudget <= 0 && $asset->storageBucket) {
+                try {
+                    $peek = app(FileInspectionService::class)->peekRemoteMetadata($version->file_path, $asset->storageBucket);
+                    $fileSizeForBudget = max($fileSizeForBudget, (int) ($peek['file_size'] ?? 0));
+                    if (! $mimeForBudget && ! empty($peek['mime_type'])) {
+                        $mimeForBudget = $peek['mime_type'];
+                    }
+                } catch (\Throwable $e) {
+                    Log::warning('[ProcessAssetJob] peekRemoteMetadata failed before worker budget', [
+                        'asset_id' => $asset->id,
+                        'version_id' => $version->id,
+                        'error' => $e->getMessage(),
+                    ]);
                 }
-            } catch (\Throwable $e) {
-                Log::warning('[ProcessAssetJob] peekRemoteMetadata failed before worker budget', [
-                    'asset_id' => $asset->id,
-                    'version_id' => $version->id,
-                    'error' => $e->getMessage(),
-                ]);
             }
-        }
 
-        $budgetDecision = $budgetService->classify($asset, $version, [
-            'file_size_bytes' => $fileSizeForBudget,
-            'mime_type' => $mimeForBudget,
-        ]);
+            $budgetDecision = $budgetService->classify($asset, $version, [
+                'file_size_bytes' => $fileSizeForBudget,
+                'mime_type' => $mimeForBudget,
+            ]);
 
-        if (! $budgetDecision->isAllowed()) {
-            $budgetService->logGuardrail($asset, $version, $budgetDecision, 'ProcessAssetJob');
-            $plan = $budgetService->heavyQueueRedispatchPlan($asset, $version, $budgetDecision, $fileSizeForBudget, $mimeForBudget);
-            $currentQueueName = (string) ($this->queue ?? config('queue.images_queue', 'images'));
-            if ($plan['should_dispatch']
-                && ($plan['target_queue'] ?? '') !== ''
-                && (string) $plan['target_queue'] !== $currentQueueName) {
-                Log::info('[ProcessAssetJob] Worker budget defer — re-dispatching to heavy pipeline queue', [
-                    'asset_id' => $asset->id,
-                    'version_id' => $version?->id,
-                    'target_queue' => $plan['target_queue'],
-                    'current_queue' => $currentQueueName,
-                ]);
-                ProcessAssetJob::dispatch($this->assetId)->onQueue((string) $plan['target_queue']);
+            if (! $budgetDecision->isAllowed()) {
+                $budgetService->logGuardrail($asset, $version, $budgetDecision, 'ProcessAssetJob');
+                $plan = $budgetService->heavyQueueRedispatchPlan($asset, $version, $budgetDecision, $fileSizeForBudget, $mimeForBudget);
+                $currentQueueName = (string) ($this->queue ?? config('queue.images_queue', 'images'));
+                if ($plan['should_dispatch']
+                    && ($plan['target_queue'] ?? '') !== ''
+                    && (string) $plan['target_queue'] !== $currentQueueName) {
+                    Log::info('[ProcessAssetJob] Worker budget defer — re-dispatching to heavy pipeline queue', [
+                        'asset_id' => $asset->id,
+                        'version_id' => $version?->id,
+                        'target_queue' => $plan['target_queue'],
+                        'current_queue' => $currentQueueName,
+                    ]);
+                    ProcessAssetJob::dispatch($this->assetId)->onQueue((string) $plan['target_queue']);
+
+                    return;
+                }
+
+                $this->shortCircuitWorkerBudget($asset, $version, $budgetDecision, $fileSizeForBudget, $mimeForBudget);
 
                 return;
             }
 
-            $this->shortCircuitWorkerBudget($asset, $version, $budgetDecision, $fileSizeForBudget, $mimeForBudget);
-
-            return;
-        }
-
-        // Version-aware: Run FileInspectionService for deterministic metadata (no S3 Content-Type, no extension guessing)
-        if ($version) {
-            $bucket = $asset->storageBucket; // null = use default s3 disk (legacy)
-            $inspection = app(FileInspectionService::class)->inspect($version->file_path, $bucket);
-            Log::info('[ProcessAssetJob] Version MIME from FileInspectionService', [
-                'version_id' => $version->id,
-                'mime' => $inspection['mime_type'],
-                'file_size' => $inspection['file_size'],
-                'is_image' => $inspection['is_image'] ?? null,
-            ]);
-            $versionUpdate = [
-                'mime_type' => $inspection['mime_type'],
-                'file_size' => $inspection['file_size'],
-                'width' => $inspection['width'],
-                'height' => $inspection['height'],
-                'pipeline_status' => 'processing',
-            ];
-            if (isset($inspection['storage_class'])) {
-                $versionUpdate['storage_class'] = $inspection['storage_class'];
-            }
-            $version->update($versionUpdate);
-
-            if (($inspection['width'] ?? null) && ($inspection['height'] ?? null)) {
-                $asset->update([
+            // Version-aware: Run FileInspectionService for deterministic metadata (no S3 Content-Type, no extension guessing)
+            if ($version) {
+                $bucket = $asset->storageBucket; // null = use default s3 disk (legacy)
+                $inspection = app(FileInspectionService::class)->inspect($version->file_path, $bucket);
+                Log::info('[ProcessAssetJob] Version MIME from FileInspectionService', [
+                    'version_id' => $version->id,
+                    'mime' => $inspection['mime_type'],
+                    'file_size' => $inspection['file_size'],
+                    'is_image' => $inspection['is_image'] ?? null,
+                ]);
+                $versionUpdate = [
+                    'mime_type' => $inspection['mime_type'],
+                    'file_size' => $inspection['file_size'],
                     'width' => $inspection['width'],
                     'height' => $inspection['height'],
-                ]);
+                    'pipeline_status' => 'processing',
+                ];
+                if (isset($inspection['storage_class'])) {
+                    $versionUpdate['storage_class'] = $inspection['storage_class'];
+                }
+                $version->update($versionUpdate);
+
+                if (($inspection['width'] ?? null) && ($inspection['height'] ?? null)) {
+                    $asset->update([
+                        'width' => $inspection['width'],
+                        'height' => $inspection['height'],
+                    ]);
+                }
+                $this->pipelineStepTimer?->lap('file_inspection', $asset->fresh(), $version->fresh());
             }
-            $this->pipelineStepTimer?->lap('file_inspection', $asset->fresh(), $version->fresh());
-        }
 
-        // ZIP/archive short-circuit: never run full pipeline — complete immediately to avoid indefinite processing
-        // These types cannot generate thumbnails, previews, or image-derived metadata; running the chain wastes
-        // queue capacity and can cause stuck states if any job fails or retries indefinitely.
-        $mimeForCheck = $version ? $version->mime_type : $asset->mime_type;
-        $extForCheck = strtolower(pathinfo($asset->original_filename ?? '', PATHINFO_EXTENSION));
-        $fileTypeService = app(\App\Services\FileTypeService::class);
-        $unsupported = $fileTypeService->getUnsupportedReason($mimeForCheck, $extForCheck);
-        if ($unsupported) {
-            $this->shortCircuitUnsupportedType($asset, $version, $unsupported);
-            return;
-        }
+            // ZIP/archive short-circuit: never run full pipeline — complete immediately to avoid indefinite processing
+            // These types cannot generate thumbnails, previews, or image-derived metadata; running the chain wastes
+            // queue capacity and can cause stuck states if any job fails or retries indefinitely.
+            $mimeForCheck = $version ? $version->mime_type : $asset->mime_type;
+            $extForCheck = strtolower(pathinfo($asset->original_filename ?? '', PATHINFO_EXTENSION));
+            $fileTypeService = app(\App\Services\FileTypeService::class);
+            $unsupported = $fileTypeService->getUnsupportedReason($mimeForCheck, $extForCheck);
+            if ($unsupported) {
+                $this->shortCircuitUnsupportedType($asset, $version, $unsupported);
 
-        // Skip if failed (don't reprocess failed assets automatically)
-        if ($asset->status === AssetStatus::FAILED) {
-            Log::warning('Asset processing skipped - asset is in failed state', [
-                'asset_id' => $asset->id,
-            ]);
-            return;
-        }
-
-        // Only process assets that are VISIBLE (not hidden or failed).
-        // Exception: category-based approval (requires_approval on Category) sets status to HIDDEN
-        // before publish, while analysis_status is still the initial "uploading" value. Those assets
-        // must still run thumbnails + AI so approvers can review; visibility stays HIDDEN until published.
-        if ($asset->status !== AssetStatus::VISIBLE) {
-            $hiddenAwaitingFirstPipeline = $asset->status === AssetStatus::HIDDEN
-                && ($asset->analysis_status ?? 'uploading') === 'uploading';
-            if (! $hiddenAwaitingFirstPipeline) {
-                Log::info('Asset processing skipped - asset is not visible', [
-                    'asset_id' => $asset->id,
-                    'status' => $asset->status->value,
-                ]);
                 return;
             }
-        }
 
-        // Idempotency: Check if processing has already started (via metadata)
-        // Version path: use version metadata. Legacy (Starter): use asset metadata.
-        $existingMetadata = $version ? ($version->metadata ?? []) : ($asset->metadata ?? []);
-        if (isset($existingMetadata['processing_started']) && $existingMetadata['processing_started'] === true) {
-            Log::info('Asset processing skipped - processing already started', [
-                'asset_id' => $asset->id,
-                'version_id' => $version?->id,
-            ]);
-            return;
-        }
+            // Skip if failed (don't reprocess failed assets automatically)
+            if ($asset->status === AssetStatus::FAILED) {
+                Log::warning('Asset processing skipped - asset is in failed state', [
+                    'asset_id' => $asset->id,
+                ]);
 
-        // Guard: only mutate analysis_status when in expected previous state
-        $expectedStatus = 'uploading';
-        $currentStatus = $asset->analysis_status ?? 'uploading';
-        if ($currentStatus !== $expectedStatus) {
-            Log::warning('[ProcessAssetJob] Invalid analysis_status transition aborted', [
-                'asset_id' => $asset->id,
-                'expected' => $expectedStatus,
-                'actual' => $currentStatus,
-            ]);
-            return;
-        }
+                return;
+            }
 
-        $this->pipelineStepTimer?->lap('pre_set_generating_thumbnails', $asset, $version);
+            // Only process assets that are VISIBLE (not hidden or failed).
+            // Exception: category-based approval (requires_approval on Category) sets status to HIDDEN
+            // before publish, while analysis_status is still the initial "uploading" value. Those assets
+            // must still run thumbnails + AI so approvers can review; visibility stays HIDDEN until published.
+            if ($asset->status !== AssetStatus::VISIBLE) {
+                $hiddenAwaitingFirstPipeline = $asset->status === AssetStatus::HIDDEN
+                    && ($asset->analysis_status ?? 'uploading') === 'uploading';
+                if (! $hiddenAwaitingFirstPipeline) {
+                    Log::info('Asset processing skipped - asset is not visible', [
+                        'asset_id' => $asset->id,
+                        'status' => $asset->status->value,
+                    ]);
 
-        // 1. When upload finishes: set analysis_status = 'generating_thumbnails'
-        $asset->update(['analysis_status' => 'generating_thumbnails']);
-        AnalysisStatusLogger::log($asset, 'uploading', 'generating_thumbnails', 'ProcessAssetJob');
+                    return;
+                }
+            }
 
-        // Mark processing as started in metadata (for idempotency)
-        // Version path: persist to version only. Legacy (Starter): persist to asset.
-        $processingStarted = [
-            'processing_started' => true,
-            'processing_started_at' => now()->toIso8601String(),
-        ];
-        if ($version) {
-            $version->update([
-                'metadata' => array_merge($version->metadata ?? [], $processingStarted),
-            ]);
-        } else {
-            $asset->update([
-                'metadata' => array_merge($asset->metadata ?? [], $processingStarted),
-            ]);
-        }
+            // Idempotency: Check if processing has already started (via metadata)
+            // Version path: use version metadata. Legacy (Starter): use asset metadata.
+            $existingMetadata = $version ? ($version->metadata ?? []) : ($asset->metadata ?? []);
+            if (isset($existingMetadata['processing_started']) && $existingMetadata['processing_started'] === true) {
+                Log::info('Asset processing skipped - processing already started', [
+                    'asset_id' => $asset->id,
+                    'version_id' => $version?->id,
+                ]);
 
-        $vFresh = $version?->fresh();
-        $aFresh = $asset->fresh();
-        $this->pipelineStepTimer?->lap('processing_marked_started', $aFresh, $vFresh);
+                return;
+            }
 
-        AssetPipelineTimingLogger::record(
-            AssetPipelineTimingLogger::EVENT_ORIGINAL_STORED,
-            $aFresh,
-            $vFresh,
-        );
+            // Guard: only mutate analysis_status when in expected previous state
+            $expectedStatus = 'uploading';
+            $currentStatus = $asset->analysis_status ?? 'uploading';
+            if ($currentStatus !== $expectedStatus) {
+                Log::warning('[ProcessAssetJob] Invalid analysis_status transition aborted', [
+                    'asset_id' => $asset->id,
+                    'expected' => $expectedStatus,
+                    'actual' => $currentStatus,
+                ]);
 
-        // Emit processing started event
-        AssetEvent::create([
-            'tenant_id' => $asset->tenant_id,
-            'brand_id' => $asset->brand_id,
-            'asset_id' => $asset->id,
-            'user_id' => null, // System event
-            'event_type' => 'asset.processing.started',
-            'metadata' => [
-                'job' => 'ProcessAssetJob',
-            ],
-            'created_at' => now(),
-        ]);
+                return;
+            }
 
-        Log::info('Asset processing started', [
-            'asset_id' => $asset->id,
-            'original_filename' => $asset->original_filename,
-        ]);
+            $this->pipelineStepTimer?->lap('pre_set_generating_thumbnails', $asset, $version);
 
-        // Dispatch processing chain using Bus::chain()
-        //
-        // Time-to-first-thumbnail fast path:
-        //   GenerateThumbnailsJob runs FIRST so the asset grid can render the
-        //   original-style thumbnail as soon as possible. Width/height/MIME are
-        //   already populated on asset+version by FileInspectionService above;
-        //   ExtractMetadataJob is not a prerequisite for image thumbnails, and
-        //   GenerateThumbnailsJob handles its own EXIF orientation/dimension
-        //   discovery for PDF/SVG/PSD/video sources.
-        //
-        // Main chain (images / images-heavy / images-psd queue):
-        //   1.  GenerateThumbnailsJob          - standard/original thumbnails (fast path)
-        //   2.  GeneratePreviewJob             - lightweight preview marker (after thumbs)
-        //   3.  GenerateVideoPreviewJob        - video hover previews (video only)
-        //   4.  ExtractMetadataJob             - canonical / video basics
-        //   5.  ExtractEmbeddedMetadataJob     - EXIF/IPTC/PDF tags
-        //   6.  EmbeddedUsageRightsSuggestionJob - optional usage_rights from embedded copyright
-        //   7.  ComputedMetadataJob            - Phase 5 computed metadata
-        //   8.  PopulateAutomaticMetadataJob   - Phase B6/B8 candidates
-        //   9.  ResolveMetadataCandidatesJob   - Phase B8 resolve candidates → asset_metadata
-        //   10. AITaggingJob                   - pipeline completion flag for tagging step
-        //   11. FinalizeAssetJob               - mark asset as completed
-        //   12. PromoteAssetJob                - move temp/ → assets/
-        //
-        // AI follow-up chain (ai / ai-low queue), dispatched in parallel after
-        // the main chain. AI vision/suggestion jobs no longer compete with the
-        // images queue worker that owns thumbnail generation:
-        //   - AiMetadataGenerationJob          - vision call: tag + field candidates
-        //   - AiTagAutoApplyJob                - applies high-confidence tags
-        //   - AiMetadataSuggestionJob          - structured suggestions from candidates
-        // Each AI job already polls/guards on thumbnail completion before doing
-        // any vision work, so running them on the ai queue in parallel with the
-        // tail of the main chain is safe.
+            // 1. When upload finishes: set analysis_status = 'generating_thumbnails'
+            $asset->update(['analysis_status' => 'generating_thumbnails']);
+            AnalysisStatusLogger::log($asset, 'uploading', 'generating_thumbnails', 'ProcessAssetJob');
 
-        // Check if asset is a video to conditionally add video preview job
-        // Version path: use version->mime_type only (from FileInspectionService). Legacy: asset->mime_type.
-        $fileTypeService = app(\App\Services\FileTypeService::class);
-        $mimeForType = $version ? $version->mime_type : $asset->mime_type;
-        $extForType = pathinfo($asset->original_filename ?? '', PATHINFO_EXTENSION);
-        $fileType = $fileTypeService->detectFileType($mimeForType, $extForType);
-        $isVideo = $fileType === 'video';
+            // Mark processing as started in metadata (for idempotency)
+            // Version path: persist to version only. Legacy (Starter): persist to asset.
+            $processingStarted = [
+                'processing_started' => true,
+                'processing_started_at' => now()->toIso8601String(),
+            ];
+            if ($version) {
+                $version->update([
+                    'metadata' => array_merge($version->metadata ?? [], $processingStarted),
+                ]);
+            } else {
+                $asset->update([
+                    'metadata' => array_merge($asset->metadata ?? [], $processingStarted),
+                ]);
+            }
 
-        PipelineLogger::warning('PIPELINE: Dispatching GenerateThumbnailsJob in chain', [
-            'asset_id' => $asset->id,
-        ]);
+            $vFresh = $version?->fresh();
+            $aFresh = $asset->fresh();
+            $this->pipelineStepTimer?->lap('processing_marked_started', $aFresh, $vFresh);
 
-        PipelineLogger::info('PROCESS ASSET: ABOUT TO DISPATCH CHILD JOBS', [
-            'asset_id' => $asset->id,
-        ]);
-
-        // Standard/original thumbnails first — fast path for time-to-first-thumbnail.
-        $chainJobs = [
-            new GenerateThumbnailsJob($thumbnailJobId), // Version ID when version-aware
-            new GeneratePreviewJob($asset->id),
-        ];
-
-        // Add video preview generation for video assets (after thumbnails)
-        if ($isVideo) {
-            $chainJobs[] = new GenerateVideoPreviewJob($asset->id);
-        }
-
-        $chainJobs = array_merge($chainJobs, [
-            new ExtractMetadataJob($asset->id, $version?->id), // Version ID for version-aware path
-            new ExtractEmbeddedMetadataJob($asset->id, $version?->id),
-            new EmbeddedUsageRightsSuggestionJob($asset->id),
-            new ComputedMetadataJob($asset->id), // Phase 5: Computed metadata
-            new PopulateAutomaticMetadataJob($asset->id), // Phase B6/B8: Create metadata candidates
-            new ResolveMetadataCandidatesJob($asset->id), // Phase B8: Resolve candidates to asset_metadata
-            // C9.2: Conditionally add AITaggingJob based on upload-time skip flag
-            ...($this->shouldSkipAiTagging($asset) ? [] : [new AITaggingJob($asset->id)]),
-            new FinalizeAssetJob($asset->id),
-            new PromoteAssetJob($asset->id),
-        ]);
-
-        $fileSizeBytes = 0;
-        if ($version) {
-            $fileSizeBytes = (int) ($version->file_size ?? 0);
-        } elseif ($asset->size_bytes) {
-            $fileSizeBytes = (int) $asset->size_bytes;
-        }
-        $pipelineQueue = PipelineQueueResolver::forPipeline(
-            $fileSizeBytes,
-            $mimeForType,
-            $asset->original_filename
-        );
-
-        Bus::chain($chainJobs)
-            ->onQueue($pipelineQueue)
-            ->dispatch();
-
-        AssetPipelineTimingLogger::record(
-            AssetPipelineTimingLogger::EVENT_THUMBNAIL_DISPATCHED,
-            $asset->fresh(),
-            $version?->fresh(),
-            [
-                'queue' => $pipelineQueue,
-                'chain_job_count' => count($chainJobs),
-                'is_video' => $isVideo,
-            ]
-        );
-
-        // AI vision/suggestion jobs run in parallel on the dedicated ai queue so
-        // they do not compete with thumbnail/preview workers on the images queue.
-        // Phase J.2.2 + C9.2: getConditionalAiJobs() already enforces tenant
-        // policy + upload-time _skip_ai_* flags.
-        $aiJobs = $this->getConditionalAiJobs($asset);
-        if (! empty($aiJobs)) {
-            $aiQueue = (string) config('queue.ai_queue', 'ai');
-            // Belt-and-braces: chain->onQueue() sets the chain queue, but the AI
-            // job constructors call configureImagesQueue() via QueuesOnImagesChannel,
-            // so we explicitly override each instance to the ai queue too.
-            $aiJobsRouted = array_map(
-                static fn ($job) => method_exists($job, 'onQueue') ? $job->onQueue($aiQueue) : $job,
-                $aiJobs
+            AssetPipelineTimingLogger::record(
+                AssetPipelineTimingLogger::EVENT_ORIGINAL_STORED,
+                $aFresh,
+                $vFresh,
             );
 
-            Bus::chain($aiJobsRouted)
-                ->onQueue($aiQueue)
+            // Emit processing started event
+            AssetEvent::create([
+                'tenant_id' => $asset->tenant_id,
+                'brand_id' => $asset->brand_id,
+                'asset_id' => $asset->id,
+                'user_id' => null, // System event
+                'event_type' => 'asset.processing.started',
+                'metadata' => [
+                    'job' => 'ProcessAssetJob',
+                ],
+                'created_at' => now(),
+            ]);
+
+            Log::info('Asset processing started', [
+                'asset_id' => $asset->id,
+                'original_filename' => $asset->original_filename,
+            ]);
+
+            // Dispatch processing chain using Bus::chain()
+            //
+            // Time-to-first-thumbnail fast path:
+            //   GenerateThumbnailsJob runs FIRST so the asset grid can render the
+            //   original-style thumbnail as soon as possible. Width/height/MIME are
+            //   already populated on asset+version by FileInspectionService above;
+            //   ExtractMetadataJob is not a prerequisite for image thumbnails, and
+            //   GenerateThumbnailsJob handles its own EXIF orientation/dimension
+            //   discovery for PDF/SVG/PSD/video sources.
+            //
+            // Main chain (images / images-heavy / images-psd queue):
+            //   1.  GenerateThumbnailsJob          - standard/original thumbnails (fast path)
+            //   2.  GeneratePreviewJob             - lightweight preview marker (after thumbs)
+            //   3.  GenerateVideoPreviewJob        - video hover previews (video only)
+            //   4.  ExtractMetadataJob             - canonical / video basics
+            //   5.  ExtractEmbeddedMetadataJob     - EXIF/IPTC/PDF tags
+            //   6.  EmbeddedUsageRightsSuggestionJob - optional usage_rights from embedded copyright
+            //   7.  ComputedMetadataJob            - Phase 5 computed metadata
+            //   8.  PopulateAutomaticMetadataJob   - Phase B6/B8 candidates
+            //   9.  ResolveMetadataCandidatesJob   - Phase B8 resolve candidates → asset_metadata
+            //   10. AITaggingJob                   - pipeline completion flag for tagging step
+            //   11. FinalizeAssetJob               - mark asset as completed
+            //   12. PromoteAssetJob                - move temp/ → assets/
+            //
+            // AI follow-up chain (ai / ai-low queue), dispatched in parallel after
+            // the main chain. AI vision/suggestion jobs no longer compete with the
+            // images queue worker that owns thumbnail generation:
+            //   - AiMetadataGenerationJob          - vision call: tag + field candidates
+            //   - AiTagAutoApplyJob                - applies high-confidence tags
+            //   - AiMetadataSuggestionJob          - structured suggestions from candidates
+            // Each AI job already polls/guards on thumbnail completion before doing
+            // any vision work, so running them on the ai queue in parallel with the
+            // tail of the main chain is safe.
+
+            // Check if asset is a video to conditionally add video preview job
+            // Version path: use version->mime_type only (from FileInspectionService). Legacy: asset->mime_type.
+            $fileTypeService = app(\App\Services\FileTypeService::class);
+            $mimeForType = $version ? $version->mime_type : $asset->mime_type;
+            $extForType = pathinfo($asset->original_filename ?? '', PATHINFO_EXTENSION);
+            $fileType = $fileTypeService->detectFileType($mimeForType, $extForType);
+            $isVideo = $fileType === 'video';
+
+            PipelineLogger::warning('PIPELINE: Dispatching GenerateThumbnailsJob in chain', [
+                'asset_id' => $asset->id,
+            ]);
+
+            PipelineLogger::info('PROCESS ASSET: ABOUT TO DISPATCH CHILD JOBS', [
+                'asset_id' => $asset->id,
+            ]);
+
+            // Standard/original thumbnails first — fast path for time-to-first-thumbnail.
+            $chainJobs = [
+                new GenerateThumbnailsJob($thumbnailJobId), // Version ID when version-aware
+                new GeneratePreviewJob($asset->id),
+            ];
+
+            // Add video preview generation for video assets (after thumbnails)
+            if ($isVideo) {
+                $chainJobs[] = new GenerateVideoPreviewJob($asset->id);
+            }
+
+            $chainJobs = array_merge($chainJobs, [
+                new ExtractMetadataJob($asset->id, $version?->id), // Version ID for version-aware path
+                new ExtractEmbeddedMetadataJob($asset->id, $version?->id),
+                new EmbeddedUsageRightsSuggestionJob($asset->id),
+                new ComputedMetadataJob($asset->id), // Phase 5: Computed metadata
+                new PopulateAutomaticMetadataJob($asset->id), // Phase B6/B8: Create metadata candidates
+                new ResolveMetadataCandidatesJob($asset->id), // Phase B8: Resolve candidates to asset_metadata
+                // C9.2: Conditionally add AITaggingJob based on upload-time skip flag
+                ...($this->shouldSkipAiTagging($asset) ? [] : [new AITaggingJob($asset->id)]),
+                new FinalizeAssetJob($asset->id),
+                new PromoteAssetJob($asset->id),
+            ]);
+
+            $fileSizeBytes = 0;
+            if ($version) {
+                $fileSizeBytes = (int) ($version->file_size ?? 0);
+            } elseif ($asset->size_bytes) {
+                $fileSizeBytes = (int) $asset->size_bytes;
+            }
+            $pipelineQueue = PipelineQueueResolver::forPipeline(
+                $fileSizeBytes,
+                $mimeForType,
+                $asset->original_filename
+            );
+
+            Bus::chain($chainJobs)
+                ->onQueue($pipelineQueue)
                 ->dispatch();
 
             AssetPipelineTimingLogger::record(
-                AssetPipelineTimingLogger::EVENT_AI_CHAIN_DISPATCHED,
+                AssetPipelineTimingLogger::EVENT_THUMBNAIL_DISPATCHED,
                 $asset->fresh(),
                 $version?->fresh(),
                 [
-                    'queue' => $aiQueue,
-                    'ai_job_count' => count($aiJobsRouted),
+                    'queue' => $pipelineQueue,
+                    'chain_job_count' => count($chainJobs),
+                    'is_video' => $isVideo,
                 ]
             );
-        }
 
-        $vFresh2 = $version?->fresh();
-        $aFresh2 = $asset->fresh();
-        $this->pipelineStepTimer?->lap('chain_dispatched', $aFresh2, $vFresh2, [
-            'chain_job_count' => count($chainJobs),
-            'pipeline_queue' => $pipelineQueue,
-            'ai_job_count' => count($aiJobs),
-        ]);
-
-        if ($isVideo && config('assets.video_ai.enabled', true) && config('assets.video_ai.auto_run_after_upload', false)) {
-            $asset->refresh();
-            $policyCheck = app(\App\Services\AiTagPolicyService::class)->shouldProceedWithAiTagging($asset);
-            $assetMeta = $asset->metadata ?? [];
-            $skipVideo = ! empty($assetMeta['_skip_ai_video_insights']);
-            if ($policyCheck['should_proceed'] && ! $skipVideo) {
-                $mergedMeta = array_merge($assetMeta, ['ai_video_status' => 'queued']);
-                $asset->update(['metadata' => $mergedMeta]);
-                ProcessVideoInsightsBatchJob::dispatch([(string) $asset->id]);
+            if (config('assets.quick_grid_thumbnails.enabled', false)) {
+                QuickGridThumbnailJob::dispatch(
+                    (string) $asset->id,
+                    $version?->id !== null ? (string) $version->id : null
+                );
             }
-        }
 
-        // Seed page 1 render for PDFs on dedicated queue.
-        if ($fileType === 'pdf') {
-            PdfPageRenderJob::dispatch($asset->id, 1)->onQueue($pipelineQueue);
-        }
+            // AI vision/suggestion jobs run in parallel on the dedicated ai queue so
+            // they do not compete with thumbnail/preview workers on the images queue.
+            // Phase J.2.2 + C9.2: getConditionalAiJobs() already enforces tenant
+            // policy + upload-time _skip_ai_* flags.
+            $aiJobs = $this->getConditionalAiJobs($asset);
+            if (! empty($aiJobs)) {
+                $aiQueue = (string) config('queue.ai_queue', 'ai');
+                // Belt-and-braces: chain->onQueue() sets the chain queue, but the AI
+                // job constructors call configureImagesQueue() via QueuesOnImagesChannel,
+                // so we explicitly override each instance to the ai queue too.
+                $aiJobsRouted = array_map(
+                    static fn ($job) => method_exists($job, 'onQueue') ? $job->onQueue($aiQueue) : $job,
+                    $aiJobs
+                );
 
-        PipelineLogger::info('[ProcessAssetJob] Job completed - processing chain dispatched', [
-            'asset_id' => $asset->id,
-            'job_id' => $this->job?->getJobId() ?? 'unknown',
-            'attempt' => $this->attempts(),
-            'chain_job_count' => count($chainJobs),
-            'chain_jobs' => array_map(fn($job) => get_class($job), $chainJobs),
-            'pipeline_queue' => $pipelineQueue,
-        ]);
+                Bus::chain($aiJobsRouted)
+                    ->onQueue($aiQueue)
+                    ->dispatch();
 
-        // pipeline_status = 'complete' is set by chain jobs (e.g. GenerateThumbnailsJob) when they finish
+                AssetPipelineTimingLogger::record(
+                    AssetPipelineTimingLogger::EVENT_AI_CHAIN_DISPATCHED,
+                    $asset->fresh(),
+                    $version?->fresh(),
+                    [
+                        'queue' => $aiQueue,
+                        'ai_job_count' => count($aiJobsRouted),
+                    ]
+                );
+            }
 
-        PipelineLogger::info('PROCESS ASSET: HANDLE END', [
-            'asset_id' => $asset->id,
-        ]);
+            $vFresh2 = $version?->fresh();
+            $aFresh2 = $asset->fresh();
+            $this->pipelineStepTimer?->lap('chain_dispatched', $aFresh2, $vFresh2, [
+                'chain_job_count' => count($chainJobs),
+                'pipeline_queue' => $pipelineQueue,
+                'ai_job_count' => count($aiJobs),
+            ]);
+
+            ThumbnailProfilingRecorder::logPipelineJob(
+                static::class,
+                (string) $asset->id,
+                $version?->id,
+                'main_chain_dispatched',
+                $this->job,
+                [
+                    'pipeline_queue' => $pipelineQueue,
+                    'chain_job_count' => count($chainJobs),
+                    'first_chain_job' => GenerateThumbnailsJob::class,
+                    'ai_chain_dispatched' => ! empty($aiJobs),
+                ]
+            );
+
+            if ($isVideo && config('assets.video_ai.enabled', true) && config('assets.video_ai.auto_run_after_upload', false)) {
+                $asset->refresh();
+                $policyCheck = app(\App\Services\AiTagPolicyService::class)->shouldProceedWithAiTagging($asset);
+                $assetMeta = $asset->metadata ?? [];
+                $skipVideo = ! empty($assetMeta['_skip_ai_video_insights']);
+                if ($policyCheck['should_proceed'] && ! $skipVideo) {
+                    $mergedMeta = array_merge($assetMeta, ['ai_video_status' => 'queued']);
+                    $asset->update(['metadata' => $mergedMeta]);
+                    ProcessVideoInsightsBatchJob::dispatch([(string) $asset->id]);
+                }
+            }
+
+            // Seed page 1 render for PDFs on dedicated queue.
+            if ($fileType === 'pdf') {
+                PdfPageRenderJob::dispatch($asset->id, 1)->onQueue($pipelineQueue);
+            }
+
+            PipelineLogger::info('[ProcessAssetJob] Job completed - processing chain dispatched', [
+                'asset_id' => $asset->id,
+                'job_id' => $this->job?->getJobId() ?? 'unknown',
+                'attempt' => $this->attempts(),
+                'chain_job_count' => count($chainJobs),
+                'chain_jobs' => array_map(fn ($job) => get_class($job), $chainJobs),
+                'pipeline_queue' => $pipelineQueue,
+            ]);
+
+            // pipeline_status = 'complete' is set by chain jobs (e.g. GenerateThumbnailsJob) when they finish
+
+            PipelineLogger::info('PROCESS ASSET: HANDLE END', [
+                'asset_id' => $asset->id,
+            ]);
         } catch (\Throwable $e) {
             PipelineLogger::error('PROCESS ASSET: EXCEPTION', [
                 'asset_id' => $this->assetId,

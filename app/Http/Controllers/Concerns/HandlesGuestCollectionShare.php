@@ -14,10 +14,10 @@ use App\Services\DownloadNameResolver;
 use App\Services\PlanService;
 use App\Services\PublicCollectionPageBrandingResolver;
 use App\Services\TenantBucketService;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
-use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Inertia\Inertia;
@@ -38,8 +38,8 @@ use Inertia\Response;
  */
 trait HandlesGuestCollectionShare
 {
-    /** Max assets returned on one unlocked guest share page (filters apply before cap). */
-    protected static int $guestPublicShareAssetLimit = 500;
+    /** Page size for guest share infinite scroll (matches {@see AssetController} grid per page). */
+    protected static int $guestPublicSharePerPage = 36;
 
     /**
      * Guest share list: search, MIME type group, sort (newest | name | type). Always scoped to {@see CollectionAssetQueryService::queryPublic}.
@@ -110,7 +110,7 @@ trait HandlesGuestCollectionShare
     /**
      * @param  array{kind: 'slug'|'token', brand_slug?: string, collection_slug?: string, token?: string}  $routeContext
      */
-    protected function respondGuestShareCollectionPage(Collection $collection, Request $request, array $routeContext): Response|RedirectResponse
+    protected function respondGuestShareCollectionPage(Collection $collection, Request $request, array $routeContext): Response|RedirectResponse|JsonResponse
     {
         $tenant = $collection->tenant;
         if (! $tenant || ! $this->shareGuestAccess->tenantAllowsShareLinks($tenant)) {
@@ -139,11 +139,13 @@ trait HandlesGuestCollectionShare
                 ], false);
 
             $brandingOptions = $this->brandingResolver->resolve($brand, $collection);
+            $publicShareTheme = $this->brandingResolver->resolveShareTheme($brand, $collection, $routeContext);
 
             return Inertia::render('Public/ShareCollectionGate', [
                 'collection_title' => $collection->name,
                 'brand_name' => $brand->name,
                 'branding_options' => $brandingOptions,
+                'public_share_theme' => $publicShareTheme,
                 'unlock_url' => $unlockUrl,
                 'cdn_domain' => config('cloudfront.domain'),
             ]);
@@ -155,7 +157,7 @@ trait HandlesGuestCollectionShare
     /**
      * @param  array{kind: 'slug'|'token', brand_slug?: string, collection_slug?: string, token?: string}  $routeContext
      */
-    protected function renderUnlockedGuestShareInertia(Collection $collection, array $routeContext, ?Request $request = null): Response
+    protected function renderUnlockedGuestShareInertia(Collection $collection, array $routeContext, ?Request $request = null): Response|JsonResponse
     {
         $tenant = $collection->tenant;
         $brand = $collection->brand;
@@ -174,30 +176,53 @@ trait HandlesGuestCollectionShare
         $filteredQuery = $this->guestPublicFilteredAssetQuery($collection, $request);
         $guestFilteredTotal = (clone $filteredQuery)->count();
 
-        $limit = self::$guestPublicShareAssetLimit;
-        $assetModels = (clone $filteredQuery)->limit($limit)->get();
+        $perPage = self::$guestPublicSharePerPage;
+        $paginator = (clone $filteredQuery)
+            ->with(['storageBucket', 'currentVersion'])
+            ->paginate($perPage);
+        $assetModels = $paginator->getCollection();
 
         $shareToken = $collection->public_share_token;
+        /** URL token from route (always present for token shares); avoids falling back to slug download when DB token column is unexpectedly null. */
+        $effectiveShareToken = $routeContext['kind'] === 'token'
+            ? (string) ($routeContext['token'] ?? $shareToken ?? '')
+            : (string) ($shareToken ?? '');
 
         $publicCollectionDownloadsEnabled = $this->shareGuestAccess->tenantAllowsPublicCollectionDownloads($tenant)
             && $collection->public_downloads_enabled;
 
         $assets = $assetModels
-            ->map(fn (Asset $asset) => $this->mapAssetToPublicGridArray($asset, $collection, $shareToken, $publicCollectionDownloadsEnabled))
+            ->map(fn (Asset $asset) => $this->mapAssetToPublicGridArray($asset, $collection, $effectiveShareToken, $publicCollectionDownloadsEnabled))
             ->values()
             ->all();
 
-        $brandingOptions = $this->brandingResolver->resolve($brand, $collection);
+        $nextPageUrl = null;
+        if ($paginator->hasMorePages()) {
+            $queryParams = array_merge($request->query(), ['page' => $paginator->currentPage() + 1]);
+            unset($queryParams['load_more']);
+            $nextPageUrl = $request->url().'?'.http_build_query($queryParams);
+        }
 
-        $downloadPostPath = $routeContext['kind'] === 'token' && $shareToken
-            ? route('share.collections.download', ['token' => $shareToken], false)
+        $isLoadMore = $request->boolean('load_more');
+        if ($isLoadMore) {
+            return response()->json([
+                'data' => $assets,
+                'next_page_url' => $nextPageUrl,
+            ]);
+        }
+
+        $brandingOptions = $this->brandingResolver->resolve($brand, $collection);
+        $publicShareTheme = $this->brandingResolver->resolveShareTheme($brand, $collection, $routeContext);
+
+        $downloadPostPath = $routeContext['kind'] === 'token'
+            ? route('share.collections.download', ['token' => $routeContext['token']], false)
             : route('public.collections.download', [
                 'brand_slug' => $brand->slug,
                 'collection_slug' => $collection->slug,
             ], false);
 
-        $guestCollectionPath = $routeContext['kind'] === 'token' && $shareToken
-            ? '/share/collections/'.$shareToken
+        $guestCollectionPath = $routeContext['kind'] === 'token'
+            ? '/share/collections/'.$routeContext['token']
             : '/b/'.$brand->slug.'/collections/'.$collection->slug;
 
         $typeRaw = strtolower((string) $request->query('type', 'all'));
@@ -221,8 +246,10 @@ trait HandlesGuestCollectionShare
                 'public_share_token' => $shareToken,
             ],
             'assets' => $assets,
+            'next_page_url' => $nextPageUrl,
             'public_collection_downloads_enabled' => $publicCollectionDownloadsEnabled,
             'branding_options' => $brandingOptions,
+            'public_share_theme' => $publicShareTheme,
             'cdn_domain' => config('cloudfront.domain'),
             'share_download_post_path' => $downloadPostPath,
             'guest_collection_path' => $guestCollectionPath,
@@ -234,8 +261,6 @@ trait HandlesGuestCollectionShare
             ],
             'guest_collection_asset_total' => $collectionAssetTotal,
             'guest_filtered_total' => $guestFilteredTotal,
-            'guest_showing_count' => count($assets),
-            'guest_asset_limit' => $limit,
         ]);
     }
 
@@ -259,19 +284,45 @@ trait HandlesGuestCollectionShare
         return $successRedirect;
     }
 
-    protected function assertGuestShareUnlockedForDownload(Collection $collection): void
+    protected function denyGuestShareDownload(Request $request, int $status, string $message): never
     {
-        if (! $this->shareGuestAccess->guestMayUseDownloads($collection)) {
-            abort(404, 'Collection not found.');
+        if ($request->expectsJson()) {
+            throw new \Illuminate\Http\Exceptions\HttpResponseException(
+                response()->json(['message' => $message], $status)
+            );
         }
-        if (! $this->shareGuestAccess->tenantAllowsPublicCollectionDownloads($collection->tenant)) {
-            abort(404, 'Collection not found.');
+
+        abort($status, $message);
+    }
+
+    protected function assertGuestShareUnlockedForDownload(Collection $collection, Request $request): void
+    {
+        $tenant = $collection->tenant;
+
+        if (! $tenant || ! $this->shareGuestAccess->tenantAllowsShareLinks($tenant)) {
+            $this->denyGuestShareDownload($request, 404, 'This shared collection is no longer available.');
+        }
+
+        if (! $collection->is_public || ! $collection->hasPublicPassword()) {
+            $this->denyGuestShareDownload($request, 404, 'This shared collection is no longer available.');
+        }
+
+        if (! $collection->isUnlockedInShareSession()) {
+            $this->denyGuestShareDownload($request, 403, 'Unlock this collection again to download files.');
+        }
+
+        if (! ($collection->public_downloads_enabled ?? true)) {
+            $this->denyGuestShareDownload($request, 403, 'Downloads are disabled for this collection.');
+        }
+
+        if (! $this->shareGuestAccess->tenantAllowsPublicCollectionDownloads($tenant)) {
+            $this->denyGuestShareDownload($request, 403, 'Downloads are not enabled for this workspace.');
         }
     }
 
     protected function performCreateDownload(Collection $collection, Request $request): RedirectResponse|JsonResponse
     {
-        $this->assertGuestShareUnlockedForDownload($collection);
+        $this->assertGuestShareUnlockedForDownload($collection, $request);
 
         $tenant = $collection->tenant;
         $brand = $collection->brand;
@@ -294,10 +345,10 @@ trait HandlesGuestCollectionShare
         $validatedIds = $this->validatedSubsetAssetIds($request, $visibleIds);
         if ($validatedIds === null) {
             if ($request->expectsJson()) {
-                return response()->json(['message' => 'Invalid selection.'], 422);
+                return response()->json(['message' => 'Some selected files are no longer available.'], 422);
             }
 
-            return redirect()->back()->with('error', 'Invalid selection.');
+            return redirect()->back()->with('error', 'Some selected files are no longer available.');
         }
 
         $subsetRequested = $request->has('asset_ids');
@@ -386,7 +437,7 @@ trait HandlesGuestCollectionShare
 
     /**
      * @param  list<string>  $visibleIds
-     * @return list<string>|null  null = invalid request
+     * @return list<string>|null null = invalid request
      */
     protected function validatedSubsetAssetIds(Request $request, array $visibleIds): ?array
     {
@@ -415,7 +466,7 @@ trait HandlesGuestCollectionShare
 
     protected function performStreamZip(Collection $collection, Request $request): \Symfony\Component\HttpFoundation\BinaryFileResponse|RedirectResponse
     {
-        $this->assertGuestShareUnlockedForDownload($collection);
+        $this->assertGuestShareUnlockedForDownload($collection, $request);
 
         $tenant = $collection->tenant;
         if (! $tenant) {
@@ -455,9 +506,9 @@ trait HandlesGuestCollectionShare
         ])->deleteFileAfterSend(true);
     }
 
-    protected function performAssetDownload(Collection $collection, Asset $asset, string $brand_slug_for_log): RedirectResponse
+    protected function performAssetDownload(Collection $collection, Asset $asset, string $brand_slug_for_log, Request $request): RedirectResponse
     {
-        $this->assertGuestShareUnlockedForDownload($collection);
+        $this->assertGuestShareUnlockedForDownload($collection, $request);
 
         $tenant = $collection->tenant;
         if (! $tenant || ! $this->shareGuestAccess->tenantAllowsShareLinks($tenant)) {
@@ -495,7 +546,7 @@ trait HandlesGuestCollectionShare
             abort(403, 'Asset not publicly accessible.');
         }
 
-        $downloadUrl = $this->assetUrlService->getPublicDownloadUrl($asset);
+        $downloadUrl = $this->assetUrlService->getPublicDownloadUrlAsAttachment($asset);
         if (! $downloadUrl) {
             abort(404, 'File not available.');
         }

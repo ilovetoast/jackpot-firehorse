@@ -26,6 +26,8 @@ import {
     XMarkIcon,
     ArrowPathIcon,
     ChevronRightIcon,
+    ChevronDownIcon,
+    ChevronUpIcon,
     TagIcon,
     SparklesIcon,
     ArrowUpTrayIcon,
@@ -48,13 +50,75 @@ import StorageUpgradeModal from './StorageUpgradeModal'
 import CollectionSelector from './Collections/CollectionSelector' // C9.1
 import { DELIVERABLES_PAGE_LABEL, DELIVERABLES_PAGE_LABEL_SINGULAR } from '../utils/uiLabels'
 import { supportsThumbnail } from '../utils/thumbnailUtils'
+import {
+    registerUploadPreview,
+    revokeClientUploadPreview,
+    attachUploadPreviewsFromFinalizeResults,
+    markPendingFinalize,
+    removePendingFinalizeClient,
+    clearAllPendingFinalize,
+} from '../utils/uploadPreviewRegistry'
+import { shouldRegisterGridBlobPreview } from '../utils/browserGridBlobPreview'
 import { getUploadAcceptAttribute } from '../utils/damFileTypes'
 import BatchNamingBar from './Upload/BatchNamingBar'
 import { FloatingUploadProgressTray } from './FloatingUploadProgressTray'
+import { formatBytesHuman } from '../utils/formatBytesHuman'
+import { computeUploadCounts } from '../utils/uploadTrayCounts'
+import { computeOverallBatchUploadPercent } from '../utils/uploadQueueProgress'
+import { uploadModalScrollbarCssVars } from '../utils/colorUtils'
 
 /** Tailwind class merge (additive; avoids new dependencies) */
 function cn(...parts) {
     return parts.filter(Boolean).join(' ')
+}
+
+/** Laravel returns JSON errors (422/401) instead of an HTML redirect page when these headers are set. */
+function uploadJsonFetchHeaders(csrfToken) {
+    const t = csrfToken ?? document.querySelector('meta[name="csrf-token"]')?.content ?? ''
+    return {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        'X-Requested-With': 'XMLHttpRequest',
+        'X-CSRF-TOKEN': t,
+    }
+}
+
+/** Flatten nested warning rows from POST /app/uploads/preflight */
+function flattenPreflightWarnings(warnings) {
+    if (!Array.isArray(warnings)) {
+        return []
+    }
+    const out = []
+    for (const row of warnings) {
+        for (const w of row.warnings || []) {
+            if (w && typeof w === 'object') {
+                out.push(w)
+            }
+        }
+    }
+    return out
+}
+
+/** Thumbnail pipeline poll: terminal states from GET /app/assets/thumbnail-status/batch */
+function isTerminalPipelineThumb(status) {
+    return status === 'completed' || status === 'failed'
+}
+
+async function fetchThumbnailStatusBatch(assetIds) {
+    const merged = []
+    for (let i = 0; i < assetIds.length; i += 50) {
+        const chunk = assetIds.slice(i, i + 50)
+        const params = new URLSearchParams()
+        chunk.forEach((id) => params.append('asset_ids[]', String(id)))
+        const res = await fetch(`/app/assets/thumbnail-status/batch?${params.toString()}`, {
+            credentials: 'same-origin',
+            headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+        })
+        if (!res.ok) continue
+        const data = await res.json()
+        merged.push(...(data.assets || []))
+    }
+    return merged
 }
 
 const UPLOAD_DIALOG_MINIMIZED_KEY = 'uploadAssetDialogMinimized'
@@ -73,57 +137,6 @@ function getUploadSchemaFieldKeySet(schema) {
         }
     }
     return keys
-}
-
-function MinimizedTrayFooter({
-    batchStatus,
-    trayCompleted,
-    trayTotal,
-    trayFailed,
-    hasUploadingItems,
-    canFinalizeV2,
-    isFinalizeSuccess,
-    brandPrimary,
-    onFinalize,
-    onCloseTray,
-}) {
-    return (
-        <div className="space-y-2">
-            {batchStatus === 'finalizing' ? (
-                <p className="text-xs text-gray-600">Finalizing uploads…</p>
-            ) : batchStatus === 'ready' ? (
-                <p className="text-xs font-medium text-green-600">
-                    Ready to finalize ({trayCompleted} / {trayTotal})
-                </p>
-            ) : batchStatus === 'partial_success' ? (
-                <p className="text-xs font-medium text-amber-600">
-                    {trayCompleted} succeeded, {trayFailed} failed
-                </p>
-            ) : null}
-            <div className="flex flex-wrap items-center justify-end gap-2">
-                {canFinalizeV2 && batchStatus !== 'finalizing' && !isFinalizeSuccess && (
-                    <button
-                        type="button"
-                        onClick={onFinalize}
-                        className="rounded-md px-3 py-1.5 text-sm font-medium text-white"
-                        style={{ backgroundColor: brandPrimary }}
-                    >
-                        Finalize now
-                    </button>
-                )}
-                {!hasUploadingItems && batchStatus !== 'finalizing' && (
-                    <button
-                        type="button"
-                        onClick={onCloseTray}
-                        className="rounded-md p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
-                        title="Close"
-                    >
-                        <XMarkIcon className="h-5 w-5" />
-                    </button>
-                )}
-            </div>
-        </div>
-    )
 }
 
 /**
@@ -153,13 +166,30 @@ const USE_LEGACY_UPLOADER = false
  * @param {Array} categories - Categories array from page props
  * @param {number|null} initialCategoryId - Optional initial category ID to prepopulate
  * @param {function} onFinalizeComplete - Optional callback when finalize completes successfully (batchStatus === 'complete')
+ * @param {function} [onFinalizeAccepted] - Called once the finalize HTTP request succeeds (assets created). Use for a soft grid reload without closing the dialog; thumbnail polling may still run in the tray.
+ * @param {function} [onGridTransferActiveChange] - (active: boolean) — true while S3 byte transfer is active; parent may pause asset-grid thumbnail polling to avoid Inertia/local churn flashing the modal.
  */
-export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'asset', categories = [], initialCategoryId = null, onFinalizeComplete = null, initialFiles = null }) {
+export default function UploadAssetDialog({
+    open,
+    onClose,
+    defaultAssetType = 'asset',
+    categories = [],
+    initialCategoryId = null,
+    onFinalizeComplete = null,
+    onFinalizeAccepted = null,
+    initialFiles = null,
+    onGridTransferActiveChange = null,
+}) {
     // Phase 2 invariant: This component assumes it is mounted only when visible.
     // Lifecycle (mount/unmount) controls visibility — not internal state.
-    const { auth, dam_file_types: damFileTypesProp } = usePage().props
+    const { auth, dam_file_types: damFileTypesProp, upload_limits: uploadLimitsProp } = usePage().props
+    const uploadMaxFilesPerBatch = Math.max(
+        1,
+        Math.min(10000, Number(uploadLimitsProp?.max_files_per_batch) || 500),
+    )
     const uploadAcceptAttribute = damFileTypesProp?.upload_accept || getUploadAcceptAttribute()
     const brandPrimary = auth?.activeBrand?.primary_color || '#6366f1'
+    const uploadScrollbarCssVars = useMemo(() => uploadModalScrollbarCssVars(brandPrimary), [brandPrimary])
 
     // TASK 1: Check if user is a contributor (not approver) - only show notice to contributors
     const { can } = usePermission()
@@ -177,6 +207,14 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
     const brandRequiresContributorApproval = auth?.activeBrand?.settings?.contributor_upload_requires_approval === true || 
                                              auth?.activeBrand?.settings?.contributor_upload_requires_approval === '1' || 
                                              auth?.activeBrand?.settings?.contributor_upload_requires_approval === 1
+    /** When true, keep AI suggestion toggles on by default even for very large batches (optional brand/tenant flags). */
+    const uploadAutoAiRequired =
+        auth?.activeBrand?.settings?.upload_auto_ai_suggestions_default_on === true ||
+        auth?.activeBrand?.settings?.upload_auto_ai_suggestions_default_on === 1 ||
+        auth?.activeBrand?.settings?.upload_auto_ai_suggestions_default_on === '1' ||
+        auth?.activeBrand?.settings?.require_auto_ai_upload_suggestions === true ||
+        auth?.activeBrand?.settings?.require_auto_ai_upload_suggestions === 1 ||
+        auth?.activeBrand?.settings?.require_auto_ai_upload_suggestions === '1'
     const assetApprovalRequired = isContributor && 
                                   companyAllowsContributorApproval && 
                                   brandRequiresContributorApproval &&
@@ -308,6 +346,9 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
     
     const [applyAiTagging, setApplyAiTagging] = useState(true) // Auto-checked by default
     const [applyAiMetadata, setApplyAiMetadata] = useState(true) // Auto-checked by default
+    const [aiSuggestionsExpanded, setAiSuggestionsExpanded] = useState(true)
+    const uploadBatchAiRef = useRef({ session: false, lastCount: 0 })
+    const warnedLowCreditsRef = useRef(false)
 
     /**
      * CLEAN UPLOADER V2 — Global Metadata Draft
@@ -343,6 +384,9 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
      * - error: null | Error object
      */
     const [v2Files, setV2Files] = useState([])
+
+    /** Shown after add-files: queue full vs trimmed-to-cap (server cap matches upload_limits.max_files_per_batch). */
+    const [batchFileCapNotice, setBatchFileCapNotice] = useState(null)
     
     // FINAL FIX: Track mapping between v2File.clientId and UploadManager.clientReference for multipart uploads
     // This allows us to read status/progress from UploadManager instead of v2Files for chunked uploads
@@ -353,12 +397,42 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
     
     // Track when finalize succeeds (all files finalized, no failures) - used to disable form during auto-close delay
     const [isFinalizeSuccess, setIsFinalizeSuccess] = useState(false)
+    const v2FilesRef = useRef(v2Files)
+    useEffect(() => {
+        v2FilesRef.current = v2Files
+    }, [v2Files])
+
+    useEffect(() => {
+        if (v2Files.length === 0) {
+            setBatchFileCapNotice(null)
+        }
+    }, [v2Files.length])
     
     // Minimize to tray: compact bar at bottom so user can browse while uploads run in background
     const [isMinimized, setIsMinimized] = useState(false)
+    /** Minimized tray: per-file list hidden until user opens details */
+    const [trayUploadDetails, setTrayUploadDetails] = useState(false)
+    const [trayListShowAll, setTrayListShowAll] = useState(false)
+    /** After Finalize is clicked we move to the tray; hide bulky in-modal finalize/preview banners until the user expands again. */
+    const [finalizeUiBackground, setFinalizeUiBackground] = useState(false)
     const autoFinalizeTriggeredRef = useRef(false)
     /** Synchronous guard so two rapid Finalize clicks cannot both POST before v2Files re-renders to finalizing */
     const finalizeV2InFlightRef = useRef(false)
+    /** V2 + legacy: surfaced in modal footer and minimized tray when finalize fails. */
+    const [finalizeError, setFinalizeError] = useState(null)
+
+    /** Server-side upload preflight (metadata only); optional gate for initiate-batch. */
+    const preflightIdRef = useRef(null)
+    const preflightGenRef = useRef(0)
+
+    const [preflightUi, setPreflightUi] = useState({
+        loading: false,
+        summary: null,
+        rejected: [],
+        storage: null,
+        error: null,
+        warnings: [],
+    })
 
     const handleMinimize = useCallback(() => {
         try {
@@ -379,8 +453,61 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
         } catch (_) {
             /* ignore */
         }
+        setTrayUploadDetails(false)
+        setFinalizeUiBackground(false)
         setIsMinimized(false)
     }, [])
+
+    /** Conservative defaults for AI suggestion toggles (batch size + optional brand “always on” flags). */
+    useEffect(() => {
+        const active = v2Files.filter((f) => f.status !== 'cancelled')
+        const n = active.length
+        if (n === 0) {
+            uploadBatchAiRef.current = { session: false, lastCount: 0 }
+            warnedLowCreditsRef.current = false
+            return
+        }
+        if (!uploadBatchAiRef.current.session) {
+            uploadBatchAiRef.current = { session: true, lastCount: n }
+            if (uploadAutoAiRequired) {
+                setApplyAiTagging(!aiTaggingDisabled)
+                setApplyAiMetadata(!aiMetadataDisabled)
+            } else if (n > 100) {
+                setApplyAiTagging(false)
+                setApplyAiMetadata(false)
+            } else {
+                setApplyAiTagging(!aiTaggingDisabled)
+                setApplyAiMetadata(!aiMetadataDisabled)
+            }
+            setAiSuggestionsExpanded(n <= 25)
+            return
+        }
+        const prev = uploadBatchAiRef.current.lastCount
+        if (!uploadAutoAiRequired && prev <= 100 && n > 100) {
+            setApplyAiTagging(false)
+            setApplyAiMetadata(false)
+            setAiSuggestionsExpanded(false)
+        }
+        uploadBatchAiRef.current.lastCount = n
+    }, [v2Files, uploadAutoAiRequired, aiTaggingDisabled, aiMetadataDisabled])
+
+    /** Preflight can flag low AI credits; default suggestions off once per preflight result (user can re-enable). */
+    useEffect(() => {
+        if (preflightUi.loading) {
+            return
+        }
+        const flat = flattenPreflightWarnings(preflightUi.warnings)
+        if (!flat.some((w) => w.code === 'ai_credits_low')) {
+            warnedLowCreditsRef.current = false
+            return
+        }
+        if (warnedLowCreditsRef.current || !isAdminOrBrandManager || uploadAutoAiRequired) {
+            return
+        }
+        warnedLowCreditsRef.current = true
+        setApplyAiTagging(false)
+        setApplyAiMetadata(false)
+    }, [preflightUi.loading, preflightUi.warnings, isAdminOrBrandManager, uploadAutoAiRequired])
 
     useEffect(() => {
         try {
@@ -695,8 +822,14 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
         return true
     })
 
-    /** Collapse Legal / Rights (usage, expiration, license) by default for all categories */
-    const defaultCollapsedGroups = ['legal', 'legal_rights', 'license', 'expiration']
+    /** Collapse Legal / Rights always; collapse Creative + General when many files to reduce noise */
+    const defaultCollapsedGroups = useMemo(() => {
+        const base = ['legal', 'legal_rights', 'license', 'expiration']
+        if (v2Files.length >= 8) {
+            return [...base, 'creative', 'general']
+        }
+        return base
+    }, [v2Files.length])
     
     // Debug: Log all categories received vs filtered (in useEffect to avoid render side-effects)
     useEffect(() => {
@@ -729,43 +862,62 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
         
         try {
             // b. POST to /app/uploads/initiate-batch
-            const payload = {
-                files: [{
-                    file_name: file.name,
-                    file_size: file.size,
-                    mime_type: file.type || 'application/octet-stream',
-                    client_reference: clientId,
-                }],
-                brand_id: auth.activeBrand?.id,
+            const buildPayload = (includePreflight) => {
+                const p = {
+                    files: [{
+                        file_name: file.name,
+                        file_size: file.size,
+                        mime_type: file.type || 'application/octet-stream',
+                        client_reference: clientId,
+                    }],
+                    brand_id: auth.activeBrand?.id,
+                }
+                if (selectedCategoryId !== null && selectedCategoryId !== undefined) {
+                    p.category_id = selectedCategoryId
+                }
+                if (includePreflight && preflightIdRef.current) {
+                    p.preflight_id = preflightIdRef.current
+                }
+                return p
             }
-            
-            let response = await fetch('/app/uploads/initiate-batch', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content,
-                },
-                credentials: 'same-origin',
-                body: JSON.stringify(payload),
-            })
-            
-            // Handle 419 CSRF token mismatch by refreshing token and retrying once
-            if (response.status === 419) {
-                const newToken = await refreshCsrfToken()
-                if (newToken) {
-                    // Retry the request with the new token
-                    response = await fetch('/app/uploads/initiate-batch', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'X-CSRF-TOKEN': newToken,
-                        },
-                        credentials: 'same-origin',
-                        body: JSON.stringify(payload),
-                    })
+
+            const postInitiate = async (payload) => {
+                let res = await fetch('/app/uploads/initiate-batch', {
+                    method: 'POST',
+                    headers: uploadJsonFetchHeaders(),
+                    credentials: 'same-origin',
+                    body: JSON.stringify(payload),
+                })
+                if (res.status === 419) {
+                    const newToken = await refreshCsrfToken()
+                    if (newToken) {
+                        res = await fetch('/app/uploads/initiate-batch', {
+                            method: 'POST',
+                            headers: uploadJsonFetchHeaders(newToken),
+                            credentials: 'same-origin',
+                            body: JSON.stringify(payload),
+                        })
+                    }
+                }
+                return res
+            }
+
+            const preflightIdAtStart = preflightIdRef.current
+            let response = await postInitiate(buildPayload(true))
+            if (response.status === 422 && preflightIdAtStart) {
+                let errJson = null
+                try {
+                    errJson = await response.clone().json()
+                } catch {
+                    /* ignore */
+                }
+                const pe = errJson?.error
+                if (pe === 'preflight_invalid' || pe === 'preflight_mismatch' || pe === 'preflight_tamper') {
+                    preflightIdRef.current = null
+                    response = await postInitiate(buildPayload(false))
                 }
             }
-            
+
             if (!response.ok) {
                 // Phase 3.0C: Improved error handling for HTML error pages (419 CSRF, etc.)
                 // Phase 2.5 Step 1: Extract error message, then normalize in catch block
@@ -988,7 +1140,136 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
             
             throw error
         }
-    }, [auth.activeBrand?.id])
+    }, [auth.activeBrand?.id, selectedCategoryId])
+
+    const runUploadPreflight = useCallback(
+        async (entries) => {
+            const pending = entries.filter((e) => e.status === 'pending_preflight' && !e.error)
+            if (pending.length === 0) {
+                return
+            }
+            const gen = ++preflightGenRef.current
+            setPreflightUi((s) => ({ ...s, loading: true, error: null }))
+            const deriveExt = (file) => {
+                const n = file.name || ''
+                const i = n.lastIndexOf('.')
+                return i > 0 ? n.slice(i + 1).toLowerCase() : ''
+            }
+            const body = {
+                brand_id: auth.activeBrand?.id,
+                assume_auto_ai_metadata: applyAiMetadata,
+                ...(selectedCategoryId != null ? { category_id: selectedCategoryId } : {}),
+                ...(selectedCollectionIds?.length ? { collection_ids: selectedCollectionIds } : {}),
+                files: pending.map((e) => ({
+                    client_file_id: e.clientId,
+                    name: e.file.name,
+                    size: e.file.size,
+                    mime_type: e.file.type || null,
+                    extension: deriveExt(e.file),
+                    last_modified: e.file.lastModified != null ? e.file.lastModified : undefined,
+                })),
+            }
+            const pendingIds = new Set(pending.map((p) => p.clientId))
+            try {
+                let res = await fetch('/app/uploads/preflight', {
+                    method: 'POST',
+                    headers: uploadJsonFetchHeaders(),
+                    credentials: 'same-origin',
+                    body: JSON.stringify(body),
+                })
+                if (res.status === 419) {
+                    const newToken = await refreshCsrfToken()
+                    if (newToken) {
+                        res = await fetch('/app/uploads/preflight', {
+                            method: 'POST',
+                            headers: uploadJsonFetchHeaders(newToken),
+                            credentials: 'same-origin',
+                            body: JSON.stringify(body),
+                        })
+                    }
+                }
+                if (!res.ok) {
+                    let msg = `Preflight failed (${res.status})`
+                    try {
+                        const errData = await res.json()
+                        msg = errData.message || errData.error || msg
+                    } catch {
+                        /* ignore */
+                    }
+                    throw new Error(msg)
+                }
+                const data = await parseUploadJsonResponse(res, 'preflight')
+                if (gen !== preflightGenRef.current) {
+                    return
+                }
+                const acceptedCount = data.batch_summary?.accepted_count ?? 0
+                preflightIdRef.current =
+                    acceptedCount > 0 ? (data.preflight_id || data.upload_session_id || null) : null
+                const acceptedIds = new Set((data.accepted || []).map((a) => a.client_file_id))
+                const rejectedMap = new Map((data.rejected || []).map((r) => [r.client_file_id, r]))
+                setV2Files((prev) =>
+                    prev.map((f) => {
+                        if (!pendingIds.has(f.clientId)) {
+                            return f
+                        }
+                        const rej = rejectedMap.get(f.clientId)
+                        if (rej) {
+                            const first = (rej.reasons && rej.reasons[0]) || {}
+                            return {
+                                ...f,
+                                status: 'failed',
+                                error: {
+                                    message: first.message || 'This file cannot be uploaded.',
+                                    stage: 'preflight',
+                                    code: first.code || 'preflight_rejected',
+                                },
+                            }
+                        }
+                        if (acceptedIds.has(f.clientId)) {
+                            return { ...f, status: 'selected' }
+                        }
+                        return {
+                            ...f,
+                            status: 'failed',
+                            error: { message: 'Preflight did not include this file.', stage: 'preflight' },
+                        }
+                    }),
+                )
+                setPreflightUi({
+                    loading: false,
+                    summary: data.batch_summary || null,
+                    rejected: data.rejected || [],
+                    storage: data.storage || null,
+                    error: null,
+                    warnings: data.warnings || [],
+                })
+            } catch (err) {
+                if (gen !== preflightGenRef.current) {
+                    return
+                }
+                preflightIdRef.current = null
+                setV2Files((prev) =>
+                    prev.map((f) => {
+                        if (!pendingIds.has(f.clientId)) {
+                            return f
+                        }
+                        return {
+                            ...f,
+                            status: 'failed',
+                            error: { message: err.message || 'Preflight failed', stage: 'preflight' },
+                        }
+                    }),
+                )
+                setPreflightUi((s) => ({
+                    ...s,
+                    loading: false,
+                    error: err.message || 'Preflight failed',
+                    warnings: [],
+                }))
+            }
+        },
+        [auth.activeBrand?.id, selectedCategoryId, selectedCollectionIds, applyAiMetadata],
+    )
 
     /**
      * ═══════════════════════════════════════════════════════════════
@@ -1007,7 +1288,58 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
         }
 
         const fileArray = Array.from(selectedFiles)
-        console.log('[FILE_SELECT] Processing files', { count: fileArray.length, fileNames: fileArray.map(f => f.name) })
+        const cap = uploadMaxFilesPerBatch
+        const prev = v2FilesRef.current
+        const activeCount = prev.filter((f) => f.status !== 'cancelled').length
+        const room = Math.max(0, cap - activeCount)
+
+        if (room === 0) {
+            setBatchFileCapNotice({
+                kind: 'queue_full',
+                cap,
+                activeCount,
+                selected: fileArray.length,
+            })
+            window.alert(
+                `This upload queue is already at the maximum of ${cap} files.\n\nRemove files (X) or cancel in-progress uploads, then add more. You tried to add ${fileArray.length} more.`,
+            )
+            return
+        }
+
+        const toAddFiles = fileArray.slice(0, room)
+        const skipped = fileArray.length - toAddFiles.length
+
+        if (skipped > 0) {
+            const ok = window.confirm(
+                `This workspace allows up to ${cap} files in a single upload queue (${activeCount} already listed).\n\n` +
+                    `You selected ${fileArray.length} files. Only ${toAddFiles.length} can be added now; ${skipped} would be left out.\n\n` +
+                    `OK = add the first ${toAddFiles.length} from your selection.\n` +
+                    `Cancel = do not add any of these files (pick fewer files or free space in the queue first).`,
+            )
+            if (!ok) {
+                setBatchFileCapNotice({
+                    kind: 'user_declined_trim',
+                    cap,
+                    activeCount,
+                    selected: fileArray.length,
+                    wouldAdd: toAddFiles.length,
+                    skipped,
+                })
+                return
+            }
+            setBatchFileCapNotice({
+                kind: 'trimmed',
+                cap,
+                activeCount,
+                selected: fileArray.length,
+                added: toAddFiles.length,
+                skipped,
+            })
+        } else {
+            setBatchFileCapNotice(null)
+        }
+
+        console.log('[FILE_SELECT] Processing files', { count: toAddFiles.length, fileNames: toAddFiles.map((f) => f.name) })
         
         // Helper to derive initial resolvedFilename from filename
         const deriveInitialResolvedFilename = (filename) => {
@@ -1022,7 +1354,7 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
         }
 
         // Create clean file entries for v2Files state
-        const newV2FileEntries = fileArray.map((file) => {
+        const newV2FileEntries = toAddFiles.map((file) => {
             // Generate UUID - crypto.randomUUID needs to be called with proper context
             let clientId
             if (window.crypto && window.crypto.randomUUID) {
@@ -1042,7 +1374,7 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
             return {
                 clientId,
                 file,
-                status: unreadableFromZip ? 'failed' : 'selected', // 'selected' | 'uploading' | 'uploaded' | 'finalizing' | 'finalized' | 'failed'
+                status: unreadableFromZip ? 'failed' : 'pending_preflight', // preflight → 'selected' | then upload lifecycle
                 progress: 0, // 0-100
                 uploadKey: null, // Set when upload completes
                 title: null, // Will be derived from filename, can be edited
@@ -1060,6 +1392,21 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
 
         console.log('[FILE_SELECT] Created file entries', { count: newV2FileEntries.length, clientIds: newV2FileEntries.map(e => e.clientId) })
 
+        for (const entry of newV2FileEntries) {
+            if (entry.file && !entry.error && shouldRegisterGridBlobPreview(entry.file)) {
+                try {
+                    const url = URL.createObjectURL(entry.file)
+                    registerUploadPreview(entry.clientId, url, {
+                        filename: entry.file.name,
+                        size: entry.file.size,
+                        mimeType: entry.file.type || '',
+                    })
+                } catch (e) {
+                    console.warn('[FILE_SELECT] Local preview registry skipped', e)
+                }
+            }
+        }
+
         // Add new file entries to v2Files state ONLY
         // Upload coordinator useEffect will handle starting uploads automatically
         setV2Files((prevFiles) => {
@@ -1067,7 +1414,8 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
             console.log('[FILE_SELECT] Updated v2Files state', { totalCount: updated.length })
             return updated
         })
-    }, [selectedCategoryId])
+        void runUploadPreflight(newV2FileEntries)
+    }, [selectedCategoryId, runUploadPreflight, uploadMaxFilesPerBatch])
     
     // DISABLED LEGACY CODE (commented out for clean uploader v2):
     /*
@@ -1297,10 +1645,7 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
         // STEP 2.5: Use fetch() directly to bypass axios and verify network path
         let response = await fetch('/app/uploads/initiate-batch', {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content,
-            },
+            headers: uploadJsonFetchHeaders(),
             credentials: 'same-origin',
             body: JSON.stringify(payload),
         })
@@ -1315,10 +1660,7 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                 // Retry the request with the new token
                 response = await fetch('/app/uploads/initiate-batch', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-CSRF-TOKEN': newToken,
-                    },
+                    headers: uploadJsonFetchHeaders(newToken),
                     credentials: 'same-origin',
                     body: JSON.stringify(payload),
                 })
@@ -1748,6 +2090,11 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                           ...f,
                           status: 'uploaded',
                           error: null,
+                          assetId: null,
+                          pipelineThumbStatus: null,
+                          pipelineThumbError: null,
+                          serverPreviewUrl: null,
+                          serverFinalThumbUrl: null,
                       }
                     : f
             )
@@ -1762,7 +2109,8 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
     // Phase 2.8: Remove file and cancel any active uploads
     const removeFile = useCallback((clientId) => {
         console.log('[REMOVE_FILE] Removing file', { clientId })
-        
+        revokeClientUploadPreview(clientId)
+
         // Phase 2.8: Cancel UploadManager upload if active
         const uploadManagerClientRef = v2ToUploadManagerMapRef.current.get(clientId)
         if (uploadManagerClientRef) {
@@ -2535,6 +2883,16 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
             return 'finalizing'
         }
 
+        const hasPipelinePending = activeV2Files.some(
+            (f) =>
+                f.status === 'finalized' &&
+                f.assetId &&
+                !isTerminalPipelineThumb(f.pipelineThumbStatus),
+        )
+        if (hasPipelinePending) {
+            return 'processing_followup'
+        }
+
         // Count finalized files (direct uploads)
         const finalizedCount = activeV2Files.filter((f) => f.status === 'finalized').length
         
@@ -2617,6 +2975,120 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
         return 'idle'
     }, [v2Files, uploadManagerStateVersion])
 
+    const postFinalizeSummary = useMemo(() => {
+        const assets = v2Files.filter((f) => f.status === 'finalized' && f.assetId)
+        const assetsCreated = assets.length
+        let previewsReady = 0
+        let processing = 0
+        let previewFailed = 0
+        for (const f of assets) {
+            const t = f.pipelineThumbStatus
+            if (t === 'completed') previewsReady++
+            else if (t === 'failed') previewFailed++
+            else if (!isTerminalPipelineThumb(t)) processing++
+        }
+        return { assetsCreated, previewsReady, processing, previewFailed }
+    }, [v2Files])
+
+    const needsPipelinePolling = useMemo(
+        () =>
+            open &&
+            v2Files.some(
+                (f) =>
+                    f.status === 'finalized' &&
+                    f.assetId &&
+                    !isTerminalPipelineThumb(f.pipelineThumbStatus),
+            ),
+        [open, v2Files],
+    )
+
+    useEffect(() => {
+        if (!needsPipelinePolling) {
+            return undefined
+        }
+        let cancelled = false
+
+        const tick = async () => {
+            const files = v2FilesRef.current
+            const pending = files.filter(
+                (f) =>
+                    f.status === 'finalized' &&
+                    f.assetId &&
+                    !isTerminalPipelineThumb(f.pipelineThumbStatus),
+            )
+            if (pending.length === 0) {
+                return
+            }
+            const ids = [...new Set(pending.map((f) => f.assetId))]
+            try {
+                const rows = await fetchThumbnailStatusBatch(ids)
+                if (cancelled) {
+                    return
+                }
+                const byId = new Map(rows.map((r) => [r.asset_id, r]))
+                setV2Files((prev) =>
+                    prev.map((f) => {
+                        if (f.status !== 'finalized' || !f.assetId) {
+                            return f
+                        }
+                        const row = byId.get(f.assetId)
+                        if (!row) {
+                            return f
+                        }
+                        return {
+                            ...f,
+                            pipelineThumbStatus: row.thumbnail_status ?? f.pipelineThumbStatus,
+                            pipelineThumbError: row.thumbnail_error ?? f.pipelineThumbError,
+                            serverPreviewUrl: row.preview_thumbnail_url ?? f.serverPreviewUrl ?? null,
+                            serverFinalThumbUrl: row.final_thumbnail_url ?? f.serverFinalThumbUrl ?? null,
+                        }
+                    }),
+                )
+            } catch {
+                /* keep polling */
+            }
+        }
+
+        void tick()
+        const intervalId = window.setInterval(() => void tick(), 3000)
+        return () => {
+            cancelled = true
+            window.clearInterval(intervalId)
+        }
+    }, [needsPipelinePolling])
+
+    /** When every finalized asset has a terminal thumbnail status, end the post-finalize phase and show success if nothing failed at finalize. */
+    useEffect(() => {
+        if (!open) {
+            return
+        }
+        const okAssets = v2Files.filter((f) => f.status === 'finalized' && f.assetId)
+        if (okAssets.length === 0) {
+            return
+        }
+        if (!okAssets.every((f) => isTerminalPipelineThumb(f.pipelineThumbStatus))) {
+            return
+        }
+        const hasFinalizeFailure = v2Files.some((f) => f.status === 'failed')
+        if (!hasFinalizeFailure) {
+            setIsFinalizeSuccess(true)
+        }
+    }, [open, v2Files])
+
+    const [finalizeElapsedSec, setFinalizeElapsedSec] = useState(0)
+
+    useEffect(() => {
+        if (batchStatus !== 'finalizing') {
+            setFinalizeElapsedSec(0)
+            return undefined
+        }
+        const t0 = Date.now()
+        const id = window.setInterval(() => {
+            setFinalizeElapsedSec(Math.floor((Date.now() - t0) / 1000))
+        }, 1000)
+        return () => window.clearInterval(id)
+    }, [batchStatus])
+
     // Phase 2.8: Finalize gating logic
     // An upload is considered COMPLETE if:
     // - v2File.status === 'uploaded' (direct uploads)
@@ -2672,7 +3144,7 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
         // Check for active uploads (direct or multipart) - ANY active upload blocks finalize
         const hasUploading = activeV2Files.some((f) => {
             // Direct uploads: check v2Files status
-            if (f.status === 'uploading' || f.status === 'selected') {
+            if (f.status === 'uploading' || f.status === 'selected' || f.status === 'pending_preflight') {
                 return true
             }
             
@@ -2725,6 +3197,60 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
         return allCompleted && !hasUploading && !hasFailed && !hasFinalizing && hasCategory
     }, [v2Files, selectedCategoryId, uploadManagerStateVersion, uploadMetadataSchema])
 
+    /** Short hint above the sticky footer when Finalize is disabled (upload / failures / category). */
+    const finalizeFooterHint = useMemo(() => {
+        if (isFinalizeSuccess || v2Files.length === 0) return null
+        if (canFinalizeV2) return null
+
+        const allUploadManagerUploads = UploadManager.getUploads()
+        const uploadManagerMap = new Map(allUploadManagerUploads.map((u) => [u.clientReference, u]))
+        const activeV2Files = v2Files.filter((f) => {
+            const uploadManagerClientRef = v2ToUploadManagerMapRef.current.get(f.clientId)
+            if (uploadManagerClientRef) {
+                const uploadManagerUpload = uploadManagerMap.get(uploadManagerClientRef)
+                if (uploadManagerUpload?.status === 'cancelled') return false
+            }
+            return f.status !== 'cancelled'
+        })
+
+        const hasFailed = activeV2Files.some((f) => {
+            if (f.status === 'failed') return true
+            const ref = v2ToUploadManagerMapRef.current.get(f.clientId)
+            if (ref) {
+                const u = uploadManagerMap.get(ref)
+                return u?.status === 'failed'
+            }
+            return false
+        })
+        if (hasFailed) {
+            return 'Fix or remove failed uploads before finalizing.'
+        }
+
+        const stillUploading =
+            batchStatus === 'uploading' ||
+            activeV2Files.some((f) => {
+                if (['uploading', 'selected', 'pending_preflight'].includes(f.status)) return true
+                const ref = v2ToUploadManagerMapRef.current.get(f.clientId)
+                if (ref) {
+                    const u = uploadManagerMap.get(ref)
+                    return Boolean(u && ['initiating', 'uploading', 'completing'].includes(u.status))
+                }
+                return false
+            })
+        if (stillUploading) {
+            return 'Finish uploading before finalizing.'
+        }
+
+        if (
+            selectedCategoryId === null &&
+            ['ready', 'partial_success', 'complete', 'processing_followup'].includes(batchStatus)
+        ) {
+            return 'Select a category to finalize.'
+        }
+
+        return null
+    }, [isFinalizeSuccess, v2Files, canFinalizeV2, batchStatus, selectedCategoryId, uploadManagerStateVersion])
+
     /**
      * CLEAN UPLOADER V2 — Get warnings for missing required fields
      */
@@ -2751,24 +3277,37 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
     // Phase 3.0: Enhanced button label - clearly indicate when uploads are in progress
     // Button label reflects current state and prevents confusion about when finalize is available
     const finalizeButtonLabelV2 = useMemo(() => {
+        const fmtFinalizeWait = (sec) => {
+            if (sec <= 0) return ''
+            const m = Math.floor(sec / 60)
+            const s = sec % 60
+            return m > 0 ? `${m}:${String(s).padStart(2, '0')}` : `${s}s`
+        }
         if (batchStatus === 'finalizing') {
-            return 'Finalizing uploads…'
+            const suffix = fmtFinalizeWait(finalizeElapsedSec)
+            return suffix ? `Finalizing… ${suffix}` : 'Finalizing…'
         } else if (batchStatus === 'uploading') {
             return 'Uploading…'
         } else if (canFinalizeV2) {
             // Button is enabled - show finalize label
             return 'Finalize uploads'
         } else {
-            // Button is disabled - show why (uploads in progress or category missing)
-            if (batchStatus === 'ready' || batchStatus === 'partial_success') {
-                // Uploads complete but category missing
-                return 'Select category'
-            } else {
-                // Uploads still in progress
-                return 'Uploading…'
+            // Button is disabled — avoid "Uploading…" when batchStatus is `complete` (all bytes on S3) but category etc. blocks finalize
+            if (
+                selectedCategoryId === null &&
+                ['ready', 'partial_success', 'complete', 'processing_followup'].includes(batchStatus)
+            ) {
+                return 'Select category to finalize'
             }
+            if (batchStatus === 'processing_followup') {
+                return 'Preparing…'
+            }
+            if (batchStatus === 'complete') {
+                return 'Almost ready…'
+            }
+            return 'Uploading…'
         }
-    }, [batchStatus, canFinalizeV2])
+    }, [batchStatus, canFinalizeV2, finalizeElapsedSec, selectedCategoryId])
 
     /**
      * ═══════════════════════════════════════════════════════════════
@@ -2989,6 +3528,7 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
             const manifestItem = {
                 upload_key: uploadKey,
                 expected_size: fileEntry.file.size,
+                client_file_id: fileEntry.clientId,
                 // C9.1: Only include category_id if it's set (null/undefined means not selected)
                 // Backend requires category_id for new assets, so this should always be set if validation passed
                 ...(selectedCategoryId !== null && selectedCategoryId !== undefined && { category_id: selectedCategoryId }),
@@ -3016,7 +3556,20 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                 selectedCollectionIds: selectedCollectionIds, // C9.1: DEBUG - Log selected IDs from state
                 selectedCollectionIds_length: selectedCollectionIds?.length ?? 0, // C9.1: DEBUG
             })
-            
+
+            // Derived hidden taxonomy for filters / automations (not shown in upload form)
+            const env = manifestItem.metadata?.environment_type
+            const sub = manifestItem.metadata?.subject_type
+            if (
+                env != null &&
+                env !== '' &&
+                sub != null &&
+                sub !== '' &&
+                manifestItem.metadata.scene_classification == null
+            ) {
+                manifestItem.metadata.scene_classification = `${String(env)}|${String(sub)}`
+            }
+
             return manifestItem
         })
 
@@ -3037,6 +3590,8 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
             return
         }
         finalizeV2InFlightRef.current = true
+        setFinalizeError(null)
+        setFinalizeUiBackground(true)
 
         // Set status to 'finalizing' for manifest files
         // Note: batchStatus is now computed from v2Files, no manual update needed
@@ -3048,6 +3603,9 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                     : f
             )
         )
+        // Move off the modal immediately; finalize + preview polling continue in the tray.
+        handleMinimize()
+        markPendingFinalize(Array.from(uploadedClientIds))
 
         try {
             // C9.2: Include AI skip flags in finalize request (upload-level, applies to all assets)
@@ -3062,10 +3620,7 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
             // Call backend finalize endpoint using fetch
             let response = await fetch('/app/assets/upload/finalize', {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content,
-                },
+                headers: uploadJsonFetchHeaders(),
                 credentials: 'same-origin',
                 body: JSON.stringify(finalizePayload),
             })
@@ -3077,10 +3632,7 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                     // Retry the request with the new token
                     response = await fetch('/app/assets/upload/finalize', {
                         method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'X-CSRF-TOKEN': newToken,
-                        },
+                        headers: uploadJsonFetchHeaders(newToken),
                         credentials: 'same-origin',
                         body: JSON.stringify(finalizePayload),
                     })
@@ -3089,7 +3641,23 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
 
             if (!response.ok) {
                 const errorText = await response.text().catch(() => 'Unknown error')
-                throw new Error(`Finalize failed: ${response.status} ${response.statusText} - ${errorText}`)
+                let summary = `Finalize failed (${response.status}).`
+                try {
+                    const j = JSON.parse(errorText)
+                    if (typeof j?.message === 'string' && j.message.trim()) {
+                        summary = j.message.trim()
+                    } else if (typeof j?.error === 'string' && j.error.trim()) {
+                        summary = j.error.trim()
+                    }
+                } catch {
+                    if (errorText && errorText.length > 0 && errorText.length < 400) {
+                        summary = errorText.trim()
+                    }
+                }
+                setFinalizeError(summary)
+                setFinalizeUiBackground(false)
+                handleExpandFromTray()
+                throw new Error(summary)
             }
 
             const responseData = await parseUploadJsonResponse(response, 'finalize')
@@ -3097,12 +3665,35 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
 
             // Handle backend response per file
             const results = responseData.results || []
+            attachUploadPreviewsFromFinalizeResults(results)
             const resultsByUploadKey = new Map()
             results.forEach((result) => {
                 if (result.upload_key) {
                     resultsByUploadKey.set(result.upload_key, result)
                 }
             })
+
+            const resolveFinalizeResultForFile = (f) => {
+                let result = resultsByUploadKey.get(f.uploadKey)
+                if (!result) {
+                    const uploadManagerClientRef = v2ToUploadManagerMapRef.current.get(f.clientId)
+                    if (uploadManagerClientRef) {
+                        const uploadManagerUpload = uploadManagerMap.get(uploadManagerClientRef)
+                        if (uploadManagerUpload?.uploadSessionId) {
+                            const sessionUploadKey = `temp/uploads/${uploadManagerUpload.uploadSessionId}/original`
+                            result = resultsByUploadKey.get(sessionUploadKey)
+                        }
+                    }
+                }
+                return result
+            }
+
+            for (const f of uploadedFiles) {
+                const r = resolveFinalizeResultForFile(f)
+                if (!r || r.status !== 'success') {
+                    removePendingFinalizeClient(f.clientId)
+                }
+            }
 
             // Phase 2.8: Update v2Files states based on results
             // For multipart uploads, also match by uploadSessionId if uploadKey doesn't match
@@ -3206,6 +3797,11 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                             ...f,
                             status: 'finalized',
                             error: null,
+                            assetId: result.asset_id ?? null,
+                            pipelineThumbStatus: null,
+                            pipelineThumbError: null,
+                            serverPreviewUrl: null,
+                            serverFinalThumbUrl: null,
                             // Phase 2.8: Preserve uploadKey for multipart uploads (ensure it's set)
                             uploadKey: f.uploadKey || (uploadManagerUpload?.uploadSessionId ? 
                                 `temp/uploads/${uploadManagerUpload.uploadSessionId}/original` : 
@@ -3280,20 +3876,26 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                     pendingMetadataCount: totalPendingMetadataCount
                 })
             }
+
+            queueMicrotask(() => {
+                if (typeof onFinalizeAccepted === 'function') {
+                    onFinalizeAccepted()
+                }
+            })
             
-            // Set success state if all files finalized and no failures (for UI overlay during auto-close delay)
-            if (finalizedCount > 0 && failedCount === 0) {
-                setIsFinalizeSuccess(true)
-            }
         } catch (error) {
             console.error('[FINALIZE_V2] Error during finalize', error)
+            clearAllPendingFinalize()
             // Network / unexpected errors - mark ALL manifest files as failed
             
             // Phase 2.5 Step 1: Normalize error for consistent AI-ready format
             // We'll normalize per-file below, but first extract common error info
             const httpStatus = error.response?.status || error.status
             const errorMessage = error.response?.data?.message || error.message || 'Finalize failed'
-            
+            setFinalizeError(errorMessage)
+            setFinalizeUiBackground(false)
+            handleExpandFromTray()
+
             setV2Files((prevFiles) =>
                 prevFiles.map((f) =>
                     uploadedClientIds.has(f.clientId)
@@ -3327,7 +3929,21 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
         } finally {
             finalizeV2InFlightRef.current = false
         }
-    }, [canFinalizeV2, v2Files, selectedCategoryId, selectedCollectionIds, getEffectiveMetadataV2, globalMetadataDraft, uploadMetadataSchema, isAdminOrBrandManager, applyAiTagging, applyAiMetadata])
+    }, [
+        canFinalizeV2,
+        v2Files,
+        selectedCategoryId,
+        selectedCollectionIds,
+        getEffectiveMetadataV2,
+        globalMetadataDraft,
+        uploadMetadataSchema,
+        isAdminOrBrandManager,
+        applyAiTagging,
+        applyAiMetadata,
+        onFinalizeAccepted,
+        handleMinimize,
+        handleExpandFromTray,
+    ])
 
     /**
      * LEGACY — DO NOT USE: Finalize Assets
@@ -3338,7 +3954,6 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
      * ⚠️ FROZEN: Disabled by USE_LEGACY_UPLOADER flag — will be removed after Step 7
      */
     const [isFinalizing, setIsFinalizing] = useState(false)
-    const [finalizeError, setFinalizeError] = useState(null)
 
     const handleFinalizeLegacy = useCallback(async () => {
         // Freeze legacy finalize logic
@@ -3968,7 +4583,23 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
     const resetV2State = useCallback(() => {
         // TASK 1: Reset approval info when state resets
         setApprovalInfo({ approvalRequired: false, pendingMetadataCount: 0 })
-        setV2Files([])
+        preflightIdRef.current = null
+        preflightGenRef.current += 1
+        setPreflightUi({
+            loading: false,
+            summary: null,
+            rejected: [],
+            storage: null,
+            error: null,
+            warnings: [],
+        })
+        setFinalizeError(null)
+        setTrayUploadDetails(false)
+        setFinalizeUiBackground(false)
+        setV2Files((prev) => {
+            prev.forEach((f) => revokeClientUploadPreview(f.clientId))
+            return []
+        })
         setSelectedCategoryId(initialCategoryId || null) // Reset to initial category
         setSelectedCollectionIds([]) // C9
         setGlobalMetadataDraft({}) // Reset global metadata
@@ -4094,8 +4725,15 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                 } else if (uploadManagerUpload.status === 'failed') {
                     uploadStatus = 'failed'
                 } else if (uploadManagerUpload.status === 'cancelled') {
-                    uploadStatus = 'failed' // Show cancelled as failed in UI
-                    // Phase 2.8: Cancelled uploads are excluded from finalize gating
+                    uploadStatus = 'skipped'
+                }
+
+                if (
+                    v2File.status === 'finalized' &&
+                    v2File.assetId &&
+                    !isTerminalPipelineThumb(v2File.pipelineThumbStatus)
+                ) {
+                    uploadStatus = 'processing'
                 }
                 
                 // Derive resolvedFilename if not set in v2File (use same logic as finalize)
@@ -4109,16 +4747,31 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                     .replace(/^-+|-+$/g, '')
                 const defaultResolvedFilename = extension ? `${slugified}.${extension}` : slugified
                 
+                const rawErr = uploadManagerUpload.error || uploadManagerUpload.errorInfo?.message || null
+                const normalizedError =
+                    typeof rawErr === 'string'
+                        ? { message: rawErr, stage: 'upload' }
+                        : rawErr && typeof rawErr === 'object'
+                          ? rawErr
+                          : null
+
                 return {
                     clientId: v2File.clientId,
                     uploadStatus: uploadStatus,
+                    lifecycle: v2File.status,
                     progress: uploadManagerUpload.progress || 0,
                     originalFilename: v2File.file.name,
                     file: v2File.file,
                     title: v2File.title || null,
                     resolvedFilename: v2File.resolvedFilename || defaultResolvedFilename,
                     metadataDraft: v2File.metadataDraft || {},
-                    error: uploadManagerUpload.error || uploadManagerUpload.errorInfo?.message || null,
+                    error: normalizedError,
+                    assetId: v2File.assetId ?? null,
+                    pipelineThumbStatus: v2File.pipelineThumbStatus ?? null,
+                    pipelineThumbError: v2File.pipelineThumbError ?? null,
+                    uploadSessionId: v2File.uploadSessionId ?? null,
+                    serverPreviewUrl: v2File.serverPreviewUrl ?? null,
+                    serverFinalThumbUrl: v2File.serverFinalThumbUrl ?? null,
                 }
             }
             
@@ -4136,14 +4789,33 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
             
             // Phase 3.0: Enhanced status mapping for better UX feedback
             // Map finalizing to processing state for clearer visual feedback
+            let directUploadStatus =
+                v2File.status === 'pending_preflight' || v2File.status === 'selected'
+                    ? 'queued'
+                    : v2File.status === 'uploading'
+                      ? 'uploading'
+                      : v2File.status === 'uploaded'
+                        ? 'complete'
+                        : v2File.status === 'finalizing'
+                          ? 'processing'
+                          : v2File.status === 'finalized'
+                            ? 'complete'
+                            : v2File.status === 'failed'
+                              ? 'failed'
+                              : v2File.status === 'cancelled'
+                                ? 'skipped'
+                                : 'queued'
+            if (
+                v2File.status === 'finalized' &&
+                v2File.assetId &&
+                !isTerminalPipelineThumb(v2File.pipelineThumbStatus)
+            ) {
+                directUploadStatus = 'processing'
+            }
             return {
                 clientId: v2File.clientId,
-                uploadStatus: v2File.status === 'selected' ? 'queued' : 
-                             v2File.status === 'uploading' ? 'uploading' :
-                             v2File.status === 'uploaded' ? 'complete' :
-                             v2File.status === 'finalizing' ? 'processing' : // Phase 3.0: Show as processing during finalize
-                             v2File.status === 'finalized' ? 'complete' :
-                             v2File.status === 'failed' ? 'failed' : 'queued',
+                uploadStatus: directUploadStatus,
+                lifecycle: v2File.status,
                 progress: v2File.progress,
                 originalFilename: v2File.file.name,
                 file: v2File.file,
@@ -4151,6 +4823,12 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                 resolvedFilename: v2File.resolvedFilename || defaultResolvedFilename,
                 metadataDraft: v2File.metadataDraft || {}, // Per-file metadata overrides
                 error: v2File.error || null, // Include error object for failed uploads
+                assetId: v2File.assetId ?? null,
+                pipelineThumbStatus: v2File.pipelineThumbStatus ?? null,
+                pipelineThumbError: v2File.pipelineThumbError ?? null,
+                uploadSessionId: v2File.uploadSessionId ?? null,
+                serverPreviewUrl: v2File.serverPreviewUrl ?? null,
+                serverFinalThumbUrl: v2File.serverFinalThumbUrl ?? null,
             }
         })
         
@@ -4195,6 +4873,88 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
             validateMetadata: () => {}, // NO-OP - validation not implemented
         }
     }, [v2Files, uploadManagerStateVersion, selectedCategoryId, globalMetadataDraft, uploadMetadataSchema]) // Include uploadMetadataSchema to update availableMetadataFields
+
+    const uploadFooterSnapshot = useMemo(() => {
+        const items = v2UploadManager.items || []
+        const counts = computeUploadCounts(items)
+        const total = items.length
+        const transferred = counts.uploaded + counts.ready + counts.processing
+        const pendingTransfer = counts.uploading + counts.queued
+        const percentComplete = total > 0 ? Math.min(100, Math.round((transferred / total) * 100)) : 0
+        const bytesRemaining =
+            typeof preflightUi.summary?.storage_remaining_bytes_after_accepted === 'number'
+                ? preflightUi.summary.storage_remaining_bytes_after_accepted
+                : null
+
+        let readiness = ''
+        if (preflightUi.loading) {
+            readiness = 'Checking…'
+        } else if (batchStatus === 'finalizing') {
+            readiness = 'Finalizing…'
+        } else if (batchStatus === 'processing_followup') {
+            readiness = 'Preparing previews…'
+        } else if (isFinalizeSuccess && total > 0) {
+            readiness = 'Complete'
+        } else if (batchStatus === 'complete' && total > 0) {
+            // All bytes on S3 — still need category + Finalize unless already succeeded.
+            readiness =
+                selectedCategoryId === null
+                    ? 'Select category to finalize'
+                    : canFinalizeV2
+                      ? 'Ready to finalize'
+                      : 'Almost ready…'
+        } else if (counts.failed > 0 || batchStatus === 'partial_success') {
+            readiness = 'Needs attention'
+        } else if (batchStatus === 'uploading' || pendingTransfer > 0) {
+            readiness = 'Uploading…'
+        } else if (batchStatus === 'ready') {
+            readiness = canFinalizeV2 ? 'Ready to finalize' : 'Needs attention'
+        } else if (total > 0 && batchStatus === 'idle') {
+            readiness = 'Preparing uploads…'
+        }
+
+        const rawEst =
+            preflightUi.summary?.estimated_ai_usage_credits ??
+            preflightUi.summary?.estimated_ai_credits ??
+            null
+        const creditLine =
+            rawEst != null && Number.isFinite(Number(rawEst))
+                ? `Estimated AI usage: ${Number(rawEst).toLocaleString('en-US')} credits`
+                : null
+
+        return { counts, total, transferred, percentComplete, bytesRemaining, readiness, creditLine, pendingTransfer }
+    }, [
+        v2UploadManager.items,
+        preflightUi.loading,
+        preflightUi.summary,
+        batchStatus,
+        canFinalizeV2,
+        isFinalizeSuccess,
+        selectedCategoryId,
+    ])
+
+    const largeBatchAiHelper = useMemo(() => {
+        const n = v2Files.filter((f) => f.status !== 'cancelled').length
+        if (
+            !isAdminOrBrandManager ||
+            n <= 100 ||
+            uploadAutoAiRequired ||
+            applyAiTagging ||
+            applyAiMetadata
+        ) {
+            return null
+        }
+        return 'AI suggestions are off for large batches to help control credits. You can run them later.'
+    }, [v2Files, isAdminOrBrandManager, uploadAutoAiRequired, applyAiTagging, applyAiMetadata])
+
+    const lowCreditFooterHint = useMemo(() => {
+        if (preflightUi.loading) {
+            return null
+        }
+        const flat = flattenPreflightWarnings(preflightUi.warnings)
+        const w = flat.find((x) => x.code === 'ai_credits_low')
+        return w?.message || null
+    }, [preflightUi.loading, preflightUi.warnings])
 
     // Phase 2.8: Sync completed multipart uploads to v2Files status
     // When a multipart upload completes in UploadManager, update v2File status to 'uploaded' for finalization
@@ -4241,11 +5001,27 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
     const hasFiles = v2UploadManager.hasItems
     const hasUploadingItems = v2Files.some(f => f.status === 'uploading')
 
+    const shouldPauseParentGridThumbnailPoll = useMemo(
+        () => batchStatus === 'uploading' || hasUploadingItems,
+        [batchStatus, hasUploadingItems]
+    )
+
+    useEffect(() => {
+        if (typeof onGridTransferActiveChange !== 'function') {
+            return undefined
+        }
+        onGridTransferActiveChange(shouldPauseParentGridThumbnailPoll)
+        return () => {
+            onGridTransferActiveChange(false)
+        }
+    }, [shouldPauseParentGridThumbnailPoll, onGridTransferActiveChange])
+
     const hasActiveUploads = useMemo(
         () =>
             hasUploadingItems ||
             batchStatus === 'finalizing' ||
-            batchStatus === 'uploading',
+            batchStatus === 'uploading' ||
+            batchStatus === 'processing_followup',
         [hasUploadingItems, batchStatus]
     )
 
@@ -4260,9 +5036,18 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                 batchStatus === 'partial_success' ||
                 batchStatus === 'uploading' ||
                 batchStatus === 'finalizing' ||
-                batchStatus === 'complete'),
+                batchStatus === 'complete' ||
+                batchStatus === 'processing_followup'),
         [hasFiles, hasUploadingItems, batchStatus, isFinalizeSuccess]
     )
+
+    /** Aligns with UploadTray queue height lock — stable shell so rows/progress updates do not resize the modal. */
+    const uploadModalLayoutLock = hasFiles && v2Files.length >= 8
+
+    const supportSessionId = useMemo(() => {
+        const f = v2Files.find((x) => x.uploadSessionId)
+        return f?.uploadSessionId || null
+    }, [v2Files])
 
     // Warn before closing tab/browser when uploads are in progress
     useEffect(() => {
@@ -4276,18 +5061,139 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
         return () => window.removeEventListener('beforeunload', handler)
     }, [hasActiveUploads])
 
-    const floatingTrayUploads = useMemo(
-        () =>
-            v2UploadManager.items.map((item) => ({
-                id: item.clientId,
-                name: item.originalFilename || item.file?.name || 'File',
-                progress:
-                    item.uploadStatus === 'complete'
-                        ? 100
-                        : Math.min(100, Math.round(Number(item.progress) || 0)),
-            })),
-        [v2UploadManager.items]
-    )
+    const trayHeadline = useMemo(() => {
+        const n = v2UploadManager.items.length
+        if (n === 0) return 'Uploads'
+        if (isFinalizeSuccess) return 'Upload complete'
+        if (finalizeError && batchStatus !== 'finalizing') return 'Upload needs attention'
+        if (batchStatus === 'partial_success') return `Upload complete · issues`
+        if (batchStatus === 'finalizing') return `Finalizing ${n} asset${n === 1 ? '' : 's'}`
+        if (batchStatus === 'processing_followup') return `Processing ${n} asset${n === 1 ? '' : 's'}`
+        if (batchStatus === 'uploading' || hasUploadingItems) return `Uploading ${n} asset${n === 1 ? '' : 's'}`
+        if (batchStatus === 'ready' && canFinalizeV2) return `${n} asset${n === 1 ? '' : 's'} ready`
+        if (batchStatus === 'complete') return 'Upload complete'
+        return `${n} asset${n === 1 ? '' : 's'}`
+    }, [
+        v2UploadManager.items.length,
+        batchStatus,
+        hasUploadingItems,
+        canFinalizeV2,
+        isFinalizeSuccess,
+        finalizeError,
+    ])
+
+    const trayPhase = useMemo(() => {
+        const c = computeUploadCounts(v2UploadManager.items)
+        if (isFinalizeSuccess) return 'complete'
+        if (finalizeError && batchStatus !== 'finalizing') return 'complete_issues'
+        if (batchStatus === 'partial_success' || (c.failed > 0 && batchStatus !== 'uploading' && !hasUploadingItems))
+            return 'complete_issues'
+        if (batchStatus === 'finalizing') return 'finalizing'
+        if (batchStatus === 'processing_followup') return 'processing_previews'
+        if (batchStatus === 'ready') return 'ready'
+        if (batchStatus === 'complete') return 'complete'
+        if (c.failed > 0 && c.failed === v2UploadManager.items.length) return 'failed'
+        if (hasUploadingItems || batchStatus === 'uploading') return 'uploading'
+        return 'uploading'
+    }, [v2UploadManager.items, batchStatus, hasUploadingItems, isFinalizeSuccess, finalizeError])
+
+    const trayCountLine = useMemo(() => {
+        const items = v2UploadManager.items
+        const n = items.length
+        const c = computeUploadCounts(items)
+        if (batchStatus === 'finalizing') {
+            return 'Creating assets on the server…'
+        }
+        if (batchStatus === 'processing_followup' && postFinalizeSummary) {
+            const { previewsReady, processing, previewFailed } = postFinalizeSummary
+            const bits = [`${previewsReady} preview${previewsReady === 1 ? '' : 's'} ready`]
+            if (processing > 0) bits.push(`${processing} processing`)
+            if (previewFailed > 0) bits.push(`${previewFailed} preview issue${previewFailed === 1 ? '' : 's'}`)
+            return bits.join(' · ')
+        }
+        if (hasUploadingItems || batchStatus === 'uploading') {
+            const bits = []
+            const done = Math.max(0, n - c.uploading - c.queued - c.failed)
+            if (done > 0) bits.push(`${done} ready`)
+            const up = c.uploading + c.queued
+            if (up > 0) bits.push(`${up} uploading`)
+            if (c.failed > 0) bits.push(`${c.failed} failed`)
+            return bits.join(' · ') || `${n} file${n === 1 ? '' : 's'}`
+        }
+        if (batchStatus === 'ready' && canFinalizeV2) {
+            const bits = []
+            const readyish = c.uploaded + c.ready
+            if (readyish > 0) bits.push(`${readyish} ready to finalize`)
+            if (c.processing > 0) bits.push(`${c.processing} processing`)
+            if (c.failed > 0) bits.push(`${c.failed} failed`)
+            return bits.join(' · ') || 'Tap Finalize when ready'
+        }
+        if (batchStatus === 'partial_success' || c.failed > 0) {
+            return `${c.failed} failed · ${Math.max(0, n - c.failed)} ok`
+        }
+        if (isFinalizeSuccess || batchStatus === 'complete') {
+            return 'You can close this tray or expand for details.'
+        }
+        return null
+    }, [
+        v2UploadManager.items,
+        batchStatus,
+        hasUploadingItems,
+        canFinalizeV2,
+        postFinalizeSummary,
+        isFinalizeSuccess,
+    ])
+
+    const trayAggregateProgress = useMemo(() => {
+        const items = v2UploadManager.items
+        const n = items.length
+        if (!n) return 0
+        if (batchStatus === 'finalizing') return null
+        if (batchStatus === 'processing_followup' && postFinalizeSummary?.assetsCreated > 0) {
+            const { assetsCreated, previewsReady, processing, previewFailed } = postFinalizeSummary
+            const settled = previewsReady + previewFailed
+            if (processing === 0) return 100
+            return Math.min(99, Math.round((settled / Math.max(1, assetsCreated)) * 100))
+        }
+        if (batchStatus === 'processing_followup') return null
+        return Math.round(computeOverallBatchUploadPercent(items))
+    }, [v2UploadManager.items, batchStatus, postFinalizeSummary])
+
+    const trayFileRows = useMemo(() => {
+        const rows = v2UploadManager.items.map((it) => {
+            const name = it.originalFilename || it.file?.name || 'File'
+            const life = it.lifecycle || ''
+            const failed = it.uploadStatus === 'failed' || life === 'failed'
+            const finalizedDone =
+                life === 'finalized' &&
+                (!it.assetId || isTerminalPipelineThumb(it.pipelineThumbStatus))
+            let rowKind = 'active'
+            if (failed) rowKind = 'failed'
+            else if (finalizedDone) rowKind = 'complete'
+            const err = it.error
+            const detail =
+                failed && err
+                    ? typeof err.message === 'string'
+                        ? err.message
+                        : err.normalized?.message || 'Upload failed'
+                    : null
+            const progress =
+                rowKind === 'active' && it.uploadStatus === 'uploading'
+                    ? Math.min(100, Math.round(Number(it.progress) || 0))
+                    : null
+            return { id: it.clientId, name, rowKind, detail, progress }
+        })
+        const order = { failed: 0, active: 1, complete: 2 }
+        return rows.sort((a, b) => order[a.rowKind] - order[b.rowKind])
+    }, [v2UploadManager.items])
+
+    const trayShowDismiss =
+        !hasUploadingItems &&
+        batchStatus !== 'finalizing' &&
+        batchStatus !== 'processing_followup'
+
+    const trayShowFinalize =
+        canFinalizeV2 && batchStatus !== 'finalizing' && !isFinalizeSuccess && batchStatus !== 'processing_followup'
 
     const handleSuccessViewAssets = useCallback(() => {
         try {
@@ -4336,9 +5242,18 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
     }, [v2Files])
 
     // Tray summary counts for minimized view
-    const trayCompleted = v2UploadManager.items.filter((i) => i.uploadStatus === 'complete').length
-    const trayTotal = v2UploadManager.items.length
-    const trayFailed = v2UploadManager.items.filter((i) => i.uploadStatus === 'failed').length
+    const handleRetryTrayItem = useCallback(
+        (clientId) => {
+            const f = v2Files.find((x) => x.clientId === clientId)
+            if (!f) return
+            if (f.status === 'failed' && f.error?.stage === 'finalize') {
+                retryFinalize(clientId)
+            } else {
+                retryUpload(clientId)
+            }
+        },
+        [v2Files, retryFinalize, retryUpload]
+    )
 
     return (
         <>
@@ -4346,73 +5261,60 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
             <div
                 data-upload-dialog-root
                 className="fixed bottom-4 right-4 z-50"
+                style={uploadScrollbarCssVars}
                 role="dialog"
                 aria-label="Upload progress"
             >
-                {floatingTrayUploads.length > 0 ? (
-                    <FloatingUploadProgressTray
-                        uploads={floatingTrayUploads}
-                        onExpand={handleExpandFromTray}
-                    >
-                        <MinimizedTrayFooter
-                            batchStatus={batchStatus}
-                            trayCompleted={trayCompleted}
-                            trayTotal={trayTotal}
-                            trayFailed={trayFailed}
-                            hasUploadingItems={hasUploadingItems}
-                            canFinalizeV2={canFinalizeV2}
-                            isFinalizeSuccess={isFinalizeSuccess}
-                            brandPrimary={brandPrimary}
-                            onFinalize={handleFinalizeV2}
-                            onCloseTray={() => {
-                                resetV2State()
-                                onClose()
-                            }}
-                        />
-                    </FloatingUploadProgressTray>
-                ) : (
-                    <div className="flex w-80 flex-col gap-3 rounded-xl border border-gray-200 bg-white p-4 shadow-xl">
-                        <div className="flex items-center justify-between gap-2">
-                            <p className="text-sm font-medium text-gray-900">Uploads</p>
-                            <button
-                                type="button"
-                                onClick={handleExpandFromTray}
-                                className="text-xs font-medium text-primary hover:underline"
-                            >
-                                Expand
-                            </button>
-                        </div>
-                        <MinimizedTrayFooter
-                            batchStatus={batchStatus}
-                            trayCompleted={trayCompleted}
-                            trayTotal={trayTotal}
-                            trayFailed={trayFailed}
-                            hasUploadingItems={hasUploadingItems}
-                            canFinalizeV2={canFinalizeV2}
-                            isFinalizeSuccess={isFinalizeSuccess}
-                            brandPrimary={brandPrimary}
-                            onFinalize={handleFinalizeV2}
-                            onCloseTray={() => {
-                                resetV2State()
-                                onClose()
-                            }}
-                        />
-                    </div>
-                )}
+                <FloatingUploadProgressTray
+                    title={trayHeadline}
+                    countLine={trayCountLine}
+                    phase={trayPhase}
+                    aggregateProgress={trayAggregateProgress}
+                    brandPrimary={brandPrimary}
+                    listExpanded={trayUploadDetails}
+                    onToggleList={() => {
+                        setTrayUploadDetails((v) => {
+                            const next = !v
+                            if (!next) setTrayListShowAll(false)
+                            return next
+                        })
+                    }}
+                    listShowAll={trayListShowAll}
+                    onToggleShowAll={() => setTrayListShowAll((s) => !s)}
+                    fileRows={trayFileRows}
+                    finalizeError={finalizeError}
+                    isFinalizeSuccess={isFinalizeSuccess}
+                    showFinalizeButton={trayShowFinalize}
+                    onFinalize={handleFinalizeV2}
+                    showDismiss={trayShowDismiss}
+                    onDismiss={() => {
+                        resetV2State()
+                        onClose()
+                    }}
+                    onExpandDialog={handleExpandFromTray}
+                    onRetryFile={handleRetryTrayItem}
+                />
             </div>
         ) : (
         <div
             data-upload-dialog-root
-            className="fixed inset-0 z-50 overflow-y-auto"
+            className="jp-upload-modal-scroll fixed inset-0 z-50 flex max-h-[100dvh] items-center justify-center overflow-y-auto p-4 sm:p-6"
+            style={uploadScrollbarCssVars}
             aria-labelledby="modal-title"
             role="dialog"
             aria-modal="true"
         >
-            <div className="flex min-h-screen items-center justify-center px-4 py-8 text-center sm:px-6 sm:py-10">
+            <div className="relative flex w-full min-h-0 max-w-4xl items-stretch justify-center">
                 {/* Background overlay */}
                 <div
                     className="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity"
-                    onClick={!hasUploadingItems && batchStatus !== 'finalizing' ? onClose : undefined}
+                    onClick={
+                        !hasUploadingItems &&
+                        batchStatus !== 'finalizing' &&
+                        batchStatus !== 'processing_followup'
+                            ? onClose
+                            : undefined
+                    }
                 />
 
                 {/* Success — viewport-fixed so the card stays centered after long forms (not the tall modal box). */}
@@ -4465,7 +5367,8 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                             </div>
                             <h3 className="text-lg font-semibold text-gray-900">Upload complete</h3>
                             <p className="mt-1 text-sm text-gray-500">
-                                Your assets are ready. AI enhancements will continue in the background.
+                                Your files are in the library and previews have finished processing for this batch. AI
+                                tagging or metadata may still run in the background if enabled.
                             </p>
                             <div className="mt-6 flex flex-wrap justify-center gap-3">
                                 <button
@@ -4490,11 +5393,21 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                     </div>
                 )}
 
-                {/* Modal panel - wider for Phase 3 layout; flex parent keeps vertical + horizontal center at all breakpoints */}
-                <div className="relative z-10 w-full max-w-4xl transform overflow-hidden rounded-lg bg-white text-left shadow-xl transition-all">
-                    <div className={`bg-white px-4 pt-5 pb-4 sm:p-6 relative ${isFinalizeSuccess ? 'opacity-20 pointer-events-none' : ''}`}>
+                {/* Modal panel: fixed height for multi-file batches (stable layout); max-h only for empty/small pickers */}
+                <div
+                    className={cn(
+                        'relative z-10 flex w-full min-h-0 flex-col overflow-hidden rounded-lg bg-white text-left shadow-xl',
+                        uploadModalLayoutLock
+                            ? 'h-[min(90vh,calc(100dvh-2rem))]'
+                            : 'max-h-[min(90vh,calc(100dvh-2rem))]',
+                    )}
+                >
+                    <div
+                        className={`relative flex min-h-0 flex-1 flex-col overflow-hidden bg-white ${isFinalizeSuccess ? 'opacity-20 pointer-events-none' : ''}`}
+                    >
+                        <div className="shrink-0 border-b border-gray-100 px-4 pb-3 pt-5 sm:px-6">
                         {/* Header */}
-                        <div className="flex items-center justify-between mb-4">
+                        <div className="flex items-center justify-between">
                             <h3 className="text-lg font-medium leading-6 text-gray-900" id="modal-title">
                                 Add {defaultAssetType === 'asset' ? 'Asset' : DELIVERABLES_PAGE_LABEL_SINGULAR}
                             </h3>
@@ -4509,7 +5422,9 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                                         <ChevronRightIcon className="h-5 w-5" />
                                     </button>
                                 )}
-                                {!hasUploadingItems && batchStatus !== 'finalizing' && (
+                                {!hasUploadingItems &&
+                                    batchStatus !== 'finalizing' &&
+                                    batchStatus !== 'processing_followup' && (
                                     <button
                                         type="button"
                                         className="text-gray-400 hover:text-gray-500"
@@ -4531,9 +5446,25 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                                 )}
                             </div>
                         </div>
+                        </div>
 
                             {/* Asset Type - Hidden (used internally for filtering and finalization) */}
 
+                        <div
+                            className={cn(
+                                'jp-upload-modal-scroll min-h-0 flex-1 overflow-y-auto overscroll-y-contain px-4 py-3 sm:px-6',
+                                uploadModalLayoutLock && '[scrollbar-gutter:stable]',
+                            )}
+                        >
+                            {isContributor && (assetApprovalRequired || approvalInfo.approvalRequired) && (
+                                <div className="mb-4">
+                                    <ApprovalNotice
+                                        assetApprovalRequired={assetApprovalRequired}
+                                        metadataApprovalRequired={approvalInfo.approvalRequired}
+                                        pendingMetadataCount={approvalInfo.pendingMetadataCount}
+                                    />
+                                </div>
+                            )}
                         {/* File Drop Zone - always visible */}
                         {!hasFiles ? (
                             <div className="mb-4">
@@ -4633,17 +5564,20 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                                             })
                                         )
                                     }}
-                                    disabled={batchStatus === 'finalizing' || isFinalizeSuccess}
+                                    disabled={batchStatus === 'finalizing' ||
+                                        batchStatus === 'processing_followup' ||
+                                        isFinalizeSuccess}
                                 />
 
                                 {/* Upload Tray — files first, then metadata filters below */}
                                 {/* CLEAN UPLOADER V2: UploadTray now uses v2Files state */}
                                 <UploadTray
                                     uploadManager={v2UploadManager}
+                                    batchStatus={batchStatus}
                                     onRemoveItem={(clientId) => {
-                                        // Remove file from v2Files state
                                         removeFile(clientId)
                                     }}
+                                    onRetryItem={handleRetryTrayItem}
                                     disabled={batchStatus === 'finalizing' || isFinalizeSuccess}
                                 />
 
@@ -4661,12 +5595,14 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                                 )}
 
                                 {/* Category only — Collections are in General metadata group (seeder: group_key general) */}
-                                <div className="flex flex-col gap-3 pt-4 border-t border-gray-200 mt-4">
+                                <div className="flex flex-col gap-2 pt-3 border-t border-gray-200 mt-3">
                                     <GlobalMetadataPanel
                                         uploadManager={v2UploadManager}
                                         categories={filteredCategories}
                                         onCategoryChange={handleCategoryChangeV2}
-                                        disabled={batchStatus === 'finalizing' || isFinalizeSuccess}
+                                        disabled={batchStatus === 'finalizing' ||
+                                        batchStatus === 'processing_followup' ||
+                                        isFinalizeSuccess}
                                         inline
                                         inputClassName="min-w-0 flex-1"
                                     />
@@ -4684,7 +5620,7 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
 
                                 {/* Dynamic Metadata Fields (Creative, General, Legal/Rights) — below uploads */}
                                 {selectedCategoryId && (
-                                    <div className="space-y-6">
+                                    <div className="space-y-3">
                                             {isLoadingMetadataSchema ? (
                                                 <div className="text-center py-4">
                                                     <ArrowPathIcon className="h-5 w-5 text-gray-400 animate-spin mx-auto" />
@@ -4695,7 +5631,9 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                                                     groups={uploadMetadataSchema.groups || []}
                                                     values={globalMetadataDraft}
                                                     onChange={handleMetadataFieldChange}
-                                                    disabled={batchStatus === 'finalizing' || isFinalizeSuccess}
+                                                    disabled={batchStatus === 'finalizing' ||
+                                        batchStatus === 'processing_followup' ||
+                                        isFinalizeSuccess}
                                                     showErrors={showMetadataErrors}
                                                     onValidationAttempt={() => {
                                                         setShowMetadataErrors(true)
@@ -4710,6 +5648,7 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                                                     } : null}
                                                     tagFieldInputRef={tagFieldInputRef}
                                                     defaultCollapsedGroupKeys={defaultCollapsedGroups}
+                                                    compact
                                                 />
                                             ) : (
                                                 <div className="rounded-md bg-gray-50 border border-gray-200 p-3">
@@ -4723,169 +5662,486 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
 
                                 {/* Starred: not in uploader — set from asset drawer / detail after upload (Assets & Deliverables share this dialog). */}
 
+                                {batchFileCapNotice && v2Files.length > 0 ? (
+                                    <div
+                                        className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-950 shadow-sm"
+                                        role="status"
+                                    >
+                                        <div className="flex flex-wrap items-start justify-between gap-2">
+                                            <div className="min-w-0 space-y-1">
+                                                {batchFileCapNotice.kind === 'queue_full' ? (
+                                                    <p className="text-xs font-semibold leading-snug">
+                                                        Queue is full ({batchFileCapNotice.cap} files max per batch)
+                                                    </p>
+                                                ) : batchFileCapNotice.kind === 'trimmed' ? (
+                                                    <p className="text-xs font-semibold leading-snug">
+                                                        Partial batch: added {batchFileCapNotice.added} of{' '}
+                                                        {batchFileCapNotice.selected} selected files
+                                                    </p>
+                                                ) : batchFileCapNotice.kind === 'user_declined_trim' ? (
+                                                    <p className="text-xs font-semibold leading-snug">
+                                                        No files were added (you cancelled the partial batch)
+                                                    </p>
+                                                ) : (
+                                                    <p className="text-xs font-semibold leading-snug">Upload queue notice</p>
+                                                )}
+                                                <p className="text-[11px] leading-snug text-amber-900/90">
+                                                    Each batch is limited to {batchFileCapNotice.cap} files so preflight and
+                                                    uploads stay reliable. Use the row <strong>Remove (×)</strong> control or
+                                                    cancel in-progress items to free slots; use <strong>Retry</strong> on
+                                                    failed rows after fixing issues. To upload more than {batchFileCapNotice.cap}{' '}
+                                                    files, finalize this batch (or clear the queue), then start another upload.
+                                                </p>
+                                            </div>
+                                            <button
+                                                type="button"
+                                                className="shrink-0 rounded-md border border-amber-300/80 bg-white px-2 py-1 text-[11px] font-semibold text-amber-950 hover:bg-amber-100/80"
+                                                onClick={() => setBatchFileCapNotice(null)}
+                                            >
+                                                Dismiss
+                                            </button>
+                                        </div>
+                                    </div>
+                                ) : null}
+
                                 {/* Phase 2.5 Step 3: Dev-only diagnostics panel */}
                                 {/* Read-only panel showing normalized errors and upload session info */}
                                 <DevUploadDiagnostics files={v2Files} />
+
+                                {!finalizeUiBackground && batchStatus === 'finalizing' && v2Files.length > 0 && (
+                                    <div className="rounded-lg border border-indigo-100 bg-indigo-50 px-4 py-3 text-sm text-indigo-950 shadow-sm">
+                                        <p className="font-medium">Finalizing upload — creating assets</p>
+                                        <p className="mt-1 text-xs text-indigo-900/90">
+                                            Queuing processing jobs on the server. This step can take one to three minutes for
+                                            large batches. You can minimize and keep working — uploads continue in the
+                                            background.
+                                        </p>
+                                        {canMinimize && (
+                                            <button
+                                                type="button"
+                                                onClick={handleMinimize}
+                                                className="mt-2 text-xs font-semibold text-indigo-800 underline decoration-indigo-300 underline-offset-2 hover:text-indigo-950"
+                                            >
+                                                Continue in background
+                                            </button>
+                                        )}
+                                    </div>
+                                )}
+                                {!finalizeUiBackground &&
+                                    batchStatus === 'processing_followup' &&
+                                    v2Files.length > 0 &&
+                                    !isFinalizeSuccess && (
+                                    <div
+                                        className="rounded-lg border border-violet-100 bg-violet-50 px-4 py-3 text-sm text-violet-950 shadow-sm"
+                                        role="status"
+                                        aria-live="polite"
+                                    >
+                                        <p className="font-medium">Files uploaded. We’re preparing previews.</p>
+                                        <p className="mt-1 text-xs text-violet-900/90">
+                                            Upload is complete for these files, but thumbnails and metadata may still be
+                                            processing. This can take a few minutes for large batches. AI analysis (if
+                                            enabled) also runs in the background.
+                                        </p>
+                                        <ul className="mt-2 grid gap-1 text-xs text-violet-900/95 sm:grid-cols-2">
+                                            <li>
+                                                Assets created:{' '}
+                                                <span className="font-semibold tabular-nums">
+                                                    {postFinalizeSummary.assetsCreated}
+                                                </span>
+                                            </li>
+                                            <li>
+                                                Previews ready:{' '}
+                                                <span className="font-semibold tabular-nums">
+                                                    {postFinalizeSummary.previewsReady}
+                                                </span>
+                                            </li>
+                                            <li>
+                                                Still processing:{' '}
+                                                <span className="font-semibold tabular-nums">
+                                                    {postFinalizeSummary.processing}
+                                                </span>
+                                            </li>
+                                            <li>
+                                                Preview issues:{' '}
+                                                <span className="font-semibold tabular-nums">
+                                                    {postFinalizeSummary.previewFailed}
+                                                </span>
+                                            </li>
+                                        </ul>
+                                        <div className="mt-3 flex flex-wrap items-center gap-3 text-xs">
+                                            <a
+                                                href="/app/assets"
+                                                className="font-semibold text-violet-900 underline decoration-violet-300 underline-offset-2 hover:text-violet-950"
+                                            >
+                                                Open library
+                                            </a>
+                                            {supportSessionId ? (
+                                                <span className="text-violet-800/80" title="Reference for support">
+                                                    Session:{' '}
+                                                    <code className="rounded bg-white/70 px-1 py-0.5 text-[11px]">
+                                                        {supportSessionId}
+                                                    </code>
+                                                </span>
+                                            ) : null}
+                                        </div>
+                                        {canMinimize && (
+                                            <button
+                                                type="button"
+                                                onClick={handleMinimize}
+                                                className="mt-2 text-xs font-semibold text-violet-900 underline decoration-violet-300 underline-offset-2 hover:text-violet-950"
+                                            >
+                                                Continue browsing — keep progress in the tray
+                                            </button>
+                                        )}
+                                    </div>
+                                )}
+                                {v2Files.length > 0 &&
+                                    batchStatus !== 'finalizing' &&
+                                    (preflightUi.loading ||
+                                        preflightUi.error ||
+                                        (preflightUi.summary?.rejected_count ?? 0) > 0 ||
+                                        (preflightUi.rejected && preflightUi.rejected.length > 0) ||
+                                        Object.keys(preflightUi.summary?.rejected_counts_by_code || {}).length > 0) && (
+                                    <div
+                                        className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 shadow-sm"
+                                        role="status"
+                                    >
+                                        {preflightUi.loading ? (
+                                            <p className="text-xs text-gray-600">Checking files with the server…</p>
+                                        ) : preflightUi.error ? (
+                                            <p className="text-xs text-red-700">{preflightUi.error}</p>
+                                        ) : (
+                                            <>
+                                                <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-gray-800">
+                                                    {(preflightUi.summary?.rejected_count ?? 0) > 0 ? (
+                                                        <span className="text-xs font-medium text-amber-900">
+                                                            {preflightUi.summary.rejected_count} skipped
+                                                        </span>
+                                                    ) : null}
+                                                    {Object.entries(
+                                                        preflightUi.summary?.rejected_counts_by_code || {},
+                                                    ).map(([code, count]) => {
+                                                        const labels = {
+                                                            file_size_limit: 'too large',
+                                                            unsupported_type: 'unsupported',
+                                                            dangerous_file_type: 'blocked type',
+                                                            storage_limit: 'over storage',
+                                                            invalid_client_file_id: 'invalid id',
+                                                            invalid_name: 'invalid name',
+                                                            invalid_size: 'invalid size',
+                                                            email_verification_required: 'verification',
+                                                            brand_plan_limit: 'plan limit',
+                                                            collection_not_found: 'collection',
+                                                            collection_upload_denied: 'no access',
+                                                        }
+                                                        const label = labels[code] || code.replace(/_/g, ' ')
+                                                        return (
+                                                            <span
+                                                                key={code}
+                                                                className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-900"
+                                                            >
+                                                                {count} {label}
+                                                            </span>
+                                                        )
+                                                    })}
+                                                </div>
+                                                {preflightUi.rejected?.length > 0 ? (
+                                                    <details className="mt-1.5 text-xs text-gray-600">
+                                                        <summary className="cursor-pointer font-medium text-gray-700">
+                                                            View skipped files
+                                                        </summary>
+                                                        <ul className="jp-upload-modal-scroll mt-2 max-h-40 list-disc space-y-1 overflow-y-auto pl-5">
+                                                            {preflightUi.rejected.map((r) => (
+                                                                <li key={r.client_file_id || r.name}>
+                                                                    <span className="font-mono text-gray-800">{r.name || '—'}</span>
+                                                                    {r.reasons?.[0]?.message ? (
+                                                                        <span className="text-gray-600">
+                                                                            {' '}
+                                                                            — {r.reasons[0].message}
+                                                                        </span>
+                                                                    ) : null}
+                                                                </li>
+                                                            ))}
+                                                        </ul>
+                                                        <button
+                                                            type="button"
+                                                            className="mt-2 text-xs font-semibold text-indigo-600 hover:text-indigo-800"
+                                                            onClick={() => {
+                                                                const lines = (preflightUi.rejected || []).map((r) =>
+                                                                    `${r.name || ''}\t${(r.reasons && r.reasons[0]?.message) || ''}`.trim(),
+                                                                )
+                                                                void navigator.clipboard?.writeText?.(lines.join('\n'))
+                                                            }}
+                                                        >
+                                                            Copy skipped list
+                                                        </button>
+                                                    </details>
+                                                ) : null}
+                                                <button
+                                                    type="button"
+                                                    className="mt-2 text-xs font-medium text-gray-500 hover:text-gray-800"
+                                                    onClick={() =>
+                                                        setPreflightUi((s) => ({
+                                                            ...s,
+                                                            summary: null,
+                                                            rejected: [],
+                                                            error: null,
+                                                            warnings: [],
+                                                        }))
+                                                    }
+                                                >
+                                                    Dismiss
+                                                </button>
+                                            </>
+                                        )}
+                                    </div>
+                                )}
+                                {v2Files.length > 0 && v2Warnings.length > 0 && (
+                                    <div className="space-y-2">
+                                        {v2Warnings.map((warning, index) => (
+                                            <div
+                                                key={index}
+                                                className="flex items-center gap-2 rounded-lg border border-yellow-300 bg-yellow-50 px-3 py-2 text-sm text-yellow-800"
+                                            >
+                                                <ExclamationTriangleIcon className="h-4 w-4 shrink-0" aria-hidden />
+                                                <span>{warning}</span>
+                                            </div>
+                                        ))}
                                     </div>
                                 )}
 
-
-                        {/* Footer Actions */}
-                        <div className="mt-6">
-                            {/* CLEAN UPLOADER V2 — Warnings for missing required fields */}
-                            {v2Files.length > 0 && v2Warnings.length > 0 && (
-                                <div className="mb-4 space-y-2">
-                                    {v2Warnings.map((warning, index) => (
-                                        <div
-                                            key={index}
-                                            className="flex items-center gap-2 rounded-lg border border-yellow-300 bg-yellow-50 px-3 py-2 text-sm text-yellow-800"
+                                {isAdminOrBrandManager && v2Files.length > 0 && (
+                                    <div className="rounded-lg border border-gray-200 bg-white shadow-sm overflow-hidden">
+                                        <button
+                                            type="button"
+                                            className="flex w-full items-start justify-between gap-2 px-2.5 py-2 text-left hover:bg-gray-50/90"
+                                            onClick={() => setAiSuggestionsExpanded((v) => !v)}
+                                            aria-expanded={aiSuggestionsExpanded}
                                         >
-                                            <ExclamationTriangleIcon className="h-4 w-4 shrink-0" aria-hidden />
-                                            <span>{warning}</span>
-                                        </div>
-                                    ))}
-                                </div>
-                            )}
-
-                            {/* Phase J.3.1: Approval notice for contributors (non-blocking, informational only) */}
-                            {/* Show if asset approval is required OR metadata approval is required */}
-                            {isContributor && (assetApprovalRequired || approvalInfo.approvalRequired) && (
-                                <ApprovalNotice 
-                                    assetApprovalRequired={assetApprovalRequired}
-                                    metadataApprovalRequired={approvalInfo.approvalRequired}
-                                    pendingMetadataCount={approvalInfo.pendingMetadataCount}
-                                />
-                            )}
-
-                            {/* C9.2: Upload-time AI skip controls (Admin/Brand Manager only) — compact toggle rows (bulk-actions visual language) */}
-                            {isAdminOrBrandManager && v2Files.length > 0 && (
-                                <div className="mb-4 rounded-xl border border-gray-100 bg-white shadow-sm overflow-hidden">
-                                    <div className="px-3 py-2 border-b border-gray-100 bg-gradient-to-r from-gray-50/90 to-white">
-                                        <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                                            Enhancements (after upload)
-                                        </h4>
-                                        <p className="text-[11px] text-gray-400 mt-0.5 leading-snug">
-                                            Runs after finalize. Tag and field suggestions are independent — you can use one, both, or neither.
-                                        </p>
-                                    </div>
-                                    <div className="p-2 space-y-2">
-                                        {[
-                                            {
-                                                key: 'tagging',
-                                                checked: applyAiTagging,
-                                                onChange: setApplyAiTagging,
-                                                disabled: aiTaggingDisabled || batchStatus === 'finalizing' || isFinalizeSuccess,
-                                                title: 'AI tagging',
-                                                helper: 'Suggest tags from the image (shown in the asset drawer after processing)',
-                                                disabledNote: 'AI tagging is disabled for this tenant or brand.',
-                                                Icon: TagIcon,
-                                                iconBg: 'bg-violet-100',
-                                                iconColor: 'text-violet-700',
-                                            },
-                                            {
-                                                key: 'metadata',
-                                                checked: applyAiMetadata,
-                                                onChange: setApplyAiMetadata,
-                                                disabled: aiMetadataDisabled || batchStatus === 'finalizing' || isFinalizeSuccess,
-                                                title: 'AI metadata',
-                                                helper: 'Suggest structured fields (e.g. photo type, scene) in the drawer',
-                                                disabledNote: 'AI metadata generation is disabled for this tenant or brand.',
-                                                Icon: SparklesIcon,
-                                                iconBg: 'bg-indigo-100',
-                                                iconColor: 'text-indigo-700',
-                                            },
-                                        ].map(
-                                            ({
-                                                key,
-                                                checked,
-                                                onChange,
-                                                disabled,
-                                                title,
-                                                helper,
-                                                disabledNote,
-                                                Icon,
-                                                iconBg,
-                                                iconColor,
-                                            }) => (
-                                                <div
-                                                    key={key}
-                                                    className={`flex items-center gap-2.5 rounded-lg border border-gray-100 px-2.5 py-2 transition-colors ${
-                                                        disabled ? 'opacity-60' : 'hover:bg-gray-50/80'
-                                                    }`}
-                                                >
-                                                    <span
-                                                        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${iconBg}`}
-                                                    >
-                                                        <Icon className={`h-4 w-4 ${iconColor}`} aria-hidden />
-                                                    </span>
-                                                    <div className="min-w-0 flex-1">
-                                                        <p
-                                                            className={`text-sm font-medium leading-tight ${
-                                                                disabled ? 'text-gray-400' : 'text-gray-900'
+                                            <div className="min-w-0">
+                                                <h4 className="text-xs font-semibold text-gray-900">
+                                                    AI suggestions after upload
+                                                </h4>
+                                                <p className="text-[11px] text-gray-500 leading-snug mt-0.5">
+                                                    Suggest tags and structured metadata after files are processed.
+                                                </p>
+                                                {uploadFooterSnapshot.creditLine ? (
+                                                    <p className="text-[11px] text-gray-600 mt-0.5 tabular-nums">
+                                                        {uploadFooterSnapshot.creditLine}
+                                                    </p>
+                                                ) : null}
+                                            </div>
+                                            {aiSuggestionsExpanded ? (
+                                                <ChevronUpIcon className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" aria-hidden />
+                                            ) : (
+                                                <ChevronDownIcon className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" aria-hidden />
+                                            )}
+                                        </button>
+                                        {aiSuggestionsExpanded ? (
+                                            <div className="border-t border-gray-100 px-2.5 pb-2 pt-1.5 space-y-1.5">
+                                                {[
+                                                    {
+                                                        key: 'tagging',
+                                                        checked: applyAiTagging,
+                                                        onChange: setApplyAiTagging,
+                                                        disabled:
+                                                            aiTaggingDisabled ||
+                                                            batchStatus === 'finalizing' ||
+                                                            batchStatus === 'processing_followup' ||
+                                                            isFinalizeSuccess,
+                                                        title: 'AI tagging',
+                                                        disabledNote: 'AI tagging is disabled for this tenant or brand.',
+                                                        Icon: TagIcon,
+                                                        iconBg: 'bg-violet-100',
+                                                        iconColor: 'text-violet-700',
+                                                    },
+                                                    {
+                                                        key: 'metadata',
+                                                        checked: applyAiMetadata,
+                                                        onChange: setApplyAiMetadata,
+                                                        disabled:
+                                                            aiMetadataDisabled ||
+                                                            batchStatus === 'finalizing' ||
+                                                            batchStatus === 'processing_followup' ||
+                                                            isFinalizeSuccess,
+                                                        title: 'AI metadata',
+                                                        disabledNote: 'AI metadata is disabled for this tenant or brand.',
+                                                        Icon: SparklesIcon,
+                                                        iconBg: 'bg-indigo-100',
+                                                        iconColor: 'text-indigo-700',
+                                                    },
+                                                ].map(
+                                                    ({
+                                                        key,
+                                                        checked,
+                                                        onChange,
+                                                        disabled,
+                                                        title,
+                                                        disabledNote,
+                                                        Icon,
+                                                        iconBg,
+                                                        iconColor,
+                                                    }) => (
+                                                        <div
+                                                            key={key}
+                                                            className={`flex items-center gap-2 rounded-md border border-gray-100 px-2 py-1.5 ${
+                                                                disabled ? 'opacity-60' : 'hover:bg-gray-50/80'
                                                             }`}
                                                         >
-                                                            {title}
-                                                        </p>
-                                                        <p className="text-[11px] text-gray-500 leading-snug mt-0.5">
-                                                            {disabled ? disabledNote : helper}
-                                                        </p>
-                                                    </div>
-                                                    <Switch
-                                                        checked={checked}
-                                                        onChange={onChange}
-                                                        disabled={disabled}
-                                                        className="group relative inline-flex h-[22px] w-[38px] shrink-0 cursor-pointer items-center rounded-full border border-transparent bg-gray-200 transition-colors duration-200 ease-out focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 focus-visible:ring-offset-1 disabled:cursor-not-allowed"
-                                                        style={
-                                                            checked
-                                                                ? { backgroundColor: brandPrimary, ['--tw-ring-color']: brandPrimary }
-                                                                : undefined
-                                                        }
-                                                    >
-                                                        <span
-                                                            aria-hidden
-                                                            className={`pointer-events-none inline-block h-[18px] w-[18px] rounded-full bg-white shadow transition duration-200 ease-out ${
-                                                                checked ? 'translate-x-[18px]' : 'translate-x-0.5'
-                                                            }`}
-                                                        />
-                                                    </Switch>
-                                                </div>
-                                            )
-                                        )}
+                                                            <span
+                                                                className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md ${iconBg}`}
+                                                            >
+                                                                <Icon className={`h-3.5 w-3.5 ${iconColor}`} aria-hidden />
+                                                            </span>
+                                                            <div className="min-w-0 flex-1">
+                                                                <p
+                                                                    className={`text-xs font-medium leading-tight ${
+                                                                        disabled ? 'text-gray-400' : 'text-gray-900'
+                                                                    }`}
+                                                                >
+                                                                    {title}
+                                                                </p>
+                                                                {disabled ? (
+                                                                    <p className="text-[10px] text-gray-400 leading-snug mt-0.5">
+                                                                        {disabledNote}
+                                                                    </p>
+                                                                ) : null}
+                                                            </div>
+                                                            <Switch
+                                                                checked={checked}
+                                                                onChange={onChange}
+                                                                disabled={disabled}
+                                                                className="group relative inline-flex h-[22px] w-[38px] shrink-0 cursor-pointer items-center rounded-full border border-transparent bg-gray-200 transition-colors duration-200 ease-out focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 focus-visible:ring-offset-1 disabled:cursor-not-allowed"
+                                                                style={
+                                                                    checked
+                                                                        ? {
+                                                                              backgroundColor: brandPrimary,
+                                                                              ['--tw-ring-color']: brandPrimary,
+                                                                          }
+                                                                        : undefined
+                                                                }
+                                                            >
+                                                                <span
+                                                                    aria-hidden
+                                                                    className={`pointer-events-none inline-block h-[18px] w-[18px] rounded-full bg-white shadow transition duration-200 ease-out ${
+                                                                        checked ? 'translate-x-[18px]' : 'translate-x-0.5'
+                                                                    }`}
+                                                                />
+                                                            </Switch>
+                                                        </div>
+                                                    ),
+                                                )}
+                                                <p className="text-[10px] text-gray-500 leading-snug pt-0.5">
+                                                    Runs in background. You can also run suggestions later.
+                                                </p>
+                                            </div>
+                                        ) : null}
                                     </div>
-                                </div>
-                            )}
+                                )}
 
-                            {/* CLEAN UPLOADER V2 — Partial success banner */}
-                            {batchStatus === 'partial_success' && (
-                                <div className="mb-4 rounded-md bg-yellow-50 border border-yellow-200 p-3">
-                                    <div className="flex">
-                                        <div className="flex-shrink-0">
-                                            <svg className="h-5 w-5 text-yellow-400" viewBox="0 0 20 20" fill="currentColor">
-                                                <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
-                                            </svg>
-                                        </div>
-                                        <div className="ml-3">
-                                            <p className="text-sm text-yellow-800">
-                                                {(() => {
-                                                    const finalizedCount = v2Files.filter((f) => f.status === 'finalized').length
-                                                    const failedCount = v2Files.filter((f) => f.status === 'failed').length
-                                                    return (
-                                                        <>
-                                                            {finalizedCount} asset{finalizedCount !== 1 ? 's' : ''} created successfully. {failedCount} failed — review and retry.
-                                                        </>
-                                                    )
-                                                })()}
-                                            </p>
+                                {batchStatus === 'partial_success' && (
+                                    <div className="rounded-md bg-yellow-50 border border-yellow-200 p-3">
+                                        <div className="flex">
+                                            <div className="flex-shrink-0">
+                                                <svg className="h-5 w-5 text-yellow-400" viewBox="0 0 20 20" fill="currentColor">
+                                                    <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
+                                                </svg>
+                                            </div>
+                                            <div className="ml-3">
+                                                <p className="text-sm text-yellow-800">
+                                                    {(() => {
+                                                        const finalizedCount = v2Files.filter((f) => f.status === 'finalized').length
+                                                        const failedCount = v2Files.filter((f) => f.status === 'failed').length
+                                                        return (
+                                                            <>
+                                                                {finalizedCount} asset{finalizedCount !== 1 ? 's' : ''} created successfully. {failedCount} failed — review and retry.
+                                                            </>
+                                                        )
+                                                    })()}
+                                                </p>
+                                            </div>
                                         </div>
                                     </div>
-                                </div>
-                            )}
+                                )}
+                                    </div>
+                                )}
+                        </div>
 
-                            <div className="flex items-center justify-end gap-3">
+
+                        <div className="shrink-0 border-t border-gray-200 bg-gray-50/95 px-4 py-3 sm:px-6">
+                            {finalizeFooterHint ? (
+                                <p className="mb-2 text-xs text-gray-600" role="status">
+                                    {finalizeFooterHint}
+                                </p>
+                            ) : null}
+                            <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-end sm:gap-3">
                                 {/* Status indicator - Show v2 counter when v2Files exist, otherwise legacy */}
                                 {v2Files.length > 0 ? (
-                                    <div className="flex-1 text-sm text-gray-600">
-                                        {v2Files.length} / {v2Files.length} upload{v2Files.length !== 1 ? 's' : ''}
+                                    <div className="min-w-0 flex-1 text-xs text-gray-600 space-y-1.5 sm:pr-2">
+                                        <div
+                                            className="h-2 w-full max-w-md overflow-hidden rounded-full bg-gray-200"
+                                            role="progressbar"
+                                            aria-valuenow={uploadFooterSnapshot.percentComplete}
+                                            aria-valuemin={0}
+                                            aria-valuemax={100}
+                                            aria-label="Upload progress"
+                                        >
+                                            <div
+                                                className="h-full rounded-full transition-[width] duration-300 ease-out"
+                                                style={{
+                                                    width: `${uploadFooterSnapshot.percentComplete}%`,
+                                                    backgroundColor: brandPrimary,
+                                                }}
+                                            />
+                                        </div>
+                                        <p className="leading-snug">
+                                            <span className="font-semibold text-gray-900 tabular-nums">
+                                                {uploadFooterSnapshot.percentComplete}%
+                                            </span>
+                                            {uploadFooterSnapshot.readiness ? (
+                                                <>
+                                                    <span className="text-gray-400"> · </span>
+                                                    <span className="text-gray-700">{uploadFooterSnapshot.readiness}</span>
+                                                </>
+                                            ) : null}
+                                            <span className="text-gray-500 font-normal">
+                                                {' '}
+                                                <span className="tabular-nums">
+                                                    ({uploadFooterSnapshot.transferred}/{uploadFooterSnapshot.total} files)
+                                                </span>
+                                            </span>
+                                        </p>
+                                        {(uploadFooterSnapshot.counts.failed > 0 ||
+                                            uploadFooterSnapshot.counts.skipped > 0) && (
+                                            <p className="text-amber-900">
+                                                {uploadFooterSnapshot.counts.failed > 0 ? (
+                                                    <span className="tabular-nums">
+                                                        {uploadFooterSnapshot.counts.failed} failed
+                                                    </span>
+                                                ) : null}
+                                                {uploadFooterSnapshot.counts.failed > 0 &&
+                                                uploadFooterSnapshot.counts.skipped > 0 ? (
+                                                    <span className="text-gray-400"> · </span>
+                                                ) : null}
+                                                {uploadFooterSnapshot.counts.skipped > 0 ? (
+                                                    <span className="tabular-nums">
+                                                        {uploadFooterSnapshot.counts.skipped} skipped
+                                                    </span>
+                                                ) : null}
+                                            </p>
+                                        )}
+                                        {uploadFooterSnapshot.bytesRemaining != null ? (
+                                            <p className="text-gray-500">
+                                                Storage remaining after upload:{' '}
+                                                {formatBytesHuman(uploadFooterSnapshot.bytesRemaining)}
+                                            </p>
+                                        ) : null}
+                                        {largeBatchAiHelper ? (
+                                            <p className="text-gray-500">{largeBatchAiHelper}</p>
+                                        ) : null}
+                                        {lowCreditFooterHint ? (
+                                            <p className="text-amber-800">{lowCreditFooterHint}</p>
+                                        ) : null}
                                     </div>
                                 ) : files.length > 0 ? (
                                     <div className="flex-1 text-sm text-gray-600">
@@ -4918,12 +6174,13 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                                         })()}
                                     </div>
                                 ) : null}
-                                
+
+                                <div className="flex max-w-full shrink-0 flex-nowrap items-center justify-end gap-2 overflow-x-auto pb-0.5 sm:gap-3">
                                 {canMinimize && (
                                     <button
                                         type="button"
                                         onClick={handleMinimize}
-                                        className="text-sm text-gray-500 hover:text-gray-700"
+                                        className="shrink-0 text-sm text-gray-500 hover:text-gray-700"
                                         title="Continue in background — browse while uploads run"
                                     >
                                         Continue in background
@@ -4931,7 +6188,9 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                                 )}
                                 
                                 {(() => {
-                                    const disableClose = batchStatus === 'finalizing' || isFinalizeSuccess
+                                    const disableClose = batchStatus === 'finalizing' ||
+                                        batchStatus === 'processing_followup' ||
+                                        isFinalizeSuccess
                                     
                                     return (
                                         <button
@@ -4941,12 +6200,20 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                                                 onClose()
                                             }}
                                             disabled={disableClose}
-                                            className={`rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium ${
+                                            className={`shrink-0 rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium ${
                                                 disableClose
                                                     ? 'text-gray-400 cursor-not-allowed opacity-50'
                                                     : 'text-gray-700 hover:bg-gray-50'
                                             }`}
-                                            title={disableClose ? (isFinalizeSuccess ? 'Assets created successfully. Dialog closing...' : 'Finalizing uploads…') : undefined}
+                                            title={
+                                                disableClose
+                                                    ? isFinalizeSuccess
+                                                        ? 'Assets created successfully. Dialog closing...'
+                                                        : batchStatus === 'processing_followup'
+                                                          ? 'Preparing previews — use “Continue in background” to browse, or wait here.'
+                                                          : 'Finalizing uploads…'
+                                                    : undefined
+                                            }
                                         >
                                             {hasFiles ? 'Close' : 'Cancel'}
                                         </button>
@@ -4958,8 +6225,10 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                                 <button
                                         type="button"
                                         onClick={handleFinalizeV2}
-                                        disabled={!canFinalizeV2 || batchStatus === 'finalizing' || isFinalizeSuccess}
-                                        className={`rounded-md px-4 py-2 text-sm font-medium flex items-center gap-2 ${
+                                        disabled={!canFinalizeV2 || batchStatus === 'finalizing' ||
+                                        batchStatus === 'processing_followup' ||
+                                        isFinalizeSuccess}
+                                        className={`inline-flex min-w-[17.5rem] shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-md px-4 py-2 text-sm font-medium tabular-nums ${
                                             canFinalizeV2 && batchStatus !== 'finalizing' && !isFinalizeSuccess
                                                 ? 'text-white hover:opacity-90'
                                                 : 'bg-gray-300 text-gray-500 cursor-not-allowed'
@@ -4973,6 +6242,7 @@ export default function UploadAssetDialog({ open, onClose, defaultAssetType = 'a
                                         {finalizeButtonLabelV2}
                                 </button>
                                 )}
+                                </div>
                             </div>
                             
                             {/* Error message (only show if not already in blockingErrors) */}

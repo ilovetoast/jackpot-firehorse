@@ -25,6 +25,7 @@ import { validateMetadata } from '../../utils/metadataValidation'
  * @param {boolean} [props.showErrors] - Whether to show validation errors
  * @param {Function} [props.onValidationAttempt] - Callback when validation is attempted
  * @param {string[]} [props.defaultCollapsedGroupKeys] - Group keys (case-insensitive) that start collapsed on upload
+ * @param {boolean} [props.compact] - Tighter spacing for upload modal
  */
 export default function MetadataGroups({ 
     groups = [], 
@@ -36,6 +37,7 @@ export default function MetadataGroups({
     collectionProps = null,
     tagFieldInputRef = null,
     defaultCollapsedGroupKeys = null,
+    compact = false,
 }) {
     const { auth } = usePage().props
     const groupRefs = useRef({})
@@ -69,10 +71,14 @@ export default function MetadataGroups({
     }
 
     return (
-        <div className="space-y-4">
+        <div className={compact ? 'space-y-2' : 'space-y-4'}>
             {/* UX-1: Helper message for contributors when metadata approval is enabled */}
             {showApprovalMessage && (
-                <div className="rounded-md bg-gray-50 border border-gray-200 px-3 py-2">
+                <div
+                    className={`rounded-md bg-gray-50 border border-gray-200 ${
+                        compact ? 'px-2.5 py-1.5' : 'px-3 py-2'
+                    }`}
+                >
                     <p className="text-xs text-gray-600">
                         Metadata entered here will be reviewed before publishing.
                     </p>
@@ -116,6 +122,7 @@ export default function MetadataGroups({
                             defaultExpanded={defaultExpanded}
                             collectionProps={collectionProps}
                             tagFieldInputRef={tagFieldInputRef}
+                            compact={compact}
                         />
                     </div>
                 )

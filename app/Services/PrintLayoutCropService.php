@@ -312,6 +312,7 @@ final class PrintLayoutCropService
 
         try {
             $full->setIteratorIndex(0);
+            ImageOrientationNormalizer::imagickAutoOrientAndResetOrientation($full);
             if ($full->getImageAlphaChannel() !== Imagick::ALPHACHANNEL_UNDEFINED) {
                 $full->setImageBackgroundColor('#ffffff');
                 $full->setImageAlphaChannel(Imagick::ALPHACHANNEL_REMOVE);
@@ -392,6 +393,7 @@ final class PrintLayoutCropService
 
         try {
             $full->setIteratorIndex(0);
+            ImageOrientationNormalizer::imagickAutoOrientAndResetOrientation($full);
             if ($full->getImageAlphaChannel() !== Imagick::ALPHACHANNEL_UNDEFINED) {
                 $full->setImageBackgroundColor('#ffffff');
                 $full->setImageAlphaChannel(Imagick::ALPHACHANNEL_REMOVE);
