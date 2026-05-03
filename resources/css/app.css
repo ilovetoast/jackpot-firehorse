@@ -710,6 +710,25 @@ body.has-mobile-tabbar {
     will-change: auto;
 }
 
+/* Jackpot symbol mosaic — subtle brightness pulse + staggered delay (deterministic --jp-ph-delay) */
+@keyframes jp-ph-symbol-breathe {
+    0%,
+    100% {
+        filter: brightness(0.9) contrast(1.02);
+    }
+    50% {
+        filter: brightness(1.2) contrast(1.05);
+    }
+}
+.jp-ph-symbol {
+    animation: jp-ph-symbol-breathe 4.85s ease-in-out infinite;
+    animation-delay: var(--jp-ph-delay, 0ms);
+}
+.jp-ph-symbol-static {
+    animation: none;
+    filter: none;
+}
+
 @media (prefers-reduced-motion: reduce) {
     .jp-asset-placeholder-soft-pulse {
         animation: none;
@@ -722,5 +741,9 @@ body.has-mobile-tabbar {
         animation: none !important;
         filter: none;
         opacity: 1;
+    }
+    .jp-ph-symbol {
+        animation: none !important;
+        filter: none;
     }
 }
