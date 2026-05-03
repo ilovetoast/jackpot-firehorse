@@ -269,6 +269,7 @@ class PublicCollectionDownloadD6Test extends TestCase
                 'brand_slug' => $this->brand->slug,
                 'collection_slug' => $collection->slug,
             ]))
-            ->assertStatus(404);
+            ->assertStatus(403)
+            ->assertJsonFragment(['message' => 'Downloads are disabled for this collection.']);
     }
 }

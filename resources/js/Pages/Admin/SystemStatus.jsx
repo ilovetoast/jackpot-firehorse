@@ -380,6 +380,12 @@ export default function AdminSystemStatus({ systemHealth, recentFailedJobs, asse
                     {/* Recent Failed Jobs */}
                     <div className="mb-8">
                         <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-slate-500">Recent failed jobs</h2>
+                        <p className="mb-3 max-w-3xl text-xs text-gray-500">
+                            Rows come from the Laravel <code className="rounded bg-gray-100 px-1">failed_jobs</code> table (queue
+                            workers). The thumbnails card &quot;Failed&quot; count is assets with{' '}
+                            <code className="rounded bg-gray-100 px-1">thumbnail_status = failed</code> — those do not appear here
+                            unless the job also landed in <code className="rounded bg-gray-100 px-1">failed_jobs</code>.
+                        </p>
                         <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
                             {recentFailedJobs && recentFailedJobs.length > 0 ? (
                                 <div className="overflow-x-auto">

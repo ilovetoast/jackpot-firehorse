@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Support\DeployedAtManifest;
 use App\Models\AssetDerivativeFailure;
 use App\Models\AIAgentRun;
 use App\Models\Brand;
@@ -372,6 +373,7 @@ class AdminOverviewController extends Controller
      * Version metadata for the Command Center (env, optional .release-info.json, .deploy_timestamp).
      *
      * Optional JSON at base_path('.release-info.json'): commit|sha, committed_at|time, message, status_url
+     * When those are absent, {@see DeployedAtManifest} (same {@see base_path('DEPLOYED_AT')} as System status) fills commit, message, deploy time, and release id.
      */
     protected function buildReleasePayload(): array
     {
@@ -404,6 +406,30 @@ class AdminOverviewController extends Controller
         $committedAt = is_string($committedAt) && $committedAt !== '' ? trim($committedAt) : null;
         $statusUrl = is_string($statusUrl) && $statusUrl !== '' ? trim($statusUrl) : null;
         $deployedAt = $this->getLastDeployTimestamp();
+        $releaseId = null;
+
+        // Same DEPLOYED_AT file as System status (web-mirror-deploy.sh) — fills gaps when .release-info.json / APP_BUILD_* are absent.
+        $manifest = DeployedAtManifest::read();
+        if (is_array($manifest)) {
+            if ($commit === null && isset($manifest['Commit']) && trim((string) $manifest['Commit']) !== '') {
+                $commit = trim((string) $manifest['Commit']);
+            }
+            if ($message === null && isset($manifest['Message']) && trim((string) $manifest['Message']) !== '') {
+                $message = Str::limit(trim((string) $manifest['Message']), 160);
+            }
+            foreach (['Release', 'Release dir'] as $releaseKey) {
+                if (isset($manifest[$releaseKey]) && trim((string) $manifest[$releaseKey]) !== '') {
+                    $releaseId = trim((string) $manifest[$releaseKey]);
+                    break;
+                }
+            }
+            if (($deployedAt === null || $deployedAt === '') && isset($manifest['Deployed at'])) {
+                $fromManifest = trim((string) $manifest['Deployed at']);
+                if ($fromManifest !== '') {
+                    $deployedAt = $fromManifest;
+                }
+            }
+        }
 
         return [
             'commit' => $commit,
@@ -411,6 +437,7 @@ class AdminOverviewController extends Controller
             'message' => $message,
             'status_url' => $statusUrl,
             'deployed_at' => is_string($deployedAt) && $deployedAt !== '' ? $deployedAt : null,
+            'release_id' => $releaseId,
         ];
     }
 

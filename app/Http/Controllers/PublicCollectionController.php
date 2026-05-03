@@ -25,7 +25,8 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
  * Password-protected collection share links (V1): is_public + public_password_hash + optional token URL.
  * Legacy is_public without a password hash is not served to guests until a password is set.
  *
- * C10: Gated by tenant feature; when disabled, return 404 (not unauthorized).
+ * C10: Gated by tenant/plan and collection flags; unavailable share links use 404. Collection-level
+ * download-off returns 403 JSON with a clear message when the guest session is unlocked (see HandlesGuestCollectionShare).
  * D6: createDownload — collection-scoped ZIP from share page.
  */
 class PublicCollectionController extends Controller

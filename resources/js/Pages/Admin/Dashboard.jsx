@@ -93,7 +93,14 @@ function hasReleaseInfo(release) {
     if (!release || typeof release !== 'object') {
         return false
     }
-    return !!(release.commit || release.message || release.committed_at || release.deployed_at || release.status_url)
+    return !!(
+        release.commit ||
+        release.message ||
+        release.committed_at ||
+        release.deployed_at ||
+        release.status_url ||
+        (typeof release.release_id === 'string' && release.release_id.trim())
+    )
 }
 
 /** Short git SHA for display (full hash still available on System status). */
@@ -136,9 +143,12 @@ function buildCommitDeployMetric(release) {
     if (typeof r.status_url === 'string' && r.status_url.trim()) {
         subParts.push('External status page configured')
     }
+    if (typeof r.release_id === 'string' && r.release_id.trim()) {
+        subParts.push(`Release ${r.release_id.trim()}`)
+    }
     if (subParts.length === 0) {
         subParts.push(
-            'Set .release-info.json, .deploy_timestamp, or APP_BUILD_COMMIT / APP_BUILD_TIME in the app root or env.',
+            'Set DEPLOYED_AT (deploy script), .release-info.json, .deploy_timestamp, or APP_BUILD_COMMIT / APP_BUILD_TIME in the app root or env.',
         )
     }
 
@@ -150,12 +160,18 @@ function buildCommitDeployMetric(release) {
             value = committed.display
         } else if (msg) {
             value = 'Build'
+        } else if (typeof r.release_id === 'string' && r.release_id.trim()) {
+            const rid = r.release_id.trim()
+            value = rid.length > 22 ? `${rid.slice(0, 19)}…` : rid
         } else {
             value = 'Not reported'
         }
     }
 
-    const status = sha || deployed.display || committed.display ? 'stable' : 'unknown'
+    const status =
+        sha || deployed.display || committed.display || (typeof r.release_id === 'string' && r.release_id.trim())
+            ? 'stable'
+            : 'unknown'
 
     return {
         value,
@@ -184,6 +200,18 @@ function ReleaseInfoPanel({ release }) {
                 <div className="rounded-lg border border-slate-200/80 bg-white/70 p-3 shadow-sm">
                     <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Source (build)</p>
                     <dl className="mt-2 space-y-2">
+                        {typeof r.release_id === 'string' && r.release_id.trim() !== '' ? (
+                            <div className="flex gap-2 sm:gap-3">
+                                <dt className="w-[5.25rem] shrink-0 text-[10px] font-medium uppercase tracking-wide text-slate-400">
+                                    Release
+                                </dt>
+                                <dd className="min-w-0 flex-1">
+                                    <span className="break-all font-mono text-[11px] font-medium text-slate-800" title="Deploy release id">
+                                        {String(r.release_id).trim()}
+                                    </span>
+                                </dd>
+                            </div>
+                        ) : null}
                         <div className="flex gap-2 sm:gap-3">
                             <dt className="w-[5.25rem] shrink-0 text-[10px] font-medium uppercase tracking-wide text-slate-400">
                                 Commit
