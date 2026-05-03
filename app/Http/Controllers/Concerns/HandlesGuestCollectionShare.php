@@ -234,7 +234,11 @@ trait HandlesGuestCollectionShare
         $sort = in_array($sortRaw, ['newest', 'name', 'type'], true) ? $sortRaw : 'newest';
 
         $viewRaw = strtolower((string) $request->query('view', 'grid'));
-        $view = $viewRaw === 'list' ? 'list' : 'grid';
+        $view = match ($viewRaw) {
+            'list' => 'list',
+            'masonry' => 'masonry',
+            default => 'grid',
+        };
 
         return Inertia::render('Public/Collection', [
             'collection' => [
@@ -376,7 +380,11 @@ trait HandlesGuestCollectionShare
             return redirect()->back()->with('error', "This plan allows up to {$maxAssets} assets per download.");
         }
 
-        $estimatedBytes = $modelsForZip->sum(fn (Asset $a) => (int) ($a->metadata['file_size'] ?? $a->metadata['size'] ?? 0));
+        $estimatedBytes = $modelsForZip->sum(function (Asset $a) {
+            $fromMeta = (int) ($a->metadata['file_size'] ?? $a->metadata['size'] ?? 0);
+
+            return $fromMeta > 0 ? $fromMeta : (int) ($a->size_bytes ?? 0);
+        });
         $maxZipBytes = $this->planService->getMaxDownloadZipBytes($tenant);
         if ($estimatedBytes > $maxZipBytes) {
             if ($request->expectsJson()) {
@@ -679,6 +687,8 @@ trait HandlesGuestCollectionShare
             'mime_type' => $asset->mime_type,
             'file_extension' => $fileExtension,
             'size_bytes' => $asset->size_bytes,
+            'width' => ($asset->width ?? 0) > 0 ? (int) $asset->width : null,
+            'height' => ($asset->height ?? 0) > 0 ? (int) $asset->height : null,
             'thumbnail_url' => $thumbnailUrl,
             'final_thumbnail_url' => $thumbnailUrl,
             'thumbnail_url_lightbox' => $thumbnailUrlLightbox,

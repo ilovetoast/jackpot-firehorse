@@ -73,6 +73,8 @@ export default function AssetCard({
     gridSearchQuery = '',
     /** Uniform grid (Assets): 'cover' | 'contain' — passed from View menu; undefined uses ThumbnailPreview defaults */
     gridImageFit = undefined,
+    /** Public share: title + extension row under thumb (main asset grid style); hides ext pill on image */
+    splitTitleFooter = false,
 }) {
     const { auth } = usePage().props
     /** Brand Guidelines Google Fonts (no DAM file) — grid preview only, no drawer */
@@ -876,7 +878,7 @@ export default function AssetCard({
                                 {asset.health_status === 'critical' ? 'Critical' : 'Needs attention'}
                             </span>
                         )}
-                        {showInfo && !isGuidelines && (
+                        {showInfo && !isGuidelines && !splitTitleFooter && (
                             <span className="inline-flex items-center rounded-md bg-black/60 backdrop-blur-sm px-2 py-1 text-xs font-medium text-white uppercase tracking-wide">
                                 {fileExtension}
                             </span>
@@ -943,6 +945,57 @@ export default function AssetCard({
                         <span className="font-mono text-[10px] font-medium text-gray-600 flex-shrink-0">
                             {fileExtension}
                         </span>
+                    </div>
+                ) : splitTitleFooter ? (
+                    <div className={`mt-3 min-w-0 ${isCinematic ? 'px-0.5' : ''}`}>
+                        <div className="flex items-start justify-between gap-2 min-w-0">
+                            <span
+                                className={`min-w-0 flex-1 text-xs font-medium leading-snug line-clamp-2 transition-colors duration-200 group-hover:text-[var(--primary-color)] ${
+                                    isCinematic ? 'text-white drop-shadow-sm' : 'text-gray-900'
+                                }`}
+                            >
+                                {asset.title || asset.original_filename || 'Untitled Asset'}
+                            </span>
+                            <span
+                                className={`shrink-0 font-mono text-[10px] font-semibold tabular-nums uppercase tracking-wide ${
+                                    isCinematic ? 'text-white/55' : 'text-gray-500'
+                                }`}
+                            >
+                                {fileExtension}
+                            </span>
+                        </div>
+                        {isVideo && videoSummary && gridSearchQuery.trim() && (
+                            <p
+                                className={`mt-1 line-clamp-2 text-xs ${
+                                    isCinematic ? 'text-white/75' : 'text-gray-500'
+                                }`}
+                            >
+                                {videoSummary}
+                            </p>
+                        )}
+                        {isVideo && highlightTokens.length > 0 && videoTags.length > 0 && (
+                            <div className="mt-1 flex flex-wrap gap-1">
+                                {videoTags.slice(0, 8).map((tag, idx) => {
+                                    const label = String(tag)
+                                    const lower = label.toLowerCase()
+                                    const hit = highlightTokens.some((t) => lower.includes(t))
+                                    return (
+                                        <span
+                                            key={`${label}-${idx}`}
+                                            className={`max-w-full truncate rounded px-1 text-[10px] ${
+                                                hit
+                                                    ? 'bg-yellow-100 text-gray-900'
+                                                    : isCinematic
+                                                      ? 'bg-white/15 text-white/90'
+                                                      : 'bg-gray-100 text-gray-600'
+                                            }`}
+                                        >
+                                            {label}
+                                        </span>
+                                    )
+                                })}
+                            </div>
+                        )}
                     </div>
                 ) : (
                     <div className={`p-3 pt-2 ${isCinematic ? 'border-t border-white/20' : 'mt-1'}`}>

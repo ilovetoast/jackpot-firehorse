@@ -9,6 +9,7 @@ use Aws\S3\Exception\S3Exception;
 use Aws\S3\S3Client;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
+use Psr\Http\Message\StreamInterface;
 use ZipArchive;
 
 /**
@@ -21,9 +22,15 @@ use ZipArchive;
  * The cached mode stores the ZIP in the tenant's bucket under a deterministic key.
  * When collection assets change, Collection::invalidatePublicZip() clears the
  * cache columns and the old S3 object is cleaned up on next build.
+ *
+ * Large collections: each S3 object is streamed to a temp file and added with
+ * ZipArchive::addFile (not addFromString) so PHP does not load every object into
+ * memory — avoids OOM and generic 500s on multi‑GB public collection ZIPs.
  */
 class CollectionZipBuilderService
 {
+    private const STREAM_CHUNK_BYTES = 8 * 1024 * 1024;
+
     /**
      * Build a ZIP file from assets, writing to a temp file.
      *
@@ -32,12 +39,18 @@ class CollectionZipBuilderService
      */
     public function buildZipFromAssets(Collection $assets, StorageBucket $bucket, S3Client $s3Client): string
     {
-        $tempZipPath = tempnam(sys_get_temp_dir(), 'collection_zip_') . '.zip';
+        if (function_exists('set_time_limit')) {
+            @set_time_limit(0);
+        }
 
-        $zip = new ZipArchive();
+        $tempZipPath = tempnam(sys_get_temp_dir(), 'collection_zip_').'.zip';
+
+        $zip = new ZipArchive;
         if ($zip->open($tempZipPath, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== true) {
             throw new \RuntimeException('Failed to create ZIP archive');
         }
+
+        $scratchFiles = [];
 
         try {
             foreach ($assets as $asset) {
@@ -47,30 +60,46 @@ class CollectionZipBuilderService
                         Log::warning('[CollectionZipBuilderService] Asset missing storage path, skipping', [
                             'asset_id' => $asset->id,
                         ]);
+
                         continue;
                     }
 
-                    $assetContent = $this->downloadAssetFromS3($bucket, $assetPath, $s3Client);
-                    if ($assetContent === null) {
+                    $localPath = $this->streamS3ObjectToTempFile($bucket, $assetPath, $s3Client);
+                    if ($localPath === null) {
                         Log::warning('[CollectionZipBuilderService] Failed to download asset from S3, skipping', [
                             'asset_id' => $asset->id,
                             'asset_path' => $assetPath,
                         ]);
+
                         continue;
                     }
+
+                    $scratchFiles[] = $localPath;
 
                     $zipFileName = $asset->original_filename ?? basename($assetPath);
                     $index = 0;
                     while ($zip->locateName($zipFileName) !== false) {
                         $index++;
                         $pathInfo = pathinfo($asset->original_filename ?? basename($assetPath));
-                        $zipFileName = ($pathInfo['filename'] ?? 'file') . '_' . $index;
+                        $zipFileName = ($pathInfo['filename'] ?? 'file').'_'.$index;
                         if (isset($pathInfo['extension'])) {
-                            $zipFileName .= '.' . $pathInfo['extension'];
+                            $zipFileName .= '.'.$pathInfo['extension'];
                         }
                     }
 
-                    $zip->addFromString($zipFileName, $assetContent);
+                    if (! $zip->addFile($localPath, $zipFileName)) {
+                        Log::warning('[CollectionZipBuilderService] addFile failed, skipping asset', [
+                            'asset_id' => $asset->id,
+                            'local_path' => $localPath,
+                        ]);
+
+                        continue;
+                    }
+
+                    // Avoid re-compressing JPEG/RAW/etc.; faster builds and lower CPU for huge archives.
+                    if (defined('ZipArchive::CM_STORE')) {
+                        $zip->setCompressionName($zipFileName, ZipArchive::CM_STORE);
+                    }
                 } catch (\Throwable $e) {
                     Log::warning('[CollectionZipBuilderService] Failed to add asset to ZIP, continuing', [
                         'asset_id' => $asset->id,
@@ -79,7 +108,16 @@ class CollectionZipBuilderService
                 }
             }
 
-            $zip->close();
+            if (! $zip->close()) {
+                throw new \RuntimeException('Failed to finalize ZIP archive');
+            }
+
+            foreach ($scratchFiles as $path) {
+                if (is_string($path) && $path !== '' && file_exists($path)) {
+                    @unlink($path);
+                }
+            }
+            $scratchFiles = [];
 
             if (! file_exists($tempZipPath) || filesize($tempZipPath) === 0) {
                 if (file_exists($tempZipPath)) {
@@ -90,7 +128,16 @@ class CollectionZipBuilderService
 
             return $tempZipPath;
         } catch (\Throwable $e) {
-            $zip->close();
+            foreach ($scratchFiles as $path) {
+                if (is_string($path) && $path !== '' && file_exists($path)) {
+                    @unlink($path);
+                }
+            }
+            try {
+                $zip->close();
+            } catch (\Throwable) {
+                // ignore
+            }
             if (file_exists($tempZipPath)) {
                 @unlink($tempZipPath);
             }
@@ -211,7 +258,10 @@ class CollectionZipBuilderService
         }
     }
 
-    protected function downloadAssetFromS3(StorageBucket $bucket, string $assetPath, S3Client $s3Client): ?string
+    /**
+     * Stream an S3 object to a temp file (bounded RAM). Caller must unlink the path.
+     */
+    protected function streamS3ObjectToTempFile(StorageBucket $bucket, string $assetPath, S3Client $s3Client): ?string
     {
         try {
             if (! $s3Client->doesObjectExist($bucket->name, $assetPath)) {
@@ -223,9 +273,51 @@ class CollectionZipBuilderService
                 'Key' => $assetPath,
             ]);
 
-            return (string) $result['Body'];
+            $tmpPath = tempnam(sys_get_temp_dir(), 'zip_part_');
+            if ($tmpPath === false) {
+                return null;
+            }
+
+            $out = fopen($tmpPath, 'wb');
+            if ($out === false) {
+                @unlink($tmpPath);
+
+                return null;
+            }
+
+            $body = $result['Body'] ?? null;
+            try {
+                if ($body instanceof StreamInterface) {
+                    while (! $body->eof()) {
+                        $chunk = $body->read(self::STREAM_CHUNK_BYTES);
+                        if ($chunk === '' || $chunk === false) {
+                            break;
+                        }
+                        if (fwrite($out, $chunk) === false) {
+                            throw new \RuntimeException('Failed writing S3 stream to temp file');
+                        }
+                    }
+                } elseif (is_string($body)) {
+                    if (fwrite($out, $body) === false) {
+                        throw new \RuntimeException('Failed writing S3 body string to temp file');
+                    }
+                } else {
+                    fclose($out);
+                    @unlink($tmpPath);
+
+                    return null;
+                }
+            } finally {
+                if ($body instanceof StreamInterface) {
+                    $body->close();
+                }
+            }
+
+            fclose($out);
+
+            return $tmpPath;
         } catch (S3Exception $e) {
-            Log::warning('[CollectionZipBuilderService] Failed to download asset from S3', [
+            Log::warning('[CollectionZipBuilderService] Failed to stream asset from S3', [
                 'bucket' => $bucket->name,
                 'asset_path' => $assetPath,
                 'error' => $e->getMessage(),
@@ -249,6 +341,7 @@ class CollectionZipBuilderService
             $config['endpoint'] = config('filesystems.disks.s3.endpoint');
             $config['use_path_style_endpoint'] = config('filesystems.disks.s3.use_path_style_endpoint', false);
         }
+
         return new S3Client($config);
     }
 }

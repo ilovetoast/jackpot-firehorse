@@ -35,9 +35,17 @@ import { executionEnhancedGridContainerClass } from '../utils/executionEnhancedG
 import { isExecutionEnhancedGridMode } from '../utils/assetCardEnhancedExecutionChrome'
 import {
     getPendingFinalizeSnapshot,
+    getUploadPreviewEntryForClient,
+    normalizeAssetId,
     prunePendingFinalizeVisibleInAssetList,
     subscribeUploadPreviewRegistry,
 } from '../utils/uploadPreviewRegistry'
+
+function normalizePendingFilename(name) {
+    return String(name || '')
+        .trim()
+        .toLowerCase()
+}
 
 const MARQUEE_DRAG_THRESHOLD_PX = 5
 /** Matches Tailwind `gap-7` (1.75rem) for column width math */
@@ -95,6 +103,8 @@ export default function AssetGrid({
     gridSearchQuery = '',
     /** Assets uniform grid: 'cover' | 'contain' from View menu */
     gridImageFit = undefined,
+    /** Public share: title + file ext on one row like main asset grid (no pill on thumb) */
+    splitTitleFooter = false,
 }) {
     const safeAssets = (assets || []).filter(Boolean)
     const selection = useSelectionOptional()
@@ -112,6 +122,37 @@ export default function AssetGrid({
         if (!rest) return []
         return rest.split('\u0002').filter(Boolean)
     }, [pendingFinalizeSnapshot])
+
+    /** Hide finalize placeholder when the real asset row is already in the grid (same frame as prune effect). */
+    const visiblePendingClientIds = useMemo(() => {
+        const idSet = new Set(
+            safeAssets.map((a) => normalizeAssetId(a?.id)).filter((x) => x != null),
+        )
+        return pendingClientIds.filter((cid) => {
+            const entry = getUploadPreviewEntryForClient(cid)
+            const aid = entry?.assetId != null ? normalizeAssetId(entry.assetId) : null
+            if (aid && idSet.has(aid)) {
+                return false
+            }
+            if (entry && !aid) {
+                const fn = normalizePendingFilename(entry.filename)
+                if (fn) {
+                    const matchingAssets = safeAssets
+                        .slice(0, 50)
+                        .filter((a) => normalizePendingFilename(a.original_filename || a.title) === fn)
+                    const pendingPeers = pendingClientIds.filter((id) => {
+                        const e = getUploadPreviewEntryForClient(id)
+                        const eAid = e?.assetId != null ? normalizeAssetId(e.assetId) : null
+                        return e && !eAid && normalizePendingFilename(e.filename) === fn
+                    })
+                    if (matchingAssets.length === 1 && pendingPeers.length === 1 && pendingPeers[0] === cid) {
+                        return false
+                    }
+                }
+            }
+            return true
+        })
+    }, [pendingClientIds, safeAssets])
 
     const containerRef = useRef(null)
     const masonryMeasureRef = useRef(null)
@@ -233,20 +274,20 @@ export default function AssetGrid({
         const n = Math.max(1, masonryColumnCount)
         const cols = Array.from({ length: n }, () => [])
         const merged = [
-            ...pendingClientIds.map((clientId, index) => ({
+            ...visiblePendingClientIds.map((clientId, index) => ({
                 pendingClientId: clientId,
                 index,
             })),
             ...safeAssets.map((asset, index) => ({
                 asset,
-                index: index + pendingClientIds.length,
+                index: index + visiblePendingClientIds.length,
             })),
         ]
         merged.forEach((item, index) => {
             cols[index % n].push(item)
         })
         return cols
-    }, [layoutMode, safeAssets, masonryColumnCount, pendingClientIds])
+    }, [layoutMode, safeAssets, masonryColumnCount, visiblePendingClientIds])
 
     const handleContainerPointerDown = useCallback(
         (e) => {
@@ -324,7 +365,7 @@ export default function AssetGrid({
         [selection, onAssetSelect, applyMarqueeSelection, clearMarqueeSession]
     )
 
-    if (safeAssets.length === 0 && pendingClientIds.length === 0) {
+    if (safeAssets.length === 0 && visiblePendingClientIds.length === 0) {
         return null
     }
 
@@ -401,6 +442,7 @@ export default function AssetGrid({
                     executionThumbnailViewMode={executionThumbnailViewMode}
                     gridSearchQuery={gridSearchQuery}
                     gridImageFit={gridImageFit}
+                    splitTitleFooter={splitTitleFooter}
                 />
             </div>
         )
@@ -460,9 +502,9 @@ export default function AssetGrid({
                 </div>
             ) : (
                 <AssetGridContainer cardSize={cardSize} layoutMode={layoutMode}>
-                    {pendingClientIds.map((cid) => renderPendingCell(cid))}
+                    {visiblePendingClientIds.map((cid) => renderPendingCell(cid))}
                     {safeAssets.map((asset, index) =>
-                        renderAssetCell(asset, index + pendingClientIds.length),
+                        renderAssetCell(asset, index + visiblePendingClientIds.length),
                     )}
                 </AssetGridContainer>
             )}

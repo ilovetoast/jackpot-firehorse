@@ -7,9 +7,10 @@ import LegalPage, { LegalSection, LegalParagraph, LegalList } from '../../Compon
  * - Governing law: Ohio. Venue / arbitration seat: Franklin County, Ohio.
  * - Dispute resolution: binding AAA arbitration with class-action waiver.
  * - Minimum age: 18.
- * - AI credit policy: monthly forfeit, no cash value.
- * - Price-change notice: 30 days before renewal for subscription fees; usage/credit pricing
- *   may change at next billing period.
+ * - AI credit policy: monthly forfeit, no cash value; discretionary vs subscription fees;
+ *   no refund/re-credit obligation; program terms may change without subscription-fee notice.
+ * - Price-change notice: 30 days before renewal for subscription base fees; AI Credit program
+ *   (allocations, burn rates, worth) may change at any time as described in Section 7.
  * - Content license: Customer retains ownership; grants Jackpot broad operational license.
  * - Anonymized / aggregated data: Jackpot may use for service improvement, analytics,
  *   benchmarking, and development of machine-learning/AI features. Jackpot will not use
@@ -22,7 +23,7 @@ import LegalPage, { LegalSection, LegalParagraph, LegalList } from '../../Compon
  */
 export default function Terms() {
     return (
-        <LegalPage title="Terms of Service" effectiveDate="April 18, 2026">
+        <LegalPage title="Terms of Service" effectiveDate="May 3, 2026">
             <LegalParagraph>
                 These Terms of Service (the <strong>"Terms"</strong>) form a binding legal agreement between{' '}
                 <strong>Jackpot Brand Asset Management, LLC</strong>, an Ohio limited liability company doing
@@ -47,7 +48,7 @@ export default function Terms() {
                     <li><a href="#s4" className="hover:text-white">The Services</a></li>
                     <li><a href="#s5" className="hover:text-white">Subscriptions, Fees & Renewal</a></li>
                     <li><a href="#s6" className="hover:text-white">AI Credits</a></li>
-                    <li><a href="#s7" className="hover:text-white">Price Changes</a></li>
+                    <li><a href="#s7" className="hover:text-white">Price Changes; AI Credit Program</a></li>
                     <li><a href="#s8" className="hover:text-white">Customer Content & License</a></li>
                     <li><a href="#s9" className="hover:text-white">Anonymized & Aggregated Data</a></li>
                     <li><a href="#s10" className="hover:text-white">Acceptable Use</a></li>
@@ -130,7 +131,7 @@ export default function Terms() {
                         <><strong>Billing.</strong> Customer authorizes Jackpot and its payment processor (Stripe) to charge the payment method on file for all recurring and usage-based fees. If a charge is declined, Jackpot may suspend the Services until payment is received and may assess late fees and reasonable collection costs.</>,
                         <><strong>Renewal.</strong> Subscriptions renew automatically for successive periods equal to the then-current Subscription Term unless Customer cancels through the Services or in writing to <a className="text-white" href="mailto:support@jackpotbam.com">support@jackpotbam.com</a> at least fifteen (15) days before the end of the current term.</>,
                         <><strong>Taxes.</strong> Fees are exclusive of all applicable taxes. Customer is responsible for all taxes other than taxes on Jackpot's net income.</>,
-                        <><strong>No Refunds.</strong> Except where required by applicable law, Jackpot does not provide refunds or credits for partial periods, unused portions of a Subscription Term, unused AI Credits, or features Customer does not use.</>,
+                        <><strong>No Refunds.</strong> Except where required by applicable law, Jackpot does not provide refunds or credits for partial periods, unused portions of a Subscription Term, unused AI Credits, or features Customer does not use. Without limiting the foregoing, Jackpot has no obligation to refund subscription fees, to restore or re-issue AI Credits, or to grant monetary or account credit for any dispute, outage, metering issue, or dissatisfaction relating to AI Credits or AI-powered features.</>,
                         <><strong>Collections.</strong> Past-due amounts accrue interest at the lesser of 1.5% per month or the maximum permitted by law. Customer will reimburse Jackpot for all reasonable costs of collection, including attorneys' fees.</>,
                     ]}
                 />
@@ -141,6 +142,8 @@ export default function Terms() {
                     ordered
                     items={[
                         <><strong>Nature.</strong> AI Credits are a limited, revocable, non-transferable license to invoke AI-powered Services. AI Credits have no cash value, are not property, are not a security, and cannot be redeemed, exchanged, transferred, or sold.</>,
+                        <><strong>Not Part of Subscription Consideration.</strong> Any AI Credits granted in connection with a plan—including complimentary, promotional, or plan-included allocations—are a <strong>discretionary benefit</strong>. They do not form part of the bargained-for consideration for recurring subscription fees, which principally secure access to the licensed Services. The presence, absence, or level of AI Credit allocations does not reduce, offset, or otherwise affect the amount or lawfulness of subscription fees except as Jackpot expressly states in an Order Form.</>,
+                        <><strong>No Refund, Restoration, or Re-Credit.</strong> Except where required by applicable law, AI Credits are <strong>never refundable</strong> in cash or as a credit against fees. Jackpot has <strong>no obligation</strong> to restore, replace, re-credit, or otherwise compensate Customer for AI Credits that are lost, expired, forfeited, consumed, allegedly consumed in error, or affected by outages, degradation, third-party model or API failures, security incidents, bugs, misconfiguration, or any other circumstance, whether or not attributable to Jackpot. Any discretionary adjustment Jackpot may make in an individual case creates <strong>no precedent or ongoing obligation</strong>.</>,
                         <><strong>Monthly Forfeiture.</strong> Unless an Order Form expressly states otherwise, unused AI Credits <strong>expire and are forfeited at the end of each billing period</strong> and do not roll over.</>,
                         <><strong>Forfeiture on Termination.</strong> All AI Credits are immediately forfeited upon cancellation, downgrade, suspension, or termination of the Account, for any reason.</>,
                         <><strong>Consumption.</strong> Jackpot determines in good faith the number of AI Credits consumed by a given action. Credit costs may vary by model, input size, output size, region, and feature, and may change from time to time.</>,
@@ -150,16 +153,29 @@ export default function Terms() {
                 />
             </LegalSection>
 
-            <LegalSection id="s7" number="7" title="Price Changes">
+            <LegalSection id="s7" number="7" title="Price Changes; AI Credit Program">
                 <LegalParagraph>
-                    Jackpot may change subscription fees, credit pack pricing, overage rates, or the composition
-                    of any plan. For recurring subscription fees, Jackpot will provide Customer at least{' '}
-                    <strong>thirty (30) days' written notice</strong> (by email to the Account contact or by
-                    in-product notice) prior to the change taking effect at the next renewal. For usage-based or
-                    AI-credit pricing, changes take effect at the start of the next billing period following
-                    notice. If Customer does not agree to a price change, Customer's sole remedy is to cancel
+                    Jackpot may change <strong>recurring subscription fees</strong>, credit-pack pricing, overage
+                    rates, or the composition of any plan. For recurring subscription fees, Jackpot will provide
+                    Customer at least <strong>thirty (30) days' written notice</strong> (by email to the Account
+                    contact or by in-product notice) prior to the change taking effect at the next renewal. If
+                    Customer does not agree to a subscription fee change, Customer's sole remedy is to cancel
                     before the change becomes effective; continued use after the effective date constitutes
                     acceptance.
+                </LegalParagraph>
+                <LegalParagraph>
+                    <strong>AI Credit program.</strong> Independently of the notice period above, Jackpot may at
+                    any time, with or without prior notice, modify (i) the number or frequency of AI Credits
+                    allocated to any plan or Customer, (ii) the number of AI Credits consumed by any action,
+                    model, or feature, (iii) eligibility of any feature for AI Credit consumption, or (iv) any
+                    methodology or weighting used to determine consumption or the relative economic "worth" of a
+                    credit as between features—effective immediately or on a date Jackpot specifies in-product or
+                    by email. Such changes are <strong>not</strong> increases to the recurring subscription base
+                    fee and need not follow the thirty (30) day notice cycle in the first paragraph of this
+                    Section, though Jackpot may align changes with a billing period where practicable. For
+                    separately purchased credit packs or metered overage <strong>rates</strong> (priced in
+                    currency), changes take effect at the start of the next billing period following notice unless
+                    an Order Form states otherwise.
                 </LegalParagraph>
             </LegalSection>
 
@@ -373,11 +389,20 @@ export default function Terms() {
             <LegalSection id="s21" number="21" title="Beta and Early-Access Features">
                 <LegalParagraph>
                     Jackpot may make features, modules, or integrations available as "beta," "preview," "alpha,"
-                    or "early access" (<strong>"Beta Features"</strong>). Beta Features are provided for
-                    evaluation, are offered without any warranty or support obligation, may change or be
-                    discontinued at any time, and are excluded from any SLA. Section 15 (Disclaimers) and
-                    Section 16 (Limitation of Liability) apply to Beta Features without exception. Customer's use
-                    of Beta Features is at Customer's sole risk.
+                    or "early access" (<strong>"Beta Features"</strong>). Beta Features are provided solely as an{' '}
+                    <strong>ancillary, discretionary convenience</strong> and do <strong>not</strong> form part of
+                    the core Services or any committed functionality under these Terms, an Order Form, or the
+                    Documentation unless Jackpot expressly designates a feature as generally available in a
+                    written release notice. Customer has <strong>no contractual expectation</strong> that Beta
+                    Features will be provided, will remain available, will achieve any particular quality or
+                    performance, or will ever graduate to a generally available product.
+                </LegalParagraph>
+                <LegalParagraph>
+                    Beta Features are offered for evaluation only, without any warranty or support obligation (and
+                    may be supported on a best-efforts basis only), may change or be discontinued at any time with
+                    or without notice, and are excluded from any service-level agreement or uptime commitment.
+                    Section 15 (Disclaimers) and Section 16 (Limitation of Liability) apply to Beta Features
+                    without exception. Customer's use of Beta Features is at Customer's sole risk.
                 </LegalParagraph>
             </LegalSection>
 

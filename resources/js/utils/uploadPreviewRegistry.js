@@ -14,7 +14,7 @@ const byAsset = new Map()
  * @param {unknown} assetId
  * @returns {string|null}
  */
-function normalizeAssetId(assetId) {
+export function normalizeAssetId(assetId) {
     if (assetId == null) return null
     if (typeof assetId === 'number') {
         return Number.isFinite(assetId) ? String(assetId) : null
@@ -94,7 +94,8 @@ export function attachUploadPreviewAssetId(clientFileId, assetId) {
 export function attachUploadPreviewsFromFinalizeResults(results) {
     if (!Array.isArray(results)) return
     for (const r of results) {
-        if (r?.status !== 'success') continue
+        const ok = r?.status === 'success' || r?.status === true
+        if (!ok) continue
         const cid = r.client_file_id ?? r.clientFileId
         const aid = r.asset_id ?? r.assetId
         if (cid && aid != null) {

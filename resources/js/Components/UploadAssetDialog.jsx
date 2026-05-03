@@ -54,6 +54,7 @@ import {
     registerUploadPreview,
     revokeClientUploadPreview,
     attachUploadPreviewsFromFinalizeResults,
+    attachUploadPreviewAssetId,
     markPendingFinalize,
     removePendingFinalizeClient,
     clearAllPendingFinalize,
@@ -3689,8 +3690,18 @@ export default function UploadAssetDialog({
             }
 
             for (const f of uploadedFiles) {
+                if (!uploadedClientIds.has(f.clientId)) continue
                 const r = resolveFinalizeResultForFile(f)
-                if (!r || r.status !== 'success') {
+                const aid = r?.asset_id ?? r?.assetId
+                const ok = r && (r.status === 'success' || r.status === true)
+                if (ok && aid != null) {
+                    attachUploadPreviewAssetId(String(f.clientId), aid)
+                }
+            }
+
+            for (const f of uploadedFiles) {
+                const r = resolveFinalizeResultForFile(f)
+                if (!r || (r.status !== 'success' && r.status !== true)) {
                     removePendingFinalizeClient(f.clientId)
                 }
             }

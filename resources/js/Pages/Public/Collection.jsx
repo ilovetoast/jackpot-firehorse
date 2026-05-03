@@ -1,6 +1,6 @@
 /**
  * Password-protected share collection (guests): press-kit style gallery.
- * Filters: GET ?q=&type=&sort=&view= on guest_collection_path.
+ * Filters: GET ?q=&type=&sort=&view=grid|list|masonry on guest_collection_path.
  */
 import { useState, useCallback, useMemo, useRef, useEffect } from 'react'
 import { Head, router } from '@inertiajs/react'
@@ -21,6 +21,7 @@ import { useCdn403Recovery } from '../../hooks/useCdn403Recovery'
 import { contrastTextOnPrimary } from '../../utils/contrastTextOnPrimary'
 import { publicShareCinemaLayers } from '../../utils/publicShareCinemaBackground'
 import { saveUrlAsDownload } from '../../utils/singleAssetDownload'
+import { JACKPOT_WORDMARK_INVERTED_SRC } from '../../Components/Brand/LogoMark'
 
 /** Show a “may take a while” notice in the ZIP modal above this file count (full collection or selected). */
 const LARGE_PUBLIC_ZIP_WARNING_THRESHOLD = 25
@@ -31,6 +32,20 @@ function formatBytes(n) {
     if (v < 1024) return `${v} B`
     if (v < 1024 * 1024) return `${(v / 1024).toFixed(1)} KB`
     return `${(v / (1024 * 1024)).toFixed(1)} MB`
+}
+
+/** Masonry layout icon (matches AssetGridViewOptionsDropdown layout control). */
+function GuestLayoutMasonryIcon({ className = 'h-5 w-5' }) {
+    return (
+        <svg className={className} fill="none" viewBox="0 0 20 16" stroke="currentColor" strokeWidth={1.5} aria-hidden>
+            <rect x="1" y="1" width="5.5" height="4" rx="0.5" />
+            <rect x="8" y="1" width="5.5" height="7" rx="0.5" />
+            <rect x="14.5" y="1" width="4.5" height="5" rx="0.5" />
+            <rect x="1" y="6" width="5.5" height="9" rx="0.5" />
+            <rect x="8" y="9" width="5.5" height="6" rx="0.5" />
+            <rect x="14.5" y="7" width="4.5" height="8" rx="0.5" />
+        </svg>
+    )
 }
 
 export default function PublicCollection({
@@ -60,7 +75,8 @@ export default function PublicCollection({
     const q = typeof guestQueryProp?.q === 'string' ? guestQueryProp.q : ''
     const type = typeof guestQueryProp?.type === 'string' ? guestQueryProp.type : 'all'
     const sort = typeof guestQueryProp?.sort === 'string' ? guestQueryProp.sort : 'newest'
-    const view = guestQueryProp?.view === 'list' ? 'list' : 'grid'
+    const viewRaw = typeof guestQueryProp?.view === 'string' ? String(guestQueryProp.view).toLowerCase() : 'grid'
+    const view = viewRaw === 'list' || viewRaw === 'masonry' ? viewRaw : 'grid'
 
     const [downloadPanelOpen, setDownloadPanelOpen] = useState(false)
     const [downloadPanelMode, setDownloadPanelMode] = useState('all')
@@ -379,7 +395,21 @@ export default function PublicCollection({
             </div>
 
             <div className="relative z-10">
-                <header className="pt-12 pb-8 px-4 sm:px-6 max-w-5xl mx-auto text-center">
+                <header className="pt-10 pb-8 px-4 sm:px-6 max-w-5xl mx-auto text-center sm:pt-12">
+                    <div className="mb-5 flex flex-col items-center sm:mb-6">
+                        <img
+                            src={JACKPOT_WORDMARK_INVERTED_SRC}
+                            alt="Jackpot"
+                            width={132}
+                            height={36}
+                            decoding="async"
+                            draggable={false}
+                            className="h-9 w-auto max-w-[min(15rem,88vw)] object-contain opacity-[0.48] drop-shadow-[0_2px_14px_rgba(0,0,0,0.45)] sm:h-10 md:h-11"
+                        />
+                        <span className="mt-1.5 text-[10px] font-medium uppercase tracking-[0.18em] text-white/30">
+                            Powered by Jackpot
+                        </span>
+                    </div>
                     {logoUrl ? (
                         <div className="mb-6 flex justify-center">
                             <img
@@ -474,14 +504,28 @@ export default function PublicCollection({
                                                     : { color: 'rgba(255,255,255,0.65)' }
                                             }
                                             aria-pressed={view === 'grid'}
-                                            title="Grid"
+                                            title="Uniform grid"
                                         >
                                             <Squares2X2Icon className="h-5 w-5" />
                                         </button>
                                         <button
                                             type="button"
+                                            onClick={() => navigateGuestQuery({ view: 'masonry' })}
+                                            className="p-2.5 transition border-l border-white/10"
+                                            style={
+                                                view === 'masonry'
+                                                    ? { backgroundColor: primaryColor, color: onPrimaryBtn }
+                                                    : { color: 'rgba(255,255,255,0.65)' }
+                                            }
+                                            aria-pressed={view === 'masonry'}
+                                            title="Masonry"
+                                        >
+                                            <GuestLayoutMasonryIcon className="h-5 w-5" />
+                                        </button>
+                                        <button
+                                            type="button"
                                             onClick={() => navigateGuestQuery({ view: 'list' })}
-                                            className="p-2.5 transition"
+                                            className="p-2.5 transition border-l border-white/10"
                                             style={
                                                 view === 'list'
                                                     ? { backgroundColor: primaryColor, color: onPrimaryBtn }
@@ -562,20 +606,23 @@ export default function PublicCollection({
                             <DocumentIcon className="mx-auto h-14 w-14 text-white/25" aria-hidden />
                             <p className="mt-4 font-medium text-white/80">No files match your search.</p>
                         </div>
-                    ) : view === 'grid' && assetsList?.length > 0 ? (
-                        <AssetGrid
-                            assets={assetsList}
-                            onAssetClick={openLightboxForAsset}
-                            cardSize={220}
-                            showInfo
-                            selectedAssetId={null}
-                            primaryColor={primaryColor}
-                            cardVariant="cinematic"
-                            bucketAssetIds={bucketIdsList}
-                            onBucketToggle={toggleBucket}
-                            layoutMode="grid"
-                            gridSearchQuery={q}
-                        />
+                    ) : (view === 'grid' || view === 'masonry') && assetsList?.length > 0 ? (
+                        <div className="rounded-2xl border border-gray-200/90 bg-gray-50 px-3 py-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.75)] ring-1 ring-black/[0.04] sm:px-5 sm:py-5">
+                            <AssetGrid
+                                assets={assetsList}
+                                onAssetClick={openLightboxForAsset}
+                                cardSize={220}
+                                showInfo
+                                selectedAssetId={null}
+                                primaryColor={primaryColor}
+                                cardVariant="default"
+                                bucketAssetIds={bucketIdsList}
+                                onBucketToggle={toggleBucket}
+                                layoutMode={view === 'masonry' ? 'masonry' : 'grid'}
+                                gridSearchQuery={q}
+                                splitTitleFooter
+                            />
+                        </div>
                     ) : view === 'list' && assetsList?.length > 0 ? (
                         <ul className="rounded-2xl border border-white/[0.08] divide-y divide-white/10 overflow-hidden bg-zinc-950/35 backdrop-blur-md ring-1 ring-white/[0.04]">
                             {assetsList.map((asset) => {

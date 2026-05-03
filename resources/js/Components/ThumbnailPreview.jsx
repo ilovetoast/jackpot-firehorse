@@ -242,6 +242,17 @@ export default function ThumbnailPreview({
                     nextType !== lockedType ||
                     assetIdChanged
 
+                // Same asset, still a server "final" raster, but URL string changed (e.g. legacy thumb →
+                // final_thumbnail_url, cache-bust, drawer poll merge). Remounting the <img> and forcing
+                // imageLoaded=false looks like a double load in the grid + quickview together.
+                const isFinalToFinalUrlSwap =
+                    !assetIdChanged &&
+                    Boolean(lockedUrl) &&
+                    Boolean(newUrl) &&
+                    newUrl !== lockedUrl &&
+                    lockedType === 'final' &&
+                    nextType === 'final'
+
                 setLockedUrl(newUrl)
                 if (newFinal) {
                     setLockedType('final')
@@ -250,7 +261,7 @@ export default function ThumbnailPreview({
                 } else {
                     setLockedType(null)
                 }
-                if (urlOrTypeOrAssetChanged) {
+                if (urlOrTypeOrAssetChanged && !isFinalToFinalUrlSwap) {
                     setImageLoaded(false)
                     setImageError(false)
                 }
@@ -461,6 +472,9 @@ export default function ThumbnailPreview({
     }, [lockedUrl, isLogoOrGraphicCategory, isSvg, urlKnownFailed])
 
     const contrastBackdropClass = needsContrastBackdrop ? 'bg-neutral-200' : ''
+
+    /** Stable key so swapping final URL (same asset) does not remount <img> and flash the placeholder. */
+    const rasterImageKey = asset?.id != null ? `asset-thumb-${asset.id}` : lockedUrl || 'thumb'
 
     useEffect(() => {
         setForcedStableUrl(null)
@@ -823,7 +837,7 @@ export default function ThumbnailPreview({
                 />
 
                 <img
-                    key={lockedUrl}
+                    key={rasterImageKey}
                     ref={imgRef}
                     src={lockedUrl}
                     alt={alt}
@@ -845,8 +859,6 @@ export default function ThumbnailPreview({
             </div>
         )
     }
-
-
 
     /* ------------------------------------------------------------
        FALLBACK: Final failed but preview exists → render preview
@@ -884,7 +896,7 @@ export default function ThumbnailPreview({
                     }}
                 />
                 <img
-                    key={lockedUrl}
+                    key={rasterImageKey}
                     ref={imgRef}
                     src={lockedUrl}
                     alt={alt}
@@ -966,7 +978,7 @@ export default function ThumbnailPreview({
                 {/* NEVER render FileTypeIcon when preview exists */}
                 {/* imageLoaded only affects opacity, not DOM presence */}
                 <img
-                    key={lockedUrl}
+                    key={rasterImageKey}
                     ref={imgRef}
                     src={lockedUrl}
                     alt={alt}
