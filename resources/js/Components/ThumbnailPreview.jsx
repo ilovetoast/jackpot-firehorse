@@ -71,6 +71,36 @@ function lqipPreviewUrlForAsset(asset) {
     return asset?.preview_thumbnail_url ?? null
 }
 
+/**
+ * Primary raster thumbnail URL for locking and image src — aligned with {@link getThumbnailState}:
+ * `final_thumbnail_url` (optional large SVG variant), else legacy `thumbnail_url` when status is completed.
+ * List payloads often omit `final_thumbnail_url` / `preview_thumbnail_url` while still sending legacy `thumbnail_url`;
+ * without this, the grid shows a placeholder while the drawer (batch poll) shows the image.
+ */
+function resolveEffectiveFinalThumbnailUrl(asset, preferLargeForVector) {
+    if (!asset) {
+        return null
+    }
+    const isSvg =
+        asset.mime_type === 'image/svg+xml' ||
+        String(asset.original_filename || '')
+            .toLowerCase()
+            .endsWith('.svg') ||
+        asset.file_extension === 'svg'
+    const useLarge = Boolean(preferLargeForVector && isSvg && asset.id)
+    if (asset.final_thumbnail_url && useLarge) {
+        return asset.thumbnail_url_large ?? asset.final_thumbnail_url
+    }
+    if (asset.final_thumbnail_url) {
+        return asset.final_thumbnail_url
+    }
+    const ts = String(asset.thumbnail_status?.value || asset.thumbnail_status || '').toLowerCase()
+    if (asset.thumbnail_url && ts === 'completed') {
+        return asset.thumbnail_url
+    }
+    return null
+}
+
 export default function ThumbnailPreview({
     asset,
     alt = 'Asset',
@@ -135,9 +165,10 @@ export default function ThumbnailPreview({
     const isSvg = asset?.mime_type === 'image/svg+xml' ||
         (asset?.original_filename?.toLowerCase().endsWith('.svg') || asset?.file_extension === 'svg')
     const useLargeForVector = preferLargeForVector && isSvg && asset?.id
-    const effectiveFinalUrl = asset?.final_thumbnail_url && useLargeForVector
-        ? (asset?.thumbnail_url_large ?? asset?.final_thumbnail_url)
-        : asset?.final_thumbnail_url
+    const effectiveFinalUrl = useMemo(
+        () => resolveEffectiveFinalThumbnailUrl(asset, preferLargeForVector),
+        [asset, preferLargeForVector],
+    )
 
     // SVG fallback: when no rasterized WebP thumbnail exists, use the original SVG file
     // (vectors render natively in <img>). Prefer the crisp vector over LQIP blobs — for SVG
@@ -163,17 +194,23 @@ export default function ThumbnailPreview({
     // Lock the URL on first render for grid, but allow updates for drawer.
     // Priority for SVG: final > SVG original > LQIP. For everything else: final > LQIP.
     const [lockedUrl, setLockedUrl] = useState(() => {
-        const initialFinal = effectiveFinalUrl
-        const initialPreview = lqipUrl
+        const initialFinal = resolveEffectiveFinalThumbnailUrl(asset, preferLargeForVector)
+        const initialPreview = lqipPreviewUrlForAsset(asset)
         if (initialFinal) return initialFinal
-        if (svgOriginalFallback) return svgOriginalFallback
+        const svgFb =
+            isSvg && !initialFinal
+                ? (asset?.original || null)
+                : null
+        if (svgFb) return svgFb
         return initialPreview || null
     })
 
     const [lockedType, setLockedType] = useState(() => {
-        if (asset?.final_thumbnail_url) return 'final'
-        if (svgOriginalFallback) return 'final'
-        if (lqipUrl) return 'preview'
+        const initialRaster = resolveEffectiveFinalThumbnailUrl(asset, preferLargeForVector)
+        if (initialRaster) return 'final'
+        const svgFb = isSvg && !initialRaster ? (asset?.original || null) : null
+        if (svgFb) return 'final'
+        if (lqipPreviewUrlForAsset(asset)) return 'preview'
         return null
     })
     
@@ -195,6 +232,12 @@ export default function ThumbnailPreview({
                 : (assetIdChanged || (!lockedUrl && newUrl)) // Grid: only update if we didn't have a URL and now we do
             
             if (shouldUpdate) {
+                const nextType = newFinal ? 'final' : newPreview ? 'preview' : null
+                const urlOrTypeOrAssetChanged =
+                    newUrl !== lockedUrl ||
+                    nextType !== lockedType ||
+                    assetIdChanged
+
                 setLockedUrl(newUrl)
                 if (newFinal) {
                     setLockedType('final')
@@ -203,11 +246,10 @@ export default function ThumbnailPreview({
                 } else {
                     setLockedType(null)
                 }
-                // Reset image state when URL changes
-                setImageLoaded(false)
-                setImageError(false)
-                
-                // Update ref to track current asset ID
+                if (urlOrTypeOrAssetChanged) {
+                    setImageLoaded(false)
+                    setImageError(false)
+                }
                 prevAssetIdRef.current = asset?.id
             }
         } else if (isDrawerContext && !asset) {
@@ -312,9 +354,16 @@ export default function ThumbnailPreview({
     ])
 
     useEffect(() => {
+        // When server raster (or SVG original) is available, the grid uses PRIORITY 1 / lockedUrl — not the
+        // ephemeral blob. Upload-registry churn still updates `ephemeralLocalPreviewUrl`; resetting imageLoaded
+        // then would show the branded overlay on top of an already-correct <img>, and cached images may not
+        // emit `onLoad` again for the same `src`.
+        if (effectiveFinalUrl || svgOriginalFallback) {
+            return
+        }
         setImageLoaded(false)
         setImageError(false)
-    }, [ephemeralLocalPreviewUrl])
+    }, [ephemeralLocalPreviewUrl, effectiveFinalUrl, svgOriginalFallback])
 
     // Small thumbnails (<100px): center image as-is, don't use cover (avoids blurry upscale in container)
     const isSmallThumbnail = useMemo(() => {
