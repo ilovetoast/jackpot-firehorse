@@ -43,6 +43,7 @@ import { usePermission } from '../hooks/usePermission'
 import { useBucketOptional } from '../contexts/BucketContext'
 import { useSelectionOptional } from '../contexts/SelectionContext'
 import { router, usePage } from '@inertiajs/react'
+import { resolveTrackedSingleAssetFileUrl, saveUrlAsDownload } from '../utils/singleAssetDownload'
 import { resolve, isExcludedFromGenericLoop, hasCollectionField, CONTEXT, WIDGET } from '../utils/widgetResolver'
 
 const GROUP_LABELS = {
@@ -487,9 +488,18 @@ export default function AssetDetailPanel({
                 onToast?.(data?.message || 'Download failed', 'error')
                 return
             }
-            const fileUrl = data?.file_url || data?.public_url || data?.download_url
+            const fileUrl = resolveTrackedSingleAssetFileUrl(data)
+            const fallbackName =
+                (typeof asset?.original_filename === 'string' && asset.original_filename.trim()) ||
+                (typeof asset?.title === 'string' && asset.title.trim()) ||
+                'download'
             if (fileUrl) {
-                window.location.href = fileUrl
+                try {
+                    await saveUrlAsDownload(fileUrl, fallbackName)
+                    onToast?.('Download started', 'success')
+                } catch {
+                    onToast?.('Download failed', 'error')
+                }
             } else {
                 onToast?.('Download started', 'success')
             }

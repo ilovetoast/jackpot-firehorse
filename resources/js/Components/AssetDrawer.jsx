@@ -116,6 +116,7 @@ import {
     setPreferredExecutionThumbnailTier,
 } from '../utils/executionPreferredThumbnailStorage'
 import { ensureAccentContrastOnWhite } from '../utils/colorUtils'
+import { resolveTrackedSingleAssetFileUrl, saveUrlAsDownload } from '../utils/singleAssetDownload'
 
 /** Assets that can appear in the drawer fullscreen carousel / lightbox (includes fonts). */
 function assetSupportsLightboxCarousel(a) {
@@ -4967,11 +4968,25 @@ export default function AssetDrawer({
                                                             setTimeout(() => setToastMessage(null), 4000)
                                                             return
                                                         }
-                                                        const fileUrl = data?.file_url || data?.public_url || data?.download_url
+                                                        const fileUrl = resolveTrackedSingleAssetFileUrl(data)
+                                                        const fallbackName =
+                                                            (typeof displayAsset?.original_filename === 'string' &&
+                                                                displayAsset.original_filename.trim()) ||
+                                                            (typeof displayAsset?.title === 'string' &&
+                                                                displayAsset.title.trim()) ||
+                                                            'download'
                                                         if (fileUrl) {
-                                                            window.location.href = fileUrl
+                                                            try {
+                                                                await saveUrlAsDownload(fileUrl, fallbackName)
+                                                                setToastMessage('Download started')
+                                                                setToastType('success')
+                                                            } catch {
+                                                                setToastMessage('Download failed')
+                                                                setToastType('error')
+                                                            }
                                                         } else {
                                                             setToastMessage('Download started')
+                                                            setToastType('success')
                                                         }
                                                     } catch (e) {
                                                         setToastMessage('Download failed')
