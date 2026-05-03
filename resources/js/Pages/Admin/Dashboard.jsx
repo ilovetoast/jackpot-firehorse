@@ -16,7 +16,7 @@ import {
     BoltIcon,
     CreditCardIcon,
     InboxIcon,
-    CubeIcon,
+    CommandLineIcon,
 } from '@heroicons/react/24/outline'
 
 const STATUS_COLORS = {
@@ -42,7 +42,7 @@ function MetricCard({ title, value, subtitle, status, href, icon: Icon }) {
             <div className="min-w-0 flex-1">
                 <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">{title}</p>
                 <p className="mt-0.5 text-2xl font-bold text-slate-900">{value}</p>
-                <p className="mt-0.5 text-sm text-slate-500">{subtitle}</p>
+                <p className="mt-0.5 line-clamp-3 text-sm text-slate-500">{subtitle}</p>
             </div>
         </div>
     )
@@ -108,34 +108,60 @@ function shortCommitDisplay(commit) {
 }
 
 /**
- * @param {Record<string, unknown>} release
- * @returns {{ value: string, subtitle: string } | null}
+ * Command Center tile: always show something useful (commit short SHA, deploy time, or setup hint).
+ *
+ * @param {Record<string, unknown>|null|undefined} release
+ * @returns {{ value: string, subtitle: string, status: string }}
  */
-function deploymentSummaryForTile(release) {
-    if (!release || typeof release !== 'object') return null
-    const deployed = formatReleaseTimestamp(release.deployed_at)
-    const committed = formatReleaseTimestamp(release.committed_at)
-    const sha = shortCommitDisplay(release.commit)
-    if (sha) {
-        const when = deployed.display || committed.display
-        return {
-            value: sha,
-            subtitle: when || 'Build revision',
-        }
-    }
+function buildCommitDeployMetric(release) {
+    const r = release && typeof release === 'object' ? release : {}
+    const deployed = formatReleaseTimestamp(r.deployed_at)
+    const committed = formatReleaseTimestamp(r.committed_at)
+    const sha = shortCommitDisplay(r.commit)
+    const msg =
+        typeof r.message === 'string' && r.message.trim()
+            ? `${r.message.trim().slice(0, 72)}${r.message.trim().length > 72 ? '…' : ''}`
+            : ''
+
+    const subParts = []
     if (deployed.display) {
-        return {
-            value: deployed.display,
-            subtitle:
-                typeof release.message === 'string' && release.message.trim()
-                    ? `${release.message.trim().slice(0, 56)}${release.message.trim().length > 56 ? '…' : ''}`
-                    : 'Last deployment',
+        subParts.push(`Deployed ${deployed.display}`)
+    }
+    if (committed.display && committed.display !== deployed.display) {
+        subParts.push(`Source ${committed.display}`)
+    }
+    if (msg) {
+        subParts.push(msg)
+    }
+    if (typeof r.status_url === 'string' && r.status_url.trim()) {
+        subParts.push('External status page configured')
+    }
+    if (subParts.length === 0) {
+        subParts.push(
+            'Set .release-info.json, .deploy_timestamp, or APP_BUILD_COMMIT / APP_BUILD_TIME in the app root or env.',
+        )
+    }
+
+    let value = sha
+    if (!value) {
+        if (deployed.display) {
+            value = deployed.display
+        } else if (committed.display) {
+            value = committed.display
+        } else if (msg) {
+            value = 'Build'
+        } else {
+            value = 'Not reported'
         }
     }
-    if (committed.display) {
-        return { value: committed.display, subtitle: 'Source commit time' }
+
+    const status = sha || deployed.display || committed.display ? 'stable' : 'unknown'
+
+    return {
+        value,
+        subtitle: subParts.join(' · '),
+        status,
     }
-    return null
 }
 
 function ReleaseInfoPanel({ release }) {
@@ -272,9 +298,11 @@ export default function AdminDashboard({ auth, metrics: initialMetrics }) {
     const healthStatusClass = STATUS_COLORS[health.status] || STATUS_COLORS.unknown
     const release = m.release || {}
     const showRelease = hasReleaseInfo(release)
-    const deploymentTile = deploymentSummaryForTile(release)
-    const showDeploymentTile = deploymentTile != null
-    const showReleasePanel = showRelease && !showDeploymentTile
+    const commitDeployMetric = buildCommitDeployMetric(release)
+    /** Expanded block when rich metadata exists beyond the summary tile (avoids duplicate when only commit+dates). */
+    const showReleasePanel =
+        showRelease &&
+        (!!release.status_url || (!!release.message && String(release.message).trim().length > 90))
 
     const hubs = [
         {
@@ -371,34 +399,30 @@ export default function AdminDashboard({ auth, metrics: initialMetrics }) {
                         />
                     </div>
 
-                    {(perms.canViewAI || showDeploymentTile) && (
-                        <div
-                            className={`mb-8 grid grid-cols-1 gap-4 ${
-                                perms.canViewAI && showDeploymentTile ? 'lg:grid-cols-2 lg:items-stretch' : ''
-                            }`}
-                        >
-                            {perms.canViewAI ? (
-                                <MetricCard
-                                    title="AI spend (24h)"
-                                    value={`$${Number(ai.cost_24h_usd ?? 0).toFixed(2)}`}
-                                    subtitle={`${ai.runs_24h ?? 0} runs`}
-                                    status="healthy"
-                                    href="/app/admin/ai/budgets"
-                                    icon={ChartBarIcon}
-                                />
-                            ) : null}
-                            {showDeploymentTile ? (
-                                <MetricCard
-                                    title="Deployment"
-                                    value={deploymentTile.value}
-                                    subtitle={deploymentTile.subtitle}
-                                    status="stable"
-                                    href="/app/admin/system-status"
-                                    icon={CubeIcon}
-                                />
-                            ) : null}
-                        </div>
-                    )}
+                    <div
+                        className={`mb-8 grid grid-cols-1 gap-4 ${
+                            perms.canViewAI ? 'lg:grid-cols-2 lg:items-stretch' : ''
+                        }`}
+                    >
+                        <MetricCard
+                            title="Commit & deploy"
+                            value={commitDeployMetric.value}
+                            subtitle={commitDeployMetric.subtitle}
+                            status={commitDeployMetric.status}
+                            href="/app/admin/system-status"
+                            icon={CommandLineIcon}
+                        />
+                        {perms.canViewAI ? (
+                            <MetricCard
+                                title="AI spend (24h)"
+                                value={`$${Number(ai.cost_24h_usd ?? 0).toFixed(2)}`}
+                                subtitle={`${ai.runs_24h ?? 0} runs`}
+                                status="healthy"
+                                href="/app/admin/ai/budgets"
+                                icon={ChartBarIcon}
+                            />
+                        ) : null}
+                    </div>
 
                     {showReleasePanel ? (
                         <div className="mb-8">

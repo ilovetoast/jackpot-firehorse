@@ -52,6 +52,7 @@ class AssetUrlService
         'calls' => 0,
         'admin_thumbnail_calls' => 0,
         'public_thumbnail_calls' => 0,
+        'public_lightbox_thumbnail_calls' => 0,
         'admin_download_calls' => 0,
         'public_download_calls' => 0,
         'tenant_cache_hits' => 0,
@@ -435,6 +436,48 @@ class AssetUrlService
             );
         } finally {
             $this->recordTimedCall($start, 'public_thumbnail_calls');
+        }
+    }
+
+    /**
+     * Public lightbox / fullscreen preview URL (signed CloudFront, 30-minute TTL).
+     *
+     * Prefer largest available derivative (large → medium → small) so a single opened
+     * image looks sharp; {@see getPublicThumbnailUrl} stays small-first for grid payloads.
+     */
+    public function getPublicLightboxThumbnailUrl(Asset $asset): ?string
+    {
+        $start = null;
+        if ($this->metricsEnabled()) {
+            $start = microtime(true);
+        }
+
+        try {
+            if (! $this->isAssetPublic($asset)) {
+                return null;
+            }
+
+            $thumbnailStatus = $asset->thumbnail_status instanceof ThumbnailStatus
+                ? $asset->thumbnail_status->value
+                : (string) ($asset->thumbnail_status ?? 'pending');
+
+            $variants = $thumbnailStatus === ThumbnailStatus::COMPLETED->value
+                ? [
+                    AssetVariant::THUMB_LARGE,
+                    AssetVariant::THUMB_MEDIUM,
+                    AssetVariant::THUMB_SMALL,
+                    AssetVariant::THUMB_PREVIEW,
+                ]
+                : [AssetVariant::THUMB_PREVIEW];
+
+            return $this->firstAvailableVariantUrl(
+                $asset,
+                $variants,
+                self::PUBLIC_TTL_SECONDS,
+                true
+            );
+        } finally {
+            $this->recordTimedCall($start, 'public_lightbox_thumbnail_calls');
         }
     }
 
@@ -900,6 +943,7 @@ class AssetUrlService
             'calls' => 0,
             'admin_thumbnail_calls' => 0,
             'public_thumbnail_calls' => 0,
+            'public_lightbox_thumbnail_calls' => 0,
             'admin_download_calls' => 0,
             'public_download_calls' => 0,
             'tenant_cache_hits' => 0,

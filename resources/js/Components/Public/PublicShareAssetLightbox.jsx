@@ -35,10 +35,17 @@ export default function PublicShareAssetLightbox({
     onNext,
 }) {
     const { color: onPrimary } = contrastTextOnPrimary(primaryHex)
-    const thumb = asset?.final_thumbnail_url || asset?.thumbnail_url
+    /** Grid uses small thumb; lightbox requests large → medium → small from the server. */
+    const gridThumb = asset?.final_thumbnail_url || asset?.thumbnail_url
+    const lightboxThumb =
+        typeof asset?.thumbnail_url_lightbox === 'string' && asset.thumbnail_url_lightbox.trim()
+            ? asset.thumbnail_url_lightbox.trim()
+            : null
+    const previewSrc = lightboxThumb || gridThumb
     const isImage = isImageMime(asset?.mime_type)
-    const showLargePreview = isImage && thumb
-    const processing = !thumb && (asset?.thumbnail_status === 'pending' || !asset?.thumbnail_status)
+    const showLargePreview = isImage && previewSrc
+    const processing =
+        !previewSrc && (asset?.thumbnail_status === 'pending' || !asset?.thumbnail_status)
     const [downloadBusy, setDownloadBusy] = useState(false)
 
     const onKeyDown = useCallback(
@@ -97,16 +104,24 @@ export default function PublicShareAssetLightbox({
                     </button>
                 </div>
                 <div className="min-h-0 flex-1 overflow-auto flex flex-col lg:flex-row">
-                    <div className="flex min-h-[200px] flex-1 items-center justify-center bg-black/40 p-4 lg:min-h-[320px]">
+                    <div className="flex min-h-[min(50vh,420px)] flex-1 items-center justify-center bg-black/40 p-3 sm:p-5 lg:min-h-[min(62vh,520px)]">
                         {showLargePreview ? (
-                            <img src={thumb} alt="" className="max-h-[55vh] max-w-full object-contain rounded-lg shadow-lg" />
+                            <img
+                                src={previewSrc}
+                                alt=""
+                                className="max-h-[min(78vh,960px)] w-full max-w-full object-contain rounded-lg shadow-lg"
+                            />
                         ) : processing ? (
                             <div className="flex max-w-sm flex-col items-center gap-3 text-center text-white/80">
                                 <div className="h-20 w-20 animate-pulse rounded-xl bg-white/10" />
                                 <p className="text-sm">Preview still processing</p>
                             </div>
-                        ) : thumb ? (
-                            <img src={thumb} alt="" className="max-h-[55vh] max-w-full object-contain rounded-lg shadow-lg" />
+                        ) : previewSrc ? (
+                            <img
+                                src={previewSrc}
+                                alt=""
+                                className="max-h-[min(78vh,960px)] w-full max-w-full object-contain rounded-lg shadow-lg"
+                            />
                         ) : (
                             <div className="flex flex-col items-center gap-2 text-white/70">
                                 <DocumentIcon className="h-16 w-16 opacity-80" aria-hidden />

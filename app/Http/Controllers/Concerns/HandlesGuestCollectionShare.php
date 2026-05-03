@@ -656,6 +656,7 @@ trait HandlesGuestCollectionShare
         }
 
         $thumbnailUrl = $this->assetUrlService->getPublicThumbnailUrl($asset);
+        $thumbnailUrlLightbox = $this->assetUrlService->getPublicLightboxThumbnailUrl($asset);
 
         $downloadUrl = null;
         if ($guestDownloadsEnabled && $asset->isPublic()) {
@@ -680,6 +681,7 @@ trait HandlesGuestCollectionShare
             'size_bytes' => $asset->size_bytes,
             'thumbnail_url' => $thumbnailUrl,
             'final_thumbnail_url' => $thumbnailUrl,
+            'thumbnail_url_lightbox' => $thumbnailUrlLightbox,
             'download_url' => $downloadUrl,
             'thumbnail_status' => $thumbnailUrl ? 'completed' : 'pending',
             'is_published' => true,
