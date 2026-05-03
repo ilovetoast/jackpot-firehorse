@@ -31,6 +31,7 @@ import {
     getLuminance,
     hexToRgba,
     getContrastTextColor,
+    getWorkspaceSidebarForegroundHex,
     resolveWorkspaceSidebarSurface,
 } from '../../utils/colorUtils'
 import axios from 'axios'
@@ -90,8 +91,8 @@ export default function CollectionsIndex({
         resolveWorkspaceSidebarSurface(auth.activeBrand)
     const workspaceAccentColor = getWorkspaceButtonColor(auth.activeBrand)
     const accentLum = getLuminance(workspaceAccentColor)
-    /** WCAG ratio pick — same as AssetSidebar; avoids black-on-purple when luminance-only heuristics misfire. */
-    const textColor = sidebarIsCinematic ? '#ffffff' : getContrastTextColor(sidebarColor)
+    /** Solid rail: light copy on brand tints (see `getWorkspaceSidebarForegroundHex`). */
+    const textColor = sidebarIsCinematic ? '#ffffff' : getWorkspaceSidebarForegroundHex(sidebarColor)
     // Full brand tint for normal accents; neutral chrome when style is white/black so selection stays visible
     const activeBgColor =
         accentLum < 0.06 || accentLum > 0.94

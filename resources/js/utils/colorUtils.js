@@ -264,6 +264,26 @@ export function getContrastTextColor(backgroundColor) {
 }
 
 /**
+ * Foreground for **solid** workspace sidebars (Assets / Collections / Deliverables nav rail).
+ *
+ * `getContrastTextColor` alone picks black on many pastel / mid‑tint brand primaries because the ratio
+ * is slightly higher than white — but product‑wise those rails are still “brand chrome” and read better
+ * with light copy (muted via `unselectedTextColor` in sidebars). Only near‑white nav surfaces fall back
+ * to strict contrast (dark text).
+ *
+ * @param {string|null|undefined} sidebarColorHex — `nav_color` or `primary_color` from brand
+ * @returns {'#ffffff'|'#000000'}
+ */
+export function getWorkspaceSidebarForegroundHex(sidebarColorHex) {
+    const bg = normalizeHexColor(sidebarColorHex || '#1f2937')
+    // Paper / off‑white nav: use binary WCAG pick so labels stay readable.
+    if (getLuminance(bg) > 0.88) {
+        return getContrastTextColor(bg)
+    }
+    return '#ffffff'
+}
+
+/**
  * Brand settings tile / selector (same logic as BrandIconUnified).
  * @param {'gradient'|'solid'|'subtle'} style
  * @param {string|null|undefined} primary

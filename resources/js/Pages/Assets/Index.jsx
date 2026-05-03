@@ -30,6 +30,7 @@ import {
     getWorkspaceButtonColor,
     getWorkspaceContextualTone,
     getContrastTextColor,
+    getWorkspaceSidebarForegroundHex,
     resolveWorkspaceSidebarSurface,
 } from '../../utils/colorUtils'
 import { shouldPurgeOnCategoryChange } from '../../utils/filterQueryOwnership'
@@ -977,7 +978,7 @@ export default function AssetsIndex({
     const { isCinematic: sidebarIsCinematic, sidebarColor, backdropCss: sidebarBackdropCss } =
         resolveWorkspaceSidebarSurface(auth.activeBrand)
     const workspaceAccentColor = getWorkspaceButtonColor(auth.activeBrand)
-    const textColor = sidebarIsCinematic ? '#ffffff' : getContrastTextColor(sidebarColor)
+    const textColor = sidebarIsCinematic ? '#ffffff' : getWorkspaceSidebarForegroundHex(sidebarColor)
     // Same solid as AddAssetButton (darken workspace accent by 20) for Library row selection
     const contextualDarkColor = getWorkspaceContextualTone(workspaceAccentColor)
     const activeBgColor = contextualDarkColor

@@ -24,7 +24,13 @@ import {
 } from '@heroicons/react/24/outline'
 import { CategoryIcon } from '../Helpers/categoryIcons'
 import OnlineUsersIndicator from './OnlineUsersIndicator'
-import { getWorkspaceContextualTone, getContrastTextColor } from '../utils/colorUtils'
+import {
+    getWorkspaceContextualTone,
+    getContrastTextColor,
+    getWorkspaceSidebarForegroundHex,
+    getLuminance,
+    normalizeHexColor,
+} from '../utils/colorUtils'
 
 const STORAGE_KEY = 'workspace-sidebar-system-collapsed'
 
@@ -146,7 +152,7 @@ export default function AssetSidebar({
     const textColor =
         sidebarBackdropCss != null && String(sidebarBackdropCss).trim() !== ''
             ? '#ffffff'
-            : getContrastTextColor(sidebarColor)
+            : getWorkspaceSidebarForegroundHex(sidebarColor)
     const contextualDarkColor = getWorkspaceContextualTone(workspaceAccentColor || '#6366f1')
     const activeBgColor = contextualDarkColor
     const activeTextColor = getContrastTextColor(contextualDarkColor)
@@ -400,7 +406,7 @@ export default function AssetSidebar({
                     isLightBackground={
                         sidebarBackdropCss != null && String(sidebarBackdropCss).trim() !== ''
                             ? false
-                            : getContrastTextColor(sidebarColor) === '#000000'
+                            : getLuminance(normalizeHexColor(sidebarColor)) > 0.88
                     }
                 />
             </div>

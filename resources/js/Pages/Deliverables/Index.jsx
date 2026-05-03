@@ -32,6 +32,7 @@ import {
     getWorkspaceButtonColor,
     getWorkspaceContextualTone,
     getContrastTextColor,
+    getWorkspaceSidebarForegroundHex,
     resolveWorkspaceSidebarSurface,
 } from '../../utils/colorUtils'
 import {
@@ -399,7 +400,7 @@ function DeliverablesIndexPage({ categories, bulk_categories_by_asset_type = nul
     const { isCinematic: sidebarIsCinematic, sidebarColor, backdropCss: sidebarBackdropCss } =
         resolveWorkspaceSidebarSurface(auth.activeBrand)
     const workspaceAccentColor = getWorkspaceButtonColor(auth.activeBrand)
-    const textColor = sidebarIsCinematic ? '#ffffff' : getContrastTextColor(sidebarColor)
+    const textColor = sidebarIsCinematic ? '#ffffff' : getWorkspaceSidebarForegroundHex(sidebarColor)
     // Match Add Execution button: selected/hover use dark hue (same as button hover state)
     const contextualDarkColor = getWorkspaceContextualTone(workspaceAccentColor)
     const activeBgColor = contextualDarkColor
