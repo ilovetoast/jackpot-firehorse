@@ -97,6 +97,31 @@ class AiMetadataGenerationJob implements ShouldQueue
             $this->job
         );
 
+        // Self-heal: an earlier run may have skipped with thumbnail_unavailable while the parallel
+        // thumbnail job was still running; once paths exist, clear skip so vision can run (no manual rerun).
+        if (! $this->isManualRerun) {
+            $asset->refresh();
+            $metadata = $asset->metadata ?? [];
+            if (($metadata['_ai_metadata_skipped'] ?? false) === true
+                && ($metadata['_ai_metadata_skip_reason'] ?? '') === 'thumbnail_unavailable'
+                && ! isset($metadata['_ai_metadata_generated_at'])
+                && $this->resolveThumbnailPath($asset)) {
+                unset(
+                    $metadata['_ai_metadata_skipped'],
+                    $metadata['_ai_metadata_skip_reason'],
+                    $metadata['_ai_metadata_skipped_at']
+                );
+                if (($metadata['_ai_metadata_status'] ?? '') === 'skipped:thumbnail_unavailable') {
+                    unset($metadata['_ai_metadata_status']);
+                }
+                $asset->update(['metadata' => $metadata]);
+                $asset->refresh();
+                Log::info('[AiMetadataGenerationJob] Cleared prior thumbnail_unavailable skip; thumbnails now available', [
+                    'asset_id' => $asset->id,
+                ]);
+            }
+        }
+
         // 1. Check if already generated (unless manual rerun)
         // Auto-generation runs once per asset
         // Manual regenerate (via admin) overrides this check
@@ -373,78 +398,75 @@ class AiMetadataGenerationJob implements ShouldQueue
     }
 
     /**
-     * Wait for thumbnail path to be available with retry logic.
+     * Wait for thumbnail path to be available (parallel pipeline: AI queue vs images queue).
      *
-     * AiMetadataGenerationService fetches thumbnails internally via S3/IAM (no presigned URLs).
-     * This method waits for the thumbnail path to exist in asset metadata.
+     * AiMetadataGenerationService reads the object via S3/IAM from paths in asset metadata.
+     * Heavy formats (RAW, large PSD) can take many minutes; use assets.processing.ai_metadata_thumbnail_max_wait_seconds.
      *
-     * Retry strategy:
-     * - Initial check (immediate)
-     * - Retry with exponential backoff (2s, 4s, 8s, 16s)
-     * - Maximum wait time: 30 seconds
-     *
-     * @return bool True if thumbnail path is available, false if timeout
+     * @return bool True if thumbnail path is available, false if timeout or terminal non-success thumbnail state
      */
     protected function waitForThumbnail(Asset $asset): bool
     {
-        $maxWaitSeconds = 30;
-        $maxRetries = 5;
-        $retryDelays = [0, 2, 4, 8, 16];
+        $maxWaitSeconds = (int) config('assets.processing.ai_metadata_thumbnail_max_wait_seconds', 540);
+        $pollSeconds = (int) config('assets.processing.ai_metadata_thumbnail_poll_seconds', 5);
+        if (app()->runningUnitTests()) {
+            $maxWaitSeconds = min($maxWaitSeconds, 25);
+            $pollSeconds = min($pollSeconds, 1);
+        }
+
+        $deadline = time() + max(5, $maxWaitSeconds);
 
         Log::info('[AiMetadataGenerationJob] Waiting for thumbnail', [
             'asset_id' => $asset->id,
             'thumbnail_status' => $asset->thumbnail_status?->value ?? 'null',
             'max_wait_seconds' => $maxWaitSeconds,
+            'poll_seconds' => $pollSeconds,
         ]);
 
-        for ($attempt = 0; $attempt < $maxRetries; $attempt++) {
+        while (time() < $deadline) {
             $asset->refresh();
 
             $path = $this->resolveThumbnailPath($asset);
             if ($path) {
                 Log::info('[AiMetadataGenerationJob] Thumbnail available', [
                     'asset_id' => $asset->id,
-                    'attempt' => $attempt + 1,
                     'thumbnail_status' => $asset->thumbnail_status?->value ?? 'null',
                 ]);
 
                 return true;
             }
 
-            // Check if we should continue waiting
             $thumbnailStatus = $asset->thumbnail_status;
-            $isProcessing = in_array($thumbnailStatus, [
-                \App\Enums\ThumbnailStatus::PENDING,
-                \App\Enums\ThumbnailStatus::PROCESSING,
-            ], true);
 
-            if (! $isProcessing && $thumbnailStatus !== \App\Enums\ThumbnailStatus::COMPLETED) {
-                // Thumbnail generation failed or was skipped - no point waiting
-                Log::warning('[AiMetadataGenerationJob] Thumbnail not processing, skipping wait', [
+            if (in_array($thumbnailStatus, [
+                \App\Enums\ThumbnailStatus::FAILED,
+                \App\Enums\ThumbnailStatus::SKIPPED,
+            ], true)) {
+                Log::warning('[AiMetadataGenerationJob] Thumbnail generation failed or skipped; stopping wait', [
                     'asset_id' => $asset->id,
                     'thumbnail_status' => $thumbnailStatus?->value ?? 'null',
                 ]);
-                break;
+
+                return false;
             }
 
-            // Wait before next retry (except on last attempt)
-            if ($attempt < $maxRetries - 1) {
-                $delay = $retryDelays[$attempt] ?? 16;
-                if ($delay > 0) {
-                    Log::debug('[AiMetadataGenerationJob] Waiting for thumbnail, retry in '.$delay.'s', [
-                        'asset_id' => $asset->id,
-                        'attempt' => $attempt + 1,
-                        'delay_seconds' => $delay,
-                    ]);
-                    sleep($delay);
-                }
+            // Terminal: marked completed but no resolvable path (corrupt / stripped metadata) — do not spin.
+            if ($thumbnailStatus === \App\Enums\ThumbnailStatus::COMPLETED) {
+                Log::warning('[AiMetadataGenerationJob] Thumbnail COMPLETED but no path in metadata; stopping wait', [
+                    'asset_id' => $asset->id,
+                ]);
+
+                return false;
             }
+
+            $sleep = min($pollSeconds, max(1, $deadline - time()));
+            sleep($sleep);
         }
 
-        Log::warning('[AiMetadataGenerationJob] Thumbnail not available after retries', [
+        Log::warning('[AiMetadataGenerationJob] Thumbnail not available before deadline', [
             'asset_id' => $asset->id,
-            'attempts' => $maxRetries,
             'thumbnail_status' => $asset->thumbnail_status?->value ?? 'null',
+            'max_wait_seconds' => $maxWaitSeconds,
         ]);
 
         return false;

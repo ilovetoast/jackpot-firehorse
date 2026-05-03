@@ -545,8 +545,8 @@ if ($asset->thumbnail_status !== ThumbnailStatus::COMPLETED) {
    - Status: Enforced ✅
 
 3. **AiMetadataGenerationJob**
-   - Model: Wait logic (retries internally)
-   - Gate: Waits up to 30 seconds for thumbnails
+   - Model: Wait logic (polls internally; AI chain runs in parallel with `GenerateThumbnailsJob`)
+   - Gate: Waits up to `assets.processing.ai_metadata_thumbnail_max_wait_seconds` (default 540s) for a resolvable thumbnail path, then may skip or self-heal if thumbnails arrive after an earlier short-fuse skip
    - Status: Enforced ✅
 
 ### Tests

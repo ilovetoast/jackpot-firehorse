@@ -480,6 +480,15 @@ return [
          * supervisor-images-psd (HORIZON_IMAGES_PSD_WORKER_TIMEOUT). Large PSD flatten can run long.
          */
         'process_asset_job_timeout_psd_seconds' => (int) env('PROCESS_ASSET_JOB_TIMEOUT_PSD_SECONDS', 7200),
+
+        /*
+         * AiMetadataGenerationJob runs on the AI queue in parallel with GenerateThumbnailsJob (images queue).
+         * RAW/heavy files can take minutes before metadata contains a medium/preview path; a short wait caused
+         * false "skipped:thumbnail_unavailable" while thumbnails were still generating.
+         * Keep below Horizon AI worker timeout (HORIZON_AI_WORKER_TIMEOUT, default 960s) minus headroom for the vision API call.
+         */
+        'ai_metadata_thumbnail_max_wait_seconds' => (int) env('AI_METADATA_THUMBNAIL_MAX_WAIT_SECONDS', 540),
+        'ai_metadata_thumbnail_poll_seconds' => (int) env('AI_METADATA_THUMBNAIL_POLL_SECONDS', 5),
     ],
 
     /*

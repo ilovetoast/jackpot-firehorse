@@ -65,13 +65,29 @@ class AiMetadataSuggestionJob implements ShouldQueue
         // Idempotency: Check if AI suggestions already generated
         // BUT: If it failed before, allow retry (check for failed flag)
         $existingMetadata = $asset->metadata ?? [];
-        $wasCompleted = isset($existingMetadata['ai_metadata_suggestions_completed']) && 
+        $thumbSkipPoison = ($existingMetadata['_ai_metadata_skipped'] ?? false) === true
+            && ($existingMetadata['_ai_metadata_skip_reason'] ?? '') === 'thumbnail_unavailable';
+        // Legacy race: generation skipped for "no thumbnails" but this job still marked suggestions "completed" with 0 rows.
+        if ($thumbSkipPoison
+            && ($existingMetadata['ai_metadata_suggestions_completed'] ?? false) === true
+            && ! ($existingMetadata['ai_metadata_suggestions_failed'] ?? false)) {
+            unset(
+                $existingMetadata['ai_metadata_suggestions_completed'],
+                $existingMetadata['ai_metadata_suggestions_completed_at'],
+                $existingMetadata['ai_metadata_suggestions_count']
+            );
+            $asset->update(['metadata' => $existingMetadata]);
+            $asset->refresh();
+            $existingMetadata = $asset->metadata ?? [];
+        }
+
+        $wasCompleted = isset($existingMetadata['ai_metadata_suggestions_completed']) &&
             $existingMetadata['ai_metadata_suggestions_completed'] === true;
-        $wasFailed = isset($existingMetadata['ai_metadata_suggestions_failed']) && 
+        $wasFailed = isset($existingMetadata['ai_metadata_suggestions_failed']) &&
             $existingMetadata['ai_metadata_suggestions_failed'] === true;
-        
+
         // Skip if completed successfully, but allow retry if it failed
-        if ($wasCompleted && !$wasFailed) {
+        if ($wasCompleted && ! $wasFailed) {
             Log::info('[AiMetadataSuggestionJob] Skipping - already completed successfully', [
                 'asset_id' => $asset->id,
                 'suggestions_count' => $existingMetadata['ai_metadata_suggestions_count'] ?? 0,
@@ -104,6 +120,17 @@ class AiMetadataSuggestionJob implements ShouldQueue
             Log::info('[AiMetadataSuggestionJob] Skipping - no category', [
                 'asset_id' => $asset->id,
             ]);
+            return;
+        }
+
+        $asset->refresh();
+        $genMeta = $asset->metadata ?? [];
+        if (($genMeta['_ai_metadata_skipped'] ?? false) === true
+            && ($genMeta['_ai_metadata_skip_reason'] ?? '') === 'thumbnail_unavailable') {
+            Log::info('[AiMetadataSuggestionJob] Skipping — AiMetadataGenerationJob skipped (thumbnail unavailable); not marking suggestions completed', [
+                'asset_id' => $asset->id,
+            ]);
+
             return;
         }
 

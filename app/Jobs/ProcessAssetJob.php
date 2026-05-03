@@ -558,9 +558,9 @@ class ProcessAssetJob implements ShouldQueue
             //   - AiMetadataGenerationJob          - vision call: tag + field candidates
             //   - AiTagAutoApplyJob                - applies high-confidence tags
             //   - AiMetadataSuggestionJob          - structured suggestions from candidates
-            // Each AI job already polls/guards on thumbnail completion before doing
-            // any vision work, so running them on the ai queue in parallel with the
-            // tail of the main chain is safe.
+            // AiMetadataGenerationJob polls until thumbnail paths exist (see assets.processing
+            // ai_metadata_thumbnail_max_wait_seconds) because this chain starts in parallel
+            // with GenerateThumbnailsJob — slow RAW/PSD jobs can take many minutes.
 
             // Check if asset is a video to conditionally add video preview job
             // Version path: use version->mime_type only (from FileInspectionService). Legacy: asset->mime_type.
