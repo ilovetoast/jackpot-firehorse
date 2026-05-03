@@ -111,9 +111,9 @@ class HandleInertiaRequests extends Middleware
                 // Verify user has access to this brand (unless owner/admin)
                 if ($activeBrand && $user) {
                     $tenantRole = $user->getRoleForTenant($tenant);
-                    $isTenantOwnerOrAdmin = in_array($tenantRole, ['owner', 'admin']);
+                    $isTenantOwnerOrAdmin = in_array($tenantRole, ['owner', 'admin', 'agency_admin'], true);
 
-                    // Phase MI-1: Verify user has active brand membership (unless owner/admin)
+                    // Phase MI-1: Verify user has active brand membership (unless owner/admin/agency_admin)
                     if (! $isTenantOwnerOrAdmin) {
                         $membership = $user->activeBrandMembership($activeBrand);
                         $hasBrandAccess = $membership !== null;
@@ -149,7 +149,7 @@ class HandleInertiaRequests extends Middleware
                 // Try to find a brand the user has access to
                 if ($user) {
                     $tenantRole = $user->getRoleForTenant($tenant);
-                    $isTenantOwnerOrAdmin = in_array($tenantRole, ['owner', 'admin']);
+                    $isTenantOwnerOrAdmin = in_array($tenantRole, ['owner', 'admin', 'agency_admin'], true);
 
                     if (! $isTenantOwnerOrAdmin) {
                         $userBrand = $user->brands()
@@ -196,7 +196,7 @@ class HandleInertiaRequests extends Middleware
                 $isTenantOwnerOrAdmin = false;
                 if ($user) {
                     $tenantRole = $user->getRoleForTenant($tenant);
-                    $isTenantOwnerOrAdmin = in_array($tenantRole, ['owner', 'admin']);
+                    $isTenantOwnerOrAdmin = in_array($tenantRole, ['owner', 'admin', 'agency_admin'], true);
                 }
 
                 // Load all brands at query time. activeBrandMembership() uses brand->tenant_id only.

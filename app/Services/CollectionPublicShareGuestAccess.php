@@ -92,7 +92,7 @@ class CollectionPublicShareGuestAccess
     }
 
     /**
-     * Tenant-level plan gate for ZIP / bulk public downloads (unchanged).
+     * Tenant-level plan gate for ZIP / bulk public downloads (see config/plans.php per plan).
      */
     public function tenantAllowsPublicCollectionDownloads(?Tenant $tenant): bool
     {

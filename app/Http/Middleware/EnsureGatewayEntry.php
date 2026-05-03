@@ -110,7 +110,7 @@ class EnsureGatewayEntry
             ->where('tenants.id', $tenantId)
             ->first()?->pivot?->role;
 
-        $isTenantOwnerOrAdmin = in_array($tenantRole, ['owner', 'admin']);
+        $isTenantOwnerOrAdmin = in_array($tenantRole, ['owner', 'admin', 'agency_admin'], true);
 
         if (! $isTenantOwnerOrAdmin) {
             $hasAccess = $brand->users()

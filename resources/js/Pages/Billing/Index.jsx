@@ -49,6 +49,7 @@ const PLAN_HIGHLIGHTS = {
         { text: 'Advanced roles & permissions', included: true },
         { text: 'Private categories', included: true },
         { text: 'Public collection share links (optional password)', included: true },
+        { text: 'ZIP downloads from public collection pages', included: true },
         { text: 'Creator Module available', included: true, addon: true },
         { text: 'All add-ons available', included: true },
     ],
