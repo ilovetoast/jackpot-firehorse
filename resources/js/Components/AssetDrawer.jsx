@@ -5340,15 +5340,22 @@ export default function AssetDrawer({
                                         />
                                         {showDrawerReviewEmptyState && (
                                             <div
-                                                className="flex flex-col items-center justify-center rounded-lg border border-gray-100 bg-gray-50/90 px-4 py-8 text-center"
+                                                className="flex flex-col items-center gap-2 rounded-lg border border-gray-100 bg-gray-50/90 px-3 py-3 text-center sm:flex-row sm:items-center sm:gap-3 sm:py-2.5 sm:text-left"
                                                 role="status"
                                             >
-                                                <JackpotSlotReels className="mb-3" decorative />
-                                                <p className="text-sm font-semibold text-gray-800">No action required</p>
-                                                <p className="mt-1.5 max-w-[280px] text-xs leading-relaxed text-gray-500">
-                                                    Nothing is waiting for your review in Jackpot. When suggestions or
-                                                    tag ideas are ready, they will appear in this section.
-                                                </p>
+                                                <JackpotSlotReels
+                                                    className="shrink-0 scale-90 origin-center"
+                                                    decorative
+                                                />
+                                                <div className="min-w-0 sm:flex-1">
+                                                    <p className="text-sm font-semibold text-gray-800">
+                                                        No action required
+                                                    </p>
+                                                    <p className="mt-0.5 max-w-[280px] text-xs leading-snug text-gray-500 sm:mt-0.5 sm:max-w-none">
+                                                        Nothing is waiting for your review in Jackpot. When suggestions
+                                                        or tag ideas are ready, they will appear in this section.
+                                                    </p>
+                                                </div>
                                             </div>
                                         )}
                                     </div>

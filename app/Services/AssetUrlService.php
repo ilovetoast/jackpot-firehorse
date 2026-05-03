@@ -397,6 +397,10 @@ class AssetUrlService
     /**
      * Public thumbnail URL (signed CloudFront, 30-minute TTL).
      * Only available when the asset is public via collection membership.
+     *
+     * Variant order: smallest suitable raster first. Guest collection grids only need
+     * thumb/medium pixels; preferring {@see AssetVariant::THUMB_LARGE} first caused each
+     * tile to download multi-megabyte `large.webp` files (hundreds of MB per page).
      */
     public function getPublicThumbnailUrl(Asset $asset): ?string
     {
@@ -415,7 +419,12 @@ class AssetUrlService
                 : (string) ($asset->thumbnail_status ?? 'pending');
 
             $variants = $thumbnailStatus === ThumbnailStatus::COMPLETED->value
-                ? [AssetVariant::THUMB_LARGE, AssetVariant::THUMB_MEDIUM, AssetVariant::THUMB_SMALL, AssetVariant::THUMB_PREVIEW]
+                ? [
+                    AssetVariant::THUMB_SMALL,
+                    AssetVariant::THUMB_MEDIUM,
+                    AssetVariant::THUMB_PREVIEW,
+                    AssetVariant::THUMB_LARGE,
+                ]
                 : [AssetVariant::THUMB_PREVIEW];
 
             return $this->firstAvailableVariantUrl(

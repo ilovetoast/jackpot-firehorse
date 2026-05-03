@@ -152,9 +152,11 @@ class PipelineSequencingTest extends TestCase
             $metadata['_ai_tagging_skip_reason'] ?? null,
             'Skip reason should be thumbnail_unavailable'
         );
-        $this->assertFalse(
+        // AITaggingJob uses the skip model: no vision work ran, but the pipeline step is closed so
+        // downstream completion checks can proceed (see AITaggingJob::markAsSkipped).
+        $this->assertTrue(
             isset($metadata['ai_tagging_completed']) && $metadata['ai_tagging_completed'] === true,
-            'AI tagging should NOT be marked as completed when thumbnails are not ready'
+            'Skipped AI tagging is still marked completed for pipeline sequencing'
         );
     }
 

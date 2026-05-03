@@ -12,6 +12,7 @@ use App\Models\Tenant;
 use App\Models\UploadSession;
 use App\Services\AiUsageService;
 use App\Services\AI\Contracts\AIProviderInterface;
+use App\Services\PlanService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
@@ -62,7 +63,7 @@ class AiMetadataGenerationJobTest extends TestCase
     {
         Queue::fake();
 
-        $tenant = $this->createTenantWithPlanLimit(0); // At limit
+        $tenant = $this->createTenantWithPlanLimit(); // Credits already at monthly cap
         $asset = $this->createAssetWithCategory($tenant);
 
         $job = new AiMetadataGenerationJob($asset->id);
@@ -257,26 +258,31 @@ class AiMetadataGenerationJobTest extends TestCase
     }
 
     /**
-     * Helper: Create tenant with plan limit
+     * Helper: tenant whose shared AI credit budget is already exhausted (next checkUsage throws).
      */
-    protected function createTenantWithPlanLimit(int $limit): Tenant
+    protected function createTenantWithPlanLimit(): Tenant
     {
         $tenant = Tenant::create([
             'name' => 'Test Tenant',
             'slug' => 'test-tenant',
         ]);
 
-        // Set usage to limit
-        if ($limit > 0) {
-            DB::table('ai_usage')->insert([
-                'tenant_id' => $tenant->id,
-                'feature' => 'tagging',
-                'usage_date' => now()->toDateString(),
-                'call_count' => $limit,
-                'created_at' => now(),
-                'updated_at' => now(),
-            ]);
+        $cap = app(PlanService::class)->getEffectiveAiCredits($tenant);
+        if ($cap <= 0) {
+            $tenant->update(['manual_plan_override' => 'free']);
+            $tenant->refresh();
+            $cap = app(PlanService::class)->getEffectiveAiCredits($tenant);
         }
+        $this->assertGreaterThan(0, $cap, 'Fixture requires a finite AI credit cap');
+
+        DB::table('ai_usage')->insert([
+            'tenant_id' => $tenant->id,
+            'feature' => 'tagging',
+            'usage_date' => now()->toDateString(),
+            'call_count' => $cap,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
 
         return $tenant;
     }

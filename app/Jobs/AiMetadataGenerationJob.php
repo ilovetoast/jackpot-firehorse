@@ -409,7 +409,7 @@ class AiMetadataGenerationJob implements ShouldQueue
     {
         $maxWaitSeconds = (int) config('assets.processing.ai_metadata_thumbnail_max_wait_seconds', 540);
         $pollSeconds = (int) config('assets.processing.ai_metadata_thumbnail_poll_seconds', 5);
-        if (app()->runningUnitTests()) {
+        if (app()->runningUnitTests() || app()->environment('testing')) {
             $maxWaitSeconds = min($maxWaitSeconds, 25);
             $pollSeconds = min($pollSeconds, 1);
         }
