@@ -12,6 +12,11 @@ import {
     isUploadItemTransferTerminal,
 } from '../utils/uploadQueueProgress'
 
+/** Tailwind class merge (additive; avoids new dependencies) */
+function cn(...parts) {
+    return parts.filter(Boolean).join(' ')
+}
+
 const VIRTUAL_THRESHOLD = 42
 const ROW_ESTIMATE_PX = 120
 /** Above this count, default to collapsed list (active + issues + sample of completed). */

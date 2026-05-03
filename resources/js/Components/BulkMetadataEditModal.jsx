@@ -20,6 +20,11 @@ import CollectionSelector from './Collections/CollectionSelector'
 import CreateCollectionModal from './Collections/CreateCollectionModal'
 import ConfirmDialog from './ConfirmDialog'
 
+/** Above this count, collection preview skips per-asset GETs (instant summary). */
+const COLLECTION_LARGE_PREVIEW_THRESHOLD = 100
+/** Concurrent collection fetches when building a detailed preview (avoids hundreds of parallel requests). */
+const COLLECTION_PREVIEW_CONCURRENCY = 10
+
 export default function BulkMetadataEditModal({
     assetIds,
     onClose,
@@ -50,6 +55,7 @@ export default function BulkMetadataEditModal({
     const [showCategoryChangeConfirm, setShowCategoryChangeConfirm] = useState(false)
     const [pendingCategoryField, setPendingCategoryField] = useState(null)
     const [showCreateCollectionModal, setShowCreateCollectionModal] = useState(false)
+    const [previewBuildProgress, setPreviewBuildProgress] = useState(null)
     const tagFieldInputRef = useRef(null)
 
     const canShowCategoryWarning = () => {
@@ -233,58 +239,124 @@ export default function BulkMetadataEditModal({
 
         setLoading(true)
         setError(null)
+        setPreviewBuildProgress(null)
 
         try {
-            // C9.2: For collections, use sync endpoint preview (simulate for each asset)
+            // C9.2: For collections, preview current membership (batched) or summary-only when very large
             if (selectedField === 'collections') {
-                // For collections, we'll preview by checking current collections for each asset
                 const previewData = {
                     total_assets: assetIds.length,
                     affected_assets: [],
                     errors: [],
+                    summary_only: false,
                 }
 
-                // Fetch current collections for each asset to build preview
-                const previewPromises = assetIds.map(async (assetId) => {
-                    try {
-                        const res = await fetch(`/app/assets/${assetId}/collections`, {
-                            headers: { Accept: 'application/json' },
-                            credentials: 'same-origin',
-                        })
-                        const data = await res.json()
-                        const currentCollectionIds = (data.collections || []).filter(Boolean).map((c) => c?.id).filter(Boolean)
-                        const newCollectionIds = operationType === 'clear' ? [] : selectedCollectionIds
-                        const willChange = JSON.stringify(currentCollectionIds.sort()) !== JSON.stringify(newCollectionIds.sort())
+                const newCollectionIds = operationType === 'clear' ? [] : selectedCollectionIds
+                const selectedNames = collectionsList
+                    .filter((c) => selectedCollectionIds.includes(c.id))
+                    .map((c) => c.name)
+                    .filter(Boolean)
 
-                        if (willChange) {
+                if (assetIds.length > COLLECTION_LARGE_PREVIEW_THRESHOLD) {
+                    previewData.summary_only = true
+                    const opLabel =
+                        operationType === 'clear'
+                            ? 'remove all collection assignments'
+                            : operationType === 'add'
+                              ? 'add the selected collections (merged with existing on each asset)'
+                              : operationType === 'replace'
+                                ? "replace each asset's collections with exactly the selection below"
+                                : 'update collections'
+                    const namesText =
+                        operationType === 'clear'
+                            ? 'No collections will remain on each asset.'
+                            : selectedNames.length > 0
+                              ? `Collections: ${selectedNames.join(', ')}.`
+                              : `${newCollectionIds.length} collection(s) by ID.`
+                    previewData.summary_note = [
+                        `Per-asset preview is skipped for selections over ${COLLECTION_LARGE_PREVIEW_THRESHOLD} assets so this stays fast and the page does not freeze.`,
+                        `You selected ${assetIds.length} assets. Confirm will ${opLabel}.`,
+                        namesText,
+                        'Assets that already match your choice are no-ops during apply.',
+                    ]
+                } else {
+                    setPreviewBuildProgress({ done: 0, total: assetIds.length })
+
+                    const fetchOne = async (assetId) => {
+                        const idStr = String(assetId)
+                        try {
+                            const res = await fetch(`/app/assets/${assetId}/collections`, {
+                                headers: {
+                                    Accept: 'application/json',
+                                    'X-Requested-With': 'XMLHttpRequest',
+                                },
+                                credentials: 'same-origin',
+                            })
+                            const data = await res.json()
+                            const currentCollectionIds = (data.collections || [])
+                                .filter(Boolean)
+                                .map((c) => c?.id)
+                                .filter(Boolean)
+                            const willChange =
+                                JSON.stringify([...currentCollectionIds].sort()) !==
+                                JSON.stringify([...newCollectionIds].sort())
+
+                            if (willChange) {
+                                return {
+                                    asset_id: assetId,
+                                    asset_title: `Asset ${idStr.slice(0, 8)}…`,
+                                    changes: [
+                                        {
+                                            field_label: 'Collections',
+                                            old_value:
+                                                currentCollectionIds.length > 0
+                                                    ? `${currentCollectionIds.length} collection(s)`
+                                                    : 'None',
+                                            new_value:
+                                                newCollectionIds.length > 0
+                                                    ? `${newCollectionIds.length} collection(s)`
+                                                    : 'None',
+                                        },
+                                    ],
+                                }
+                            }
+                            return null
+                        } catch (err) {
                             return {
                                 asset_id: assetId,
-                                asset_title: `Asset ${assetId.substring(0, 8)}...`,
-                                changes: [{
-                                    field_label: 'Collections',
-                                    old_value: currentCollectionIds.length > 0 ? `${currentCollectionIds.length} collection(s)` : 'None',
-                                    new_value: newCollectionIds.length > 0 ? `${newCollectionIds.length} collection(s)` : 'None',
-                                }],
+                                asset_title: `Asset ${idStr.slice(0, 8)}…`,
+                                errors: [err.message || 'Failed to preview'],
                             }
                         }
-                        return null
-                    } catch (err) {
-                        return {
-                            asset_id: assetId,
-                            asset_title: `Asset ${assetId.substring(0, 8)}...`,
-                            errors: [err.message || 'Failed to preview'],
-                        }
                     }
-                })
 
-                const previewResults = await Promise.all(previewPromises)
-                previewData.affected_assets = previewResults.filter((r) => r !== null && !r.errors)
-                previewData.errors = previewResults.filter((r) => r?.errors).map((r) => ({
-                    asset_title: r.asset_title,
-                    errors: r.errors,
-                }))
+                    const previewResults = []
+                    for (let i = 0; i < assetIds.length; i += COLLECTION_PREVIEW_CONCURRENCY) {
+                        const slice = assetIds.slice(i, i + COLLECTION_PREVIEW_CONCURRENCY)
+                        const part = await Promise.all(slice.map((id) => fetchOne(id)))
+                        previewResults.push(...part)
+                        setPreviewBuildProgress({
+                            done: Math.min(i + slice.length, assetIds.length),
+                            total: assetIds.length,
+                        })
+                        await new Promise((r) => {
+                            if (typeof requestAnimationFrame === 'function') {
+                                requestAnimationFrame(() => r())
+                            } else {
+                                setTimeout(r, 0)
+                            }
+                        })
+                    }
 
-                // Generate a preview token (simple hash of operation)
+                    previewData.affected_assets = previewResults.filter((r) => r !== null && !r.errors)
+                    previewData.errors = previewResults
+                        .filter((r) => r?.errors)
+                        .map((r) => ({
+                            asset_title: r.asset_title,
+                            errors: r.errors,
+                        }))
+                }
+
                 const previewTokenData = {
                     operation_type: operationType,
                     field: 'collections',
@@ -330,6 +402,7 @@ export default function BulkMetadataEditModal({
             setError(err.message || 'Failed to preview changes')
         } finally {
             setLoading(false)
+            setPreviewBuildProgress(null)
         }
     }
 
@@ -388,7 +461,9 @@ export default function BulkMetadataEditModal({
         setError(null)
 
         const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content
-        const collectionIds = operationType === 'clear' ? [] : selectedCollectionIds
+        const normalizeCollectionIds = (ids) =>
+            [...new Set((ids || []).map((id) => parseInt(String(id), 10)).filter((n) => Number.isFinite(n) && n > 0))]
+        const collectionIds = operationType === 'clear' ? [] : normalizeCollectionIds(selectedCollectionIds)
         const successes = []
         const failures = []
 
@@ -404,7 +479,9 @@ export default function BulkMetadataEditModal({
                         credentials: 'same-origin',
                     })
                     const currentData = await currentRes.json()
-                    const currentIds = (currentData.collections || []).map((c) => c?.id).filter(Boolean)
+                    const currentIds = normalizeCollectionIds(
+                        (currentData.collections || []).map((c) => c?.id).filter(Boolean),
+                    )
                     const merged = [...new Set([...currentIds, ...collectionIds])]
                     idsToSync = merged
                 }
@@ -423,7 +500,14 @@ export default function BulkMetadataEditModal({
 
                 if (!res.ok) {
                     const errData = await res.json().catch(() => ({}))
-                    throw new Error(errData.message || `HTTP ${res.status}`)
+                    const flat =
+                        errData.errors && typeof errData.errors === 'object'
+                            ? Object.values(errData.errors)
+                                  .flat()
+                                  .filter(Boolean)
+                                  .join(' ')
+                            : ''
+                    throw new Error((errData.message && String(errData.message).trim()) || flat || `HTTP ${res.status}`)
                 }
 
                 successes.push({ asset_id: assetId })
@@ -686,7 +770,11 @@ export default function BulkMetadataEditModal({
                                     )}
                                     className="w-full px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
                                 >
-                                    {loading ? 'Generating Preview...' : 'Preview Changes'}
+                                    {loading && previewBuildProgress
+                                        ? `Building preview ${previewBuildProgress.done}/${previewBuildProgress.total}…`
+                                        : loading
+                                          ? 'Generating Preview…'
+                                          : 'Preview Changes'}
                                 </button>
                             </div>
                         )}
@@ -710,10 +798,27 @@ export default function BulkMetadataEditModal({
                                         <div className="text-sm font-medium text-blue-900">
                                             {preview.total_assets} assets selected
                                         </div>
-                                        <div className="text-sm text-blue-700 mt-1">
-                                            {preview.affected_assets.length} assets will be modified
-                                        </div>
+                                        {preview.summary_only ? (
+                                            <div className="text-sm text-blue-800 mt-1 font-medium">
+                                                Fast preview — per-asset diff omitted (over{' '}
+                                                {COLLECTION_LARGE_PREVIEW_THRESHOLD} assets)
+                                            </div>
+                                        ) : (
+                                            <div className="text-sm text-blue-700 mt-1">
+                                                {preview.affected_assets.length} assets will be modified
+                                            </div>
+                                        )}
                                     </div>
+
+                                    {preview.summary_only && Array.isArray(preview.summary_note) && (
+                                        <div className="p-4 bg-amber-50 border border-amber-200 rounded-md space-y-2">
+                                            {preview.summary_note.map((line, i) => (
+                                                <p key={i} className="text-sm text-amber-950 leading-snug">
+                                                    {line}
+                                                </p>
+                                            ))}
+                                        </div>
+                                    )}
 
                                     {preview.errors.length > 0 && (
                                         <div className="p-4 bg-red-50 border border-red-200 rounded-md">

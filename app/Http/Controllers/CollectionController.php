@@ -1226,7 +1226,10 @@ class CollectionController extends Controller
             'collection_ids.*' => 'integer|exists:collections,id',
         ]);
 
-        $requestedCollectionIds = $validated['collection_ids'];
+        $requestedCollectionIds = array_map(
+            static fn ($id) => (int) $id,
+            $validated['collection_ids'],
+        );
         $errors = [];
         $attached = [];
         $detached = [];
@@ -1236,11 +1239,20 @@ class CollectionController extends Controller
             ->where('tenant_id', $tenant->id)
             ->where('brand_id', $brand->id)
             ->pluck('collections.id')
-            ->toArray();
+            ->map(static fn ($id) => (int) $id)
+            ->all();
 
         // Determine what to add and remove
-        $toAdd = array_diff($requestedCollectionIds, $currentCollections);
-        $toRemove = array_diff($currentCollections, $requestedCollectionIds);
+        $toAdd = array_values(array_diff($requestedCollectionIds, $currentCollections));
+        $toRemove = array_values(array_diff($currentCollections, $requestedCollectionIds));
+
+        // D6.1: Fail before any detach/attach if adds are requested but asset cannot join collections.
+        // (Previously removals ran first and the request still 422'd on add — leaving a half-applied state.)
+        if ($toAdd !== [] && ! $this->assetEligibilityService->isEligibleForCollections($asset)) {
+            return response()->json([
+                'message' => 'This asset is not published (or is archived) and cannot be added to collections. Publish it first, or exclude it from this bulk action. Removing collections from unpublished assets is allowed — use an operation that only removes memberships.',
+            ], 422);
+        }
 
         // Process removals first
         foreach ($toRemove as $collectionId) {
@@ -1288,13 +1300,6 @@ class CollectionController extends Controller
                 $errors[] = "You do not have permission to add assets to collection: {$collection->name}.";
 
                 continue;
-            }
-
-            // D6.1: Asset eligibility (published, non-archived) is enforced here. Do not bypass this for collections or downloads.
-            if (! $this->assetEligibilityService->isEligibleForCollections($asset)) {
-                return response()->json([
-                    'message' => 'Some selected assets are not published and cannot be added to collections.',
-                ], 422);
             }
 
             try {
