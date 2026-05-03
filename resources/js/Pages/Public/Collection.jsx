@@ -20,6 +20,7 @@ import FilmGrainOverlay from '../../Components/FilmGrainOverlay'
 import { useCdn403Recovery } from '../../hooks/useCdn403Recovery'
 import { contrastTextOnPrimary } from '../../utils/contrastTextOnPrimary'
 import { publicShareCinemaLayers } from '../../utils/publicShareCinemaBackground'
+import { saveUrlAsDownload } from '../../utils/singleAssetDownload'
 
 /** Show a “may take a while” notice in the ZIP modal above this file count (full collection or selected). */
 const LARGE_PUBLIC_ZIP_WARNING_THRESHOLD = 25
@@ -67,6 +68,8 @@ export default function PublicCollection({
     const [downloadError, setDownloadError] = useState(null)
     const [selectedIds, setSelectedIds] = useState(() => new Set())
     const [lightboxIndex, setLightboxIndex] = useState(null)
+    /** Row-level single-file download (same-origin fetch; avoids CDN opening in a new tab). */
+    const [publicListDownloadId, setPublicListDownloadId] = useState(null)
     const searchInputRef = useRef(null)
     /** Index in `assetsList` for Shift-click range select (download checkboxes). */
     const lastBucketAnchorIndexRef = useRef(null)
@@ -291,6 +294,30 @@ export default function PublicCollection({
     )
 
     const closeLightbox = useCallback(() => setLightboxIndex(null), [])
+
+    const downloadPublicListSingleAsset = useCallback(
+        async (asset, e) => {
+            e?.stopPropagation?.()
+            if (!asset?.download_url || publicListDownloadId != null) return
+            setPublicListDownloadId(String(asset.id))
+            try {
+                const url = new URL(asset.download_url, window.location.origin).href
+                const raw = asset.original_filename || asset.title || 'download'
+                const name =
+                    String(raw)
+                        .split(/[/\\]/)
+                        .pop()
+                        ?.replace(/["\\]/g, '_')
+                        ?.slice(0, 200) || 'download'
+                await saveUrlAsDownload(url, name)
+            } catch {
+                window.alert('Download failed. Please try again.')
+            } finally {
+                setPublicListDownloadId(null)
+            }
+        },
+        [publicListDownloadId]
+    )
 
     const goLightboxPrev = useCallback(() => {
         setLightboxIndex((i) => {
@@ -590,22 +617,16 @@ export default function PublicCollection({
                                         </div>
                                         <span className="hidden sm:block text-xs shrink-0 text-white/35">{formatBytes(asset.size_bytes)}</span>
                                         {downloadCollectionEnabled && asset.download_url ? (
-                                            <a
-                                                href={asset.download_url}
-                                                download={
-                                                    String(asset.original_filename || asset.title || 'download')
-                                                        .split(/[/\\]/)
-                                                        .pop()
-                                                        ?.replace(/["\\]/g, '_')
-                                                        ?.slice(0, 200) || 'download'
-                                                }
-                                                onClick={(e) => e.stopPropagation()}
-                                                className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-semibold shrink-0 shadow-md transition hover:opacity-95"
+                                            <button
+                                                type="button"
+                                                disabled={publicListDownloadId != null}
+                                                onClick={(e) => downloadPublicListSingleAsset(asset, e)}
+                                                className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-semibold shrink-0 shadow-md transition hover:opacity-95 disabled:cursor-wait disabled:opacity-60"
                                                 style={{ backgroundColor: accentColor, color: onAccentBtn }}
                                             >
                                                 <ArrowDownTrayIcon className="h-4 w-4" />
-                                                Download
-                                            </a>
+                                                {publicListDownloadId === String(asset.id) ? '…' : 'Download'}
+                                            </button>
                                         ) : null}
                                     </li>
                                 )

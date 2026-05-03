@@ -19,6 +19,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Inertia\Response;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
  * Password-protected collection share links (V1): is_public + public_password_hash + optional token URL.
@@ -131,7 +132,7 @@ class PublicCollectionController extends Controller
     /**
      * Download a single asset from a share collection. No auth.
      */
-    public function download(string $brand_slug, string $collection_slug, Asset $asset, Request $request): RedirectResponse
+    public function download(string $brand_slug, string $collection_slug, Asset $asset, Request $request): RedirectResponse|StreamedResponse
     {
         $collection = $this->resolveCollectionByPublicSlug($brand_slug, $collection_slug);
         if (! $collection) {

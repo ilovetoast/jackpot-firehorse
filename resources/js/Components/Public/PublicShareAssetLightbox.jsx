@@ -1,17 +1,27 @@
-import { useCallback, useEffect } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { XMarkIcon, ChevronLeftIcon, ChevronRightIcon, ArrowDownTrayIcon, DocumentIcon } from '@heroicons/react/24/outline'
 import { contrastTextOnPrimary } from '../../utils/contrastTextOnPrimary'
+import { saveUrlAsDownload } from '../../utils/singleAssetDownload'
 
 function isImageMime(mime) {
     if (!mime || typeof mime !== 'string') return false
     return mime.toLowerCase().startsWith('image/')
 }
 
-/** Hint for same-origin download step; server redirect uses Content-Disposition: attachment on CDN URL. */
+/** Basename for client-side save when Content-Disposition is missing. */
 function suggestedDownloadName(asset) {
     const raw = asset?.original_filename || asset?.title || 'download'
     const base = String(raw).split(/[/\\]/).pop() || 'download'
     return base.replace(/["\\]/g, '_').slice(0, 200) || 'download'
+}
+
+function absoluteUrl(href) {
+    if (!href || typeof href !== 'string') return ''
+    try {
+        return new URL(href, window.location.origin).href
+    } catch {
+        return href
+    }
 }
 
 export default function PublicShareAssetLightbox({
@@ -29,6 +39,7 @@ export default function PublicShareAssetLightbox({
     const isImage = isImageMime(asset?.mime_type)
     const showLargePreview = isImage && thumb
     const processing = !thumb && (asset?.thumbnail_status === 'pending' || !asset?.thumbnail_status)
+    const [downloadBusy, setDownloadBusy] = useState(false)
 
     const onKeyDown = useCallback(
         (e) => {
@@ -50,6 +61,18 @@ export default function PublicShareAssetLightbox({
         window.addEventListener('keydown', onKeyDown)
         return () => window.removeEventListener('keydown', onKeyDown)
     }, [onKeyDown])
+
+    const handleDownload = useCallback(async () => {
+        if (!asset?.download_url || downloadBusy) return
+        setDownloadBusy(true)
+        try {
+            await saveUrlAsDownload(absoluteUrl(asset.download_url), suggestedDownloadName(asset))
+        } catch {
+            window.alert('Download failed. Please try again.')
+        } finally {
+            setDownloadBusy(false)
+        }
+    }, [asset?.download_url, asset?.original_filename, asset?.title, downloadBusy])
 
     if (!asset) return null
 
@@ -95,15 +118,16 @@ export default function PublicShareAssetLightbox({
                         <p className="text-xs font-medium uppercase tracking-wider text-white/45">File type</p>
                         <p className="mt-1 text-sm text-white/90">{asset.mime_type || ext}</p>
                         {downloadsEnabled && asset.download_url ? (
-                            <a
-                                href={asset.download_url}
-                                download={suggestedDownloadName(asset)}
-                                className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold shadow-lg transition hover:opacity-95"
+                            <button
+                                type="button"
+                                disabled={downloadBusy}
+                                onClick={handleDownload}
+                                className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold shadow-lg transition hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-60"
                                 style={{ backgroundColor: primaryHex || '#6366f1', color: onPrimary }}
                             >
                                 <ArrowDownTrayIcon className="h-4 w-4 shrink-0" />
-                                Download
-                            </a>
+                                {downloadBusy ? 'Preparing…' : 'Download'}
+                            </button>
                         ) : null}
                     </div>
                 </div>

@@ -16,6 +16,7 @@ import {
     BoltIcon,
     CreditCardIcon,
     InboxIcon,
+    CubeIcon,
 } from '@heroicons/react/24/outline'
 
 const STATUS_COLORS = {
@@ -93,6 +94,48 @@ function hasReleaseInfo(release) {
         return false
     }
     return !!(release.commit || release.message || release.committed_at || release.deployed_at || release.status_url)
+}
+
+/** Short git SHA for display (full hash still available on System status). */
+function shortCommitDisplay(commit) {
+    if (commit == null || typeof commit !== 'string') return null
+    const c = commit.trim()
+    if (c === '') return null
+    if (/^[a-f0-9]{7,64}$/i.test(c)) {
+        return c.length > 7 ? c.slice(0, 7) : c
+    }
+    return c.length > 24 ? `${c.slice(0, 21)}…` : c
+}
+
+/**
+ * @param {Record<string, unknown>} release
+ * @returns {{ value: string, subtitle: string } | null}
+ */
+function deploymentSummaryForTile(release) {
+    if (!release || typeof release !== 'object') return null
+    const deployed = formatReleaseTimestamp(release.deployed_at)
+    const committed = formatReleaseTimestamp(release.committed_at)
+    const sha = shortCommitDisplay(release.commit)
+    if (sha) {
+        const when = deployed.display || committed.display
+        return {
+            value: sha,
+            subtitle: when || 'Build revision',
+        }
+    }
+    if (deployed.display) {
+        return {
+            value: deployed.display,
+            subtitle:
+                typeof release.message === 'string' && release.message.trim()
+                    ? `${release.message.trim().slice(0, 56)}${release.message.trim().length > 56 ? '…' : ''}`
+                    : 'Last deployment',
+        }
+    }
+    if (committed.display) {
+        return { value: committed.display, subtitle: 'Source commit time' }
+    }
+    return null
 }
 
 function ReleaseInfoPanel({ release }) {
@@ -229,6 +272,9 @@ export default function AdminDashboard({ auth, metrics: initialMetrics }) {
     const healthStatusClass = STATUS_COLORS[health.status] || STATUS_COLORS.unknown
     const release = m.release || {}
     const showRelease = hasReleaseInfo(release)
+    const deploymentTile = deploymentSummaryForTile(release)
+    const showDeploymentTile = deploymentTile != null
+    const showReleasePanel = showRelease && !showDeploymentTile
 
     const hubs = [
         {
@@ -325,10 +371,10 @@ export default function AdminDashboard({ auth, metrics: initialMetrics }) {
                         />
                     </div>
 
-                    {(perms.canViewAI || showRelease) && (
+                    {(perms.canViewAI || showDeploymentTile) && (
                         <div
                             className={`mb-8 grid grid-cols-1 gap-4 ${
-                                perms.canViewAI && showRelease ? 'lg:grid-cols-2 lg:items-stretch' : ''
+                                perms.canViewAI && showDeploymentTile ? 'lg:grid-cols-2 lg:items-stretch' : ''
                             }`}
                         >
                             {perms.canViewAI ? (
@@ -341,9 +387,24 @@ export default function AdminDashboard({ auth, metrics: initialMetrics }) {
                                     icon={ChartBarIcon}
                                 />
                             ) : null}
-                            {showRelease ? <ReleaseInfoPanel release={release} /> : null}
+                            {showDeploymentTile ? (
+                                <MetricCard
+                                    title="Deployment"
+                                    value={deploymentTile.value}
+                                    subtitle={deploymentTile.subtitle}
+                                    status="stable"
+                                    href="/app/admin/system-status"
+                                    icon={CubeIcon}
+                                />
+                            ) : null}
                         </div>
                     )}
+
+                    {showReleasePanel ? (
+                        <div className="mb-8">
+                            <ReleaseInfoPanel release={release} />
+                        </div>
+                    ) : null}
 
                     <div className="mb-8 grid grid-cols-1 gap-4 lg:grid-cols-2">
                         <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">

@@ -19,6 +19,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Inertia\Response;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
  * Token-based share URLs: /share/collections/{public_share_token}
@@ -130,7 +131,7 @@ class ShareCollectionController extends Controller
         return $this->performStreamZip($collection, $request);
     }
 
-    public function download(Request $request, string $token, Asset $asset): RedirectResponse
+    public function download(Request $request, string $token, Asset $asset): RedirectResponse|StreamedResponse
     {
         $collection = Collection::query()
             ->where('public_share_token', $token)

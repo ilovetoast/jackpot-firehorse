@@ -19,6 +19,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 use Illuminate\Support\Str;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -506,7 +507,7 @@ trait HandlesGuestCollectionShare
         ])->deleteFileAfterSend(true);
     }
 
-    protected function performAssetDownload(Collection $collection, Asset $asset, string $brand_slug_for_log, Request $request): RedirectResponse
+    protected function performAssetDownload(Collection $collection, Asset $asset, string $brand_slug_for_log, Request $request): RedirectResponse|StreamedResponse
     {
         $this->assertGuestShareUnlockedForDownload($collection, $request);
 
@@ -546,12 +547,90 @@ trait HandlesGuestCollectionShare
             abort(403, 'Asset not publicly accessible.');
         }
 
-        $downloadUrl = $this->assetUrlService->getPublicDownloadUrlAsAttachment($asset);
-        if (! $downloadUrl) {
-            abort(404, 'File not available.');
+        // Stream through the app so browsers always save (CloudFront redirect + cookies / query signing
+        // often serves images inline instead of honoring attachment on the guest's final navigation).
+        try {
+            return $this->streamPublicGuestCollectionOriginalAsset($asset, $tenant);
+        } catch (\Throwable $e) {
+            Log::warning('[GuestShare] Streaming public asset failed; falling back to signed CDN URL', [
+                'collection_id' => $collection->id,
+                'asset_id' => $asset->id,
+                'error' => $e->getMessage(),
+            ]);
+            $downloadUrl = $this->assetUrlService->getPublicDownloadUrlAsAttachment($asset);
+            if (! $downloadUrl) {
+                abort(503, 'Download temporarily unavailable.');
+            }
+
+            return redirect()->away($downloadUrl);
+        }
+    }
+
+    /**
+     * Stream the original object from tenant storage with Content-Disposition: attachment (public share).
+     */
+    protected function streamPublicGuestCollectionOriginalAsset(Asset $asset, \App\Models\Tenant $tenant): StreamedResponse
+    {
+        $asset->loadMissing(['storageBucket']);
+        $bucketService = app(TenantBucketService::class);
+        try {
+            $bucket = $asset->storageBucket
+                ?? $bucketService->resolveActiveBucketOrFail($tenant);
+        } catch (\Throwable $e) {
+            Log::error('[GuestShare] streamPublicGuestCollectionOriginalAsset: bucket resolution failed', [
+                'asset_id' => $asset->id,
+                'error' => $e->getMessage(),
+            ]);
+            throw $e;
         }
 
-        return redirect()->away($downloadUrl);
+        $key = ltrim((string) $asset->storage_root_path, '/');
+        $rawName = is_string($asset->original_filename) && trim($asset->original_filename) !== ''
+            ? $asset->original_filename
+            : basename($key);
+        $sanitized = $this->downloadNameResolver->sanitizeFilename($rawName);
+        $safeFilename = preg_replace('/[\r\n"\\\\]/', '', $sanitized);
+        $safeFilename = ($safeFilename !== null && $safeFilename !== '') ? $safeFilename : 'download';
+
+        $s3Client = $bucketService->getS3Client();
+
+        try {
+            $head = $s3Client->headObject([
+                'Bucket' => $bucket->name,
+                'Key' => $key,
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('[GuestShare] streamPublicGuestCollectionOriginalAsset: headObject failed', [
+                'asset_id' => $asset->id,
+                'bucket' => $bucket->name,
+                'key' => $key,
+                'error' => $e->getMessage(),
+            ]);
+            throw $e;
+        }
+
+        $contentType = $head['ContentType'] ?? 'application/octet-stream';
+        $headers = ['Content-Type' => $contentType];
+        if (isset($head['ContentLength'])) {
+            $headers['Content-Length'] = (string) $head['ContentLength'];
+        }
+
+        $bucketName = $bucket->name;
+
+        return response()->streamDownload(function () use ($s3Client, $bucketName, $key) {
+            $result = $s3Client->getObject([
+                'Bucket' => $bucketName,
+                'Key' => $key,
+            ]);
+            $body = $result['Body'];
+            if ($body instanceof \Psr\Http\Message\StreamInterface) {
+                while (! $body->eof()) {
+                    echo $body->read(1024 * 1024);
+                }
+            } else {
+                echo (string) $body;
+            }
+        }, $safeFilename, $headers);
     }
 
     protected function mapAssetToPublicGridArray(Asset $asset, Collection $collection, ?string $shareToken, bool $guestDownloadsEnabled): array
