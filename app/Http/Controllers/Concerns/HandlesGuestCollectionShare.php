@@ -385,15 +385,28 @@ trait HandlesGuestCollectionShare
 
             return $fromMeta > 0 ? $fromMeta : (int) ($a->size_bytes ?? 0);
         });
-        $maxZipBytes = $this->planService->getMaxDownloadZipBytes($tenant);
+        $planMaxZipBytes = $this->planService->getMaxDownloadZipBytes($tenant);
+        $maxZipBytes = $planMaxZipBytes;
+        $serverCeilingMb = (int) config('collection_zip.server_max_estimated_zip_mb', 0);
+        $serverCeilingBytes = $serverCeilingMb > 0 ? $serverCeilingMb * 1024 * 1024 : 0;
+        if ($serverCeilingBytes > 0) {
+            $maxZipBytes = min($maxZipBytes, $serverCeilingBytes);
+        }
         if ($estimatedBytes > $maxZipBytes) {
+            if ($estimatedBytes > $planMaxZipBytes) {
+                $zipLimitMessage = 'Estimated ZIP size exceeds plan limit.';
+            } elseif ($serverCeilingBytes > 0 && $estimatedBytes > $serverCeilingBytes) {
+                $zipLimitMessage = 'Estimated ZIP size exceeds this host\'s configured download limit. Try a smaller selection or ask your administrator.';
+            } else {
+                $zipLimitMessage = 'Estimated ZIP size exceeds the allowed limit for this download.';
+            }
             if ($request->expectsJson()) {
                 return response()->json([
-                    'message' => 'Estimated ZIP size exceeds plan limit.',
+                    'message' => $zipLimitMessage,
                 ], 422);
             }
 
-            return redirect()->back()->with('error', 'Estimated ZIP size exceeds plan limit.');
+            return redirect()->back()->with('error', $zipLimitMessage);
         }
 
         $bucketService = app(TenantBucketService::class);

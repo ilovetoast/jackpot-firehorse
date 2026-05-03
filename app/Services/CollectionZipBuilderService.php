@@ -32,6 +32,20 @@ class CollectionZipBuilderService
     private const STREAM_CHUNK_BYTES = 8 * 1024 * 1024;
 
     /**
+     * Directory for tempnam() scratch files (ZIP + per-object streams). Falls back to system temp.
+     */
+    protected function writableTempDirectory(): string
+    {
+        $configured = (string) config('collection_zip.temp_directory', '');
+        $configured = $configured !== '' ? rtrim($configured, '/\\') : '';
+        if ($configured !== '' && is_dir($configured) && is_writable($configured)) {
+            return $configured;
+        }
+
+        return sys_get_temp_dir();
+    }
+
+    /**
      * Build a ZIP file from assets, writing to a temp file.
      *
      * @param  Collection<int, Asset>  $assets  Assets with storageBucket relation loaded
@@ -43,7 +57,8 @@ class CollectionZipBuilderService
             @set_time_limit(0);
         }
 
-        $tempZipPath = tempnam(sys_get_temp_dir(), 'collection_zip_').'.zip';
+        $tempBase = $this->writableTempDirectory();
+        $tempZipPath = tempnam($tempBase, 'collection_zip_').'.zip';
 
         $zip = new ZipArchive;
         if ($zip->open($tempZipPath, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== true) {
@@ -273,7 +288,7 @@ class CollectionZipBuilderService
                 'Key' => $assetPath,
             ]);
 
-            $tmpPath = tempnam(sys_get_temp_dir(), 'zip_part_');
+            $tmpPath = tempnam($this->writableTempDirectory(), 'zip_part_');
             if ($tmpPath === false) {
                 return null;
             }

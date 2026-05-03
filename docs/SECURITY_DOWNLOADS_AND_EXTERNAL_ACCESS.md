@@ -4,6 +4,8 @@ This document summarizes how shareable download links and the public download ex
 
 For collection access flows, see also [COLLECTIONS_ACCESS.md](./COLLECTIONS_ACCESS.md). For the permission model, see [PERMISSIONS.md](./PERMISSIONS.md).
 
+For **disk, nginx/PHP timeouts, optional host ZIP ceilings, and temp directory** for public/guest collection ZIP builds, see [OPERATIONS_PUBLIC_COLLECTION_ZIP.md](./OPERATIONS_PUBLIC_COLLECTION_ZIP.md).
+
 ---
 
 ## External (collection) users
@@ -75,3 +77,4 @@ For collection access flows, see also [COLLECTIONS_ACCESS.md](./COLLECTIONS_ACCE
 ## Change log
 
 - **D12:** Added `downloads.share_public_link`, blocked public links for collection guests, defaulted guests to sign-in–required company scope in UI, documented this file.
+- **2026-05:** Cross-linked [OPERATIONS_PUBLIC_COLLECTION_ZIP.md](./OPERATIONS_PUBLIC_COLLECTION_ZIP.md) for collection ZIP host/plan limits and disk.
