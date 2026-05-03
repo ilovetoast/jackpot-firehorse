@@ -72,7 +72,7 @@ const PLANS = [
             'Brand portal & guidelines editor',
             'Advanced roles & permissions',
             'Private categories',
-            'SSO / Single sign-on',
+            'Public collection share links (optional password)',
             'Creator Module available (add-on)',
             'All add-ons available',
             'Priority phone support',
@@ -96,7 +96,8 @@ const PLANS = [
         features: [
             'All Pro features',
             'Creator Module included (50 seats)',
-            'Public collections & portal',
+            'Public collections, share links & brand portal',
+            'ZIP downloads from public collection pages',
             'Password-protected download links',
             'Download policy controls',
             'Non-expiring links',

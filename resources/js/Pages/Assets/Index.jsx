@@ -977,16 +977,7 @@ export default function AssetsIndex({
     const { isCinematic: sidebarIsCinematic, sidebarColor, backdropCss: sidebarBackdropCss } =
         resolveWorkspaceSidebarSurface(auth.activeBrand)
     const workspaceAccentColor = getWorkspaceButtonColor(auth.activeBrand)
-    const isLightColor = (color) => {
-        if (!color || color === '#ffffff' || color === '#FFFFFF') return true
-        const hex = color.replace('#', '')
-        const r = parseInt(hex.substr(0, 2), 16)
-        const g = parseInt(hex.substr(2, 2), 16)
-        const b = parseInt(hex.substr(4, 2), 16)
-        const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
-        return luminance > 0.5
-    }
-    const textColor = sidebarIsCinematic || !isLightColor(sidebarColor) ? '#ffffff' : '#000000'
+    const textColor = sidebarIsCinematic ? '#ffffff' : getContrastTextColor(sidebarColor)
     // Same solid as AddAssetButton (darken workspace accent by 20) for Library row selection
     const contextualDarkColor = getWorkspaceContextualTone(workspaceAccentColor)
     const activeBgColor = contextualDarkColor
@@ -1071,7 +1062,6 @@ export default function AssetsIndex({
                         sidebarColor={sidebarColor}
                         sidebarBackdropCss={sidebarBackdropCss}
                         workspaceAccentColor={workspaceAccentColor}
-                        isLightColor={isLightColor}
                         tooltipVisible={tooltipVisible}
                         setTooltipVisible={setTooltipVisible}
                         canManageCategoriesAndFields={(can('metadata.registry.view') || can('metadata.tenant.visibility.manage')) || can('brand_categories.manage')}

@@ -113,7 +113,6 @@ export default function AssetSidebar({
     /** When set, Overview-style cinematic gradient (brand primary + secondary glows on #0B0B0D). */
     sidebarBackdropCss = null,
     workspaceAccentColor,
-    isLightColor,
     tooltipVisible,
     setTooltipVisible,
     canManageCategoriesAndFields = false,
@@ -147,9 +146,7 @@ export default function AssetSidebar({
     const textColor =
         sidebarBackdropCss != null && String(sidebarBackdropCss).trim() !== ''
             ? '#ffffff'
-            : isLightColor(sidebarColor)
-              ? '#000000'
-              : '#ffffff'
+            : getContrastTextColor(sidebarColor)
     const contextualDarkColor = getWorkspaceContextualTone(workspaceAccentColor || '#6366f1')
     const activeBgColor = contextualDarkColor
     const activeTextColor = getContrastTextColor(contextualDarkColor)
@@ -403,7 +400,7 @@ export default function AssetSidebar({
                     isLightBackground={
                         sidebarBackdropCss != null && String(sidebarBackdropCss).trim() !== ''
                             ? false
-                            : isLightColor(sidebarColor)
+                            : getContrastTextColor(sidebarColor) === '#000000'
                     }
                 />
             </div>

@@ -90,16 +90,8 @@ export default function CollectionsIndex({
         resolveWorkspaceSidebarSurface(auth.activeBrand)
     const workspaceAccentColor = getWorkspaceButtonColor(auth.activeBrand)
     const accentLum = getLuminance(workspaceAccentColor)
-    const isLightColor = (color) => {
-        if (!color || color === '#ffffff' || color === '#FFFFFF') return true
-        const hex = color.replace('#', '')
-        const r = parseInt(hex.substr(0, 2), 16)
-        const g = parseInt(hex.substr(2, 2), 16)
-        const b = parseInt(hex.substr(4, 2), 16)
-        const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
-        return luminance > 0.5
-    }
-    const textColor = sidebarIsCinematic || !isLightColor(sidebarColor) ? '#ffffff' : '#000000'
+    /** WCAG ratio pick — same as AssetSidebar; avoids black-on-purple when luminance-only heuristics misfire. */
+    const textColor = sidebarIsCinematic ? '#ffffff' : getContrastTextColor(sidebarColor)
     // Full brand tint for normal accents; neutral chrome when style is white/black so selection stays visible
     const activeBgColor =
         accentLum < 0.06 || accentLum > 0.94

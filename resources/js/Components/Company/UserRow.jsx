@@ -133,7 +133,7 @@ export default function UserRow({
         <div className="border-b border-gray-200 last:border-b-0">
             {/* Header row */}
             <div
-                className="flex items-center gap-3 py-3 px-4 hover:bg-gray-50/50 cursor-pointer"
+                className="flex cursor-pointer items-center gap-3 px-5 py-4 sm:gap-4 sm:px-6 sm:py-5 hover:bg-gray-50/50"
                 onClick={() => setExpanded((e) => !e)}
             >
                 <button type="button" className="p-0.5 text-gray-400 hover:text-gray-600" aria-label={expanded ? 'Collapse' : 'Expand'}>
@@ -161,13 +161,15 @@ export default function UserRow({
                         }}
                         onClick={(e) => e.stopPropagation()}
                         disabled={updatingKeys[`tenant_${user.id}`]}
-                        className={`inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-medium cursor-pointer focus:ring-violet-500 focus:outline-none disabled:opacity-50 ${getRoleColor(user.company_role)}`}
+                        className={`inline-flex shrink-0 cursor-pointer items-center rounded-md border px-2.5 py-1 text-xs font-medium focus:outline-none focus:ring-violet-500 disabled:opacity-50 ${getRoleColor(user.company_role)}`}
                     >
                         <option value="admin">Admin</option>
                         <option value="member">Member</option>
                     </select>
                 ) : (
-                    <span className={`inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-medium ${getRoleColor(user.company_role)}`}>
+                    <span
+                        className={`inline-flex shrink-0 items-center rounded-md border px-2.5 py-1 text-xs font-medium ${getRoleColor(user.company_role)}`}
+                    >
                         {COMPANY_ROLE_LABEL[user.company_role] ||
                             (user.company_role === 'owner' ? 'Owner' : user.company_role === 'admin' ? 'Admin' : 'Member')}
                     </span>
@@ -229,8 +231,8 @@ export default function UserRow({
 
             {/* Expanded: brand roles */}
             {expanded && (
-                <div className="bg-gray-50/80 px-4 pb-4 pt-2 border-t border-gray-100">
-                    <div className="pl-10 space-y-2">
+                <div className="border-t border-gray-100 bg-gray-50/80 px-5 pb-5 pt-3 sm:px-6">
+                    <div className="space-y-2 pl-9 sm:pl-10">
                         {isAgencyManaged && (
                             <p className="text-xs text-gray-600 pb-1">
                                 Roles for this person are managed by the agency link. To change access, use Company Settings → Agencies or remove the agency.

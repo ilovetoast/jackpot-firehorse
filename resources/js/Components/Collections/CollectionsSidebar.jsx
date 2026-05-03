@@ -3,6 +3,7 @@
  * C11: Share-link indicator and asset count signals (read-only; no permission implication).
  * Lists collections for the current brand; selection is URL-driven (?collection=id).
  */
+import { useState } from 'react'
 import { router } from '@inertiajs/react'
 import { RectangleStackIcon, PlusIcon, LinkIcon, UserGroupIcon, SparklesIcon } from '@heroicons/react/24/outline'
 
@@ -22,14 +23,22 @@ export default function CollectionsSidebar({
     /** Landing grid: no collection selected — show through cinematic backdrop (desktop row). */
     transparentBackground = false,
 }) {
+    const [hoveredCollectionId, setHoveredCollectionId] = useState(null)
     const onCinematic = Boolean(sidebarBackdropCss && String(sidebarBackdropCss).trim() !== '')
     const effectiveTextColor = onCinematic ? '#ffffff' : textColor
     const isLight = effectiveTextColor === '#000000'
     const onDarkBackdrop = transparentBackground
     const listTextColor = onDarkBackdrop && isLight ? '#ffffff' : effectiveTextColor
+    /** Matches AssetSidebar: body copy is muted vs full #fff/#000 for hierarchy. */
+    const onDarkListSurface = listTextColor === '#ffffff'
+    const unselectedTextColor = onDarkListSurface ? 'rgba(255, 255, 255, 0.65)' : 'rgba(0, 0, 0, 0.65)'
+    const unselectedIconColor = onDarkListSurface ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0, 0, 0, 0.6)'
+    const unselectedCountColor = onDarkListSurface ? 'rgba(255, 255, 255, 0.5)' : 'rgba(0, 0, 0, 0.5)'
+    /** Inactive row hover: match AssetSidebar NavButton (accent / contrast text on hover). */
+    const hoverRowForeground = activeTextColor || listTextColor
     const mutedStyle = onDarkBackdrop
         ? { color: 'rgba(255, 255, 255, 0.55)' }
-        : { color: isLight ? 'rgba(0, 0, 0, 0.6)' : 'rgba(255, 255, 255, 0.6)' }
+        : { color: onDarkListSurface ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0, 0, 0, 0.6)' }
     const buttonBg = onDarkBackdrop
         ? 'bg-white/15 hover:bg-white/25'
         : isLight
@@ -86,36 +95,46 @@ export default function CollectionsSidebar({
                                     const showExternalGuests = !!c.allows_external_guests
                                     const showCampaign = !!c.has_campaign
                                     const count = typeof c.assets_count === 'number' ? c.assets_count : null
-                                    const itemTextColor = isActive && activeTextColor ? activeTextColor : listTextColor
+                                    const isRowHover = !isActive && hoveredCollectionId === c.id
+                                    const rowText =
+                                        isActive && activeTextColor
+                                            ? activeTextColor
+                                            : isRowHover
+                                              ? hoverRowForeground
+                                              : unselectedTextColor
+                                    const rowIcon =
+                                        isActive && activeTextColor
+                                            ? activeTextColor
+                                            : isRowHover
+                                              ? hoverRowForeground
+                                              : unselectedIconColor
+                                    const rowCount =
+                                        isActive && activeTextColor
+                                            ? activeTextColor
+                                            : isRowHover
+                                              ? hoverRowForeground
+                                              : unselectedCountColor
                                     return (
                                         <button
                                             key={c.id}
                                             type="button"
                                             onClick={() => handleSelectCollection(c.id)}
+                                            onMouseEnter={() => {
+                                                if (!isActive) setHoveredCollectionId(c.id)
+                                            }}
+                                            onMouseLeave={() => setHoveredCollectionId(null)}
                                             className="w-full text-left px-3 py-2 rounded-md text-sm font-medium flex items-center gap-2"
                                             style={{
-                                                backgroundColor: isActive ? itemActiveBg : 'transparent',
-                                                color: itemTextColor,
-                                            }}
-                                            onMouseEnter={(e) => {
-                                                if (!isActive) {
-                                                    e.currentTarget.style.backgroundColor = itemHoverBg
-                                                    e.currentTarget.style.color = listTextColor
-                                                }
-                                            }}
-                                            onMouseLeave={(e) => {
-                                                if (!isActive) {
-                                                    e.currentTarget.style.backgroundColor = 'transparent'
-                                                    e.currentTarget.style.color = listTextColor
-                                                }
+                                                backgroundColor: isActive ? itemActiveBg : isRowHover ? itemHoverBg : 'transparent',
+                                                color: rowText,
                                             }}
                                         >
-                                            <RectangleStackIcon className="h-4 w-4 flex-shrink-0" style={{ color: itemTextColor }} />
+                                            <RectangleStackIcon className="h-4 w-4 flex-shrink-0" style={{ color: rowIcon }} />
                                             <span className="truncate flex-1 min-w-0">{c.name}</span>
                                             {showPublic && (
                                                 <LinkIcon
                                                     className="h-4 w-4 flex-shrink-0 opacity-80"
-                                                    style={{ color: itemTextColor }}
+                                                    style={{ color: rowIcon }}
                                                     title="Share link enabled"
                                                     aria-hidden="true"
                                                 />
@@ -123,7 +142,7 @@ export default function CollectionsSidebar({
                                             {showExternalGuests && (
                                                 <UserGroupIcon
                                                     className="h-4 w-4 flex-shrink-0 opacity-80"
-                                                    style={{ color: itemTextColor }}
+                                                    style={{ color: rowIcon }}
                                                     title="External guests allowed — collection-only access by email"
                                                     aria-hidden="true"
                                                 />
@@ -131,13 +150,17 @@ export default function CollectionsSidebar({
                                             {showCampaign && (
                                                 <SparklesIcon
                                                     className="h-3.5 w-3.5 flex-shrink-0 opacity-70"
-                                                    style={{ color: itemTextColor }}
+                                                    style={{ color: rowIcon }}
                                                     title="Campaign identity configured"
                                                     aria-hidden="true"
                                                 />
                                             )}
                                             {count !== null && (
-                                                <span className="flex-shrink-0 text-xs opacity-80" style={{ color: itemTextColor }} aria-label={`${count} assets`}>
+                                                <span
+                                                    className="flex-shrink-0 text-xs opacity-80"
+                                                    style={{ color: rowCount }}
+                                                    aria-label={`${count} assets`}
+                                                >
                                                     {count}
                                                 </span>
                                             )}

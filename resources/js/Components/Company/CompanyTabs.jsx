@@ -36,7 +36,7 @@ export default function CompanyTabs({ variant = 'default', showAgencyTab = true 
             className={
                 cinematic
                     ? 'mb-6 border-b border-white/10'
-                    : '-mt-0.5 border-b border-slate-200/90'
+                    : '-mt-0.5 mb-1 border-b border-slate-200/90'
             }
         >
             <nav

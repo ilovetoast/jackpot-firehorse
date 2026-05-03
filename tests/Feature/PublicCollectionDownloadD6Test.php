@@ -32,7 +32,7 @@ use Tests\TestCase;
  * - Public collection POST redirects to signed zip URL; no Download stored
  * - Private collection cannot create download (404)
  * - GET signed zip URL streams ZIP (only collection assets)
- * - Non-Enterprise plan cannot create public collection downloads (gated)
+ * - Tenants without `public_collection_downloads_enabled` on their plan cannot create public collection ZIPs (gated)
  */
 class PublicCollectionDownloadD6Test extends TestCase
 {

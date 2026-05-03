@@ -399,16 +399,7 @@ function DeliverablesIndexPage({ categories, bulk_categories_by_asset_type = nul
     const { isCinematic: sidebarIsCinematic, sidebarColor, backdropCss: sidebarBackdropCss } =
         resolveWorkspaceSidebarSurface(auth.activeBrand)
     const workspaceAccentColor = getWorkspaceButtonColor(auth.activeBrand)
-    const isLightColor = (color) => {
-        if (!color || color === '#ffffff' || color === '#FFFFFF') return true
-        const hex = color.replace('#', '')
-        const r = parseInt(hex.substr(0, 2), 16)
-        const g = parseInt(hex.substr(2, 2), 16)
-        const b = parseInt(hex.substr(4, 2), 16)
-        const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
-        return luminance > 0.5
-    }
-    const textColor = sidebarIsCinematic || !isLightColor(sidebarColor) ? '#ffffff' : '#000000'
+    const textColor = sidebarIsCinematic ? '#ffffff' : getContrastTextColor(sidebarColor)
     // Match Add Execution button: selected/hover use dark hue (same as button hover state)
     const contextualDarkColor = getWorkspaceContextualTone(workspaceAccentColor)
     const activeBgColor = contextualDarkColor
@@ -740,7 +731,6 @@ function DeliverablesIndexPage({ categories, bulk_categories_by_asset_type = nul
                         sidebarColor={sidebarColor}
                         sidebarBackdropCss={sidebarBackdropCss}
                         workspaceAccentColor={workspaceAccentColor}
-                        isLightColor={isLightColor}
                         tooltipVisible={tooltipVisible}
                         setTooltipVisible={setTooltipVisible}
                         emptyMessage="No execution categories yet"

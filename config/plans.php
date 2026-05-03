@@ -208,7 +208,9 @@ return [
             'notifications.enabled' => true,
             'approval_summaries.enabled' => true,
         ],
-        'public_collections_enabled' => false,
+        'public_collections_enabled' => true,
+        /** Guest-facing ZIP from public collection page; Business+ only (Pro gets share links + grid only). */
+        'public_collection_downloads_enabled' => false,
         'brand_portal' => [
             'customization' => true,
             'public_access' => false,
@@ -243,6 +245,7 @@ return [
             '1,500 AI credits per month',
             '1,000 downloads per month',
             'Full approvals and advanced permissions',
+            'Public collection share links (password optional; ZIP download on public page is Business+)',
             'Creator Module available as add-on ($99/mo)',
         ],
     ],

@@ -354,12 +354,12 @@ export default function Team({ tenant, brands = [], tenant_roles = [], invite_lo
                     </div>
                 )}
 
-                <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
+                <div className="mt-8 mb-6 flex flex-wrap items-center justify-between gap-x-5 gap-y-4">
                     <button
                         type="button"
                         onClick={openInviteModal}
                         disabled={user_limit_reached}
-                        className="inline-flex items-center rounded-md bg-violet-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-violet-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="inline-flex h-10 shrink-0 items-center rounded-md bg-violet-600 px-4 text-sm font-semibold text-white shadow-sm hover:bg-violet-500 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                         <svg className="mr-2 h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z" />
@@ -367,19 +367,19 @@ export default function Team({ tenant, brands = [], tenant_roles = [], invite_lo
                         Invite Member
                     </button>
 
-                    {/* Search + Filters */}
-                    <div className="flex flex-wrap items-center gap-3">
+                    {/* Search + Filters — h-10 aligns with Invite (avoids top-heavy bar when controls differ in padding). */}
+                    <div className="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-3 sm:min-w-[20rem]">
                         <input
                             type="search"
                             placeholder="Search users..."
                             value={search}
                             onChange={(e) => setSearch(e.target.value)}
-                            className="rounded-md border-gray-300 text-sm py-1.5 px-3 w-48 focus:ring-violet-500 focus:border-violet-500"
+                            className="h-10 w-full min-w-0 rounded-md border border-gray-300 px-3 text-sm shadow-sm focus:border-violet-500 focus:ring-violet-500 sm:w-56"
                         />
                         <select
                             value={filterBrand}
                             onChange={(e) => setFilterBrand(e.target.value)}
-                            className="rounded-md border-gray-300 text-sm py-1.5"
+                            className="h-10 min-w-[10.5rem] rounded-md border border-gray-300 bg-white pl-3 pr-8 text-sm shadow-sm focus:border-violet-500 focus:ring-violet-500"
                         >
                             <option value="">All brands</option>
                             {(brands || []).map((b) => (
@@ -389,7 +389,7 @@ export default function Team({ tenant, brands = [], tenant_roles = [], invite_lo
                         <select
                             value={filterRole}
                             onChange={(e) => setFilterRole(e.target.value)}
-                            className="rounded-md border-gray-300 text-sm py-1.5"
+                            className="h-10 min-w-[9rem] rounded-md border border-gray-300 bg-white pl-3 pr-8 text-sm shadow-sm focus:border-violet-500 focus:ring-violet-500"
                         >
                             <option value="">All roles</option>
                             <option value="owner">Owner</option>
@@ -406,7 +406,7 @@ export default function Team({ tenant, brands = [], tenant_roles = [], invite_lo
                     />
                 )}
 
-                <div className="rounded-lg border border-gray-200 bg-white overflow-hidden">
+                <div className="rounded-lg border border-gray-200 bg-white shadow-sm overflow-hidden">
                     {loading ? (
                         <div className="py-12 text-center text-gray-500">Loading...</div>
                     ) : users.length === 0 ? (
@@ -416,7 +416,7 @@ export default function Team({ tenant, brands = [], tenant_roles = [], invite_lo
                             {directUsers.length > 0 && (
                                 <div className={hasAgencyUsers ? 'border-b border-gray-200' : ''}>
                                     {hasAgencyUsers && (
-                                        <div className="border-b border-gray-200 bg-gray-50 px-4 py-3">
+                                        <div className="border-b border-gray-200 bg-gray-50 px-5 py-3.5 sm:px-6">
                                             <h2 className="text-base font-semibold text-gray-900">Direct team</h2>
                                             <p className="text-xs text-gray-600">
                                                 Members invited or added directly by your company ({directUsers.length}{' '}
@@ -454,7 +454,7 @@ export default function Team({ tenant, brands = [], tenant_roles = [], invite_lo
                                 }
                                 return (
                                     <div key={section.agency_tenant_id} className="border-b border-gray-200 last:border-b-0">
-                                        <div className="flex flex-col gap-2 border-b border-gray-200 bg-slate-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                                        <div className="flex flex-col gap-2 border-b border-gray-200 bg-slate-50 px-5 py-3.5 sm:flex-row sm:items-center sm:justify-between sm:px-6">
                                             <div>
                                                 <h2 className="text-base font-semibold text-gray-900">
                                                     {section.name}
