@@ -28,8 +28,6 @@ import CollectionFiltersBar from '../../Components/Collections/CollectionFilters
 import {
     getWorkspaceButtonColor,
     getWorkspaceContextualTone,
-    getLuminance,
-    hexToRgba,
     getContrastTextColor,
     getWorkspaceSidebarForegroundHex,
     resolveWorkspaceSidebarSurface,
@@ -90,16 +88,13 @@ export default function CollectionsIndex({
     const { isCinematic: sidebarIsCinematic, sidebarColor, backdropCss: sidebarBackdropCss } =
         resolveWorkspaceSidebarSurface(auth.activeBrand)
     const workspaceAccentColor = getWorkspaceButtonColor(auth.activeBrand)
-    const accentLum = getLuminance(workspaceAccentColor)
     /** Solid rail: light copy on brand tints (see `getWorkspaceSidebarForegroundHex`). */
     const textColor = sidebarIsCinematic ? '#ffffff' : getWorkspaceSidebarForegroundHex(sidebarColor)
-    // Full brand tint for normal accents; neutral chrome when style is white/black so selection stays visible
-    const activeBgColor =
-        accentLum < 0.06 || accentLum > 0.94
-            ? getWorkspaceContextualTone(workspaceAccentColor)
-            : workspaceAccentColor
-    const activeTextColor = getContrastTextColor(activeBgColor)
-    const hoverBgColor = hexToRgba(workspaceAccentColor, 0.12)
+    /** Same selection chrome as AssetSidebar (darkened accent), not full saturation — keeps white/light rail legible. */
+    const contextualDarkColor = getWorkspaceContextualTone(workspaceAccentColor)
+    const activeBgColor = contextualDarkColor
+    const activeTextColor = getContrastTextColor(contextualDarkColor)
+    const hoverBgColor = contextualDarkColor
 
     const brandPrimaryHex = auth?.activeBrand?.primary_color || '#6366f1'
 

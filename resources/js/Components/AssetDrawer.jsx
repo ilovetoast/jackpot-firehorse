@@ -4101,6 +4101,7 @@ export default function AssetDrawer({
                                         }}
                                         size="lg"
                                         thumbnailVersion={thumbnailVersion}
+                                        liveThumbnailUpdates
                                         shouldAnimateThumbnail={shouldAnimateThumbnail}
                                         forceObjectFit={drawerPreviewForceObjectFit || 'cover'}
                                         forcedImageUrl={drawerForcedPreviewUrl}
@@ -4283,6 +4284,7 @@ export default function AssetDrawer({
                                             }}
                                             size="lg"
                                             thumbnailVersion={thumbnailVersion}
+                                            liveThumbnailUpdates
                                             shouldAnimateThumbnail={shouldAnimateThumbnail}
                                             preferLargeForVector
                                             forceObjectFit={drawerPreviewForceObjectFit || undefined}
@@ -4316,6 +4318,7 @@ export default function AssetDrawer({
                                     }}
                                     size="lg"
                                     thumbnailVersion={thumbnailVersion}
+                                    liveThumbnailUpdates
                                     shouldAnimateThumbnail={shouldAnimateThumbnail}
                                     preferLargeForVector
                                     ephemeralLocalPreviewUrl={drawerEphemeralLocalPreviewUrl}

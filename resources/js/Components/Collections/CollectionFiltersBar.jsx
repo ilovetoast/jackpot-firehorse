@@ -88,7 +88,7 @@ export default function CollectionFiltersBar({
             <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Type</span>
             <div
                 style={{ ['--cf-accent']: accent }}
-                className="inline-flex flex-wrap items-center gap-0.5 rounded-lg border border-slate-200 bg-slate-100/90 p-0.5 shadow-inner"
+                className="inline-flex flex-wrap items-center gap-0.5 rounded-lg border border-gray-200 bg-white p-0.5 shadow-sm"
                 role="group"
                 aria-label="Collection asset types"
             >
@@ -121,7 +121,7 @@ export default function CollectionFiltersBar({
                                     ? isAll
                                         ? 'font-semibold'
                                         : 'font-medium'
-                                    : 'text-slate-600 hover:bg-white/80 hover:text-slate-800'
+                                    : 'text-slate-600 hover:bg-gray-50 hover:text-slate-800'
                             }`}
                         >
                             {label}

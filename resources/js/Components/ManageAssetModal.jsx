@@ -712,6 +712,7 @@ export default function ManageAssetModal({
                                         <ThumbnailPreview
                                             asset={asset}
                                             thumbnailVersion={thumbnailVersion}
+                                            liveThumbnailUpdates
                                             size="lg"
                                             preferLargeForVector
                                             forcedImageUrl={forcedModeUrl}
@@ -723,6 +724,7 @@ export default function ManageAssetModal({
                                         <ThumbnailPreview
                                             asset={asset}
                                             thumbnailVersion={thumbnailVersion}
+                                            liveThumbnailUpdates
                                             size="lg"
                                             preferLargeForVector
                                             className="h-full w-full flex-1"

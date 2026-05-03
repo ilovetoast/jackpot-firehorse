@@ -29,7 +29,8 @@
  * @param {string} props.className - Additional CSS classes
  * @param {number} props.retryCount - Retry count (UI only)
  * @param {string} props.size - Size variant ('sm', 'md', 'lg')
- * @param {number|null} props.thumbnailVersion - Thumbnail version (ignored in grid context)
+ * @param {number|null|string} props.thumbnailVersion - Memo invalidation key from {@link getThumbnailVersion} (does NOT imply live URL updates).
+ * @param {boolean} [props.liveThumbnailUpdates=false] — When true (drawer/detail), locked URL may follow asset props / clear when preview is removed. Grid must stay false so slim Inertia rows never blank tiles.
  * @param {boolean} props.shouldAnimateThumbnail - Whether to animate thumbnail appearance
  * @param {string|null} props.primaryColor - Brand primary color for placeholder
  * @param {string|null} props.forceObjectFit - Force object-fit value ('cover' or 'contain'), overrides category-based logic
@@ -77,6 +78,8 @@ export default function ThumbnailPreview({
     retryCount = 0,
     size = 'md',
     thumbnailVersion = null,
+    /** Only AssetDrawer (and similar) should set true — AssetCard passes thumbnailVersion for memo keys, not "drawer mode". */
+    liveThumbnailUpdates = false,
     shouldAnimateThumbnail = false,
     primaryColor = null,
     forceObjectFit = null,
@@ -124,9 +127,9 @@ export default function ThumbnailPreview({
     // Stability > real-time updates.
     // Live thumbnail upgrades can be reintroduced later via explicit user action (refresh / reopen page).
     
-    // DRAWER CONTEXT: If thumbnailVersion is provided, allow live updates
-    // This enables drawer previews to update when new thumbnails are generated
-    const isDrawerContext = thumbnailVersion !== null
+    // Live URL updates: explicit opt-in only. AssetCard always passes a non-null `thumbnailVersion`
+    // string from getThumbnailVersion() — that must NOT enable drawer-style clearing when props omit URLs.
+    const isDrawerContext = liveThumbnailUpdates
 
     // For SVG/vector assets in detail view: use 'large' style (4096px) for crisp rendering
     const isSvg = asset?.mime_type === 'image/svg+xml' ||
@@ -215,6 +218,9 @@ export default function ThumbnailPreview({
     
     // Handle case where preview was removed - if locked URL exists but asset data shows no preview, clear it
     useEffect(() => {
+        if (!liveThumbnailUpdates) {
+            return
+        }
         if (lockedUrl && lockedType === 'preview' && !lqipPreviewUrlForAsset(asset) && !asset?.final_thumbnail_url) {
             // Preview was removed - clear locked URL to show icon
             setLockedUrl(null)
@@ -222,7 +228,7 @@ export default function ThumbnailPreview({
             setImageLoaded(false)
             setImageError(false)
         }
-    }, [lockedUrl, lockedType, asset?.preview_thumbnail_url, asset?.mime_type, asset?.final_thumbnail_url])
+    }, [liveThumbnailUpdates, lockedUrl, lockedType, asset?.preview_thumbnail_url, asset?.mime_type, asset?.final_thumbnail_url])
     
     // Determine if locked URL is final or preview (based on what was locked at mount)
     const lockedIsFinal = lockedType === 'final'
