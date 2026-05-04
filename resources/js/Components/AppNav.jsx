@@ -216,10 +216,16 @@ export default function AppNav({
 
     const companyNm = activeCompany?.name?.trim() ?? ''
     const brandNmForMenu = (activeBrand?.name?.trim() || companyNm) || ''
+    const brandNmTitleCase = brandNmForMenu
+        ? brandNmForMenu
+              .split(/\s+/)
+              .map((w) => (w ? w.charAt(0).toUpperCase() + w.slice(1).toLowerCase() : ''))
+              .join(' ')
+        : ''
     const overviewNavTitle = companyNm ? `Overview (${companyNm})` : 'Overview'
     const brandGuidelinesNavTitle = companyNm ? `Brand Guidelines (${companyNm})` : 'Brand Guidelines'
     /** Account menu: brand identity, guidelines, portal */
-    const brandSettingsLabel = brandNmForMenu ? `${brandNmForMenu} Settings` : 'Brand settings'
+    const brandSettingsLabel = brandNmTitleCase ? `${brandNmTitleCase} Settings` : 'Brand Settings'
 
     /** Company default brand color (from shared auth) + active brand; drives workspace menu accent */
     const workspaceBrandColor = activeBrand?.primary_color || activeCompany?.primary_color || JACKPOT_VIOLET

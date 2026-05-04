@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Link, useForm, usePage } from '@inertiajs/react'
-import { BuildingOffice2Icon, Cog6ToothIcon, CreditCardIcon, UserCircleIcon } from '@heroicons/react/24/outline'
+import { BuildingOffice2Icon, Cog6ToothIcon, CreditCardIcon } from '@heroicons/react/24/outline'
 import PermissionGate from '../PermissionGate'
 import Avatar from '../Avatar'
 import NotificationBell from '../NotificationBell'
@@ -16,7 +16,7 @@ export default function GlobalUserControls({
     effectiveCollection = null,
     collectionOnly = false,
     workspaceBrandColor = '#6366f1',
-    brandSettingsLabel = 'Brand settings',
+    brandSettingsLabel = 'Brand Settings',
 }) {
     const page = usePage()
     const { auth } = page.props
@@ -138,7 +138,13 @@ export default function GlobalUserControls({
                             <div className="px-4 py-2 border-b border-gray-200">
                                 <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Account</p>
                                 {showWorkspaceCard ? (
-                                    <div className="flex items-center gap-3 rounded-lg px-2 py-2 text-left">
+                                    <Link
+                                        href="/app/profile"
+                                        className="group flex items-center gap-3 rounded-lg px-2 py-2 text-left transition-colors hover:bg-gray-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2"
+                                        onClick={() => setUserMenuOpen(false)}
+                                        aria-label="Edit profile"
+                                        title="Edit profile"
+                                    >
                                         <Avatar
                                             avatarUrl={auth.user?.avatar_url}
                                             firstName={auth.user?.first_name}
@@ -154,7 +160,11 @@ export default function GlobalUserControls({
                                             </p>
                                             <p className="text-xs text-gray-500 truncate">{auth.user?.email}</p>
                                         </div>
-                                    </div>
+                                        <Cog6ToothIcon
+                                            className="h-4 w-4 shrink-0 text-gray-400 transition-colors group-hover:text-gray-600"
+                                            aria-hidden
+                                        />
+                                    </Link>
                                 ) : (
                                     <Link
                                         href="/app/profile"
@@ -306,21 +316,12 @@ export default function GlobalUserControls({
                                                         }
                                                         className="flex min-w-0 items-center rounded-md px-2 py-1.5 text-sm text-gray-800 hover:bg-white/80"
                                                         onClick={() => setUserMenuOpen(false)}
-                                                        title="Tenant settings"
+                                                        title="Account Settings"
                                                     >
                                                         <BuildingOffice2Icon className="mr-2 h-4 w-4 flex-shrink-0 text-gray-400" aria-hidden />
-                                                        <span className="min-w-0 flex-1 truncate font-medium">Tenant settings</span>
+                                                        <span className="min-w-0 flex-1 truncate font-medium">Account Settings</span>
                                                     </Link>
                                                 </PermissionGate>
-                                                <Link
-                                                    href="/app/profile"
-                                                    className="flex min-w-0 items-center rounded-md px-2 py-1.5 text-sm text-gray-800 hover:bg-white/80"
-                                                    onClick={() => setUserMenuOpen(false)}
-                                                    title="Profile"
-                                                >
-                                                    <UserCircleIcon className="mr-2 h-4 w-4 flex-shrink-0 text-gray-400" aria-hidden />
-                                                    <span className="min-w-0 flex-1 truncate font-medium">Profile</span>
-                                                </Link>
                                                 {activeBrand && hasAnyBrandAccess && !collectionOnly && (
                                                     <PermissionGate permission="brand_settings.manage">
                                                         <Link

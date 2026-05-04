@@ -102,7 +102,8 @@ export default function PendingFinalizeGridTile({
         return isGuidelines ? Math.round((w * 3) / 5) : Math.round((w * 3) / 4)
     }, [isMasonry, isGuidelines, cardSize])
 
-    const statusLabel = ephemeralUrl ? 'Processing preview' : 'Creating asset'
+    /** Tile chrome + ThumbnailPreview already show status copy — avoid a second “Creating asset…” chip. */
+    const statusLabel = ephemeralUrl ? 'Processing preview' : 'Processing upload'
 
     return (
         <div
@@ -138,14 +139,6 @@ export default function PendingFinalizeGridTile({
                     masonryMinHeight={isMasonry ? masonryThumbnailMinHeightPx : null}
                     ephemeralLocalPreviewUrl={ephemeralUrl}
                 />
-                {!ephemeralUrl ? (
-                    <span
-                        className="pointer-events-none absolute bottom-1.5 left-1/2 z-10 w-[calc(100%-1rem)] -translate-x-1/2 truncate rounded bg-black/55 px-2 py-0.5 text-center text-[10px] font-medium text-white shadow-sm"
-                        title="Creating asset on server"
-                    >
-                        Creating asset…
-                    </span>
-                ) : null}
             </div>
             {entry?.filename ? (
                 <p
