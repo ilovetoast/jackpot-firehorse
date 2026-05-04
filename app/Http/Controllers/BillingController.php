@@ -13,6 +13,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Inertia\Inertia;
 use Inertia\Response;
+use Stripe\Exception\ApiErrorException;
 use Stripe\Price;
 use Stripe\Stripe;
 
@@ -56,7 +57,7 @@ class BillingController extends Controller
             ->where('name', 'default')
             ->orderBy('created_at', 'desc')
             ->first();
-        $paymentMethod = $tenant->defaultPaymentMethod();
+        $paymentMethod = $this->safeDefaultPaymentMethod($tenant);
         $planService = new PlanService();
 
         // Get current usage counts
@@ -458,7 +459,7 @@ class BillingController extends Controller
             ->where('name', 'default')
             ->orderBy('created_at', 'desc')
             ->first();
-        $paymentMethod = $tenant->defaultPaymentMethod();
+        $paymentMethod = $this->safeDefaultPaymentMethod($tenant);
         $planService = new PlanService();
         
         // Get plan details
@@ -1049,6 +1050,28 @@ class BillingController extends Controller
             return back()->withErrors([
                 'billing' => 'Failed to access billing portal: ' . $e->getMessage(),
             ]);
+        }
+    }
+
+    /**
+     * Cashier calls Stripe; stale or cross-account stripe_id throws (e.g. "No such customer").
+     */
+    private function safeDefaultPaymentMethod(\App\Models\Tenant $tenant)
+    {
+        if (! $tenant->stripe_id) {
+            return null;
+        }
+
+        try {
+            return $tenant->defaultPaymentMethod();
+        } catch (ApiErrorException $e) {
+            \Log::warning('Could not load default payment method from Stripe', [
+                'tenant_id' => $tenant->id,
+                'stripe_customer_id' => $tenant->stripe_id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return null;
         }
     }
 

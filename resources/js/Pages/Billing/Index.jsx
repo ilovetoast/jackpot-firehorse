@@ -309,8 +309,12 @@ export default function BillingIndex({
 
                 {errors?.subscription && (
                     <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 mt-4">
-                        <div className="rounded-md bg-yellow-50 p-4 border border-yellow-200">
-                            <p className="text-sm text-yellow-800">{errors.subscription}</p>
+                        <div
+                            className="rounded-lg border border-violet-200 bg-violet-50/90 p-4"
+                            style={{ borderLeftWidth: 4, borderLeftColor: sitePrimaryColor }}
+                            role="alert"
+                        >
+                            <p className="text-sm font-medium text-violet-950">{errors.subscription}</p>
                         </div>
                     </div>
                 )}
