@@ -894,26 +894,9 @@ export default function AssetCard({
                     </div>
                 )}
 
-                {/* Top-right badges: health (when warning/critical) + file type + star + trash + guideline */}
+                {/* Top-right badges: file type + star + trash + guideline */}
                 <div className="absolute top-2 right-2 z-10 flex flex-col gap-1 items-end">
                     <div className="inline-flex items-center gap-1.5">
-                        {/* Asset health badge — warning/critical (support visibility) */}
-                        {asset?.health_status && asset.health_status !== 'healthy' && (
-                            <span
-                                className={`inline-flex max-w-[9rem] shrink-0 items-center truncate rounded-md px-1.5 py-0.5 text-[9px] font-semibold ring-1 ring-white/90 ${
-                                    asset.health_status === 'critical'
-                                        ? 'bg-red-600 text-white'
-                                        : 'bg-amber-100 text-amber-950'
-                                }`}
-                                title={
-                                    asset.health_status === 'critical'
-                                        ? 'Critical — open the asset or contact support'
-                                        : 'Warning — see asset details for more information'
-                                }
-                            >
-                                {asset.health_status === 'critical' ? 'Critical' : 'Needs attention'}
-                            </span>
-                        )}
                         {showInfo && !isGuidelines && !splitTitleFooter && (
                             <span className="inline-flex items-center rounded-md bg-black/60 backdrop-blur-sm px-2 py-1 text-xs font-medium text-white uppercase tracking-wide">
                                 {fileExtension}

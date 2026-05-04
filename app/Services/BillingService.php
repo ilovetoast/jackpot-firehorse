@@ -7,7 +7,9 @@ use App\Models\Tenant;
 use App\Services\ActivityRecorder;
 use App\Services\PlanService;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Log;
 use Laravel\Cashier\Exceptions\IncompletePayment;
+use Stripe\Customer;
 use Stripe\Exception\ApiErrorException;
 use Stripe\Price;
 use Stripe\Stripe;
@@ -40,7 +42,9 @@ class BillingService
                     'You already have an active subscription. Please use the upgrade/downgrade option instead of creating a new subscription.'
                 );
             }
-            
+
+            $this->ensureValidStripeCustomer($tenant);
+
             $checkout = $tenant->newSubscription('default', $priceId)
                 ->checkout([
                     'success_url' => route('billing.success'),
@@ -51,6 +55,79 @@ class BillingService
         } catch (ApiErrorException $e) {
             throw new \RuntimeException('Failed to create checkout session: ' . $e->getMessage());
         }
+    }
+
+    /**
+     * Ensure tenants.stripe_id exists in the Stripe account for the configured secret key.
+     * Clears stale IDs (deleted customer, wrong account/mode, restored DB) and creates a new Stripe customer via Cashier.
+     */
+    public function ensureValidStripeCustomer(Tenant $tenant): void
+    {
+        $stripeSecret = config('services.stripe.secret');
+        if (empty($stripeSecret)) {
+            return;
+        }
+
+        Stripe::setApiKey($stripeSecret);
+
+        if (! $tenant->stripe_id) {
+            $this->createLocalStripeCustomer($tenant);
+
+            return;
+        }
+
+        try {
+            Customer::retrieve($tenant->stripe_id);
+
+            return;
+        } catch (ApiErrorException $e) {
+            $code = $e->getStripeCode();
+            $missing = $code === 'resource_missing'
+                || str_contains($e->getMessage(), 'No such customer');
+
+            if (! $missing) {
+                throw $e;
+            }
+        }
+
+        Log::warning('billing.stripe_customer_stale_cleared', [
+            'tenant_id' => $tenant->id,
+            'removed_stripe_id' => $tenant->stripe_id,
+        ]);
+
+        $tenant->stripe_id = null;
+        $tenant->pm_type = null;
+        $tenant->pm_last_four = null;
+        $tenant->saveQuietly();
+        $tenant->refresh();
+
+        $this->createLocalStripeCustomer($tenant);
+    }
+
+    /**
+     * Create a Stripe customer for the tenant when stripe_id is null (Cashier).
+     */
+    private function createLocalStripeCustomer(Tenant $tenant): void
+    {
+        if ($tenant->stripe_id) {
+            return;
+        }
+
+        $stripeSecret = config('services.stripe.secret');
+        if (empty($stripeSecret)) {
+            throw new \RuntimeException('Stripe is not configured.');
+        }
+
+        Stripe::setApiKey($stripeSecret);
+
+        $tenant->createAsStripeCustomer([
+            'metadata' => [
+                'tenant_id' => (string) $tenant->id,
+                'tenant_slug' => (string) ($tenant->slug ?? ''),
+            ],
+        ]);
+
+        $tenant->refresh();
     }
 
     /**
@@ -65,6 +142,8 @@ class BillingService
     public function updateSubscription(Tenant $tenant, string $priceId, ?string $oldPlanId = null, ?string $newPlanId = null): array
     {
         try {
+            $this->ensureValidStripeCustomer($tenant);
+
             $oldSubscription = $tenant->subscription('default');
             $wasSubscribed = $oldSubscription !== null;
             
@@ -324,6 +403,7 @@ class BillingService
     public function updatePaymentMethod(Tenant $tenant, string $paymentMethodId): void
     {
         try {
+            $this->ensureValidStripeCustomer($tenant);
             $tenant->updateDefaultPaymentMethod($paymentMethodId);
         } catch (ApiErrorException $e) {
             throw new \RuntimeException('Failed to update payment method: ' . $e->getMessage());
@@ -336,6 +416,8 @@ class BillingService
     public function getCustomerPortalUrl(Tenant $tenant, string $returnUrl): string
     {
         try {
+            $this->ensureValidStripeCustomer($tenant);
+
             if (! $tenant->stripe_id) {
                 throw new \RuntimeException('Tenant does not have a Stripe customer ID.');
             }
