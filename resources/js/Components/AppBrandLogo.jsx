@@ -93,7 +93,7 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilte
                         <>
                             <BrandIconUnified brand={firstBrand} size="lg" />
                             <span
-                                className="font-semibold leading-none truncate min-w-0"
+                                className="min-w-0 truncate font-semibold leading-snug"
                                 style={{ fontSize: 'clamp(0.8rem, 1.5vw, 1rem)', maxWidth: '10rem', color: textColor || 'inherit' }}
                             >
                                 {firstBrand.name || 'Brand'}
@@ -173,7 +173,7 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilte
                             <>
                                 <BrandIconUnified brand={activeBrand} size="lg" />
                                 <span
-                                    className="font-semibold leading-none truncate min-w-0"
+                                    className="min-w-0 truncate font-semibold leading-snug"
                                     style={{ fontSize: 'clamp(0.8rem, 1.5vw, 1rem)', maxWidth: '10rem', color: textColor || 'inherit' }}
                                 >
                                     {brandName}
@@ -181,9 +181,9 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilte
                             </>
                         )
                     ) : (
-                        <span 
-                            className="truncate min-w-0"
-                            style={{ 
+                        <span
+                            className="min-w-0 truncate leading-snug"
+                            style={{
                                 fontSize: 'clamp(0.75rem, 2vw, 0.875rem)',
                                 maxWidth: '200px',
                                 color: textColor || '#ffffff',
@@ -341,7 +341,7 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilte
                 <>
                     <BrandIconUnified brand={activeBrand} size="lg" />
                     <span
-                        className="font-semibold leading-none truncate min-w-0"
+                        className="min-w-0 truncate font-semibold leading-snug"
                         style={{ fontSize: 'clamp(0.8rem, 1.5vw, 1rem)', maxWidth: '10rem', color: textColor || 'inherit' }}
                     >
                         {brandName}
