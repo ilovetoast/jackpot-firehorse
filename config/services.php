@@ -46,6 +46,11 @@ return [
         'model' => env('IMAGE_EMBEDDING_MODEL', 'clip-vit-base-patch32'),
     ],
 
+    /*
+     * STRIPE_SECRET selects the Stripe account + mode (test vs live). Customer and subscription IDs in the DB
+     * are not portable: restoring production tenants into staging with staging keys causes "No such customer"
+     * until stripe_id is repaired (see `billing:repair-stripe-customer` and BillingService::ensureValidStripeCustomer).
+     */
     'stripe' => [
         'key' => env('STRIPE_KEY'),
         'secret' => env('STRIPE_SECRET'),

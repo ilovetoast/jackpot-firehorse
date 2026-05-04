@@ -173,7 +173,7 @@ export default function BillingIndex({
     const handleSubscribe = (priceId, planId) => {
         if (!priceId || priceId === 'price_free' || priceId === 'price_FREE') return
         setProcessingPlanId(planId)
-        router.post('/app/billing/subscribe', { price_id: priceId }, {
+        router.post('/app/billing/subscribe', { price_id: priceId, plan_id: planId }, {
             preserveState: false,
             onFinish: () => setProcessingPlanId(null),
             onError: () => setProcessingPlanId(null),
@@ -315,6 +315,11 @@ export default function BillingIndex({
                             role="alert"
                         >
                             <p className="text-sm font-medium text-violet-950">{errors.subscription}</p>
+                            {flash?.billing_error_code ? (
+                                <p className="mt-2 text-xs text-violet-800/90">
+                                    Reference: {flash.billing_error_code}
+                                </p>
+                            ) : null}
                         </div>
                     </div>
                 )}

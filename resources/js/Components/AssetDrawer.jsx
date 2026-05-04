@@ -8313,9 +8313,9 @@ export default function AssetDrawer({
                 </div>
             )}
 
-            {/* Toast Notification */}
+            {/* Toast Notification — above lightbox (z-[10050]) so metadata save feedback is visible; below delete confirm (z-[10070]) */}
             {toastMessage && (
-                <div className="fixed top-4 right-4 z-50 max-w-md w-full">
+                <div className="fixed top-4 right-4 z-[10055] max-w-md w-full">
                     <div className={`rounded-lg border p-4 shadow-lg ${
                         toastType === 'error' ? 'bg-red-50 border-red-200 text-red-800' :
                         toastType === 'warning' ? 'bg-yellow-50 border-yellow-200 text-yellow-800' :

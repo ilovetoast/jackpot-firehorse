@@ -30,7 +30,8 @@ class UploadFailureEscalationService
             return null;
         }
 
-        $shouldCreate = $upload->failure_count >= 3 || $agentSummary !== null;
+        $minFailures = max(1, (int) config('reliability.upload_escalation_min_failures', 6));
+        $shouldCreate = $upload->failure_count >= $minFailures || $agentSummary !== null;
 
         if (! $shouldCreate) {
             return null;

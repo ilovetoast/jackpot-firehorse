@@ -20,9 +20,9 @@ return [
         /*
          * Minimum auto-recover passes that failed to fix the incident before an
          * internal ticket is allowed. Each system:auto-recover run increments
-         * repair_attempts after a failed repair. Default 3: retries before one ticket.
+         * repair_attempts after a failed repair. Higher = fewer tickets during outages.
          */
-        'min_repair_attempts_before_ticket' => 3,
+        'min_repair_attempts_before_ticket' => 5,
     ],
 
     /*
@@ -33,5 +33,33 @@ return [
      * Escalation (ticket) still runs once in the quiesce path if policy allows.
      */
     'max_auto_repair_attempts' => 30,
+
+    /*
+     * Incidents stuck longer than this get severity bumped (see EscalationPolicy).
+     * Larger value reduces premature escalation during slow queues.
+     */
+    'age_escalation_minutes' => 30,
+
+    /*
+     * assets:watchdog — longer waits reduce duplicate incidents when the pipeline
+     * is merely slow, and cut SupportTicket noise from the same stuck assets.
+     */
+    'watchdog' => [
+        'stuck_analysis_grace_minutes' => 22,
+        'failed_thumbnail_cooldown_minutes' => 12,
+        'processing_stale_minutes' => 28,
+        'auto_support_ticket_enabled' => true,
+        /** Only open a SupportTicket after the asset has been this stale (updated_at). */
+        'support_ticket_min_stale_minutes' => 40,
+        /**
+         * When true, uploading incidents dispatch SupportIncidentClassificationAgentJob.
+         * False reduces agent load; auto-recover + escalation still apply.
+         */
+        'uploading_requires_support_agent' => false,
+    ],
+
+    /** UploadSession / derivative ticket creation: minimum failures before internal ticket. */
+    'upload_escalation_min_failures' => 6,
+    'derivative_escalation_min_failures' => 6,
 
 ];

@@ -171,7 +171,7 @@ class ReliabilityEngineTest extends TestCase
             'retryable' => true,
             'resolved_at' => null,
             'detected_at' => now(),
-            'metadata' => ['repair_attempts' => 3],
+            'metadata' => ['repair_attempts' => 5],
         ]);
 
         $engine = app(ReliabilityEngine::class);
@@ -229,7 +229,7 @@ class ReliabilityEngineTest extends TestCase
             'retryable' => true,
             'resolved_at' => null,
             'detected_at' => now(),
-            'metadata' => ['repair_attempts' => 3],
+            'metadata' => ['repair_attempts' => 5],
         ]);
 
         $policy = app(EscalationPolicy::class);

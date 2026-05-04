@@ -3,20 +3,31 @@
 namespace App\Services;
 
 use App\Enums\EventType;
+use App\Exceptions\BillingUserFacingException;
 use App\Models\Tenant;
 use App\Services\ActivityRecorder;
+use App\Services\Billing\StripeCustomerVerifier;
 use App\Services\PlanService;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
 use Laravel\Cashier\Exceptions\IncompletePayment;
-use Stripe\Customer;
 use Stripe\Exception\ApiErrorException;
 use Stripe\Price;
 use Stripe\Stripe;
 use Stripe\SubscriptionItem;
 
+/**
+ * Tenant-scoped billing (Laravel Cashier Billable on {@see Tenant}).
+ *
+ * Stripe customer IDs (stripe_id) are tied to the Stripe account and mode of STRIPE_SECRET.
+ * Sharing a database dump across environments with different keys yields "No such customer" until repaired.
+ */
 class BillingService
 {
+    public function __construct(
+        protected StripeCustomerVerifier $stripeCustomerVerifier,
+    ) {}
+
     /**
      * Create a Stripe checkout session for subscription.
      * 
@@ -29,71 +40,94 @@ class BillingService
      * @return string Checkout session URL
      * @throws \RuntimeException If subscription exists and allowMultipleSubscriptions is false
      */
-    public function createCheckoutSession(Tenant $tenant, string $priceId, bool $allowMultipleSubscriptions = false): string
-    {
+    public function createCheckoutSession(
+        Tenant $tenant,
+        string $priceId,
+        bool $allowMultipleSubscriptions = false,
+        ?int $actingUserId = null,
+        ?string $planKey = null,
+    ): string {
+        if (empty(config('services.stripe.secret'))) {
+            throw BillingUserFacingException::stripeNotConfigured();
+        }
+
         try {
-            // Check if tenant already has an active subscription
             $existingSubscription = $tenant->subscription('default');
-            
-            if ($existingSubscription && !$allowMultipleSubscriptions) {
-                // If they have an active subscription, they should use updateSubscription instead
-                // This prevents duplicate subscriptions and ensures proper proration
+
+            if ($existingSubscription && ! $allowMultipleSubscriptions) {
                 throw new \RuntimeException(
                     'You already have an active subscription. Please use the upgrade/downgrade option instead of creating a new subscription.'
                 );
             }
 
-            $this->ensureValidStripeCustomer($tenant);
+            $diagnosticBase = $this->checkoutDiagnosticContext($tenant, $actingUserId, $planKey, $priceId);
+            $ensureResult = $this->ensureValidStripeCustomer($tenant, $actingUserId, $diagnosticBase);
+
+            $this->logCheckoutInitiating(array_merge($diagnosticBase, [
+                'stripe_id_after_ensure' => $tenant->stripe_id,
+                'recovered_stale_customer' => $ensureResult['recovered_stale'],
+                'created_new_customer' => $ensureResult['created_new'],
+            ]));
+
+            $metadata = $this->checkoutSessionMetadataPayload($tenant, $actingUserId, $planKey);
 
             $checkout = $tenant->newSubscription('default', $priceId)
                 ->checkout([
                     'success_url' => route('billing.success'),
                     'cancel_url' => route('billing'),
+                    'metadata' => $metadata,
+                    'subscription_data' => [
+                        'metadata' => $metadata,
+                    ],
                 ]);
 
             return $checkout->url;
         } catch (ApiErrorException $e) {
-            throw new \RuntimeException('Failed to create checkout session: ' . $e->getMessage());
+            $this->logStripeApiFailure('billing.checkout.stripe_api_error', $e, $this->checkoutDiagnosticContext($tenant, $actingUserId, $planKey, $priceId));
+
+            throw BillingUserFacingException::fromStripeApi($e, 'BILLING_CHECKOUT_FAILED', $this->checkoutDiagnosticContext($tenant, $actingUserId, $planKey, $priceId));
         }
     }
 
     /**
-     * Ensure tenants.stripe_id exists in the Stripe account for the configured secret key.
-     * Clears stale IDs (deleted customer, wrong account/mode, restored DB) and creates a new Stripe customer via Cashier.
+     * Ensure tenants.stripe_id exists for the configured Stripe account. Recovers stale IDs only when
+     * Stripe reports the customer missing and local state does not claim an active paid subscription.
+     *
+     * @param  array<string, mixed>  $diagnosticContext
+     * @return array{recovered_stale: bool, created_new: bool}
      */
-    public function ensureValidStripeCustomer(Tenant $tenant): void
+    public function ensureValidStripeCustomer(Tenant $tenant, ?int $actingUserId = null, array $diagnosticContext = []): array
     {
-        $stripeSecret = config('services.stripe.secret');
-        if (empty($stripeSecret)) {
-            return;
-        }
+        $result = ['recovered_stale' => false, 'created_new' => false];
 
-        Stripe::setApiKey($stripeSecret);
+        if (empty(config('services.stripe.secret'))) {
+            $this->logEnsureCustomer('billing.ensure_customer.skip_no_secret', $tenant, $actingUserId, $diagnosticContext, $result);
+
+            return $result;
+        }
 
         if (! $tenant->stripe_id) {
             $this->createLocalStripeCustomer($tenant);
+            $result['created_new'] = true;
+            $this->logEnsureCustomer('billing.ensure_customer.created', $tenant, $actingUserId, $diagnosticContext, $result);
 
-            return;
+            return $result;
         }
 
-        try {
-            Customer::retrieve($tenant->stripe_id);
+        if ($this->stripeCustomerVerifier->customerExistsInStripeAccount($tenant->stripe_id)) {
+            $this->logEnsureCustomer('billing.ensure_customer.valid', $tenant, $actingUserId, $diagnosticContext, $result);
 
-            return;
-        } catch (ApiErrorException $e) {
-            $code = $e->getStripeCode();
-            $missing = $code === 'resource_missing'
-                || str_contains($e->getMessage(), 'No such customer');
-
-            if (! $missing) {
-                throw $e;
-            }
+            return $result;
         }
 
-        Log::warning('billing.stripe_customer_stale_cleared', [
+        $this->assertMayClearStaleStripeCustomer($tenant, $diagnosticContext);
+
+        $removedId = $tenant->stripe_id;
+        Log::warning('billing.stripe_customer_stale_cleared', array_merge($diagnosticContext, [
             'tenant_id' => $tenant->id,
-            'removed_stripe_id' => $tenant->stripe_id,
-        ]);
+            'removed_stripe_id' => $removedId,
+            'acting_user_id' => $actingUserId,
+        ]));
 
         $tenant->stripe_id = null;
         $tenant->pm_type = null;
@@ -102,32 +136,141 @@ class BillingService
         $tenant->refresh();
 
         $this->createLocalStripeCustomer($tenant);
+        $result['recovered_stale'] = true;
+        $result['created_new'] = true;
+        $this->logEnsureCustomer('billing.ensure_customer.recovered', $tenant, $actingUserId, array_merge($diagnosticContext, [
+            'removed_stripe_id' => $removedId,
+        ]), $result);
+
+        return $result;
     }
 
     /**
-     * Create a Stripe customer for the tenant when stripe_id is null (Cashier).
+     * @param  array<string, mixed>  $diagnosticContext
      */
-    private function createLocalStripeCustomer(Tenant $tenant): void
+    protected function assertMayClearStaleStripeCustomer(Tenant $tenant, array $diagnosticContext): void
+    {
+        $sub = $tenant->subscription('default');
+        if ($sub && in_array($sub->stripe_status, ['active', 'trialing', 'past_due'], true)) {
+            Log::critical('billing.stripe_customer_missing_for_active_subscription', array_merge($diagnosticContext, [
+                'tenant_id' => $tenant->id,
+                'local_subscription_stripe_status' => $sub->stripe_status,
+            ]));
+
+            throw BillingUserFacingException::stripeCustomerMismatchForActiveSubscription([
+                'tenant_id' => $tenant->id,
+            ]);
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $context
+     */
+    protected function createLocalStripeCustomer(Tenant $tenant): void
     {
         if ($tenant->stripe_id) {
             return;
         }
 
-        $stripeSecret = config('services.stripe.secret');
-        if (empty($stripeSecret)) {
-            throw new \RuntimeException('Stripe is not configured.');
+        if (empty(config('services.stripe.secret'))) {
+            throw BillingUserFacingException::stripeNotConfigured();
         }
 
-        Stripe::setApiKey($stripeSecret);
+        Stripe::setApiKey((string) config('services.stripe.secret'));
 
-        $tenant->createAsStripeCustomer([
-            'metadata' => [
-                'tenant_id' => (string) $tenant->id,
-                'tenant_slug' => (string) ($tenant->slug ?? ''),
-            ],
-        ]);
+        $payload = $this->stripeCustomerBootstrapPayload($tenant);
+        $tenant->createAsStripeCustomer($payload);
 
         $tenant->refresh();
+    }
+
+    /**
+     * @return array{name?: string, email?: string, metadata: array<string, string>}
+     */
+    protected function stripeCustomerBootstrapPayload(Tenant $tenant): array
+    {
+        $email = $tenant->email;
+        if ($email === null || $email === '') {
+            $email = $tenant->owner()?->email;
+        }
+
+        $meta = [
+            'tenant_id' => (string) $tenant->id,
+            'tenant_slug' => (string) ($tenant->slug ?? ''),
+        ];
+
+        $out = ['metadata' => $meta];
+        if (is_string($email) && $email !== '') {
+            $out['email'] = $email;
+        }
+        $name = trim((string) ($tenant->name ?? ''));
+        if ($name !== '') {
+            $out['name'] = $name;
+        }
+
+        return $out;
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    protected function checkoutSessionMetadataPayload(Tenant $tenant, ?int $actingUserId, ?string $planKey): array
+    {
+        return [
+            'tenant_id' => (string) $tenant->id,
+            'plan_key' => (string) ($planKey ?? ''),
+            'user_id' => $actingUserId !== null ? (string) $actingUserId : '',
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    protected function checkoutDiagnosticContext(Tenant $tenant, ?int $actingUserId, ?string $planKey, string $priceId): array
+    {
+        return [
+            'app_env' => config('app.env'),
+            'tenant_id' => $tenant->id,
+            'user_id' => $actingUserId,
+            'plan_key' => $planKey,
+            'price_id' => $priceId,
+            'stripe_id_before_ensure' => $tenant->stripe_id,
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $diagnosticContext
+     * @param  array{recovered_stale: bool, created_new: bool}  $ensureResult
+     */
+    protected function logEnsureCustomer(string $message, Tenant $tenant, ?int $actingUserId, array $diagnosticContext, array $ensureResult): void
+    {
+        Log::info($message, array_merge($diagnosticContext, [
+            'tenant_id' => $tenant->id,
+            'acting_user_id' => $actingUserId,
+            'stripe_id' => $tenant->stripe_id,
+            'recovered_stale' => $ensureResult['recovered_stale'],
+            'created_new' => $ensureResult['created_new'],
+        ]));
+    }
+
+    /**
+     * @param  array<string, mixed>  $extra
+     */
+    protected function logCheckoutInitiating(array $extra): void
+    {
+        Log::info('billing.checkout.initiating', $extra);
+    }
+
+    /**
+     * @param  array<string, mixed>  $context
+     */
+    protected function logStripeApiFailure(string $channel, ApiErrorException $e, array $context): void
+    {
+        Log::error($channel, array_merge($context, [
+            'stripe_code' => $e->getStripeCode(),
+            'stripe_message' => $e->getMessage(),
+            'exception_class' => $e::class,
+        ]));
     }
 
     /**
@@ -141,6 +284,10 @@ class BillingService
      */
     public function updateSubscription(Tenant $tenant, string $priceId, ?string $oldPlanId = null, ?string $newPlanId = null): array
     {
+        if (empty(config('services.stripe.secret'))) {
+            throw BillingUserFacingException::stripeNotConfigured();
+        }
+
         try {
             $this->ensureValidStripeCustomer($tenant);
 
@@ -264,10 +411,19 @@ class BillingService
                 'old_plan' => $oldPlan,
                 'new_plan' => $newPlanId ?? 'unknown',
             ];
+        } catch (BillingUserFacingException $e) {
+            throw $e;
         } catch (IncompletePayment $e) {
             throw new \RuntimeException('Payment incomplete: ' . $e->getMessage());
         } catch (ApiErrorException $e) {
-            throw new \RuntimeException('Failed to update subscription: ' . $e->getMessage());
+            $ctx = [
+                'app_env' => config('app.env'),
+                'tenant_id' => $tenant->id,
+                'price_id' => $priceId,
+            ];
+            $this->logStripeApiFailure('billing.subscription_update.stripe_api_error', $e, $ctx);
+
+            throw BillingUserFacingException::fromStripeApi($e, 'BILLING_SUBSCRIPTION_UPDATE_FAILED', $ctx);
         }
     }
     
@@ -405,8 +561,13 @@ class BillingService
         try {
             $this->ensureValidStripeCustomer($tenant);
             $tenant->updateDefaultPaymentMethod($paymentMethodId);
+        } catch (BillingUserFacingException $e) {
+            throw $e;
         } catch (ApiErrorException $e) {
-            throw new \RuntimeException('Failed to update payment method: ' . $e->getMessage());
+            $ctx = ['tenant_id' => $tenant->id];
+            $this->logStripeApiFailure('billing.payment_method.stripe_api_error', $e, $ctx);
+
+            throw BillingUserFacingException::fromStripeApi($e, 'BILLING_PAYMENT_METHOD_FAILED', $ctx);
         }
     }
 
@@ -423,8 +584,13 @@ class BillingService
             }
 
             return $tenant->billingPortalUrl($returnUrl);
+        } catch (BillingUserFacingException $e) {
+            throw $e;
         } catch (ApiErrorException $e) {
-            throw new \RuntimeException('Failed to create customer portal URL: ' . $e->getMessage());
+            $ctx = ['tenant_id' => $tenant->id];
+            $this->logStripeApiFailure('billing.portal.stripe_api_error', $e, $ctx);
+
+            throw BillingUserFacingException::fromStripeApi($e, 'BILLING_PORTAL_FAILED', $ctx);
         }
     }
 

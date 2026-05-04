@@ -580,7 +580,7 @@ class AssetController extends Controller
         // Include special keys (tags, collection) so load_more and any GET with flat params apply all filters.
         if (empty($filters) || ! is_array($filters)) {
             $filterKeys = array_values(array_filter(array_column($schema['fields'] ?? [], 'key')));
-            $specialFilterKeys = ['tags', 'collection', 'video_scene', 'video_activity', 'video_setting']; // Applied from asset_tags/asset_collections / video JSON; may be missing from schema
+            $specialFilterKeys = ['tags', 'collection']; // Applied from asset_tags/asset_collections; may be missing from schema
             $filterKeys = array_values(array_unique(array_merge($filterKeys, $specialFilterKeys)));
             $reserved = ['category', 'sort', 'sort_direction', 'lifecycle', 'uploaded_by', 'submitted_by_prostaff', 'prostaff_user_id', 'file_type', 'asset', 'edit_metadata', 'page', 'filters', 'q', 'content_type'];
             $filters = [];
@@ -1239,30 +1239,6 @@ class AssetController extends Controller
             $keysWithValues = $this->metadataFilterService->getFieldKeysWithValuesInScope($baseQueryForFilterVisibility, $filterableSchema);
             $filterableSchema = $this->metadataFilterService->restrictFilterableSchemaToKeysWithValuesInScope($filterableSchema, $keysWithValues);
         }
-
-        $filterableSchema = array_merge($filterableSchema, [
-            [
-                'key' => 'video_scene',
-                'field_key' => 'video_scene',
-                'label' => 'Video scene',
-                'type' => 'text',
-                'is_filterable' => true,
-            ],
-            [
-                'key' => 'video_activity',
-                'field_key' => 'video_activity',
-                'label' => 'Video activity',
-                'type' => 'text',
-                'is_filterable' => true,
-            ],
-            [
-                'key' => 'video_setting',
-                'field_key' => 'video_setting',
-                'label' => 'Video setting',
-                'type' => 'text',
-                'is_filterable' => true,
-            ],
-        ]);
 
         // available_values is required by Phase H filter visibility rules
         // Do not remove without updating Phase H contract

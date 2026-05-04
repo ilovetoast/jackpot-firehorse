@@ -363,12 +363,13 @@ class HandleInertiaRequests extends Middleware
             && ($request->is('app/assets') || $request->is('app/executions'))
             && $request->has('category');
 
-        $flashKeys = ['success', 'error', 'warning', 'info', 'status', 'download_policy_saved', 'show_toast'];
+        $flashKeys = ['success', 'error', 'warning', 'info', 'status', 'download_policy_saved', 'billing_error_code', 'show_toast'];
         $success = $request->session()->get('success');
         $error = $request->session()->get('error');
         $warning = $request->session()->get('warning');
         $info = $request->session()->get('info');
         $status = $request->session()->get('status');
+        $billingErrorCode = $request->session()->get('billing_error_code');
         $flash = $isCategorySelection
             ? array_fill_keys($flashKeys, null)
             : [
@@ -378,12 +379,13 @@ class HandleInertiaRequests extends Middleware
                 'info' => $info,
                 'status' => $status,
                 'download_policy_saved' => $request->session()->get('download_policy_saved'),
-                'show_toast' => ! empty($success) || ! empty($error) || ! empty($warning) || ! empty($info) || ! empty($status),
+                'billing_error_code' => $billingErrorCode,
+                'show_toast' => ! empty($success) || ! empty($error) || ! empty($warning) || ! empty($info) || ! empty($status) || ! empty($billingErrorCode),
             ];
 
         // Clear flash after consumption so it does not persist to subsequent requests
         if (! $isCategorySelection) {
-            $request->session()->forget(['success', 'error', 'warning', 'info', 'status', 'download_policy_saved']);
+            $request->session()->forget(['success', 'error', 'warning', 'info', 'status', 'download_policy_saved', 'billing_error_code']);
         }
 
         $collectionModelForGuestNav = app()->bound('collection') ? app('collection') : null;

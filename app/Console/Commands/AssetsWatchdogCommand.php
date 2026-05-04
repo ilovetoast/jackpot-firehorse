@@ -12,7 +12,7 @@ use Illuminate\Console\Command;
 /**
  * Asset Processing Watchdog.
  *
- * Detects assets stuck in uploading or generating_thumbnails for > 10 minutes.
+ * Detects assets stuck in uploading or generating_thumbnails (grace: config reliability.watchdog).
  * Also detects failed thumbnails that still have retry budget remaining and
  * failed-but-still-PROCESSING thumbnails that died past the worker timeout.
  * Records system incidents so the auto-recover loop (ThumbnailRetryStrategy /
@@ -27,7 +27,15 @@ class AssetsWatchdogCommand extends Command
 
     public function handle(ReliabilityEngine $reliabilityEngine): int
     {
-        $cutoff = now()->subMinutes(10);
+        $stuckGrace = max(5, (int) config('reliability.watchdog.stuck_analysis_grace_minutes', 22));
+        $failedCooldown = max(3, (int) config('reliability.watchdog.failed_thumbnail_cooldown_minutes', 12));
+        $processingStaleMinutes = max(10, (int) config('reliability.watchdog.processing_stale_minutes', 28));
+        $watchdog = config('reliability.watchdog', []);
+        $autoSupportTicket = filter_var($watchdog['auto_support_ticket_enabled'] ?? true, FILTER_VALIDATE_BOOLEAN);
+        $supportTicketMinStale = max($stuckGrace, (int) ($watchdog['support_ticket_min_stale_minutes'] ?? 40));
+        $uploadingNeedsAgent = filter_var($watchdog['uploading_requires_support_agent'] ?? false, FILTER_VALIDATE_BOOLEAN);
+
+        $cutoff = now()->subMinutes($stuckGrace);
 
         $stuck = Asset::whereNull('deleted_at')
             ->whereIn('analysis_status', ['uploading', 'generating_thumbnails'])
@@ -38,7 +46,7 @@ class AssetsWatchdogCommand extends Command
         // keep trying (ThumbnailRetryStrategy allows up to MAX_RETRIES per incident), but
         // no incident exists today for this state, so the loop never engages. Emit one.
         $maxRetries = (int) config('assets.thumbnail.max_retries', 3);
-        $thumbnailRetryCooldown = now()->subMinutes(5);
+        $thumbnailRetryCooldown = now()->subMinutes($failedCooldown);
         $failedWithRetriesLeft = Asset::whereNull('deleted_at')
             ->where('thumbnail_status', ThumbnailStatus::FAILED)
             ->where('thumbnail_retry_count', '<', $maxRetries)
@@ -48,13 +56,14 @@ class AssetsWatchdogCommand extends Command
         // Thumbnails that have been in PROCESSING longer than the worker would ever run.
         // ThumbnailTimeoutGuard is the canonical fixer; calling it here removes the
         // dependency on a separately-scheduled `thumbnails:repair-stuck` run.
+        $processingCutoff = now()->subMinutes($processingStaleMinutes);
         $processingStale = Asset::whereNull('deleted_at')
             ->where('thumbnail_status', ThumbnailStatus::PROCESSING)
-            ->where(function ($q) {
-                $q->where('thumbnail_started_at', '<', now()->subMinutes(20))
-                    ->orWhere(function ($q2) {
+            ->where(function ($q) use ($processingCutoff) {
+                $q->where('thumbnail_started_at', '<', $processingCutoff)
+                    ->orWhere(function ($q2) use ($processingCutoff) {
                         $q2->whereNull('thumbnail_started_at')
-                            ->where('updated_at', '<', now()->subMinutes(20));
+                            ->where('updated_at', '<', $processingCutoff);
                     });
             })
             ->get();
@@ -89,7 +98,8 @@ class AssetsWatchdogCommand extends Command
             }
 
             $metadata = $asset->metadata ?? [];
-            $uniqueSignature = "asset_stuck:{$asset->id}:{$asset->analysis_status}:" . ($asset->updated_at?->timestamp ?? 0);
+            // Stable signature: reconciliation may touch updated_at and must not spawn a new incident per run.
+            $uniqueSignature = "asset_stuck:{$asset->id}:{$asset->analysis_status}";
 
             $basePayload = [
                 'source_type' => 'asset',
@@ -109,29 +119,32 @@ class AssetsWatchdogCommand extends Command
             if ($asset->analysis_status === 'uploading') {
                 $basePayload['severity'] = 'critical';
                 $basePayload['title'] = 'Asset stuck in uploading state';
-                $basePayload['message'] = "Asset {$asset->id} has been in uploading state for over 10 minutes.";
+                $basePayload['message'] = "Asset {$asset->id} has been in uploading state for over {$stuckGrace} minutes.";
                 $basePayload['retryable'] = true;
-                $basePayload['requires_support'] = true;
+                $basePayload['requires_support'] = $uploadingNeedsAgent;
             } else {
                 $basePayload['severity'] = 'error';
                 $basePayload['title'] = 'Thumbnail generation stalled';
-                $basePayload['message'] = "Asset {$asset->id} thumbnail generation has been stalled for over 10 minutes.";
+                $basePayload['message'] = "Asset {$asset->id} thumbnail generation has been stalled for over {$stuckGrace} minutes.";
                 $basePayload['retryable'] = true;
             }
 
             $incident = $reliabilityEngine->report($basePayload);
             if ($incident) {
                 $recorded++;
+            }
 
-                // P6: Auto-create SupportTicket if stuck and no open ticket exists
-                $signature = "asset_stalled:{$asset->id}";
+            // SupportTicket even when the incident row was deduped (recordIfNotExists returned null),
+            // once the asset crosses the stale threshold and no open ticket exists.
+            if ($autoSupportTicket) {
+                $staleEnoughForTicket = $asset->updated_at && $asset->updated_at->lte(now()->subMinutes($supportTicketMinStale));
                 $hasOpenTicket = SupportTicket::where('source_type', 'asset')
                     ->where('source_id', $asset->id)
                     ->whereIn('status', ['open', 'in_progress'])
                     ->exists();
-
-                if (!$hasOpenTicket) {
+                if ($staleEnoughForTicket && !$hasOpenTicket) {
                     try {
+                        $signature = "asset_stalled:{$asset->id}";
                         $metadata = $asset->metadata ?? [];
                         $payload = [
                             'asset_id' => $asset->id,

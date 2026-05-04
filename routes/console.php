@@ -58,15 +58,15 @@ if ($schedulerEnabled) {
         ->withoutOverlapping()
         ->description('Reset monthly AI budget usage records for the new month');
 
-    // Asset Processing Watchdog: detect stuck assets (uploading, generating_thumbnails > 10 min)
+    // Asset Processing Watchdog: detect stuck assets (grace in config/reliability.php)
     Schedule::command('assets:watchdog')
-        ->everyFiveMinutes()
+        ->everyTenMinutes()
         ->withoutOverlapping()
         ->description('Detect assets stuck in uploading or thumbnail generation');
 
     // System Auto-Recovery: reconcile, retry, create tickets for unresolved incidents
     Schedule::command('system:auto-recover')
-        ->everyFiveMinutes()
+        ->everyTenMinutes()
         ->withoutOverlapping()
         ->description('Auto-recover unresolved system incidents');
 

@@ -1517,6 +1517,7 @@ class GenerateThumbnailsJob implements ShouldQueue
                         $reportPayload['severity'] = 'error';
                         $reportPayload['title'] = 'Thumbnail generation failed';
                         $reportPayload['retryable'] = true;
+                        $reportPayload['unique_signature'] = "thumbnail_generation_failed:{$asset->id}";
                     }
                     app(ReliabilityEngine::class)->report($reportPayload);
                 } catch (\Throwable $t2Ex) {
@@ -1545,6 +1546,7 @@ class GenerateThumbnailsJob implements ShouldQueue
                         'title' => 'Thumbnail generation failed',
                         'message' => $errorMessage,
                         'retryable' => true,
+                        'unique_signature' => 'thumbnail_gen_job_failed:'.$this->assetVersionId,
                         'metadata' => [
                             'exception_class' => get_class($e),
                             'attempts' => $this->attempts(),
@@ -1673,6 +1675,7 @@ class GenerateThumbnailsJob implements ShouldQueue
                 'title' => 'Thumbnail preview not generated (terminal)',
                 'message' => $technicalMessage,
                 'retryable' => false,
+                'unique_signature' => "thumbnail_terminal_no_preview:{$asset->id}",
                 'metadata' => [
                     'derivative_failure' => true,
                     'terminal_no_retry' => true,

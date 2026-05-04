@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Enums\DownloadStatus;
+use App\Exceptions\BillingUserFacingException;
 use App\Models\Download;
 use App\Models\TenantModule;
 use App\Services\AiUsageService;
@@ -11,6 +12,7 @@ use App\Services\FeatureGate;
 use App\Services\PlanService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Inertia\Inertia;
 use Inertia\Response;
 use Stripe\Exception\ApiErrorException;
@@ -255,6 +257,7 @@ class BillingController extends Controller
 
         $request->validate([
             'price_id' => 'required|string',
+            'plan_id' => 'nullable|string',
         ]);
 
         $user = $request->user();
@@ -286,39 +289,74 @@ class BillingController extends Controller
             
             try {
                 $result = $this->billingService->updateSubscription(
-                    $tenant, 
+                    $tenant,
                     $request->price_id,
                     $oldPlan,
                     $newPlanId
                 );
-                
+
                 // Format success message based on action
                 $oldPlanName = config("plans.{$result['old_plan']}.name", ucfirst($result['old_plan']));
                 $newPlanName = config("plans.{$result['new_plan']}.name", ucfirst($result['new_plan']));
-                
-                $message = match($result['action']) {
+
+                $message = match ($result['action']) {
                     'upgrade' => "Successfully upgraded from {$oldPlanName} to {$newPlanName}. Stripe has automatically prorated the charges - you'll see the adjustment on your next invoice.",
                     'downgrade' => "Successfully downgraded from {$oldPlanName} to {$newPlanName}. Changes will take effect at the end of your billing period, and you'll receive a prorated credit.",
                     default => "Successfully updated subscription to {$newPlanName}.",
                 };
 
                 return redirect()->route('billing')->with('success', $message);
+            } catch (BillingUserFacingException $e) {
+                return $this->respondBillingUserFacing($e);
             } catch (\Exception $e) {
-                return back()->withErrors([
-                    'subscription' => 'Failed to update subscription: ' . $e->getMessage(),
+                Log::error('billing.subscribe.update_failed', [
+                    'tenant_id' => $tenant->id,
+                    'user_id' => $user->id,
+                    'message' => $e->getMessage(),
+                    'exception_class' => $e::class,
                 ]);
+
+                return back()
+                    ->withErrors([
+                        'subscription' => 'We couldn’t update your subscription. Please try again, or contact support if the issue continues.',
+                    ])
+                    ->with('billing_error_code', 'BILLING_SUBSCRIPTION_UPDATE_FAILED');
             }
         }
-        
+
         // No existing subscription - create new one via checkout
+        $planKey = $this->resolvePlanKeyFromRequest($request);
+
         try {
-            $checkoutUrl = $this->billingService->createCheckoutSession($tenant, $request->price_id);
+            $checkoutUrl = $this->billingService->createCheckoutSession(
+                $tenant,
+                $request->price_id,
+                false,
+                (int) $user->id,
+                $planKey
+            );
 
             return Inertia::location($checkoutUrl);
+        } catch (BillingUserFacingException $e) {
+            return $this->respondBillingUserFacing($e);
+        } catch (\RuntimeException $e) {
+            // Intentional business-rule messages from BillingService (e.g. duplicate subscription guard)
+            return back()
+                ->withErrors(['subscription' => $e->getMessage()])
+                ->with('billing_error_code', 'BILLING_BUSINESS_RULE');
         } catch (\Exception $e) {
-            return back()->withErrors([
-                'subscription' => 'Failed to create subscription: ' . $e->getMessage(),
+            Log::error('billing.subscribe.checkout_failed', [
+                'tenant_id' => $tenant->id,
+                'user_id' => $user->id,
+                'message' => $e->getMessage(),
+                'exception_class' => $e::class,
             ]);
+
+            return back()
+                ->withErrors([
+                    'subscription' => 'We couldn’t start checkout. Please try again, or contact support if the issue continues.',
+                ])
+                ->with('billing_error_code', 'BILLING_CHECKOUT_FAILED');
         }
     }
 
@@ -363,9 +401,11 @@ class BillingController extends Controller
             };
 
             return redirect()->route('billing')->with('success', $message);
+        } catch (BillingUserFacingException $e) {
+            return $this->respondBillingUserFacing($e);
         } catch (\Exception $e) {
             $errorMessage = $e->getMessage();
-            
+
             // Check if error is about incomplete payment
             if (str_contains(strtolower($errorMessage), 'incomplete') || str_contains(strtolower($errorMessage), 'payment')) {
                 // Try to get payment confirmation URL
@@ -405,10 +445,19 @@ class BillingController extends Controller
                     }
                 }
             }
-            
-            return back()->withErrors([
-                'subscription' => 'Failed to update subscription: ' . $errorMessage,
+
+            Log::error('billing.update_subscription.failed', [
+                'tenant_id' => $tenant->id,
+                'user_id' => $user->id,
+                'message' => $errorMessage,
+                'exception_class' => $e::class,
             ]);
+
+            return back()
+                ->withErrors([
+                    'subscription' => 'We couldn’t update your subscription. Please try again, or contact support if the issue continues.',
+                ])
+                ->with('billing_error_code', 'BILLING_SUBSCRIPTION_UPDATE_FAILED');
         }
     }
 
@@ -433,10 +482,21 @@ class BillingController extends Controller
             $this->billingService->updatePaymentMethod($tenant, $request->payment_method);
 
             return redirect()->route('billing')->with('success', 'Payment method updated successfully.');
+        } catch (BillingUserFacingException $e) {
+            return $this->respondBillingUserFacing($e, 'payment_method');
         } catch (\Exception $e) {
-            return back()->withErrors([
-                'payment_method' => 'Failed to update payment method: ' . $e->getMessage(),
+            Log::error('billing.payment_method.failed', [
+                'tenant_id' => $tenant->id,
+                'user_id' => $user->id,
+                'message' => $e->getMessage(),
+                'exception_class' => $e::class,
             ]);
+
+            return back()
+                ->withErrors([
+                    'payment_method' => 'We couldn’t update your payment method. Please try again, or contact support if the issue continues.',
+                ])
+                ->with('billing_error_code', 'BILLING_PAYMENT_METHOD_FAILED');
         }
     }
 
@@ -1033,12 +1093,6 @@ class BillingController extends Controller
             return back()->withErrors(['billing' => 'Invalid company.']);
         }
 
-        if (! $tenant->stripe_id) {
-            return back()->withErrors([
-                'billing' => 'No billing account found. Please subscribe to a plan first.',
-            ]);
-        }
-
         try {
             $portalUrl = $this->billingService->getCustomerPortalUrl(
                 $tenant,
@@ -1046,11 +1100,53 @@ class BillingController extends Controller
             );
 
             return redirect($portalUrl);
+        } catch (BillingUserFacingException $e) {
+            return $this->respondBillingUserFacing($e, 'billing');
         } catch (\Exception $e) {
-            return back()->withErrors([
-                'billing' => 'Failed to access billing portal: ' . $e->getMessage(),
+            Log::error('billing.portal.failed', [
+                'tenant_id' => $tenant->id,
+                'user_id' => $user->id,
+                'message' => $e->getMessage(),
+                'exception_class' => $e::class,
             ]);
+
+            return back()
+                ->withErrors([
+                    'billing' => 'We couldn’t open the billing portal. Please try again, or contact support if the issue continues.',
+                ])
+                ->with('billing_error_code', 'BILLING_PORTAL_FAILED');
         }
+    }
+
+    protected function resolvePlanKeyFromRequest(Request $request): ?string
+    {
+        $planKey = $request->input('plan_id');
+        if (is_string($planKey) && $planKey !== '') {
+            return $planKey;
+        }
+        $priceId = $request->input('price_id');
+        if (! is_string($priceId) || $priceId === '') {
+            return null;
+        }
+        foreach (config('plans', []) as $key => $cfg) {
+            if (($cfg['stripe_price_id'] ?? null) === $priceId) {
+                return $key;
+            }
+        }
+
+        return null;
+    }
+
+    protected function respondBillingUserFacing(BillingUserFacingException $e, string $errorKey = 'subscription'): \Illuminate\Http\RedirectResponse
+    {
+        Log::warning('billing.user_facing_error', array_merge($e->logContext, [
+            'error_code' => $e->errorCode,
+            'detail' => $e->getPrevious()?->getMessage(),
+        ]));
+
+        return back()
+            ->withErrors([$errorKey => $e->getMessage()])
+            ->with('billing_error_code', $e->errorCode);
     }
 
     /**

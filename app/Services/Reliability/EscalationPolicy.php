@@ -12,12 +12,10 @@ use Illuminate\Support\Facades\Log;
  * - critical → immediate ticket
  * - error → after 1 failed repair
  * - warning → after 3 attempts
- * - age > 15 minutes escalates one level
+ * - age > reliability.age_escalation_minutes escalates one level
  */
 class EscalationPolicy
 {
-    protected const AGE_ESCALATION_MINUTES = 15;
-
     /**
      * Whether a ticket should be created for this incident.
      */
@@ -29,7 +27,7 @@ class EscalationPolicy
             if (!config('reliability.asset_incident.auto_ticket_enabled', true)) {
                 return false;
             }
-            $minAttempts = (int) config('reliability.asset_incident.min_repair_attempts_before_ticket', 3);
+            $minAttempts = (int) config('reliability.asset_incident.min_repair_attempts_before_ticket', 5);
             if ($repairAttempts < $minAttempts) {
                 return false;
             }
@@ -62,7 +60,7 @@ class EscalationPolicy
     }
 
     /**
-     * Severity after age-based escalation (stuck > 15 min → one level up).
+     * Severity after age-based escalation (stuck > age_escalation_minutes → one level up).
      */
     public function effectiveSeverity(SystemIncident $incident): string
     {
@@ -72,8 +70,9 @@ class EscalationPolicy
             return $base;
         }
 
+        $ageMinutes = max(1, (int) config('reliability.age_escalation_minutes', 30));
         $minutesStuck = $incident->detected_at->diffInMinutes(now());
-        if ($minutesStuck < self::AGE_ESCALATION_MINUTES) {
+        if ($minutesStuck < $ageMinutes) {
             return $base;
         }
 

@@ -30,7 +30,8 @@ class AssetDerivativeFailureEscalationService
             return null;
         }
 
-        $shouldCreate = $record->failure_count >= 3 || $agentSummary !== null;
+        $minFailures = max(1, (int) config('reliability.derivative_escalation_min_failures', 6));
+        $shouldCreate = $record->failure_count >= $minFailures || $agentSummary !== null;
 
         if (! $shouldCreate) {
             return null;
