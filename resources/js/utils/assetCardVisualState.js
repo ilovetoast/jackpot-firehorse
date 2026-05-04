@@ -189,7 +189,7 @@ export function getAssetCardVisualState(asset, options = {}) {
 
     const thumbSupported = supportsThumbnail(asset.mime_type, ext)
 
-    if (!thumbSupported || ts === 'skipped') {
+    if ((!thumbSupported && !asset.pending_finalize_client_tile) || ts === 'skipped') {
         return {
             kind: 'preview_unavailable',
             label: 'No grid preview',

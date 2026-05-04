@@ -11,15 +11,51 @@ import {
     subscribeUploadPreviewRegistry,
 } from '../utils/uploadPreviewRegistry'
 
+function inferMimeFromFilenameForPending(name) {
+    const ext = String(name || '')
+        .split('.')
+        .pop()
+        ?.toLowerCase()
+        .replace(/^\./, '')
+    if (!ext) return null
+    const map = {
+        jpg: 'image/jpeg',
+        jpeg: 'image/jpeg',
+        png: 'image/png',
+        gif: 'image/gif',
+        webp: 'image/webp',
+        avif: 'image/avif',
+        heic: 'image/heic',
+        tif: 'image/tiff',
+        tiff: 'image/tiff',
+        bmp: 'image/bmp',
+        svg: 'image/svg+xml',
+        pdf: 'application/pdf',
+        mp4: 'video/mp4',
+        mov: 'video/quicktime',
+        webm: 'video/webm',
+        mkv: 'video/x-matroska',
+        m4v: 'video/x-m4v',
+        avi: 'video/x-msvideo',
+    }
+    return map[ext] ?? null
+}
+
 function syntheticAssetForPending(entry, clientFileId) {
     const name = entry?.filename || 'Asset'
+    const rawMime = (entry?.mimeType || '').trim().toLowerCase()
+    const mimeFromEntry =
+        rawMime && rawMime !== 'application/octet-stream' ? entry.mimeType : inferMimeFromFilenameForPending(name)
+    const extFromName = name.includes('.') ? String(name.split('.').pop() || '').replace(/^\./, '') : ''
     return {
         // Stable per-upload id so branded placeholder hue/jitter differs per tile (never use 0 for all).
         id: clientFileId ? String(clientFileId) : name,
         title: name,
         original_filename: name,
-        mime_type: entry?.mimeType || 'application/octet-stream',
-        file_extension: name.includes('.') ? name.split('.').pop() : '',
+        mime_type: mimeFromEntry || entry?.mimeType || 'application/octet-stream',
+        file_extension: extFromName,
+        /** Lets ThumbnailPreview + getAssetCardVisualState show animated mosaic while finalize runs (unknown MIME). */
+        pending_finalize_client_tile: true,
         thumbnail_status: 'pending',
         preview_thumbnail_url: null,
         final_thumbnail_url: null,
@@ -31,6 +67,7 @@ export default function PendingFinalizeGridTile({
     clientFileId,
     primaryColor = '#6366f1',
     cardStyle = 'default',
+    cardVariant = 'default',
     cardSize = 220,
     layoutMode = 'grid',
     masonryMaxHeightPx = 560,
@@ -56,6 +93,7 @@ export default function PendingFinalizeGridTile({
     const synthetic = useMemo(() => syntheticAssetForPending(entry, clientFileId), [entry, clientFileId])
 
     const isGuidelines = cardStyle === 'guidelines'
+    const isCinematic = cardVariant === 'cinematic'
     const aspectRatio = isGuidelines ? 'aspect-[5/3]' : 'aspect-[4/3]'
     const isMasonry = layoutMode === 'masonry'
     const masonryThumbnailMinHeightPx = useMemo(() => {
@@ -77,7 +115,9 @@ export default function PendingFinalizeGridTile({
             <div
                 className={`${
                     isMasonry ? 'w-full flex flex-col items-center justify-center' : aspectRatio
-                } relative overflow-hidden rounded-2xl border border-dashed border-gray-300 bg-gray-50 transition-all duration-200`}
+                } relative overflow-hidden rounded-2xl border border-dashed transition-all duration-200 ${
+                    isCinematic ? 'border-white/25 bg-black/25' : 'border-gray-300 bg-gray-50'
+                }`}
                 style={
                     isMasonry
                         ? {
@@ -108,7 +148,10 @@ export default function PendingFinalizeGridTile({
                 ) : null}
             </div>
             {entry?.filename ? (
-                <p className="mt-2 line-clamp-2 px-0.5 text-xs text-gray-600" title={entry.filename}>
+                <p
+                    className={`mt-2 line-clamp-2 px-0.5 text-xs ${isCinematic ? 'text-white/85' : 'text-gray-600'}`}
+                    title={entry.filename}
+                >
                     {entry.filename}
                 </p>
             ) : null}

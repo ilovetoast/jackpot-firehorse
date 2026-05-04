@@ -37,15 +37,10 @@ import {
     getPendingFinalizeSnapshot,
     getUploadPreviewEntryForClient,
     normalizeAssetId,
+    pendingUploadIdentityKey,
     prunePendingFinalizeVisibleInAssetList,
     subscribeUploadPreviewRegistry,
 } from '../utils/uploadPreviewRegistry'
-
-function normalizePendingFilename(name) {
-    return String(name || '')
-        .trim()
-        .toLowerCase()
-}
 
 const MARQUEE_DRAG_THRESHOLD_PX = 5
 /** Matches Tailwind `gap-7` (1.75rem) for column width math */
@@ -135,15 +130,17 @@ export default function AssetGrid({
                 return false
             }
             if (entry && !aid) {
-                const fn = normalizePendingFilename(entry.filename)
-                if (fn) {
+                const fk = pendingUploadIdentityKey(entry.filename)
+                if (fk) {
                     const matchingAssets = safeAssets
-                        .slice(0, 50)
-                        .filter((a) => normalizePendingFilename(a.original_filename || a.title) === fn)
+                        .slice(0, 80)
+                        .filter(
+                            (a) => pendingUploadIdentityKey(a.original_filename || a.title) === fk,
+                        )
                     const pendingPeers = pendingClientIds.filter((id) => {
                         const e = getUploadPreviewEntryForClient(id)
                         const eAid = e?.assetId != null ? normalizeAssetId(e.assetId) : null
-                        return e && !eAid && normalizePendingFilename(e.filename) === fn
+                        return e && !eAid && pendingUploadIdentityKey(e.filename) === fk
                     })
                     if (matchingAssets.length === 1 && pendingPeers.length === 1 && pendingPeers[0] === cid) {
                         return false
@@ -397,6 +394,7 @@ export default function AssetGrid({
                 clientFileId={clientId}
                 primaryColor={primaryColor}
                 cardStyle={cardStyle}
+                cardVariant={cardVariant}
                 cardSize={clampedCardSize}
                 layoutMode={layoutMode}
                 masonryMaxHeightPx={masonryMaxPx}

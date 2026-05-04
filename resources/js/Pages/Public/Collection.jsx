@@ -181,7 +181,7 @@ export default function PublicCollection({
             : '')
 
     const runZipDownload = useCallback(
-        async (assetIds) => {
+        async (assetIds, downloadTab) => {
             setDownloadError(null)
             setDownloadSubmitting(true)
             try {
@@ -206,6 +206,7 @@ export default function PublicCollection({
                 })
                 const data = await res.json().catch(() => ({}))
                 if (!res.ok) {
+                    downloadTab?.close?.()
                     const msg =
                         typeof data.message === 'string' && data.message.trim()
                             ? data.message
@@ -214,11 +215,26 @@ export default function PublicCollection({
                               : 'Download failed. Please try again.'
                     throw new Error(msg)
                 }
-                if (data.zip_url) {
-                    window.open(data.zip_url, '_blank', 'noopener,noreferrer')
+                const zipUrl = typeof data.zip_url === 'string' ? data.zip_url.trim() : ''
+                if (!zipUrl) {
+                    downloadTab?.close?.()
+                    throw new Error('No download link was returned. Please try again.')
+                }
+                /** Popup blockers allow a tab opened on the click; opening only after `fetch` is often blocked. */
+                if (downloadTab && !downloadTab.closed) {
+                    downloadTab.location.href = zipUrl
+                } else {
+                    const a = document.createElement('a')
+                    a.href = zipUrl
+                    a.target = '_blank'
+                    a.rel = 'noopener noreferrer'
+                    document.body.appendChild(a)
+                    a.click()
+                    a.remove()
                 }
                 setDownloadPanelOpen(false)
             } catch (err) {
+                downloadTab?.close?.()
                 setDownloadError(err.message || 'Failed to prepare download. Please try again.')
             } finally {
                 setDownloadSubmitting(false)
@@ -234,12 +250,19 @@ export default function PublicCollection({
     }
 
     const handleDownloadPanelConfirm = () => {
+        const downloadTab =
+            typeof window !== 'undefined'
+                ? window.open('about:blank', '_blank', 'noopener,noreferrer')
+                : null
         if (downloadPanelMode === 'selected') {
             const ids = [...selectedIds]
-            if (ids.length === 0) return
-            runZipDownload(ids)
+            if (ids.length === 0) {
+                downloadTab?.close?.()
+                return
+            }
+            runZipDownload(ids, downloadTab)
         } else {
-            runZipDownload(null)
+            runZipDownload(null, downloadTab)
         }
     }
 
@@ -607,7 +630,7 @@ export default function PublicCollection({
                             <p className="mt-4 font-medium text-white/80">No files match your search.</p>
                         </div>
                     ) : (view === 'grid' || view === 'masonry') && assetsList?.length > 0 ? (
-                        <div className="rounded-2xl border border-gray-200/90 bg-gray-50 px-3 py-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.75)] ring-1 ring-black/[0.04] sm:px-5 sm:py-5">
+                        <div className="w-full min-w-0">
                             <AssetGrid
                                 assets={assetsList}
                                 onAssetClick={openLightboxForAsset}
@@ -615,7 +638,7 @@ export default function PublicCollection({
                                 showInfo
                                 selectedAssetId={null}
                                 primaryColor={primaryColor}
-                                cardVariant="default"
+                                cardVariant="cinematic"
                                 bucketAssetIds={bucketIdsList}
                                 onBucketToggle={toggleBucket}
                                 layoutMode={view === 'masonry' ? 'masonry' : 'grid'}
@@ -762,6 +785,11 @@ export default function PublicCollection({
                     total={assetsList.length}
                     primaryHex={primaryColor}
                     downloadsEnabled={downloadCollectionEnabled}
+                    zipSelectionIncludesAsset={selectedIds.has(String(lightboxAsset.id))}
+                    zipSelectionCount={selectedIds.size}
+                    onToggleZipSelection={
+                        downloadCollectionEnabled ? () => toggleBucket(lightboxAsset.id) : undefined
+                    }
                     onClose={closeLightbox}
                     onPrev={goLightboxPrev}
                     onNext={goLightboxNext}

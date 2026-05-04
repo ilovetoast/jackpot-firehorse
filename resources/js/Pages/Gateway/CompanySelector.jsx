@@ -42,7 +42,7 @@ export default function CompanySelector({ companies }) {
                                 href="/app/profile"
                                 className="inline-flex justify-center rounded-lg border border-white/15 bg-white/[0.06] px-4 py-2.5 text-sm font-medium text-white/90 hover:bg-white/10"
                             >
-                                Account settings
+                                Profile
                             </a>
                             <a
                                 href="/app/companies"

@@ -958,7 +958,7 @@ export default function AssetCard({
                             </span>
                             <span
                                 className={`shrink-0 font-mono text-[10px] font-semibold tabular-nums uppercase tracking-wide ${
-                                    isCinematic ? 'text-white/55' : 'text-gray-500'
+                                    isCinematic ? 'text-white/90' : 'text-gray-500'
                                 }`}
                             >
                                 {fileExtension}

@@ -315,6 +315,10 @@ export default function ThumbnailPreview({
     )
 
     const showRichPlaceholder = useMemo(() => {
+        /** Pending finalize tiles often have empty/octet-stream MIME before the server row exists — still show branded motion. */
+        if (asset?.pending_finalize_client_tile) {
+            return true
+        }
         if (!supportsThumbnail(asset?.mime_type, fileExtForThumb)) {
             return false
         }

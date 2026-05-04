@@ -36,6 +36,19 @@ test('JPG without thumbnail and pending shows generating_preview', () => {
     assert.equal(vs.badgeShort, 'Processing')
 })
 
+test('pending_finalize_client_tile with unknown MIME still gets generating_preview (animated mosaic path)', () => {
+    const asset = {
+        id: 'client-uuid-1',
+        file_extension: '',
+        mime_type: 'application/octet-stream',
+        thumbnail_status: 'pending',
+        pending_finalize_client_tile: true,
+    }
+    const vs = getAssetCardVisualState(asset, { ephemeralLocalPreviewUrl: null })
+    assert.equal(vs.kind, 'generating_preview')
+    assert.equal(vs.label, 'Generating preview')
+})
+
 test('failed preview shows failed kind and danger tone', () => {
     const asset = {
         id: 103,

@@ -87,7 +87,7 @@ export default function AssetPlaceholder({
         if (!rich || !asset) return null
         if (isImageAsset(asset) || isVideoAsset(asset)) return null
         const e = extLower(asset)
-        if (!supportsThumbnail(asset.mime_type, e)) return null
+        if (!supportsThumbnail(asset.mime_type, e) && !asset.pending_finalize_client_tile) return null
         const v = getAssetCardVisualState(asset, { ephemeralLocalPreviewUrl })
         if (v.kind === 'ready' || v.kind === 'local_preview') return null
         return v

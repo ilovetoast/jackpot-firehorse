@@ -22,6 +22,40 @@ export function normalizeAssetId(assetId) {
     const s = String(assetId).trim()
     return s.length > 0 ? s : null
 }
+
+/**
+ * Collapse display names vs client filenames (e.g. "Img 6562" vs "IMG_6562.CR2") for pending-grid dedupe.
+ * Lowercase, strip last dotted extension when it looks like a file ext, then alphanumeric-only.
+ *
+ * @param {unknown} name
+ * @returns {string}
+ */
+export function pendingUploadIdentityKey(name) {
+    let s = String(name ?? '')
+        .trim()
+        .toLowerCase()
+    if (!s) return ''
+    const slash = s.lastIndexOf('/')
+    if (slash >= 0) {
+        s = s.slice(slash + 1)
+    }
+    const dot = s.lastIndexOf('.')
+    if (dot > 0) {
+        const ext = s.slice(dot + 1)
+        if (ext.length >= 2 && ext.length <= 6 && /^[a-z0-9]+$/.test(ext)) {
+            s = s.slice(0, dot)
+        }
+    }
+    return s.replace(/[^a-z0-9]+/g, '')
+}
+
+/** @param {{ original_filename?: string|null, title?: string|null }} asset */
+function assetPendingIdentityKey(asset) {
+    if (!asset) return ''
+    const fromName = pendingUploadIdentityKey(asset.original_filename)
+    if (fromName) return fromName
+    return pendingUploadIdentityKey(asset.title)
+}
 /** Ordered client ids: finalize in flight or waiting for grid to include the new asset row */
 const pendingFinalizeOrder = []
 let globalVersion = 0
@@ -200,6 +234,40 @@ export function prunePendingFinalizeVisibleInAssetList(assets) {
             changed = true
         }
     }
+
+    /** When finalize mapping is slow or omits client_file_id, drop the placeholder once the lone new row matches by stem. */
+    const keyCount = new Map()
+    for (const a of assets || []) {
+        const k = assetPendingIdentityKey(a)
+        if (k) {
+            keyCount.set(k, (keyCount.get(k) || 0) + 1)
+        }
+    }
+    for (let i = pendingFinalizeOrder.length - 1; i >= 0; i--) {
+        const cid = pendingFinalizeOrder[i]
+        const entry = byClient.get(cid)
+        if (!entry) {
+            continue
+        }
+        const aid = entry.assetId != null ? normalizeAssetId(entry.assetId) : null
+        if (aid && ids.has(aid)) {
+            continue
+        }
+        const fk = pendingUploadIdentityKey(entry.filename)
+        if (!fk || (keyCount.get(fk) || 0) !== 1) {
+            continue
+        }
+        const pendingSame = pendingFinalizeOrder.filter((id) => {
+            const e = byClient.get(id)
+            const eAid = e?.assetId != null ? normalizeAssetId(e.assetId) : null
+            return e && !eAid && pendingUploadIdentityKey(e.filename) === fk
+        })
+        if (pendingSame.length === 1 && pendingSame[0] === cid) {
+            pendingFinalizeOrder.splice(i, 1)
+            changed = true
+        }
+    }
+
     if (changed) bump()
 }
 

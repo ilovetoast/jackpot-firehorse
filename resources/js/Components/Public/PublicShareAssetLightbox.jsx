@@ -6,6 +6,7 @@ import {
     ArrowDownTrayIcon,
     DocumentIcon,
     ArrowsPointingOutIcon,
+    Square2StackIcon,
 } from '@heroicons/react/24/outline'
 import { motion, AnimatePresence, useReducedMotion } from 'framer-motion'
 import { contrastTextOnPrimary } from '../../utils/contrastTextOnPrimary'
@@ -78,6 +79,10 @@ export default function PublicShareAssetLightbox({
     total,
     primaryHex,
     downloadsEnabled,
+    /** When set, show control to include this file in the gallery “Download selected” ZIP. */
+    onToggleZipSelection,
+    zipSelectionIncludesAsset = false,
+    zipSelectionCount = 0,
     onClose,
     onPrev,
     onNext,
@@ -308,16 +313,47 @@ export default function PublicShareAssetLightbox({
                                 <p className="mt-4 text-xs font-medium uppercase tracking-wider text-white/45">Size</p>
                                 <p className="mt-1 text-sm text-white/90">{sizeLabel}</p>
                                 {downloadsEnabled && asset.download_url ? (
-                                    <button
-                                        type="button"
-                                        disabled={downloadBusy}
-                                        onClick={handleDownload}
-                                        className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold shadow-lg transition hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-60"
-                                        style={{ backgroundColor: primaryHex || '#6366f1', color: onPrimary }}
-                                    >
-                                        <ArrowDownTrayIcon className="h-4 w-4 shrink-0" />
-                                        {downloadBusy ? 'Preparing…' : 'Download'}
-                                    </button>
+                                    <>
+                                        <button
+                                            type="button"
+                                            disabled={downloadBusy}
+                                            onClick={handleDownload}
+                                            className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold shadow-lg transition hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-60"
+                                            style={{ backgroundColor: primaryHex || '#6366f1', color: onPrimary }}
+                                        >
+                                            <ArrowDownTrayIcon className="h-4 w-4 shrink-0" />
+                                            {downloadBusy ? 'Preparing…' : 'Download this file'}
+                                        </button>
+                                        {typeof onToggleZipSelection === 'function' ? (
+                                            <>
+                                                <button
+                                                    type="button"
+                                                    onClick={onToggleZipSelection}
+                                                    className={`mt-2 inline-flex w-full items-center justify-center gap-2 rounded-lg border px-4 py-2.5 text-sm font-semibold transition ${
+                                                        zipSelectionIncludesAsset
+                                                            ? 'border-white/35 bg-white/10 text-white hover:bg-white/15'
+                                                            : 'border-white/20 bg-transparent text-white/90 hover:bg-white/10'
+                                                    }`}
+                                                >
+                                                    <Square2StackIcon className="h-4 w-4 shrink-0 opacity-90" aria-hidden />
+                                                    {zipSelectionIncludesAsset
+                                                        ? 'Remove from multi-file download'
+                                                        : 'Include in multi-file download'}
+                                                </button>
+                                                <p className="mt-2 text-[11px] leading-snug text-white/45">
+                                                    {zipSelectionIncludesAsset
+                                                        ? 'This file is in your selection. Close the preview and choose Download selected to get one ZIP.'
+                                                        : 'Adds this file to your gallery checkmarks so you can download several originals together as one ZIP.'}
+                                                    {zipSelectionCount > 0 ? (
+                                                        <span className="mt-1 block text-white/55">
+                                                            {zipSelectionCount} file{zipSelectionCount !== 1 ? 's' : ''} selected
+                                                            in the gallery{zipSelectionIncludesAsset ? ' (including this one).' : '.'}
+                                                        </span>
+                                                    ) : null}
+                                                </p>
+                                            </>
+                                        ) : null}
+                                    </>
                                 ) : null}
                             </motion.div>
                         </AnimatePresence>

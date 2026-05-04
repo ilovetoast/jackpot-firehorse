@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Link, useForm, usePage } from '@inertiajs/react'
-import { Cog6ToothIcon, CreditCardIcon, UserCircleIcon } from '@heroicons/react/24/outline'
+import { BuildingOffice2Icon, Cog6ToothIcon, CreditCardIcon, UserCircleIcon } from '@heroicons/react/24/outline'
 import PermissionGate from '../PermissionGate'
 import Avatar from '../Avatar'
 import NotificationBell from '../NotificationBell'
@@ -160,8 +160,8 @@ export default function GlobalUserControls({
                                         href="/app/profile"
                                         className="group flex items-center gap-3 rounded-lg px-2 py-2 text-left transition-colors hover:bg-gray-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2"
                                         onClick={() => setUserMenuOpen(false)}
-                                        aria-label="Account settings"
-                                        title="Account settings"
+                                        aria-label="Profile"
+                                        title="Profile"
                                     >
                                         <Avatar
                                             avatarUrl={auth.user?.avatar_url}
@@ -297,14 +297,29 @@ export default function GlobalUserControls({
                                                 This workspace
                                             </p>
                                             <div className="px-1 pb-2">
+                                                <PermissionGate permission="company_settings.view">
+                                                    <Link
+                                                        href={
+                                                            typeof route === 'function'
+                                                                ? route('companies.settings')
+                                                                : '/app/companies/settings'
+                                                        }
+                                                        className="flex min-w-0 items-center rounded-md px-2 py-1.5 text-sm text-gray-800 hover:bg-white/80"
+                                                        onClick={() => setUserMenuOpen(false)}
+                                                        title="Tenant settings"
+                                                    >
+                                                        <BuildingOffice2Icon className="mr-2 h-4 w-4 flex-shrink-0 text-gray-400" aria-hidden />
+                                                        <span className="min-w-0 flex-1 truncate font-medium">Tenant settings</span>
+                                                    </Link>
+                                                </PermissionGate>
                                                 <Link
                                                     href="/app/profile"
                                                     className="flex min-w-0 items-center rounded-md px-2 py-1.5 text-sm text-gray-800 hover:bg-white/80"
                                                     onClick={() => setUserMenuOpen(false)}
-                                                    title="Account settings"
+                                                    title="Profile"
                                                 >
                                                     <UserCircleIcon className="mr-2 h-4 w-4 flex-shrink-0 text-gray-400" aria-hidden />
-                                                    <span className="min-w-0 flex-1 truncate font-medium">Account settings</span>
+                                                    <span className="min-w-0 flex-1 truncate font-medium">Profile</span>
                                                 </Link>
                                                 {activeBrand && hasAnyBrandAccess && !collectionOnly && (
                                                     <PermissionGate permission="brand_settings.manage">
