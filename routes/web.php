@@ -5,6 +5,7 @@ use App\Http\Controllers\Auth\SignupController;
 use App\Http\Controllers\BrandGatewayController;
 use App\Http\Controllers\PublicBrandPortalController;
 use App\Http\Middleware\EnsureIncubationWorkspaceNotLocked;
+use App\Http\Middleware\ImpersonationMiddleware;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
@@ -189,7 +190,7 @@ Route::post('/app/admin/performance/client-metric', $performanceClientMetric)->m
 Route::middleware(['auth', 'ensure.account.active'])->get('/test-push', \App\Http\Controllers\PushTestController::class)
     ->name('test-push');
 
-Route::middleware(['auth', 'ensure.account.active', 'impersonation', 'collect.asset_url_metrics', 'log.cloudfront.403'])->prefix('app')->group(function () {
+Route::middleware(['auth', 'ensure.account.active', ImpersonationMiddleware::class, 'collect.asset_url_metrics', 'log.cloudfront.403'])->prefix('app')->group(function () {
     Route::post('/logout', [LoginController::class, 'destroy'])->name('logout');
     Route::post('/impersonation/stop', [\App\Http\Controllers\ImpersonationController::class, 'stop'])->name('impersonation.stop');
 

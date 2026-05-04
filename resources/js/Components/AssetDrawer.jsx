@@ -361,6 +361,29 @@ function LightboxPreviewPlaceholder({ asset }) {
     )
 }
 
+/**
+ * Cache-bust orientation preview URLs after rotate/save. For presigned S3/CloudFront URLs,
+ * a new query param invalidates the signature and the image 403s — ThumbnailPreview then
+ * shows an empty/placeholder tile. Use a fragment token instead (not sent on the wire).
+ */
+function appendOrientationRasterCacheToken(url, token) {
+    if (!url || !token) {
+        return url
+    }
+    const presignedRequest =
+        /[?&]X-Amz-Signature=/i.test(url) ||
+        /[?&]X-Amz-Credential=/i.test(url) ||
+        /[?&]X-Amz-Algorithm=/i.test(url) ||
+        /[?&]Signature=/i.test(url)
+    if (presignedRequest) {
+        return url.includes('#')
+            ? `${url}&jp_rpv=${encodeURIComponent(token)}`
+            : `${url}#jp_rpv=${encodeURIComponent(token)}`
+    }
+    const sep = url.includes('?') ? '&' : '?'
+    return `${url}${sep}jp_rpv=${encodeURIComponent(token)}`
+}
+
 export default function AssetDrawer({
     asset,
     onClose,
@@ -2509,8 +2532,7 @@ export default function AssetDrawer({
         if (!token) {
             return url
         }
-        const sep = url.includes('?') ? '&' : '?'
-        return `${url}${sep}jp_rpv=${encodeURIComponent(token)}`
+        return appendOrientationRasterCacheToken(url, token)
     }, [drawerOrientationBaseRasterUrl, displayAsset?.width, displayAsset?.height, displayAsset?.size_bytes])
 
     const needsDrawerRotateOriginalSignedFetch = useMemo(
