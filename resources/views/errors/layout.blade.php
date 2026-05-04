@@ -1,6 +1,6 @@
 {{--
   Jackpot-styled error layout.
-  White background, hero-style typography, brand colors (indigo).
+  White background, hero-style typography, brand purple (Tailwind violet — not indigo-600, which reads too blue).
   Future: for brand-scoped errors, pass $brand (logo, name, primary_color) and use
   it here for nav/buttons so the error page matches the brand the user was in.
 --}}
@@ -55,7 +55,7 @@
                     <img src="{{ asset('android-chrome-192x192.png') }}" alt="" width="32" height="32" class="h-8 w-8" aria-hidden="true" decoding="async" />
                     <span class="text-xl font-bold text-gray-900">Jackpot</span>
                 </a>
-                <a href="{{ url('/') }}" class="rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600">
+                <a href="{{ url('/') }}" class="rounded-md bg-violet-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-violet-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-600">
                     Go home
                 </a>
             </div>
@@ -66,7 +66,7 @@
     <main class="flex-1 flex flex-col justify-center px-4 sm:px-6 lg:px-8 py-16 sm:py-24">
         <div class="mx-auto max-w-2xl text-center">
             @if(isset($code))
-                <p class="text-base font-semibold text-indigo-600">{{ $code }}</p>
+                <p class="text-base font-semibold text-violet-600">{{ $code }}</p>
             @endif
             <h1 class="mt-2 text-4xl font-bold tracking-tight text-gray-900 sm:text-5xl">
                 {{ $title ?? 'Something went wrong' }}
@@ -77,7 +77,7 @@
                 </p>
             @endif
             <div class="mt-10 flex items-center justify-center gap-x-6">
-                <a href="{{ url('/') }}" class="rounded-md bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600">
+                <a href="{{ url('/') }}" class="rounded-md bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-violet-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-600">
                     Back to home
                 </a>
                 @if(auth()->check())

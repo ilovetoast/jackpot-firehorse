@@ -5292,7 +5292,7 @@ export default function UploadAssetDialog({
         ) : (
         <div
             data-upload-dialog-root
-            className="jp-upload-modal-scroll fixed inset-0 z-50 flex max-h-[100dvh] items-center justify-center overflow-y-auto p-4 sm:p-6"
+            className="jp-upload-modal-scroll fixed inset-0 z-50 flex max-h-[100dvh] items-start justify-center overflow-y-auto [overflow-anchor:none] p-4 pt-6 sm:p-6 sm:pt-10"
             style={uploadScrollbarCssVars}
             aria-labelledby="modal-title"
             role="dialog"
@@ -5446,7 +5446,7 @@ export default function UploadAssetDialog({
 
                         <div
                             className={cn(
-                                'jp-upload-modal-scroll min-h-0 flex-1 overflow-y-auto overscroll-y-contain px-4 py-3 sm:px-6',
+                                'jp-upload-modal-scroll min-h-0 flex-1 overflow-y-auto overscroll-y-contain [overflow-anchor:none] px-4 py-3 sm:px-6',
                                 uploadModalLayoutLock && '[scrollbar-gutter:stable]',
                             )}
                         >

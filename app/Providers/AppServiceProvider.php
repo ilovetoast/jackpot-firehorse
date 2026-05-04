@@ -80,6 +80,7 @@ class AppServiceProvider extends ServiceProvider
         // and stale OPcache where that map hasn't reloaded yet.
         $this->app->alias(EnsureIncubationWorkspaceNotLocked::class, 'incubation.not_locked');
         $this->app->alias(EnsureOnboardingComplete::class, 'ensure.onboarding');
+        $this->app->alias(\App\Http\Middleware\ImpersonationMiddleware::class, 'impersonation');
 
         $this->app->bind(
             \App\Studio\LayerExtraction\Contracts\SamSegmentationClientInterface::class,

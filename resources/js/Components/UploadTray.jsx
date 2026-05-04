@@ -345,7 +345,7 @@ export default function UploadTray({
                 <div
                     ref={listRef}
                     className={cn(
-                        'jp-upload-modal-scroll overflow-y-auto overscroll-contain',
+                        'jp-upload-modal-scroll overflow-y-auto overscroll-contain [overflow-anchor:none]',
                         lockQueueViewport
                             ? 'h-[min(32vh,280px)] sm:h-[min(36vh,320px)]'
                             : 'max-h-[min(32vh,280px)] sm:max-h-[min(36vh,320px)]',
