@@ -93,7 +93,7 @@ class AssetPolicy
      *
      * Users can retry thumbnails if they:
      * - Can view the asset
-     * - Have 'assets.retry_thumbnails' permission for the tenant
+     * - Have 'assets.retry_thumbnails' on the tenant role (e.g. member, admin) or on the brand role (e.g. contributor)
      *
      * Future: Admin override can be added here (gate hook for admin bypass).
      *
@@ -108,16 +108,17 @@ class AssetPolicy
             return false;
         }
 
-        // Check permission for retrying thumbnails
         $tenant = $this->tenantForAsset($asset);
-        if (! $tenant || ! $user->hasPermissionForTenant($tenant, 'assets.retry_thumbnails')) {
-            return false;
+        if ($tenant && $user->hasPermissionForTenant($tenant, 'assets.retry_thumbnails')) {
+            return true;
         }
 
-        // Future: Admin override can be added here
-        // Example: if (Gate::allows('admin.override.retry_limits')) { return true; }
+        $brand = $this->brandForAsset($asset);
+        if ($brand && $user->hasPermissionForBrand($brand, 'assets.retry_thumbnails')) {
+            return true;
+        }
 
-        return true;
+        return false;
     }
 
     /**

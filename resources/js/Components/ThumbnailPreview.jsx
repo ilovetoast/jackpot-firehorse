@@ -40,6 +40,7 @@
  * @param {string|null} props.forcedImageUrl - When set, render this URL instead of locked final/preview (drawer preview mode)
  * @param {boolean} props.forcedImageSpinnerOverlay - Full-area spinner overlay on forced image (e.g. preferred pipeline processing)
  * @param {boolean} [props.useFocalPoint=true] — When true, `object-fit: cover` uses asset focal point (`metadata`) for `object-position`. Ignored for contain / masonry / small thumbs.
+ * @param {boolean} [props.gifPlaybackControl=false] — When true, animated GIFs show a play control (poster thumbnail vs original).
  */
 import { useState, useEffect, useRef, useMemo } from 'react'
 import { usePage } from '@inertiajs/react'
@@ -54,6 +55,8 @@ import {
 import FileTypeIcon from './FileTypeIcon'
 import AssetPlaceholder from './AssetPlaceholder'
 import { getAssetPlaceholderTheme } from '../utils/getAssetPlaceholderTheme.js'
+import { useAnimatedGifPlayback } from '../hooks/useAnimatedGifPlayback'
+import GifPlaybackOverlay from './GifPlaybackOverlay'
 
 // Cache of thumbnail URLs that have failed (404, etc.) - prevents retrying across instances
 // Enables graceful fallback when thumbnails are processing or missing from S3
@@ -121,6 +124,8 @@ export default function ThumbnailPreview({
     useFocalPoint = true,
     /** Session blob URL until server preview/final exists (asset grid only). */
     ephemeralLocalPreviewUrl = null,
+    /** Drawer/lightbox: animated GIF poster + play to swap in original file (grid must stay false). */
+    gifPlaybackControl = false,
 }) {
     const { auth } = usePage().props
     /**
@@ -512,6 +517,13 @@ export default function ThumbnailPreview({
         }
     }, [effectiveForced, forcedStableUrl])
 
+    const gifPosterUrlForPlayback = effectiveForced ? forcedStableUrl || effectiveForced : lockedUrl
+    const gifPlayback = useAnimatedGifPlayback({
+        enabled: Boolean(gifPlaybackControl),
+        asset,
+        posterUrl: gifPosterUrlForPlayback,
+    })
+
     /* ------------------------------------------------------------
        Animation trigger (only for meaningful transitions)
     ------------------------------------------------------------ */
@@ -724,7 +736,7 @@ export default function ThumbnailPreview({
                     <img
                         key={forcedStableUrl}
                         ref={imgRef}
-                        src={forcedStableUrl}
+                        src={gifPlaybackControl ? gifPlayback.displaySrc || forcedStableUrl : forcedStableUrl}
                         alt={alt}
                         draggable={false}
                         onDragStart={(e) => e.preventDefault()}
@@ -741,6 +753,9 @@ export default function ThumbnailPreview({
                         onLoad={handleForcedStableLoad}
                         onError={handleForcedStableError}
                     />
+                ) : null}
+                {gifPlaybackControl && gifPlayback.showPlayback ? (
+                    <GifPlaybackOverlay playing={gifPlayback.playing} onToggle={gifPlayback.toggle} />
                 ) : null}
                 {forcedPendingUrl && forcedPendingUrl !== forcedStableUrl ? (
                     <img
@@ -843,7 +858,7 @@ export default function ThumbnailPreview({
                 <img
                     key={rasterImageKey}
                     ref={imgRef}
-                    src={lockedUrl}
+                    src={gifPlaybackControl ? gifPlayback.displaySrc || lockedUrl : lockedUrl}
                     alt={alt}
                     draggable={false}
                     onDragStart={(e) => e.preventDefault()}
@@ -860,6 +875,9 @@ export default function ThumbnailPreview({
                     onLoad={handleImageLoad}
                     onError={handleImageError}
                 />
+                {gifPlaybackControl && gifPlayback.showPlayback ? (
+                    <GifPlaybackOverlay playing={gifPlayback.playing} onToggle={gifPlayback.toggle} />
+                ) : null}
             </div>
         )
     }
@@ -902,7 +920,7 @@ export default function ThumbnailPreview({
                 <img
                     key={rasterImageKey}
                     ref={imgRef}
-                    src={lockedUrl}
+                    src={gifPlaybackControl ? gifPlayback.displaySrc || lockedUrl : lockedUrl}
                     alt={alt}
                     draggable={false}
                     onDragStart={(e) => e.preventDefault()}
@@ -921,6 +939,9 @@ export default function ThumbnailPreview({
                     onLoad={handleImageLoad}
                     onError={handleImageError}
                 />
+                {gifPlaybackControl && gifPlayback.showPlayback ? (
+                    <GifPlaybackOverlay playing={gifPlayback.playing} onToggle={gifPlayback.toggle} />
+                ) : null}
 
                 {isActivelyProcessing && (
                     <span
@@ -984,7 +1005,7 @@ export default function ThumbnailPreview({
                 <img
                     key={rasterImageKey}
                     ref={imgRef}
-                    src={lockedUrl}
+                    src={gifPlaybackControl ? gifPlayback.displaySrc || lockedUrl : lockedUrl}
                     alt={alt}
                     draggable={false}
                     onDragStart={(e) => e.preventDefault()}
@@ -1003,6 +1024,9 @@ export default function ThumbnailPreview({
                     onLoad={handleImageLoad}
                     onError={handleImageError}
                 />
+                {gifPlaybackControl && gifPlayback.showPlayback ? (
+                    <GifPlaybackOverlay playing={gifPlayback.playing} onToggle={gifPlayback.toggle} />
+                ) : null}
 
                 {isActivelyProcessing && (
                     <span

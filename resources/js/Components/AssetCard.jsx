@@ -344,6 +344,14 @@ export default function AssetCard({
     const isExecutionEnhancedGrid = isExecutionEnhancedGridMode(executionThumbnailViewMode)
     const executionEnhancedChromeClass = assetCardEnhancedExecutionChromeClass(executionThumbnailViewMode)
 
+    const hasRasterThumbnailUrl =
+        Boolean(thumbnailState.thumbnailUrl) || Boolean(ephemeralLocalPreviewUrl)
+    const isExecutionThumbVisual = showExecutionDualThumb || showExecutionSingleThumb
+    const useFullBleedPlaceholder =
+        !showFontSwatch && !isExecutionThumbVisual && !hasRasterThumbnailUrl
+    const suppressPlaceholderDuplicateBadge =
+        useFullBleedPlaceholder && supportsThumbnail(asset?.mime_type, extLower)
+
     // Get appropriate icon for non-image files
     const getFileIcon = () => {
         if (extLower === 'pdf') {
@@ -551,8 +559,14 @@ export default function AssetCard({
     const cardShadowClass = isGuidelines
         ? 'shadow-none' // Guidelines: shadow lives on image only (see image container)
         : isCinematic ? 'shadow-lg hover:shadow-xl' : 'shadow-none'
+    const defaultThumbBorderTint =
+        isSelected
+            ? 'border-2'
+            : useFullBleedPlaceholder
+              ? 'border-transparent hover:border-gray-300/50'
+              : 'border-gray-200 hover:border-gray-300'
     const imageBorderClass = !isGuidelines && !isCinematic
-        ? `rounded-2xl border transition-all duration-200 ${cardBorderClass}`
+        ? `rounded-2xl border transition-all duration-200 ${defaultThumbBorderTint}`
         : isGuidelines && isSelected
           ? 'rounded-2xl border-2 transition-all duration-200'
           : cinematicThumbOnly
@@ -614,7 +628,7 @@ export default function AssetCard({
                 className={`${
                     /* Masonry: center content vertically in min-height tile (short logos vs tall neighbors) */
                     isMasonry ? 'w-full flex flex-col items-center justify-center' : aspectRatio
-                } relative overflow-hidden rounded-2xl transition-all duration-200 ${imageBorderClass} ${imageShadowClass} ${executionEnhancedChromeClass} ${isGuidelines ? (isLogoOrGraphicCategory ? 'bg-transparent shadow-none group-hover:shadow-lg' : 'bg-white shadow-none group-hover:shadow-lg') : isCinematic ? 'bg-black/20 backdrop-blur-[2px]' : isLogoOrGraphicCategory ? 'bg-transparent' : 'bg-gray-50'}`}
+                } relative overflow-hidden rounded-2xl transition-all duration-200 ${imageBorderClass} ${imageShadowClass} ${executionEnhancedChromeClass} ${isGuidelines ? (isLogoOrGraphicCategory ? 'bg-transparent shadow-none group-hover:shadow-lg' : useFullBleedPlaceholder ? 'bg-transparent shadow-none group-hover:shadow-lg' : 'bg-white shadow-none group-hover:shadow-lg') : isCinematic ? 'bg-black/20 backdrop-blur-[2px]' : isLogoOrGraphicCategory ? 'bg-transparent' : useFullBleedPlaceholder ? 'bg-transparent' : 'bg-gray-50'}`}
                 style={{
                     ...(isMasonry
                         ? {
@@ -783,6 +797,7 @@ export default function AssetCard({
 
                         {!isVirtualGoogleFont &&
                             !showFontSwatch &&
+                            !suppressPlaceholderDuplicateBadge &&
                             cardVisualState.kind !== 'ready' &&
                             cardVisualState.kind !== 'local_preview' &&
                             cardVisualState.badgeShort && (

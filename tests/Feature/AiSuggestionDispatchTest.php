@@ -29,7 +29,7 @@ use Tests\TestCase;
 /**
  * AI Suggestion Dispatch Test
  *
- * Verifies that AI suggestion jobs (AITaggingJob, AiMetadataSuggestionJob) are
+ * Verifies that AI suggestion jobs (AiMetadataGenerationJob chain, AiMetadataSuggestionJob) are
  * included in the processing chain dispatched by ProcessAssetJob.
  *
  * Does NOT assert AI output — only pipeline wiring.
@@ -81,7 +81,6 @@ class AiSuggestionDispatchTest extends TestCase
      *   - AI chain  (ai queue):      AiMetadataGenerationJob → AiTagAutoApplyJob → AiMetadataSuggestionJob.
      *
      * This test asserts both chains are dispatched and that:
-     *   - AITaggingJob (pipeline flag step) stays in the main chain
      *   - AI vision/suggestion jobs (AiMetadataGenerationJob, AiMetadataSuggestionJob) live on the AI chain
      *   - GenerateThumbnailsJob runs before ExtractMetadataJob in the main chain (fast path)
      *   - the AI chain queue is the dedicated ai queue
@@ -139,7 +138,7 @@ class AiSuggestionDispatchTest extends TestCase
         $mainClasses = $this->chainClasses($mainHead);
         $aiClasses = $this->chainClasses($aiHead);
 
-        $this->assertContains(AITaggingJob::class, $mainClasses, 'AITaggingJob (pipeline flag) must remain in main chain');
+        $this->assertNotContains(AITaggingJob::class, $mainClasses, 'AITaggingJob stub removed from main chain');
         $this->assertNotContains(AiMetadataSuggestionJob::class, $mainClasses, 'AiMetadataSuggestionJob must NOT be in the main chain');
         $this->assertNotContains(AiMetadataGenerationJob::class, $mainClasses, 'AiMetadataGenerationJob must NOT be in the main chain');
 

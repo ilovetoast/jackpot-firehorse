@@ -347,7 +347,7 @@ export default function UploadAssetDialog({
     
     const [applyAiTagging, setApplyAiTagging] = useState(true) // Auto-checked by default
     const [applyAiMetadata, setApplyAiMetadata] = useState(true) // Auto-checked by default
-    const [aiSuggestionsExpanded, setAiSuggestionsExpanded] = useState(true)
+    const [aiSuggestionsExpanded, setAiSuggestionsExpanded] = useState(false)
     const uploadBatchAiRef = useRef({ session: false, lastCount: 0 })
     const warnedLowCreditsRef = useRef(false)
 
@@ -480,14 +480,12 @@ export default function UploadAssetDialog({
                 setApplyAiTagging(!aiTaggingDisabled)
                 setApplyAiMetadata(!aiMetadataDisabled)
             }
-            setAiSuggestionsExpanded(n <= 25)
             return
         }
         const prev = uploadBatchAiRef.current.lastCount
         if (!uploadAutoAiRequired && prev <= 100 && n > 100) {
             setApplyAiTagging(false)
             setApplyAiMetadata(false)
-            setAiSuggestionsExpanded(false)
         }
         uploadBatchAiRef.current.lastCount = n
     }, [v2Files, uploadAutoAiRequired, aiTaggingDisabled, aiMetadataDisabled])
@@ -3246,31 +3244,19 @@ export default function UploadAssetDialog({
             selectedCategoryId === null &&
             ['ready', 'partial_success', 'complete', 'processing_followup'].includes(batchStatus)
         ) {
-            return 'Select a category to finalize.'
+            return null
         }
 
         return null
     }, [isFinalizeSuccess, v2Files, canFinalizeV2, batchStatus, selectedCategoryId, uploadManagerStateVersion])
 
-    /**
-     * CLEAN UPLOADER V2 — Get warnings for missing required fields
-     */
-    const v2Warnings = useMemo(() => {
-        const warnings = []
+    /** Amber callout under category control — keeps the footer from repeating the same guidance. */
+    const showCategoryRequiredHint = useMemo(() => {
+        if (selectedCategoryId != null) return false
         const hasUploaded = v2Files.some((f) => f.status === 'uploaded')
-
-        // Only show warnings if there are uploaded files ready to finalize
-        if (!hasUploaded) {
-            return warnings
-        }
-
-        // Category is required
-        if (selectedCategoryId === null) {
-            warnings.push('Category is required before finalizing assets.')
-        }
-
-        return warnings
-    }, [v2Files, selectedCategoryId])
+        if (!hasUploaded) return false
+        return ['ready', 'partial_success', 'complete', 'processing_followup'].includes(batchStatus)
+    }, [v2Files, selectedCategoryId, batchStatus])
 
     /**
      * CLEAN UPLOADER V2 — Get Finalize button label based on batchStatus
@@ -3557,19 +3543,6 @@ export default function UploadAssetDialog({
                 selectedCollectionIds: selectedCollectionIds, // C9.1: DEBUG - Log selected IDs from state
                 selectedCollectionIds_length: selectedCollectionIds?.length ?? 0, // C9.1: DEBUG
             })
-
-            // Derived hidden taxonomy for filters / automations (not shown in upload form)
-            const env = manifestItem.metadata?.environment_type
-            const sub = manifestItem.metadata?.subject_type
-            if (
-                env != null &&
-                env !== '' &&
-                sub != null &&
-                sub !== '' &&
-                manifestItem.metadata.scene_classification == null
-            ) {
-                manifestItem.metadata.scene_classification = `${String(env)}|${String(sub)}`
-            }
 
             return manifestItem
         })
@@ -5526,7 +5499,7 @@ export default function UploadAssetDialog({
                                 </div>
                             </div>
                         ) : (
-                            <div className="space-y-4">
+                            <div className="space-y-3">
                                 {/* Compact Drop Zone - above uploads list, always visible */}
                                 <div className="mb-4">
                                 <div
@@ -5590,14 +5563,15 @@ export default function UploadAssetDialog({
                                     }}
                                     onRetryItem={handleRetryTrayItem}
                                     disabled={batchStatus === 'finalizing' || isFinalizeSuccess}
+                                    brandPrimary={brandPrimary}
                                 />
 
                                 {filesWithoutThumbnailSupport.length > 0 && (
-                                    <div className="mt-3 rounded-md bg-blue-50 border border-blue-200 px-3 py-2 flex items-start gap-2">
-                                        <svg className="h-5 w-5 text-blue-500 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20" aria-hidden>
+                                    <div className="mt-3 rounded-md border border-gray-200 bg-gray-50 px-3 py-2 flex items-start gap-2">
+                                        <svg className="h-5 w-5 text-gray-500 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20" aria-hidden>
                                             <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
                                         </svg>
-                                        <p className="text-sm text-blue-800">
+                                        <p className="text-sm text-gray-700">
                                             {filesWithoutThumbnailSupport.length === 1
                                                 ? 'This file type may only show a file-type icon in the upload tray until processing finishes. If the format is supported, a preview can still appear in the library after upload.'
                                                 : `${filesWithoutThumbnailSupport.length} of your files may only show a file-type icon in the tray until processing finishes. Supported formats can still get previews in the library after upload.`}
@@ -5605,8 +5579,146 @@ export default function UploadAssetDialog({
                                     </div>
                                 )}
 
-                                {/* Category only — Collections are in General metadata group (seeder: group_key general) */}
-                                <div className="flex flex-col gap-2 pt-3 border-t border-gray-200 mt-3">
+                                {isAdminOrBrandManager && v2Files.length > 0 && (
+                                    <div className="rounded-lg border border-gray-200 bg-white shadow-sm overflow-hidden">
+                                        <button
+                                            type="button"
+                                            id="jp-upload-ai-suggestions-trigger"
+                                            className="flex w-full items-start justify-between gap-2 px-2.5 py-2 text-left hover:bg-gray-50/90"
+                                            onClick={() => setAiSuggestionsExpanded((v) => !v)}
+                                            aria-expanded={aiSuggestionsExpanded}
+                                            aria-controls="jp-upload-ai-suggestions-panel"
+                                        >
+                                            <div className="min-w-0">
+                                                <h4
+                                                    id="jp-upload-ai-suggestions-title"
+                                                    className="text-xs font-semibold text-gray-900"
+                                                >
+                                                    AI suggestions after upload
+                                                </h4>
+                                                <p className="text-[11px] text-gray-500 leading-snug mt-0.5">
+                                                    Suggest tags and structured metadata after files are processed.
+                                                </p>
+                                                {uploadFooterSnapshot.creditLine ? (
+                                                    <p className="text-[11px] text-gray-600 mt-0.5 tabular-nums">
+                                                        {uploadFooterSnapshot.creditLine}
+                                                    </p>
+                                                ) : null}
+                                            </div>
+                                            {aiSuggestionsExpanded ? (
+                                                <ChevronUpIcon className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" aria-hidden />
+                                            ) : (
+                                                <ChevronDownIcon className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" aria-hidden />
+                                            )}
+                                        </button>
+                                        <div
+                                            id="jp-upload-ai-suggestions-panel"
+                                            role="region"
+                                            aria-labelledby="jp-upload-ai-suggestions-title"
+                                            hidden={!aiSuggestionsExpanded}
+                                            className="border-t border-gray-100 px-2.5 pb-2 pt-1.5 space-y-1.5"
+                                        >
+                                                {[
+                                                    {
+                                                        key: 'tagging',
+                                                        checked: applyAiTagging,
+                                                        onChange: setApplyAiTagging,
+                                                        disabled:
+                                                            aiTaggingDisabled ||
+                                                            batchStatus === 'finalizing' ||
+                                                            batchStatus === 'processing_followup' ||
+                                                            isFinalizeSuccess,
+                                                        title: 'AI tagging',
+                                                        disabledNote: 'AI tagging is disabled for this tenant or brand.',
+                                                        Icon: TagIcon,
+                                                        iconBg: 'bg-violet-100',
+                                                        iconColor: 'text-violet-700',
+                                                    },
+                                                    {
+                                                        key: 'metadata',
+                                                        checked: applyAiMetadata,
+                                                        onChange: setApplyAiMetadata,
+                                                        disabled:
+                                                            aiMetadataDisabled ||
+                                                            batchStatus === 'finalizing' ||
+                                                            batchStatus === 'processing_followup' ||
+                                                            isFinalizeSuccess,
+                                                        title: 'AI metadata',
+                                                        disabledNote: 'AI metadata is disabled for this tenant or brand.',
+                                                        Icon: SparklesIcon,
+                                                        iconBg: 'bg-indigo-100',
+                                                        iconColor: 'text-indigo-700',
+                                                    },
+                                                ].map(
+                                                    ({
+                                                        key,
+                                                        checked,
+                                                        onChange,
+                                                        disabled,
+                                                        title,
+                                                        disabledNote,
+                                                        Icon,
+                                                        iconBg,
+                                                        iconColor,
+                                                    }) => (
+                                                        <div
+                                                            key={key}
+                                                            className={`flex items-center gap-2 rounded-md border border-gray-100 px-2 py-1.5 ${
+                                                                disabled ? 'opacity-60' : 'hover:bg-gray-50/80'
+                                                            }`}
+                                                        >
+                                                            <span
+                                                                className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md ${iconBg}`}
+                                                            >
+                                                                <Icon className={`h-3.5 w-3.5 ${iconColor}`} aria-hidden />
+                                                            </span>
+                                                            <div className="min-w-0 flex-1">
+                                                                <p
+                                                                    className={`text-xs font-medium leading-tight ${
+                                                                        disabled ? 'text-gray-400' : 'text-gray-900'
+                                                                    }`}
+                                                                >
+                                                                    {title}
+                                                                </p>
+                                                                {disabled ? (
+                                                                    <p className="text-[10px] text-gray-400 leading-snug mt-0.5">
+                                                                        {disabledNote}
+                                                                    </p>
+                                                                ) : null}
+                                                            </div>
+                                                            <Switch
+                                                                checked={checked}
+                                                                onChange={onChange}
+                                                                disabled={disabled}
+                                                                className="group relative inline-flex h-[22px] w-[38px] shrink-0 cursor-pointer items-center rounded-full border border-transparent bg-gray-200 transition-colors duration-200 ease-out focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 focus-visible:ring-offset-1 disabled:cursor-not-allowed"
+                                                                style={
+                                                                    checked
+                                                                        ? {
+                                                                              backgroundColor: brandPrimary,
+                                                                              ['--tw-ring-color']: brandPrimary,
+                                                                          }
+                                                                        : undefined
+                                                                }
+                                                            >
+                                                                <span
+                                                                    aria-hidden
+                                                                    className={`pointer-events-none inline-block h-[18px] w-[18px] rounded-full bg-white shadow transition duration-200 ease-out ${
+                                                                        checked ? 'translate-x-[18px]' : 'translate-x-0.5'
+                                                                    }`}
+                                                                />
+                                                            </Switch>
+                                                        </div>
+                                                    ),
+                                                )}
+                                                <p className="text-[10px] text-gray-500 leading-snug pt-0.5">
+                                                    Runs in background. You can also run suggestions later.
+                                                </p>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Category — required for finalize (collections live in General metadata below) */}
+                                <div className="flex flex-col gap-2 border-t border-gray-200 pt-3 mt-3">
                                     <GlobalMetadataPanel
                                         uploadManager={v2UploadManager}
                                         categories={filteredCategories}
@@ -5617,6 +5729,18 @@ export default function UploadAssetDialog({
                                         inline
                                         inputClassName="min-w-0 flex-1"
                                     />
+                                    {showCategoryRequiredHint ? (
+                                        <div
+                                            id="jp-upload-category-required-hint"
+                                            role="alert"
+                                            className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900"
+                                        >
+                                            <p className="flex items-start gap-2">
+                                                <ExclamationTriangleIcon className="h-4 w-4 shrink-0 mt-0.5" aria-hidden />
+                                                <span>Select a category to finalize.</span>
+                                            </p>
+                                        </div>
+                                    ) : null}
                                 </div>
 
                                 <CreateCollectionModal
@@ -5907,149 +6031,6 @@ export default function UploadAssetDialog({
                                         )}
                                     </div>
                                 )}
-                                {v2Files.length > 0 && v2Warnings.length > 0 && (
-                                    <div className="space-y-2">
-                                        {v2Warnings.map((warning, index) => (
-                                            <div
-                                                key={index}
-                                                className="flex items-center gap-2 rounded-lg border border-yellow-300 bg-yellow-50 px-3 py-2 text-sm text-yellow-800"
-                                            >
-                                                <ExclamationTriangleIcon className="h-4 w-4 shrink-0" aria-hidden />
-                                                <span>{warning}</span>
-                                            </div>
-                                        ))}
-                                    </div>
-                                )}
-
-                                {isAdminOrBrandManager && v2Files.length > 0 && (
-                                    <div className="rounded-lg border border-gray-200 bg-white shadow-sm overflow-hidden">
-                                        <button
-                                            type="button"
-                                            className="flex w-full items-start justify-between gap-2 px-2.5 py-2 text-left hover:bg-gray-50/90"
-                                            onClick={() => setAiSuggestionsExpanded((v) => !v)}
-                                            aria-expanded={aiSuggestionsExpanded}
-                                        >
-                                            <div className="min-w-0">
-                                                <h4 className="text-xs font-semibold text-gray-900">
-                                                    AI suggestions after upload
-                                                </h4>
-                                                <p className="text-[11px] text-gray-500 leading-snug mt-0.5">
-                                                    Suggest tags and structured metadata after files are processed.
-                                                </p>
-                                                {uploadFooterSnapshot.creditLine ? (
-                                                    <p className="text-[11px] text-gray-600 mt-0.5 tabular-nums">
-                                                        {uploadFooterSnapshot.creditLine}
-                                                    </p>
-                                                ) : null}
-                                            </div>
-                                            {aiSuggestionsExpanded ? (
-                                                <ChevronUpIcon className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" aria-hidden />
-                                            ) : (
-                                                <ChevronDownIcon className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" aria-hidden />
-                                            )}
-                                        </button>
-                                        {aiSuggestionsExpanded ? (
-                                            <div className="border-t border-gray-100 px-2.5 pb-2 pt-1.5 space-y-1.5">
-                                                {[
-                                                    {
-                                                        key: 'tagging',
-                                                        checked: applyAiTagging,
-                                                        onChange: setApplyAiTagging,
-                                                        disabled:
-                                                            aiTaggingDisabled ||
-                                                            batchStatus === 'finalizing' ||
-                                                            batchStatus === 'processing_followup' ||
-                                                            isFinalizeSuccess,
-                                                        title: 'AI tagging',
-                                                        disabledNote: 'AI tagging is disabled for this tenant or brand.',
-                                                        Icon: TagIcon,
-                                                        iconBg: 'bg-violet-100',
-                                                        iconColor: 'text-violet-700',
-                                                    },
-                                                    {
-                                                        key: 'metadata',
-                                                        checked: applyAiMetadata,
-                                                        onChange: setApplyAiMetadata,
-                                                        disabled:
-                                                            aiMetadataDisabled ||
-                                                            batchStatus === 'finalizing' ||
-                                                            batchStatus === 'processing_followup' ||
-                                                            isFinalizeSuccess,
-                                                        title: 'AI metadata',
-                                                        disabledNote: 'AI metadata is disabled for this tenant or brand.',
-                                                        Icon: SparklesIcon,
-                                                        iconBg: 'bg-indigo-100',
-                                                        iconColor: 'text-indigo-700',
-                                                    },
-                                                ].map(
-                                                    ({
-                                                        key,
-                                                        checked,
-                                                        onChange,
-                                                        disabled,
-                                                        title,
-                                                        disabledNote,
-                                                        Icon,
-                                                        iconBg,
-                                                        iconColor,
-                                                    }) => (
-                                                        <div
-                                                            key={key}
-                                                            className={`flex items-center gap-2 rounded-md border border-gray-100 px-2 py-1.5 ${
-                                                                disabled ? 'opacity-60' : 'hover:bg-gray-50/80'
-                                                            }`}
-                                                        >
-                                                            <span
-                                                                className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md ${iconBg}`}
-                                                            >
-                                                                <Icon className={`h-3.5 w-3.5 ${iconColor}`} aria-hidden />
-                                                            </span>
-                                                            <div className="min-w-0 flex-1">
-                                                                <p
-                                                                    className={`text-xs font-medium leading-tight ${
-                                                                        disabled ? 'text-gray-400' : 'text-gray-900'
-                                                                    }`}
-                                                                >
-                                                                    {title}
-                                                                </p>
-                                                                {disabled ? (
-                                                                    <p className="text-[10px] text-gray-400 leading-snug mt-0.5">
-                                                                        {disabledNote}
-                                                                    </p>
-                                                                ) : null}
-                                                            </div>
-                                                            <Switch
-                                                                checked={checked}
-                                                                onChange={onChange}
-                                                                disabled={disabled}
-                                                                className="group relative inline-flex h-[22px] w-[38px] shrink-0 cursor-pointer items-center rounded-full border border-transparent bg-gray-200 transition-colors duration-200 ease-out focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 focus-visible:ring-offset-1 disabled:cursor-not-allowed"
-                                                                style={
-                                                                    checked
-                                                                        ? {
-                                                                              backgroundColor: brandPrimary,
-                                                                              ['--tw-ring-color']: brandPrimary,
-                                                                          }
-                                                                        : undefined
-                                                                }
-                                                            >
-                                                                <span
-                                                                    aria-hidden
-                                                                    className={`pointer-events-none inline-block h-[18px] w-[18px] rounded-full bg-white shadow transition duration-200 ease-out ${
-                                                                        checked ? 'translate-x-[18px]' : 'translate-x-0.5'
-                                                                    }`}
-                                                                />
-                                                            </Switch>
-                                                        </div>
-                                                    ),
-                                                )}
-                                                <p className="text-[10px] text-gray-500 leading-snug pt-0.5">
-                                                    Runs in background. You can also run suggestions later.
-                                                </p>
-                                            </div>
-                                        ) : null}
-                                    </div>
-                                )}
-
                                 {batchStatus === 'partial_success' && (
                                     <div className="rounded-md bg-yellow-50 border border-yellow-200 p-3">
                                         <div className="flex">
@@ -6089,22 +6070,6 @@ export default function UploadAssetDialog({
                                 {/* Status indicator - Show v2 counter when v2Files exist, otherwise legacy */}
                                 {v2Files.length > 0 ? (
                                     <div className="min-w-0 flex-1 text-xs text-gray-600 space-y-1.5 sm:pr-2">
-                                        <div
-                                            className="h-2 w-full max-w-md overflow-hidden rounded-full bg-gray-200"
-                                            role="progressbar"
-                                            aria-valuenow={uploadFooterSnapshot.percentComplete}
-                                            aria-valuemin={0}
-                                            aria-valuemax={100}
-                                            aria-label="Upload progress"
-                                        >
-                                            <div
-                                                className="h-full rounded-full transition-[width] duration-300 ease-out"
-                                                style={{
-                                                    width: `${uploadFooterSnapshot.percentComplete}%`,
-                                                    backgroundColor: brandPrimary,
-                                                }}
-                                            />
-                                        </div>
                                         <p className="leading-snug">
                                             <span className="font-semibold text-gray-900 tabular-nums">
                                                 {uploadFooterSnapshot.percentComplete}%
@@ -6246,6 +6211,7 @@ export default function UploadAssetDialog({
                                         }`}
                                         style={canFinalizeV2 && batchStatus !== 'finalizing' && !isFinalizeSuccess ? { backgroundColor: brandPrimary } : undefined}
                                         title={!selectedCategoryId ? 'Select a category to finalize uploads' : undefined}
+                                        aria-describedby={showCategoryRequiredHint ? 'jp-upload-category-required-hint' : undefined}
                                     >
                                         {batchStatus === 'finalizing' && (
                                             <ArrowPathIcon className="h-4 w-4 animate-spin" />

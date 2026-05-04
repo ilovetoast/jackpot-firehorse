@@ -30,7 +30,7 @@
 
 ## 🚀 Queue Workers (Local Development)
 
-**Queue workers are required for thumbnail processing and background jobs.**
+**Queue workers are required for thumbnail processing, PDF/metadata pipelines, and upload AI jobs.** The Sail `queue` service listens on `default`, `images`, `images-heavy`, `pdf-processing`, **`ai`**, and `ai-low` (see `compose.yaml`). **Without `ai`,** `AiMetadataGenerationJob` and related jobs never run locally while thumbnails still process. Details: [docs/UPLOAD_AND_QUEUE.md](docs/UPLOAD_AND_QUEUE.md).
 
 ### Quick Start
 
@@ -104,6 +104,10 @@ This command will:
    # Repeat until queue is empty
    ```
 
+**Problem: Thumbnails finish but AI tags / metadata suggestions never appear**
+
+The upload AI chain uses the **`ai` queue**. Confirm pending jobs: `SELECT queue, COUNT(*) FROM jobs GROUP BY queue ORDER BY COUNT(*) DESC;` — if `ai` is non-zero, ensure the Sail `queue` container was recreated after `compose.yaml` changes (`./vendor/bin/sail up -d --force-recreate queue`) or run the manual worker from [docs/UPLOAD_AND_QUEUE.md](docs/UPLOAD_AND_QUEUE.md).
+
 **Problem: Queue worker keeps crashing**
 
 Check logs for errors:
@@ -114,18 +118,21 @@ Check logs for errors:
 Common issues:
 - Database connection errors → Ensure MySQL is running
 - Memory limits → Increase PHP memory limit in Dockerfile
-- Timeout errors → Jobs exceeding 90s timeout
+- Timeout errors → Increase `--timeout` in `compose.yaml` or run a one-off worker with `--timeout=960` (see docs).
 
 ### Configuration
 
-Queue connection: `database` (configured in `config/queue.php`)
+Queue connection: `database` (configured in `config/queue.php`) for typical Sail setups.
 
-Worker settings (in `compose.yaml`):
+Worker settings (in `compose.yaml` `queue` service):
+- `--queue=default,images,images-heavy,pdf-processing,ai,ai-low`
 - `--tries=3` - Maximum retry attempts
-- `--timeout=90` - Job timeout in seconds
+- `--timeout=960` - Job timeout in seconds (heavy thumbnails / PDF / AI)
 - `--sleep=3` - Seconds to sleep when no jobs available
 - `--max-jobs=1000` - Restart worker after processing N jobs (prevents memory leaks)
 - `--max-time=3600` - Restart worker after N seconds (1 hour)
+
+**Redis + Horizon locally:** run `./vendor/bin/sail artisan horizon` instead of relying on the database `queue` container.
 
 ---
 

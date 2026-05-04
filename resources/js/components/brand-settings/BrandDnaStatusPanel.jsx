@@ -44,8 +44,8 @@ export default function BrandDnaStatusPanel({
                     <button
                         type="button"
                         onClick={onToggleEnabled}
-                        className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-2 ${
-                            brandModel?.is_enabled ? 'bg-violet-600' : 'bg-slate-200'
+                        className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-[var(--jp-bs-ring)] focus:ring-offset-2 ${
+                            brandModel?.is_enabled ? 'bg-[var(--jp-bs-primary)]' : 'bg-slate-200'
                         }`}
                         role="switch"
                         aria-checked={brandModel?.is_enabled === true}
@@ -59,7 +59,7 @@ export default function BrandDnaStatusPanel({
                         />
                     </button>
                     {hasActiveVersion && (
-                        <span className="inline-flex items-center gap-1.5 rounded-full border border-violet-200 bg-violet-50 px-2.5 py-0.5 text-xs font-medium text-violet-900">
+                        <span className="inline-flex items-center gap-1.5 rounded-full border border-[var(--jp-bs-soft-border)] bg-[var(--jp-bs-soft-bg)] px-2.5 py-0.5 text-xs font-medium text-[var(--jp-bs-primary)]">
                             Active v{activeVersion.version_number}
                         </span>
                     )}
@@ -88,7 +88,7 @@ export default function BrandDnaStatusPanel({
                             <span className="text-sm text-slate-500">AI-powered builder requires a paid plan.</span>
                             <Link
                                 href={typeof route === 'function' ? route('billing.index') : '/app/billing'}
-                                className="inline-flex items-center rounded-md bg-violet-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-violet-500"
+                                className="inline-flex items-center rounded-md bg-[var(--jp-bs-primary)] px-3 py-1.5 text-sm font-medium text-white hover:bg-[var(--jp-bs-primary-hover)]"
                             >
                                 Upgrade
                             </Link>
@@ -96,7 +96,7 @@ export default function BrandDnaStatusPanel({
                     ) : (
                         <Link
                             href={researchHref}
-                            className="inline-flex items-center rounded-md bg-violet-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-violet-500"
+                            className="inline-flex items-center rounded-md bg-[var(--jp-bs-primary)] px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-[var(--jp-bs-primary-hover)]"
                         >
                             {hasActiveVersion ? 'Start new version' : 'Start Brand Builder'}
                         </Link>

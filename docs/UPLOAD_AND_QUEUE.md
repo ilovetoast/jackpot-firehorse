@@ -11,6 +11,25 @@ Queue workers process background jobs (thumbnail generation, metadata extraction
 
 **Horizon (Redis):** per-pool process counts and kill-switch are in `config/horizon.php` (env keys `HORIZON_*_PROCESSES` and `QUEUE_WORKERS_ENABLED`). Staging uses conservative defaults; set heavy pools to `0` on small instances. For overload / stuck queues, see [Horizon emergency runbook](operations/HORIZON_EMERGENCY_RUNBOOK.md).
 
+### Local Sail: `ai` queue (upload AI tagging & metadata)
+
+**The default Sail `queue` service must consume the `ai` queue** or upload-time AI jobs (`AiMetadataGenerationJob` → `AiTagAutoApplyJob` → `AiMetadataSuggestionJob`, dispatched to `config('queue.ai_queue', 'ai')`) will sit in `jobs` forever while thumbnails still process on `images*`.
+
+- **Staging/production:** Use Horizon; `supervisor-ai` already listens on `ai` and `ai-low` (see `config/horizon.php`). No change required for deployed environments.
+- **Local Sail:** `compose.yaml` runs `queue:work database` with `--queue=default,images,images-heavy,pdf-processing,ai,ai-low` (see that file for the exact flags).
+
+**Manual worker (debug / one-off):**
+
+```bash
+./vendor/bin/sail artisan queue:work database --queue=default,images,images-heavy,pdf-processing,ai,ai-low --tries=3 --timeout=960 -vvv
+```
+
+**If you run Redis + Horizon locally instead of the database worker:**
+
+```bash
+./vendor/bin/sail artisan horizon
+```
+
 ## Quick Start
 
 ### Start Queue Worker (Docker Compose)
@@ -45,9 +64,10 @@ The queue worker runs as a dedicated Docker service:
 
 **Queue Connection:** `database` (configured in `config/queue.php`)
 
-**Worker Settings** (in `compose.yaml`):
+**Worker Settings** (in `compose.yaml` `queue` service):
+- `--queue=default,images,images-heavy,pdf-processing,ai,ai-low` — includes **`ai`** so local uploads run AI metadata/tagging (see section above)
 - `--tries=3` - Maximum retry attempts per job
-- `--timeout=300` - Default job timeout (thumbnail jobs override to 600s)
+- `--timeout=960` - Long enough for heavy thumbnails, PDF processing, and AI vision jobs
 - `--sleep=3` - Seconds to sleep when no jobs available
 - `--max-jobs=1000` - Restart worker after N jobs (prevents memory leaks)
 - `--max-time=3600` - Restart worker after 1 hour (prevents memory leaks)
@@ -77,6 +97,17 @@ The queue worker runs as a dedicated Docker service:
 
 # Process one job with specific retry count
 ./vendor/bin/sail artisan queue:work --once --tries=1
+
+# Full local lane (matches Sail `queue` service — use for verifying AI + pipeline)
+./vendor/bin/sail artisan queue:work database --queue=default,images,images-heavy,pdf-processing,ai,ai-low --tries=3 --timeout=960 -vvv
+```
+
+### Database driver: pending counts by queue
+
+When `QUEUE_CONNECTION=database`, MySQL holds queued payloads in the `jobs` table:
+
+```sql
+SELECT queue, COUNT(*) AS c FROM jobs GROUP BY queue ORDER BY c DESC;
 ```
 
 ### Health Check
@@ -90,6 +121,12 @@ The queue worker runs as a dedicated Docker service:
 
 # Warning only (doesn't exit with error)
 ./vendor/bin/sail artisan queue:health-check --warn-only
+```
+
+### Retry failed jobs
+
+```bash
+./vendor/bin/sail artisan queue:retry all
 ```
 
 ### View Logs
@@ -250,9 +287,11 @@ For production:
 4. Worker runs **ProcessAssetOnUpload::handle()** → `ProcessAssetJob::dispatch($asset->id)`
 5. **ProcessAssetJob** dispatches **two parallel chains** (no env conditionals):
    - **Main chain** on the images / images-heavy / images-psd queue (resolved by `PipelineQueueResolver` from byte size + MIME):
-     `GenerateThumbnailsJob → GeneratePreviewJob → [GenerateVideoPreviewJob if video] → ExtractMetadataJob → ExtractEmbeddedMetadataJob → EmbeddedUsageRightsSuggestionJob → ComputedMetadataJob → PopulateAutomaticMetadataJob → ResolveMetadataCandidatesJob → [AITaggingJob if not _skip_ai_tagging] → FinalizeAssetJob → PromoteAssetJob`
-   - **AI follow-up chain** on `config('queue.ai_queue', 'ai')` (Horizon `supervisor-ai`), only when tenant policy + upload-time skip flags allow:
+     `GenerateThumbnailsJob → GeneratePreviewJob → [GenerateVideoPreviewJob if video] → ExtractMetadataJob → ExtractEmbeddedMetadataJob → EmbeddedUsageRightsSuggestionJob → ComputedMetadataJob → PopulateAutomaticMetadataJob → ResolveMetadataCandidatesJob → FinalizeAssetJob → PromoteAssetJob`
+   - **AI follow-up chain** on `config('queue.ai_queue', 'ai')` (Horizon `supervisor-ai` in staging/production; **Sail `queue` service must include `ai` locally**), only when tenant policy + upload-time skip flags allow:
      `AiMetadataGenerationJob → [AiTagAutoApplyJob if not _skip_ai_tagging] → [AiMetadataSuggestionJob if not _skip_ai_metadata]`
+
+   **`AITaggingJob` is deprecated:** it remains in the codebase as a **no-op** so old queued payloads do not crash. Real tag/candidate work runs in **`AiMetadataGenerationJob`** on the `ai` queue. Do not add new dispatches of `AITaggingJob`.
 
 The two chains run on different supervisors so AI vision calls cannot starve thumbnail/preview workers. AI jobs already poll/guard on `thumbnail_status === COMPLETED` before doing real vision work, so running them in parallel with the tail of the main chain is safe.
 
@@ -315,7 +354,7 @@ All AI vision/suggestion dispatch sites target `config('queue.ai_queue', 'ai')` 
 - `StagedFiledAssetAiService` — studio/staged-filed follow-up
 - `IngestPdfPagesForAiJob` — PDF AI ingestion chain
 
-Horizon already exposes `supervisor-ai` listening on `[ai, ai-low]` (see `config/horizon.php`). Scale via `HORIZON_AI_PROCESSES` if the AI queue backlogs.
+Horizon already exposes `supervisor-ai` listening on `[ai, ai-low]` (see `config/horizon.php`). Scale via `HORIZON_AI_PROCESSES` if the AI queue backlogs. **Staging/production behavior is unchanged** — this document’s Sail worker notes apply to **local** `compose.yaml` only.
 
 ## Notes
 
@@ -477,8 +516,8 @@ if ($asset->thumbnail_status !== ThumbnailStatus::COMPLETED) {
 - `GenerateThumbnailsJob` dispatches downstream jobs on completion
 - Thumbnail job is the orchestrator
 
-**Current Usage**:
-- `AITaggingJob` — skips and marks as skipped
+**Historical note (deprecated)**:
+- `AITaggingJob` — **legacy no-op**; kept so old serialized jobs still dequeue safely. Upload AI flow uses `AiMetadataGenerationJob` / `AiTagAutoApplyJob` / `AiMetadataSuggestionJob` on the `ai` queue instead.
 
 **Example**:
 ```php
@@ -490,21 +529,11 @@ if ($asset->thumbnail_status !== ThumbnailStatus::COMPLETED) {
 
 ---
 
-## Current State (2026-01-28)
+## Current state (upload AI vs legacy job)
 
-**Mixed Models** (intentional, documented):
-- `AITaggingJob` → Option B (skip)
-- `PopulateAutomaticMetadataJob` → Option A (retry)
-
-**Why Both Exist**:
-- Historical evolution of the pipeline
-- Both models are valid and functional
-- No immediate need to standardize
-
-**Long-term Recommendation**:
-- Standardize on **Option A (Retry Until Ready)** for consistency
-- Benefits: Self-healing, automatic recovery, simpler orchestration
-- Migration: Update `AITaggingJob` to use `release()` instead of skip
+- **`AITaggingJob`:** Deprecated **no-op** (see `app/Jobs/AITaggingJob.php`). Not part of the live `ProcessAssetJob` chain.
+- **Upload AI tagging / metadata:** `AiMetadataGenerationJob` → `AiTagAutoApplyJob` → `AiMetadataSuggestionJob` on `config('queue.ai_queue', 'ai')`.
+- **`PopulateAutomaticMetadataJob`:** Option A (retry with `release()` until thumbnails/metadata prerequisites are ready).
 
 ---
 
@@ -532,21 +561,18 @@ if ($asset->thumbnail_status !== ThumbnailStatus::COMPLETED) {
 
 ## Enforcement
 
-### Jobs with Thumbnail Gates
+### Jobs with thumbnail gates
 
-1. **AITaggingJob**
-   - Model: Option B (skip)
-   - Gate: `thumbnail_status !== COMPLETED` → skip
-   - Status: Enforced ✅
+1. **`AITaggingJob` (deprecated)**
+   - No-op in `handle()`; do not use for new work.
 
-2. **PopulateAutomaticMetadataJob**
+2. **`AiMetadataGenerationJob` / `AiTagAutoApplyJob` / `AiMetadataSuggestionJob`**
+   - Run on **`config('queue.ai_queue', 'ai')`** (ensure local Sail worker consumes `ai`).
+   - `AiMetadataGenerationJob` waits/polls for a resolvable thumbnail path (parallel with the tail of the main chain), up to `assets.processing.ai_metadata_thumbnail_max_wait_seconds` (default 540s), then may skip or self-heal if thumbnails arrive late.
+
+3. **PopulateAutomaticMetadataJob**
    - Model: Option A (retry)
    - Gate: `thumbnail_status !== COMPLETED` → release(60)
-   - Status: Enforced ✅
-
-3. **AiMetadataGenerationJob**
-   - Model: Wait logic (polls internally; AI chain runs in parallel with `GenerateThumbnailsJob`)
-   - Gate: Waits up to `assets.processing.ai_metadata_thumbnail_max_wait_seconds` (default 540s) for a resolvable thumbnail path, then may skip or self-heal if thumbnails arrive after an earlier short-fuse skip
    - Status: Enforced ✅
 
 ### Tests

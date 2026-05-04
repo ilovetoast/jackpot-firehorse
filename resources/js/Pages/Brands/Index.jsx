@@ -1,5 +1,5 @@
 import { Link, router, usePage, useForm } from '@inertiajs/react'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { usePermission } from '../../hooks/usePermission'
 import PlanLimitIndicator from '../../Components/PlanLimitIndicator'
 import AppNav from '../../Components/AppNav'
@@ -9,6 +9,7 @@ import { DELIVERABLES_PAGE_LABEL_SINGULAR } from '../../utils/uiLabels'
 import BrandAvatar from '../../Components/BrandAvatar'
 import Avatar from '../../Components/Avatar'
 import ConfirmDialog from '../../Components/ConfirmDialog'
+import { brandSettingsSurfaceVars } from '../../utils/colorUtils'
 
 export default function BrandsIndex({ brands, limits, can_remove_user_from_company = false }) {
     const { auth } = usePage().props
@@ -17,6 +18,8 @@ export default function BrandsIndex({ brands, limits, can_remove_user_from_compa
     const [expandedBrand, setExpandedBrand] = useState(null)
     const [categoryTab, setCategoryTab] = useState({}) // Track active tab per brand: { brandId: 'asset' | 'deliverable' }
     const [deleteConfirm, setDeleteConfirm] = useState({ open: false, brandId: null, brandName: '' })
+
+    const brandSettingsSurfaceStyle = useMemo(() => brandSettingsSurfaceVars(auth?.activeBrand), [auth?.activeBrand])
 
     const handleDelete = (brandId, brandName) => {
         setDeleteConfirm({ open: true, brandId, brandName })
@@ -38,7 +41,7 @@ export default function BrandsIndex({ brands, limits, can_remove_user_from_compa
     }
 
     return (
-        <div className="min-h-full flex flex-col">
+        <div className="jp-brand-settings-theme min-h-full flex flex-col" style={brandSettingsSurfaceStyle}>
             <AppHead title="Brands" />
             <AppNav brand={auth.activeBrand} tenant={null} />
             <main className="flex-1 bg-gray-50">
@@ -51,7 +54,7 @@ export default function BrandsIndex({ brands, limits, can_remove_user_from_compa
                         {limits.can_create && (
                             <Link
                                 href="/app/brands/create"
-                                className="rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
+                                className="rounded-md bg-[var(--jp-bs-primary)] px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-[var(--jp-bs-primary-hover)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--jp-bs-ring)]"
                             >
                                 Create Brand
                             </Link>
@@ -110,7 +113,7 @@ export default function BrandsIndex({ brands, limits, can_remove_user_from_compa
                                                         {brand.name}
                                                     </p>
                                                     {brand.is_default && (
-                                                        <span className="inline-flex items-center rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-medium text-indigo-800">
+                                                        <span className="inline-flex items-center rounded-full bg-[var(--jp-bs-soft-bg)] px-2 py-0.5 text-xs font-medium text-[var(--jp-bs-primary)]">
                                                             Default
                                                         </span>
                                                     )}
@@ -144,7 +147,7 @@ export default function BrandsIndex({ brands, limits, can_remove_user_from_compa
                                                                         onSuccess: () => window.location.reload(),
                                                                     })
                                                                 }}
-                                                                className="rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
+                                                                className="rounded-md bg-[var(--jp-bs-primary)] px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-[var(--jp-bs-primary-hover)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--jp-bs-ring)]"
                                                             >
                                                                 Switch
                                                             </button>
@@ -152,7 +155,7 @@ export default function BrandsIndex({ brands, limits, can_remove_user_from_compa
                                                         <Link
                                                             href={`/app/brands/${brand.id}/edit`}
                                                             onClick={(e) => e.stopPropagation()}
-                                                            className="rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
+                                                            className="rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--jp-bs-ring)]"
                                                         >
                                                             Edit
                                                         </Link>
@@ -260,7 +263,7 @@ export default function BrandsIndex({ brands, limits, can_remove_user_from_compa
                                                                             className={`
                                                                                 group inline-flex items-center border-b-2 py-3 px-1 text-sm font-medium transition-colors
                                                                                 ${(categoryTab[brand.id] || 'asset') === 'asset'
-                                                                                    ? 'border-indigo-500 text-indigo-600'
+                                                                                    ? 'border-[var(--jp-bs-primary)] text-[var(--jp-bs-primary)]'
                                                                                     : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
                                                                                 }
                                                                             `}
@@ -268,7 +271,7 @@ export default function BrandsIndex({ brands, limits, can_remove_user_from_compa
                                                                             <svg
                                                                                 className={`
                                                                                     -ml-0.5 mr-2 h-5 w-5
-                                                                                    ${(categoryTab[brand.id] || 'asset') === 'asset' ? 'text-indigo-500' : 'text-gray-400 group-hover:text-gray-500'}
+                                                                                    ${(categoryTab[brand.id] || 'asset') === 'asset' ? 'text-[var(--jp-bs-primary)]' : 'text-gray-400 group-hover:text-gray-500'}
                                                                                 `}
                                                                                 fill="none"
                                                                                 viewBox="0 0 24 24"
@@ -284,7 +287,7 @@ export default function BrandsIndex({ brands, limits, can_remove_user_from_compa
                                                                             className={`
                                                                                 group inline-flex items-center border-b-2 py-3 px-1 text-sm font-medium transition-colors
                                                                                 ${(categoryTab[brand.id] || 'asset') === 'deliverable'
-                                                                                    ? 'border-indigo-500 text-indigo-600'
+                                                                                    ? 'border-[var(--jp-bs-primary)] text-[var(--jp-bs-primary)]'
                                                                                     : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
                                                                                 }
                                                                             `}
@@ -292,7 +295,7 @@ export default function BrandsIndex({ brands, limits, can_remove_user_from_compa
                                                                             <svg
                                                                                 className={`
                                                                                     -ml-0.5 mr-2 h-5 w-5
-                                                                                    ${(categoryTab[brand.id] || 'asset') === 'deliverable' ? 'text-indigo-500' : 'text-gray-400 group-hover:text-gray-500'}
+                                                                                    ${(categoryTab[brand.id] || 'asset') === 'deliverable' ? 'text-[var(--jp-bs-primary)]' : 'text-gray-400 group-hover:text-gray-500'}
                                                                                 `}
                                                                                 fill="none"
                                                                                 viewBox="0 0 24 24"
@@ -324,7 +327,7 @@ export default function BrandsIndex({ brands, limits, can_remove_user_from_compa
                                                                                             <CategoryIcon 
                                                                                                 iconId={category.icon || 'plus-circle'} 
                                                                                                 className="h-5 w-5" 
-                                                                                                color="text-indigo-500"
+                                                                                                color="text-[var(--jp-bs-primary)]"
                                                                                             />
                                                                                         )}
                                                                                     </div>
@@ -367,7 +370,7 @@ export default function BrandsIndex({ brands, limits, can_remove_user_from_compa
                                                                             : '/app/manage/categories'
                                                                     }
                                                                     onClick={(e) => e.stopPropagation()}
-                                                                    className="inline-flex items-center rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
+                                                                    className="inline-flex items-center rounded-md bg-[var(--jp-bs-primary)] px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-[var(--jp-bs-primary-hover)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--jp-bs-ring)]"
                                                                 >
                                                                     Manage Metadata Fields
                                                                     <svg className="ml-2 h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
@@ -511,7 +514,7 @@ function UserInviteForm({ brandId, defaultRole = 'viewer' }) {
                         value={data.email}
                         onChange={(e) => setData('email', e.target.value)}
                         placeholder="Enter an email"
-                        className="block w-full rounded-md border-0 py-1.5 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6"
+                        className="block w-full rounded-md border-0 py-1.5 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-[var(--jp-bs-ring)] sm:text-sm sm:leading-6"
                         required
                     />
                     {errors.email && (
@@ -522,7 +525,7 @@ function UserInviteForm({ brandId, defaultRole = 'viewer' }) {
                     <select
                         value={data.role === 'member' ? 'viewer' : data.role}
                         onChange={(e) => setData('role', e.target.value)}
-                        className="block rounded-md border-0 py-1.5 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6"
+                        className="block rounded-md border-0 py-1.5 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 focus:ring-2 focus:ring-inset focus:ring-[var(--jp-bs-ring)] sm:text-sm sm:leading-6"
                     >
                         <option value="viewer">Viewer</option>
                         <option value="contributor">Contributor</option>
@@ -533,7 +536,7 @@ function UserInviteForm({ brandId, defaultRole = 'viewer' }) {
                 <button
                     type="submit"
                     disabled={processing}
-                    className="flex-shrink-0 rounded-md bg-indigo-600 px-4 py-1.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:opacity-50"
+                    className="flex-shrink-0 rounded-md bg-[var(--jp-bs-primary)] px-4 py-1.5 text-sm font-semibold text-white shadow-sm hover:bg-[var(--jp-bs-primary-hover)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--jp-bs-ring)] disabled:opacity-50"
                 >
                     {processing ? 'Sending...' : 'Send invite'}
                 </button>
@@ -555,7 +558,7 @@ function RecommendedUserCard({ user, brandId }) {
     }
 
     return (
-        <div className="flex items-center gap-3 p-3 bg-white rounded-lg border border-gray-200 hover:border-indigo-300 transition-colors">
+        <div className="flex items-center gap-3 p-3 bg-white rounded-lg border border-gray-200 hover:border-[var(--jp-bs-soft-border)] transition-colors">
             <Avatar
                 avatarUrl={user.avatar_url}
                 firstName={user.first_name}
@@ -575,7 +578,7 @@ function RecommendedUserCard({ user, brandId }) {
                 <select
                     value={role}
                     onChange={(e) => setRole(e.target.value)}
-                    className="text-xs rounded-md border-0 py-1 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 focus:ring-2 focus:ring-inset focus:ring-indigo-600"
+                    className="text-xs rounded-md border-0 py-1 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 focus:ring-2 focus:ring-inset focus:ring-[var(--jp-bs-ring)]"
                     onClick={(e) => e.stopPropagation()}
                 >
                     <option value="member">Member</option>
@@ -586,7 +589,7 @@ function RecommendedUserCard({ user, brandId }) {
                     type="button"
                     onClick={handleAdd}
                     disabled={processing}
-                    className="flex-shrink-0 rounded-full bg-indigo-600 p-1.5 text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:opacity-50"
+                    className="flex-shrink-0 rounded-full bg-[var(--jp-bs-primary)] p-1.5 text-white shadow-sm hover:bg-[var(--jp-bs-primary-hover)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--jp-bs-ring)] disabled:opacity-50"
                     title="Add to brand"
                 >
                     <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor">
@@ -630,7 +633,7 @@ function PendingInvitationCard({ invitation, brandId }) {
                     <div className="flex flex-wrap items-center gap-2">
                         <p className="text-sm font-medium text-gray-900">{invitation.email}</p>
                         {invitation.is_creator_invite ? (
-                            <span className="inline-flex items-center rounded-full bg-violet-100 px-2 py-0.5 text-xs font-medium text-violet-900 ring-1 ring-inset ring-violet-200">
+                            <span className="inline-flex items-center rounded-full bg-[var(--jp-bs-soft-bg)] px-2 py-0.5 text-xs font-medium text-[var(--jp-bs-primary)] ring-1 ring-inset ring-[var(--jp-bs-soft-border)]">
                                 Creator
                             </span>
                         ) : null}
@@ -659,7 +662,7 @@ function PendingInvitationCard({ invitation, brandId }) {
                         type="button"
                         onClick={handleResend}
                         disabled={resending || revoking}
-                        className="text-sm text-indigo-600 hover:text-indigo-800 font-medium disabled:opacity-50"
+                        className="text-sm text-[var(--jp-bs-primary)] hover:text-[var(--jp-bs-primary-active)] font-medium disabled:opacity-50"
                     >
                         {resending ? 'Resending...' : 'Resend'}
                     </button>
@@ -757,7 +760,7 @@ function UserManagementCard({ user, brandId, canRemoveUserFromCompany = false })
                             <select
                                 value={role}
                                 onChange={(e) => setRole(e.target.value)}
-                                className="text-xs rounded-md border-0 py-1.5 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 focus:ring-2 focus:ring-inset focus:ring-indigo-600"
+                                className="text-xs rounded-md border-0 py-1.5 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 focus:ring-2 focus:ring-inset focus:ring-[var(--jp-bs-ring)]"
                             >
                                 <option value="member">Member</option>
                                 <option value="admin">Admin</option>
@@ -767,7 +770,7 @@ function UserManagementCard({ user, brandId, canRemoveUserFromCompany = false })
                                 type="button"
                                 onClick={handleRoleUpdate}
                                 disabled={updatingRole}
-                                className="text-xs text-indigo-600 hover:text-indigo-800 font-medium disabled:opacity-50"
+                                className="text-xs text-[var(--jp-bs-primary)] hover:text-[var(--jp-bs-primary-active)] font-medium disabled:opacity-50"
                             >
                                 {updatingRole ? 'Saving...' : 'Save'}
                             </button>
@@ -792,7 +795,7 @@ function UserManagementCard({ user, brandId, canRemoveUserFromCompany = false })
                             <button
                                 type="button"
                                 onClick={() => setIsEditing(true)}
-                                className="text-xs text-indigo-600 hover:text-indigo-800 font-medium"
+                                className="text-xs text-[var(--jp-bs-primary)] hover:text-[var(--jp-bs-primary-active)] font-medium"
                             >
                                 Edit Role
                             </button>

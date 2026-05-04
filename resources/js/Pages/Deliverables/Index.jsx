@@ -21,7 +21,7 @@ import BulkMetadataEditModal from '../../Components/BulkMetadataEditModal'
 import SelectionActionBar from '../../Components/SelectionActionBar'
 import { useSelection } from '../../contexts/SelectionContext'
 import { useBucketOptional } from '../../contexts/BucketContext'
-import { mergeAsset, warnIfOverwritingCompletedThumbnail } from '../../utils/assetUtils'
+import { mergeAsset, warnIfOverwritingCompletedThumbnail, dedupeAssetsById } from '../../utils/assetUtils'
 import { computeThumbnailPipelineGridSummary } from '../../utils/assetGridPipelineSummary'
 import {
     clearUploadPreviewsOlderThan,
@@ -102,13 +102,15 @@ function DeliverablesIndexPage({ categories, bulk_categories_by_asset_type = nul
     const [isAutoClosing, setIsAutoClosing] = useState(false)
     
     // Server-driven pagination
-    const [assetsList, setAssetsList] = useState(Array.isArray(assets) ? assets.filter(Boolean) : [])
+    const [assetsList, setAssetsList] = useState(() =>
+        dedupeAssetsById(Array.isArray(assets) ? assets.filter(Boolean) : [])
+    )
     const [nextPageUrl, setNextPageUrl] = useState(next_page_url ?? null)
     const [loading, setLoading] = useState(false)
     const loadMoreRef = useRef(null)
 
     useEffect(() => {
-        const list = Array.isArray(assets) ? assets.filter(Boolean) : []
+        const list = dedupeAssetsById(Array.isArray(assets) ? assets.filter(Boolean) : [])
         setAssetsList(list)
         setNextPageUrl(next_page_url ?? null)
         if (typeof window !== 'undefined' && window.__assetGridStaleness) {
@@ -130,7 +132,12 @@ function DeliverablesIndexPage({ categories, bulk_categories_by_asset_type = nul
             const url = nextPageUrl + separator + 'load_more=1'
             const response = await axios.get(url)
             const data = response.data?.data ?? []
-            setAssetsList(prev => [...(prev || []).filter(Boolean), ...(Array.isArray(data) ? data.filter(Boolean) : [])])
+            setAssetsList((prev) =>
+                dedupeAssetsById([
+                    ...(prev || []).filter(Boolean),
+                    ...(Array.isArray(data) ? data.filter(Boolean) : []),
+                ])
+            )
             setNextPageUrl(response.data?.next_page_url ?? null)
         } catch (e) {
             console.error('Infinite scroll failed', e)

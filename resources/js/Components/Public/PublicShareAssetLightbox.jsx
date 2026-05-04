@@ -11,19 +11,11 @@ import {
 import { motion, AnimatePresence, useReducedMotion } from 'framer-motion'
 import { contrastTextOnPrimary } from '../../utils/contrastTextOnPrimary'
 import { saveUrlAsDownload } from '../../utils/singleAssetDownload'
+import { formatBytesHuman } from '../../utils/formatBytesHuman'
 
 function isImageMime(mime) {
     if (!mime || typeof mime !== 'string') return false
     return mime.toLowerCase().startsWith('image/')
-}
-
-function formatBytes(n) {
-    if (n == null || Number.isNaN(Number(n))) return '—'
-    const v = Number(n)
-    if (v < 0) return '—'
-    if (v < 1024) return `${v} B`
-    if (v < 1024 * 1024) return `${(v / 1024).toFixed(1)} KB`
-    return `${(v / (1024 * 1024)).toFixed(1)} MB`
 }
 
 function formatDimensions(asset) {
@@ -207,7 +199,7 @@ export default function PublicShareAssetLightbox({
     const title = asset.title || asset.original_filename || 'Untitled'
     const ext = (asset.file_extension || '').toUpperCase() || 'FILE'
     const dimensionsLabel = formatDimensions(asset)
-    const sizeLabel = formatBytes(asset?.size_bytes)
+    const sizeLabel = formatBytesHuman(asset?.size_bytes)
 
     const fullscreenImageSrc = previewSrc
 

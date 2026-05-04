@@ -31,8 +31,8 @@ use Tests\TestCase;
  * 1. Asset is created via UploadCompletionService
  * 2. AssetUploaded event is fired
  * 3. ProcessAssetOnUpload listener dispatches ProcessAssetJob
- * 4. ProcessAssetJob chains AITaggingJob
- * 5. AITaggingJob processes the asset
+ * 4. ProcessAssetJob runs the images chain and conditionally dispatches AI work (e.g. AiMetadataGenerationJob on the ai queue)
+ * 5. {@see AITaggingJob} is deprecated and no longer performs vision or writes tags
  */
 class AiTaggingPipelineTest extends TestCase
 {
@@ -122,9 +122,7 @@ class AiTaggingPipelineTest extends TestCase
         $job = new AITaggingJob($asset->id);
         $this->assertEquals($asset->id, $job->assetId, 'AITaggingJob should accept asset ID');
 
-        // Verify ProcessAssetJob includes AITaggingJob in its chain
-        // (verified by code inspection of ProcessAssetJob::handle())
-        // This is a structural check, not a runtime check
+        // Legacy stub still exists for queued retries; real tagging is AiMetadataGenerationJob.
         $this->assertTrue(
             class_exists(AITaggingJob::class),
             'AITaggingJob class should exist'
@@ -132,14 +130,10 @@ class AiTaggingPipelineTest extends TestCase
     }
 
     /**
-     * Test: AI tagging job can be dispatched directly (for manual testing)
-     * 
-     * This test verifies that AITaggingJob can be dispatched and runs
-     * when thumbnails are completed.
+     * Legacy {@see AITaggingJob} is a no-op; completion flags come from {@see \App\Jobs\AiMetadataGenerationJob}.
      */
-    public function test_ai_tagging_job_runs_when_thumbnails_completed(): void
+    public function test_legacy_ai_tagging_job_does_not_set_pipeline_flags(): void
     {
-        // Create an asset with completed thumbnails
         $uploadSession = UploadSession::create([
             'tenant_id' => $this->tenant->id,
             'brand_id' => $this->brand->id,
@@ -163,40 +157,16 @@ class AiTaggingPipelineTest extends TestCase
             'size_bytes' => 1024,
             'storage_bucket_id' => $this->bucket->id,
             'storage_root_path' => 'assets/test/test-image.jpg',
-            'thumbnail_status' => ThumbnailStatus::COMPLETED, // Required for AI tagging
+            'thumbnail_status' => ThumbnailStatus::COMPLETED,
         ]);
 
-        // Dispatch AITaggingJob directly
-        $job = new AITaggingJob($asset->id);
-        $job->handle();
-
-        // Reload asset to check metadata
+        (new AITaggingJob($asset->id))->handle();
         $asset->refresh();
-
-        // Assert that AI tagging metadata flag is set
-        // This proves the pipeline ran (even if tags are empty in stub implementation)
-        $metadata = $asset->metadata ?? [];
-        $this->assertTrue(
-            isset($metadata['ai_tagging_completed']) && $metadata['ai_tagging_completed'] === true,
-            'AI tagging should set ai_tagging_completed flag in metadata'
-        );
-
-        // Assert that ai_tagging_completed_at timestamp is set
-        $this->assertTrue(
-            isset($metadata['ai_tagging_completed_at']),
-            'AI tagging should set ai_tagging_completed_at timestamp'
-        );
+        $this->assertArrayNotHasKey('ai_tagging_completed', $asset->metadata ?? []);
     }
 
-    /**
-     * Test: AI tagging is skipped when thumbnails are not completed
-     * 
-     * This test verifies that AITaggingJob skips processing when
-     * thumbnails are not yet available.
-     */
-    public function test_ai_tagging_skipped_when_thumbnails_not_completed(): void
+    public function test_legacy_ai_tagging_job_noop_when_thumbnails_pending(): void
     {
-        // Create an asset without completed thumbnails
         $uploadSession = UploadSession::create([
             'tenant_id' => $this->tenant->id,
             'brand_id' => $this->brand->id,
@@ -220,27 +190,11 @@ class AiTaggingPipelineTest extends TestCase
             'size_bytes' => 1024,
             'storage_bucket_id' => $this->bucket->id,
             'storage_root_path' => 'assets/test/test-image.jpg',
-            'thumbnail_status' => ThumbnailStatus::PENDING, // Thumbnails not completed
+            'thumbnail_status' => ThumbnailStatus::PENDING,
         ]);
 
-        // Dispatch AITaggingJob directly
-        $job = new AITaggingJob($asset->id);
-        $job->handle();
-
-        // Reload asset to check metadata
+        (new AITaggingJob($asset->id))->handle();
         $asset->refresh();
-
-        // Assert that AI tagging was skipped
-        $metadata = $asset->metadata ?? [];
-        $this->assertTrue(
-            isset($metadata['_ai_tagging_skipped']) && $metadata['_ai_tagging_skipped'] === true,
-            'AI tagging should be skipped when thumbnails are not completed'
-        );
-
-        $this->assertEquals(
-            'thumbnail_unavailable',
-            $metadata['_ai_tagging_skip_reason'] ?? null,
-            'Skip reason should be thumbnail_unavailable'
-        );
+        $this->assertArrayNotHasKey('_ai_tagging_skipped', $asset->metadata ?? []);
     }
 }

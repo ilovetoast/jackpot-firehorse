@@ -8,6 +8,7 @@
  */
 
 import { useState, useEffect, useMemo, useRef, memo, useSyncExternalStore, useCallback } from 'react';
+import { formatBytesHuman } from '../utils/formatBytesHuman';
 import {
     CheckCircleIcon,
     ExclamationCircleIcon,
@@ -242,19 +243,6 @@ function getStatusConfig(status) {
 }
 
 /**
- * Format file size for display
- * @param {number} bytes - File size in bytes
- * @returns {string} Formatted size string
- */
-function formatFileSize(bytes) {
-    if (bytes === 0) return '0 Bytes';
-    const k = 1024;
-    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + ' ' + sizes[i];
-}
-
-/**
  * UploadItemRow - Individual upload item row with per-file overrides
  * 
  * @param {Object} props
@@ -286,7 +274,7 @@ function deriveBadgeKey(item, displayStatus) {
     return displayStatus
 }
 
-function UploadItemRow({ item, uploadManager, onRemove, onRetry, disabled = false, containPerformance = false }) {
+function UploadItemRow({ item, uploadManager, onRemove, onRetry, disabled = false, containPerformance = false, brandPrimary = null }) {
 
     // CLEAN UPLOADER V2: DEV warning for failed files
     // Phase 2.5 Step 4: Use centralized environment detection - no prod logging noise
@@ -615,24 +603,28 @@ function UploadItemRow({ item, uploadManager, onRemove, onRetry, disabled = fals
             badgeKey === 'processing' ||
             badgeKey === 'processing_preview');
     
-    // Phase 3.0: Enhanced progress bar color coding
-    const getProgressBarColor = () => {
+    // Phase 3.0: Progress fill — brand primary for active work when provided (Add Asset modal)
+    const getProgressBarFill = () => {
+        const base = 'h-full transition-[width] duration-300 rounded-full'
         switch (displayStatus) {
             case 'queued':
-                return 'bg-gray-300';
+                return { className: base + ' bg-gray-300', style: undefined }
             case 'initiating':
             case 'uploading':
-                return 'bg-blue-600';
             case 'processing':
-                return 'bg-indigo-600';
+                if (brandPrimary) {
+                    return { className: base, style: { backgroundColor: brandPrimary } }
+                }
+                return { className: base + ' bg-blue-600', style: undefined }
             case 'complete':
-                return 'bg-green-600';
+                return { className: base + ' bg-green-600', style: undefined }
             case 'failed':
-                return 'bg-red-600';
+                return { className: base + ' bg-red-600', style: undefined }
             default:
-                return 'bg-gray-300';
+                return { className: base + ' bg-gray-300', style: undefined }
         }
-    };
+    }
+    const progressBarFill = getProgressBarFill()
     
     // Phase 3.0: Animated sheen for active states (uploading, initiating, or processing)
     // Phase 3.0B: Gate sheen animation to active rows only (performance optimization)
@@ -740,7 +732,7 @@ function UploadItemRow({ item, uploadManager, onRemove, onRetry, disabled = fals
                                 {originalFilename}
                             </p>
                             <p className="text-xs text-gray-500">
-                                {item.file?.size ? formatFileSize(item.file.size) : 'Unknown size'}
+                                {item.file?.size ? formatBytesHuman(item.file.size) : 'Unknown size'}
                             </p>
 
                             {showByteProgress && (
@@ -748,8 +740,11 @@ function UploadItemRow({ item, uploadManager, onRemove, onRetry, disabled = fals
                                     <div className="flex items-center gap-2">
                                         <div className="relative h-2 flex-1 overflow-hidden rounded-full bg-gray-200">
                                             <div
-                                                className={`h-full transition-[width] duration-300 ${getProgressBarColor()}`}
-                                                style={{ width: `${getProgressPercentage()}%` }}
+                                                className={progressBarFill.className}
+                                                style={{
+                                                    width: `${getProgressPercentage()}%`,
+                                                    ...(progressBarFill.style || {}),
+                                                }}
                                             />
                                             {shouldShowSheen && (
                                                 <div className="absolute inset-0 overflow-hidden rounded-full">
@@ -988,7 +983,7 @@ function UploadItemRow({ item, uploadManager, onRemove, onRetry, disabled = fals
                                 </div>
                                 <div className="flex items-baseline gap-2 min-w-0">
                                     <dt className="text-gray-500 text-xs flex-shrink-0">File size</dt>
-                                    <dd className="text-gray-900 text-xs truncate">{item.file?.size ? formatFileSize(item.file.size) : 'Unknown'}</dd>
+                                    <dd className="text-gray-900 text-xs truncate">{item.file?.size ? formatBytesHuman(item.file.size) : 'Unknown'}</dd>
                                 </div>
                                 <div className="flex items-baseline gap-2 min-w-0">
                                     <dt className="text-gray-500 text-xs flex-shrink-0">MIME type</dt>
@@ -1212,6 +1207,9 @@ export default memo(UploadItemRow, (prevProps, nextProps) => {
         return false;
     }
     if (prevProps.containPerformance !== nextProps.containPerformance) {
+        return false;
+    }
+    if (prevProps.brandPrimary !== nextProps.brandPrimary) {
         return false;
     }
     if (prev.metadataDraft !== next.metadataDraft) {

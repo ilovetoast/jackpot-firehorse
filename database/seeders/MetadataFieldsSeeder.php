@@ -56,6 +56,7 @@ class MetadataFieldsSeeder extends Seeder
         $this->ensureDefaultSystemFields();
 
         $this->deprecateLegacySceneClassification();
+        $this->deprecateSeasonField();
         $this->deprecateRedundantMetadataStatusField();
 
         // Raw DB writes do not fire MetadataFieldObserver; bump schema version so upload/drawer
@@ -98,6 +99,21 @@ class MetadataFieldsSeeder extends Seeder
             ->update([
                 'deprecated_at' => now(),
                 'replacement_field_id' => $replacementId,
+                'updated_at' => now(),
+            ]);
+    }
+
+    /**
+     * Season removed as a product option; existing rows are hidden via deprecated_at.
+     */
+    protected function deprecateSeasonField(): void
+    {
+        DB::table('metadata_fields')
+            ->where('key', 'season')
+            ->where('scope', 'system')
+            ->update([
+                'deprecated_at' => now(),
+                'replacement_field_id' => null,
                 'updated_at' => now(),
             ]);
     }
@@ -672,31 +688,6 @@ class MetadataFieldsSeeder extends Seeder
             ['value' => 'texture_pattern', 'system_label' => 'Texture/Pattern'],
             ['value' => 'text_graphic', 'system_label' => 'Text/Graphic'],
             ['value' => 'abstract', 'system_label' => 'Abstract'],
-        ]);
-
-        // Season (system, applies_to=all). Fonts and logos categories hide this via
-        // config/metadata_category_defaults.php → system_fields_hidden_for_category_slugs.
-        $seasonId = $this->getOrCreateField([
-            'key' => 'season',
-            'system_label' => 'Season',
-            'type' => 'select',
-            'applies_to' => 'all',
-            'scope' => 'system',
-            'group_key' => 'general',
-            'is_filterable' => true,
-            'is_user_editable' => true,
-            'is_ai_trainable' => false,
-            'is_upload_visible' => true,
-            'is_internal_only' => false,
-            'ai_eligible' => false,
-            'display_widget' => 'select',
-        ]);
-        $this->syncOptions($seasonId, [
-            ['value' => 'spring', 'system_label' => 'Spring'],
-            ['value' => 'summer', 'system_label' => 'Summer'],
-            ['value' => 'fall', 'system_label' => 'Fall'],
-            ['value' => 'winter', 'system_label' => 'Winter'],
-            ['value' => 'evergreen', 'system_label' => 'Evergreen'],
         ]);
 
         // Dominant Colors (system automated) — drawer only, never in More filters

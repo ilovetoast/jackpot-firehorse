@@ -12,13 +12,12 @@
  *    - **Buttons**: white, ghost, or neutral; links often white/soft.
  *    - **Alerts / info**: dark glass, neutral, or **subtle brand-tinted** border; **warm amber** for real warnings.
  *
- * 2) WORKBENCH / PRODUCT PAGES — Jackpot operating on a brand
- *    Examples: Insights, Review, Manage, Settings / Brand edit (incl. DNA), categories/fields/tags/values.
+ * 2) WORKBENCH / BRAND-SCOPED SETTINGS — operating on a specific brand (Insights, Manage, Brand edit, …)
  *    - Structure: **white / slate / zinc / charcoal** (`BrandWorkbenchMasthead` header).
- *    - **Jackpot violet** (`JACKPOT_VIOLET`, `violet-*`): active nav, tabs, primary & save, toggles, focus,
- *      AI/product modules, selected states, badges.
- *    - **Brand color**: **identity only** — logo, tiny chip/dot in masthead, very subtle header wash.
- *    - **Amber / orange**: real attention / limits / blockers.
+ *    - **Brand chrome**: `BrandWorkbenchChrome` sets `--wb-*` CSS variables from the brand palette (primary → accent → secondary),
+ *      with the same contrast intelligence as workspace primary buttons (`getWorkspacePrimaryActionButtonColors`, `ensureAccentContrastOnWhite`).
+ *    - Tailwind `violet-*` utilities inside `.brand-workbench-theme` are remapped to those vars via `brand-workbench-theme.css`.
+ *    - **Tenant / company** surfaces (library chrome, `/app/companies/settings`, profile) keep **Jackpot / site indigo** — do not wrap those in `BrandWorkbenchChrome`.
  *
  * Cinematic and workbench must **not** both paint “active” with customer brand and violet in the same pattern.
  * ─────────────────────────────────────────────────────────────────────────
@@ -41,8 +40,8 @@ export const BRAND_ACCENT_FALLBACK = '#64748b'
 /** Product UI default accent when a hex is required and brand color is missing (nav rescue, etc.) */
 export const JACKPOT_VIOLET = '#7c3aed'
 
-/** Jackpot product UI (saves, toggles, primary CTAs, focus rings) — workbench only */
+/** Primary CTA / focus within `.brand-workbench-theme` (CSS vars; fallbacks match Jackpot when vars unset) */
 export const productButtonPrimary =
-    'inline-flex items-center justify-center rounded-md bg-violet-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-violet-500 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-2'
+    'inline-flex items-center justify-center rounded-md bg-[var(--wb-accent)] px-4 py-2 text-sm font-medium text-[var(--wb-on-accent)] shadow-sm hover:bg-[var(--wb-accent-hover)] focus:outline-none focus:ring-2 focus:ring-[var(--wb-ring)] focus:ring-offset-2'
 
-export const productFocusInput = 'focus:border-violet-500 focus:ring-violet-500'
+export const productFocusInput = 'focus:border-[color:var(--wb-link)] focus:ring-[color:var(--wb-link)]'

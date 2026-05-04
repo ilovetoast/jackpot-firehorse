@@ -123,6 +123,7 @@ class SystemStatusController extends Controller
                 'failed_count' => 0,
                 'last_processed_at' => null,
                 'queue_driver' => $driver,
+                'pending_by_queue' => [],
             ];
         }
     }
@@ -162,6 +163,7 @@ class SystemStatusController extends Controller
             'failed_count' => $failedCount,
             'last_processed_at' => null,
             'queue_driver' => 'redis',
+            'pending_by_queue' => [],
         ];
     }
 
@@ -174,6 +176,18 @@ class SystemStatusController extends Controller
     {
         $pendingCount = (int) DB::table('jobs')->count();
         $failedCount = (int) DB::table('failed_jobs')->count();
+
+        $pendingByQueue = DB::table('jobs')
+            ->select('queue', DB::raw('COUNT(*) as c'))
+            ->groupBy('queue')
+            ->orderByDesc('c')
+            ->get()
+            ->map(fn ($row) => [
+                'queue' => $row->queue !== '' ? $row->queue : 'default',
+                'count' => (int) $row->c,
+            ])
+            ->values()
+            ->all();
 
         $lastJob = DB::table('jobs')
             ->orderBy('created_at', 'desc')
@@ -196,6 +210,7 @@ class SystemStatusController extends Controller
             'failed_count' => $failedCount,
             'last_processed_at' => $lastJob ? date('c', $lastJob->created_at) : null,
             'queue_driver' => 'database',
+            'pending_by_queue' => $pendingByQueue,
         ];
     }
 

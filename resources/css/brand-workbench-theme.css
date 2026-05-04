@@ -1,0 +1,121 @@
+/* Brand workbench: remap Tailwind violet/purple utilities to CSS vars set by BrandWorkbenchChrome.
+   Scoped so library, company settings, and profile stay on default Jackpot / slate chrome. */
+
+.brand-workbench-theme {
+  /* fallbacks if inline vars missing */
+  --wb-accent: #7c3aed;
+  --wb-accent-hover: #6d28d9;
+  --wb-on-accent: #f8fafc;
+  --wb-link: #5b21b6;
+  --wb-link-hover: #4c1d95;
+  --wb-ring: rgba(124, 58, 237, 0.45);
+  --wb-soft-bg: rgba(124, 58, 237, 0.1);
+  --wb-soft-bg-strong: rgba(124, 58, 237, 0.14);
+  --wb-soft-border: rgba(124, 58, 237, 0.24);
+  --wb-muted-text: #6d28d9;
+}
+
+/* Solid fills */
+.brand-workbench-theme .bg-violet-500,
+.brand-workbench-theme .bg-violet-600 {
+  background-color: var(--wb-accent) !important;
+}
+.brand-workbench-theme .bg-violet-600\/85 { background-color: color-mix(in srgb, var(--wb-accent) 85%, transparent) !important; }
+.brand-workbench-theme .bg-violet-600\/60 { background-color: color-mix(in srgb, var(--wb-accent) 60%, transparent) !important; }
+.brand-workbench-theme .bg-violet-600\/45 { background-color: color-mix(in srgb, var(--wb-accent) 45%, transparent) !important; }
+.brand-workbench-theme .bg-violet-600\/20 { background-color: color-mix(in srgb, var(--wb-accent) 20%, transparent) !important; }
+
+.brand-workbench-theme .bg-violet-50,
+.brand-workbench-theme .bg-violet-50\/80,
+.brand-workbench-theme .bg-violet-50\/40 { background-color: var(--wb-soft-bg) !important; }
+.brand-workbench-theme .bg-violet-100,
+.brand-workbench-theme .bg-violet-100\/90 { background-color: var(--wb-soft-bg-strong) !important; }
+
+.brand-workbench-theme .from-violet-50 { --tw-gradient-from: color-mix(in srgb, var(--wb-accent) 10%, white) var(--tw-gradient-from-position); --tw-gradient-to: rgb(255 255 255 / 0) var(--tw-gradient-to-position); --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to); }
+.brand-workbench-theme .from-violet-50\/50 { --tw-gradient-from: color-mix(in srgb, var(--wb-accent) 8%, white) var(--tw-gradient-from-position); --tw-gradient-to: rgb(255 255 255 / 0) var(--tw-gradient-to-position); --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to); }
+.brand-workbench-theme .from-violet-50\/80 { --tw-gradient-from: color-mix(in srgb, var(--wb-accent) 11%, white) var(--tw-gradient-from-position); --tw-gradient-to: rgb(255 255 255 / 0) var(--tw-gradient-to-position); --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to); }
+.brand-workbench-theme .to-violet-50,
+.brand-workbench-theme .to-violet-50\/40 { --tw-gradient-to: color-mix(in srgb, var(--wb-accent) 9%, white) var(--tw-gradient-to-position); }
+.brand-workbench-theme .to-purple-50 { --tw-gradient-to: color-mix(in srgb, var(--wb-accent) 11%, white) var(--tw-gradient-to-position); }
+.brand-workbench-theme .via-violet-50 { --tw-gradient-via: color-mix(in srgb, var(--wb-accent) 7%, white) var(--tw-gradient-via-position); }
+
+.brand-workbench-theme .hover\:from-violet-50:hover { --tw-gradient-from: color-mix(in srgb, var(--wb-accent) 10%, white) var(--tw-gradient-from-position); }
+
+/* Text */
+.brand-workbench-theme .text-violet-400 { color: color-mix(in srgb, var(--wb-link) 55%, white) !important; }
+.brand-workbench-theme .text-violet-500,
+.brand-workbench-theme .text-violet-500\/90 { color: var(--wb-link) !important; opacity: 1; }
+.brand-workbench-theme .text-violet-500\/90 { opacity: 0.9 !important; }
+.brand-workbench-theme .text-violet-600,
+.brand-workbench-theme .text-violet-600\/90,
+.brand-workbench-theme .text-violet-600\/50 { color: var(--wb-link) !important; }
+.brand-workbench-theme .text-violet-600\/90 { opacity: 0.9 !important; }
+.brand-workbench-theme .text-violet-600\/50 { opacity: 0.5 !important; }
+.brand-workbench-theme .text-violet-700,
+.brand-workbench-theme .text-violet-700\/70 { color: var(--wb-muted-text) !important; }
+.brand-workbench-theme .text-violet-700\/70 { opacity: 0.7 !important; }
+.brand-workbench-theme .text-violet-800,
+.brand-workbench-theme .text-violet-800\/90 { color: color-mix(in srgb, var(--wb-link) 82%, black) !important; }
+.brand-workbench-theme .text-violet-900 { color: color-mix(in srgb, var(--wb-link) 70%, black) !important; }
+.brand-workbench-theme .text-violet-950 { color: #0f172a !important; }
+
+/* Borders & rings */
+.brand-workbench-theme .border-violet-100,
+.brand-workbench-theme .border-violet-100\/90,
+.brand-workbench-theme .border-violet-100\/80 { border-color: color-mix(in srgb, var(--wb-accent) 14%, white) !important; }
+.brand-workbench-theme .border-violet-200,
+.brand-workbench-theme .border-violet-200\/80,
+.brand-workbench-theme .border-violet-200\/90 { border-color: var(--wb-soft-border) !important; }
+.brand-workbench-theme .divide-violet-100\/80 > :not([hidden]) ~ :not([hidden]) { border-color: color-mix(in srgb, var(--wb-accent) 12%, white) !important; }
+.brand-workbench-theme .ring-violet-100\/50,
+.brand-workbench-theme .ring-violet-100\/80 { --tw-ring-color: color-mix(in srgb, var(--wb-accent) 18%, transparent) !important; }
+.brand-workbench-theme .ring-violet-200,
+.brand-workbench-theme .ring-violet-200\/60 { --tw-ring-color: var(--wb-soft-border) !important; }
+.brand-workbench-theme .ring-violet-500\/\[0\.08\] { --tw-ring-color: color-mix(in srgb, var(--wb-accent) 8%, transparent) !important; }
+
+/* Hover backgrounds */
+.brand-workbench-theme .hover\:bg-violet-50:hover,
+.brand-workbench-theme .hover\:bg-violet-50\/80:hover { background-color: var(--wb-soft-bg) !important; }
+.brand-workbench-theme .hover\:bg-violet-500:hover,
+.brand-workbench-theme .hover\:bg-violet-600:hover,
+.brand-workbench-theme .hover\:bg-violet-700:hover { background-color: var(--wb-accent-hover) !important; }
+
+/* Hover text */
+.brand-workbench-theme .hover\:text-violet-500:hover,
+.brand-workbench-theme .hover\:text-violet-600:hover,
+.brand-workbench-theme .hover\:text-violet-700:hover,
+.brand-workbench-theme .hover\:text-violet-800:hover,
+.brand-workbench-theme .hover\:text-violet-900:hover { color: var(--wb-link-hover) !important; }
+
+/* Focus rings (inputs, buttons) */
+.brand-workbench-theme .focus\:ring-violet-500:focus,
+.brand-workbench-theme .focus\:ring-violet-600:focus,
+.brand-workbench-theme .focus-visible\:ring-violet-500:focus-visible,
+.brand-workbench-theme .focus-visible\:ring-violet-600:focus-visible {
+  --tw-ring-color: var(--wb-ring) !important;
+}
+.brand-workbench-theme .focus\:border-violet-500:focus,
+.brand-workbench-theme .focus\:border-violet-600:focus { border-color: var(--wb-link) !important; }
+
+/* Outline (keyboard) */
+.brand-workbench-theme .focus-visible\:outline-violet-600:focus-visible { outline-color: var(--wb-accent) !important; }
+
+/* Checkboxes / accent */
+.brand-workbench-theme input[type="checkbox"].text-violet-600,
+.brand-workbench-theme input[type="checkbox"].border-gray-300,
+.brand-workbench-theme input[type="checkbox"].border-slate-300 { accent-color: var(--wb-accent); }
+
+/* Purple (paired gradients / badges) */
+.brand-workbench-theme .bg-purple-50 { background-color: color-mix(in srgb, var(--wb-accent) 9%, white) !important; }
+.brand-workbench-theme .text-purple-600 { color: var(--wb-link) !important; }
+.brand-workbench-theme .ring-purple-500\/10 { --tw-ring-color: color-mix(in srgb, var(--wb-accent) 12%, transparent) !important; }
+
+/* Spinner border */
+.brand-workbench-theme .border-violet-500 { border-color: var(--wb-accent) !important; }
+
+/* JSON syntax highlighter inside brand settings */
+.brand-workbench-theme .wb-json-key { color: var(--wb-link) !important; }
+
+/* Ring/border utilities without opacity suffix */
+.brand-workbench-theme .ring-violet-500 { --tw-ring-color: var(--wb-ring) !important; }
+.brand-workbench-theme .border-violet-500 { border-color: var(--wb-link) !important; }

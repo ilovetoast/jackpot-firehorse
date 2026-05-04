@@ -137,14 +137,14 @@ services:
             - mysql
             - redis
         restart: unless-stopped
-        # Queue worker configuration:
-        # --queue=default,images,pdf-processing,ai-low: Light jobs, asset pipeline, PDF jobs, video AI insights (matches Horizon split when not using Horizon)
+        # Queue worker configuration (local Sail only — staging/production use Horizon):
+        # --queue=default,images,images-heavy,pdf-processing,ai,ai-low: uploads, heavy pipeline, PDFs, upload AI metadata/tagging (see docs/UPLOAD_AND_QUEUE.md)
         # --tries=3: Maximum retry attempts per job
-        # --timeout=300: Default job timeout (thumbnail jobs override to 600s)
+        # --timeout=960: Long enough for heavy thumbnails/PDF/AI vision jobs (individual jobs may set their own limits)
         # --sleep=3: Seconds to sleep when no jobs available
         # --max-jobs=1000: Restart worker after N jobs (prevents memory leaks)
         # --max-time=3600: Restart worker after 1 hour (prevents memory leaks)
-        command: php artisan queue:work database --queue=default,images,pdf-processing,ai-low --tries=3 --timeout=300 --sleep=3 --max-jobs=1000 --max-time=3600
+        command: php artisan queue:work database --queue=default,images,images-heavy,pdf-processing,ai,ai-low --tries=3 --timeout=960 --sleep=3 --max-jobs=1000 --max-time=3600
     # Studio: baked composition MP4 export (ProcessStudioCompositionVideoExportJob → FFmpeg).
     # Requires QUEUE_CONNECTION=database in .env (or use redis + Horizon in production).
     # Image must include ffmpeg (see docker/8.5/Dockerfile); container shares app codebase with laravel.test.

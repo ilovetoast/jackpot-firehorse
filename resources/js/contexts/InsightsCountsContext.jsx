@@ -50,7 +50,7 @@ export function InsightsBadge({ count, className = '' }) {
     if (!label) return null
     return (
         <span
-            className={`inline-flex min-h-[1.25rem] min-w-[1.25rem] shrink-0 items-center justify-center rounded-full bg-violet-600 px-1.5 text-xs font-semibold text-white ${className}`}
+            className={`inline-flex min-h-[1.25rem] min-w-[1.25rem] shrink-0 items-center justify-center rounded-full bg-[var(--wb-accent)] px-1.5 text-xs font-semibold text-[var(--wb-on-accent)] ${className}`}
         >
             {label}
         </span>

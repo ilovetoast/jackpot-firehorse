@@ -132,6 +132,7 @@ function countPerFilter(items, filterId) {
  * @param {Function} [props.onRetryItem] — (clientId) => void
  * @param {string} [props.className]
  * @param {boolean} [props.disabled]
+ * @param {string|null} [props.brandPrimary] — workspace primary for batch + row progress fills
  */
 export default function UploadTray({
     uploadManager,
@@ -140,6 +141,7 @@ export default function UploadTray({
     onRetryItem,
     className = '',
     disabled = false,
+    brandPrimary = null,
 }) {
     const { hasItems, items } = uploadManager
     const [uploadFilter, setUploadFilter] = useState('all')
@@ -261,6 +263,7 @@ export default function UploadTray({
                     batchPhase={batchPhase}
                     overallPercent={overallPercent}
                     compact={items.length >= 8}
+                    brandPrimary={brandPrimary}
                 />
                 {showFilterRow && (
                     <div
@@ -315,7 +318,7 @@ export default function UploadTray({
                             </p>
                             <button
                                 type="button"
-                                className="mt-1.5 text-[11px] font-medium text-indigo-600 hover:text-indigo-800"
+                                className="mt-1.5 text-[11px] font-medium text-gray-800 hover:text-gray-950 underline decoration-gray-300 underline-offset-2"
                                 onClick={() => setListExpanded(true)}
                             >
                                 Show all {items.length} files
@@ -364,6 +367,7 @@ export default function UploadTray({
                                 onRetry={onRetryItem}
                                 disabled={disabled}
                                 containPerformance={containPerformance}
+                                brandPrimary={brandPrimary}
                             />
                         ))}
                     </div>

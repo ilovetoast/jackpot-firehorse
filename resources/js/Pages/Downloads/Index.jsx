@@ -3,6 +3,7 @@ import { Link, router, usePage, useForm } from '@inertiajs/react'
 import { useDownloadErrors } from '../../hooks/useDownloadErrors'
 import { useProcessingDownloadsPolling } from '../../hooks/useProcessingDownloadsPolling'
 import { keyByDownloads, warnIfReplacingRootState } from '../../utils/downloadUtils'
+import { formatBytesHuman } from '../../utils/formatBytesHuman'
 import AppNav from '../../Components/AppNav'
 import AppHead from '../../Components/AppHead'
 import AppFooter from '../../Components/AppFooter'
@@ -33,11 +34,10 @@ function formatDate(iso) {
   return d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
 
+
 function formatBytes(bytes) {
   if (bytes == null || bytes === 0) return '—'
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+  return formatBytesHuman(bytes)
 }
 
 /** Library vs Executions (deliverables) — aligns with {@see AssetType} / `asset_type` from download thumbnails. */

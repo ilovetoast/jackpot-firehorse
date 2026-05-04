@@ -684,6 +684,10 @@ class GenerateThumbnailsJob implements ShouldQueue
                           ($mimeType === 'image/avif' || $extension === 'avif') &&
                           extension_loaded('imagick')) {
                     $isNowSupported = true;
+                } elseif ($skipReason === 'unsupported_format:heic' &&
+                          ($mimeType === 'image/heic' || $mimeType === 'image/heif' || $extension === 'heic' || $extension === 'heif') &&
+                          extension_loaded('imagick')) {
+                    $isNowSupported = true;
                 } elseif (($skipReason === 'unsupported_format:psd' || $skipReason === 'unsupported_file_type') &&
                           ($mimeType === 'image/vnd.adobe.photoshop' || $extension === 'psd' || $extension === 'psb') &&
                           extension_loaded('imagick')) {
@@ -2084,6 +2088,9 @@ class GenerateThumbnailsJob implements ShouldQueue
                     if ($fileType === 'avif') {
                         return 'unsupported_format:avif';
                     }
+                    if ($fileType === 'heic') {
+                        return 'unsupported_format:heic';
+                    }
                     if ($fileType === 'psd') {
                         return 'unsupported_format:psd';
                     }
@@ -2121,6 +2128,15 @@ class GenerateThumbnailsJob implements ShouldQueue
 
             // If Imagick is available, AVIF should be supported - return generic reason
             // (This shouldn't normally be reached if supportsThumbnailGeneration works correctly)
+            return 'unsupported_file_type';
+        }
+
+        // HEIC/HEIF — Imagick + libheif delegate
+        if ($mimeType === 'image/heic' || $mimeType === 'image/heif' || $extension === 'heic' || $extension === 'heif') {
+            if (! extension_loaded('imagick')) {
+                return 'unsupported_format:heic';
+            }
+
             return 'unsupported_file_type';
         }
 

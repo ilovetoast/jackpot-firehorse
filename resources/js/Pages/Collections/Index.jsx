@@ -33,6 +33,7 @@ import {
     resolveWorkspaceSidebarSurface,
 } from '../../utils/colorUtils'
 import axios from 'axios'
+import { dedupeAssetsById } from '../../utils/assetUtils'
 
 const COLLECTIONS_PARTIAL_RELOAD = [
     'assets',
@@ -98,13 +99,15 @@ export default function CollectionsIndex({
 
     const brandPrimaryHex = auth?.activeBrand?.primary_color || '#6366f1'
 
-    const [assetsList, setAssetsList] = useState(Array.isArray(assets) ? assets.filter(Boolean) : [])
+    const [assetsList, setAssetsList] = useState(() =>
+        dedupeAssetsById(Array.isArray(assets) ? assets.filter(Boolean) : [])
+    )
     const [nextPageUrl, setNextPageUrl] = useState(next_page_url ?? null)
     const [loading, setLoading] = useState(false)
     const loadMoreRef = useRef(null)
 
     useEffect(() => {
-        setAssetsList(Array.isArray(assets) ? assets.filter(Boolean) : [])
+        setAssetsList(dedupeAssetsById(Array.isArray(assets) ? assets.filter(Boolean) : []))
         setNextPageUrl(next_page_url ?? null)
     }, [assets, next_page_url])
 
@@ -115,7 +118,12 @@ export default function CollectionsIndex({
             const url = nextPageUrl + (nextPageUrl.includes('?') ? '&' : '?') + 'load_more=1'
             const response = await axios.get(url)
             const data = response.data?.data ?? []
-            setAssetsList(prev => [...(prev || []).filter(Boolean), ...(Array.isArray(data) ? data.filter(Boolean) : [])])
+            setAssetsList((prev) =>
+                dedupeAssetsById([
+                    ...(prev || []).filter(Boolean),
+                    ...(Array.isArray(data) ? data.filter(Boolean) : []),
+                ])
+            )
             setNextPageUrl(response.data?.next_page_url ?? null)
         } catch (e) {
             console.error('Infinite scroll failed', e)

@@ -13,7 +13,7 @@
  * enabled for every category by default so execution assets receive computed metadata
  * without manual enablement.
  *
- * system_fields_hidden_for_category_slugs: omit specific system fields (e.g. season on fonts/logos)
+ * system_fields_hidden_for_category_slugs: omit specific system fields
  * from the tags+collection+system baseline for listed category slugs.
  *
  * Extension notes (not seeded as fields yet):
@@ -216,10 +216,7 @@ return [
      * System field keys hidden for specific category slugs (baseline: tags + collection + all system fields).
      * Evaluated in TenantMetadataVisibilityService::computeSeededDefaultForField for tags_and_collection_only_slugs.
      */
-    'system_fields_hidden_for_category_slugs' => [
-        'fonts' => ['season'],
-        'logos' => ['season'],
-    ],
+    'system_fields_hidden_for_category_slugs' => [],
 
     'restricted_option_edit_keys' => [
         'collection',
@@ -228,6 +225,5 @@ return [
         'starred',
         'dominant_hue_group',
         'dominant_colors',
-        'season',
     ],
 ];

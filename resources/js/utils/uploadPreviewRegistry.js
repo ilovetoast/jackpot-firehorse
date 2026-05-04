@@ -198,12 +198,22 @@ export function markPendingFinalize(clientFileIds) {
     bump()
 }
 
-export function removePendingFinalizeClient(clientFileId) {
+/**
+ * Remove a client id from the finalize placeholder queue (grid pending row).
+ * @param {string} clientFileId
+ * @returns {boolean} true if the queue changed
+ */
+function splicePendingFinalizeForClient(clientFileId) {
     const k = clientFileId != null ? String(clientFileId) : ''
-    if (!k) return
+    if (!k) return false
     const i = pendingFinalizeOrder.indexOf(k)
-    if (i >= 0) {
-        pendingFinalizeOrder.splice(i, 1)
+    if (i < 0) return false
+    pendingFinalizeOrder.splice(i, 1)
+    return true
+}
+
+export function removePendingFinalizeClient(clientFileId) {
+    if (splicePendingFinalizeForClient(clientFileId)) {
         bump()
     }
 }
@@ -225,6 +235,13 @@ export function prunePendingFinalizeVisibleInAssetList(assets) {
             .filter((id) => id != null),
     )
     let changed = false
+    for (let i = pendingFinalizeOrder.length - 1; i >= 0; i--) {
+        const cid = pendingFinalizeOrder[i]
+        if (!byClient.has(cid)) {
+            pendingFinalizeOrder.splice(i, 1)
+            changed = true
+        }
+    }
     for (let i = pendingFinalizeOrder.length - 1; i >= 0; i--) {
         const cid = pendingFinalizeOrder[i]
         const entry = byClient.get(cid)
@@ -305,7 +322,12 @@ export function getUploadPreviewSnapshotForClient(clientFileId) {
 export function revokeClientUploadPreview(clientFileId, shouldBump = true) {
     const key = clientFileId != null ? String(clientFileId) : ''
     const entry = key ? byClient.get(key) : null
-    if (!entry) return
+    if (!entry) {
+        if (splicePendingFinalizeForClient(key) && shouldBump) {
+            bump()
+        }
+        return
+    }
     try {
         URL.revokeObjectURL(entry.objectUrl)
     } catch (_) {
@@ -315,7 +337,10 @@ export function revokeClientUploadPreview(clientFileId, shouldBump = true) {
     if (entry.assetId != null) {
         byAsset.delete(entry.assetId)
     }
-    if (shouldBump) bump()
+    const pendingChanged = splicePendingFinalizeForClient(key)
+    if (shouldBump || pendingChanged) {
+        bump()
+    }
 }
 
 export function revokeUploadPreviewForAsset(assetId) {
@@ -329,7 +354,9 @@ export function revokeUploadPreviewForAsset(assetId) {
         /* ignore */
     }
     byAsset.delete(id)
-    byClient.delete(entry.clientFileId)
+    const cid = entry.clientFileId
+    byClient.delete(cid)
+    splicePendingFinalizeForClient(cid)
     bump()
 }
 

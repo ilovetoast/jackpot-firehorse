@@ -5,6 +5,7 @@ import AppHead from '../Components/AppHead'
 import AppNav from '../Components/AppNav'
 import AppFooter from '../Components/AppFooter'
 import BrandWorkbenchMasthead from '../components/brand-workspace/BrandWorkbenchMasthead'
+import { BrandWorkbenchChrome } from '../contexts/BrandWorkbenchChromeContext'
 import WorkbenchLocalNav from '../components/brand-workspace/WorkbenchLocalNav'
 import { BRAND_WORKBENCH_CONTENT, WORKBENCH_ASIDE_WIDTH, workbenchPageColumnsClass } from '../components/brand-workspace/brandWorkspaceTokens'
 import WorkbenchSegmentedNav from '../components/brand-workspace/WorkbenchSegmentedNav'
@@ -90,7 +91,7 @@ export default function InsightsLayout({ children, title = 'Insights', activeSec
                 <AppNav brand={auth?.activeBrand} tenant={tenant} />
 
                 <div className="flex-1">
-                    <div className={BRAND_WORKBENCH_CONTENT}>
+                    <BrandWorkbenchChrome brand={auth?.activeBrand} company={company} className={BRAND_WORKBENCH_CONTENT}>
                         <BrandWorkbenchMasthead
                             companyName={company?.name}
                             brandName={brand?.name}
@@ -108,7 +109,7 @@ export default function InsightsLayout({ children, title = 'Insights', activeSec
                             <InsightsWorkbenchNav activeSection={activeSection} sidebarItems={sidebarItems} />
                             <main className="min-w-0 flex-1 lg:pl-0">{children}</main>
                         </div>
-                    </div>
+                    </BrandWorkbenchChrome>
                 </div>
 
                 <AppFooter />

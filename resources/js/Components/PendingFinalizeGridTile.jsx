@@ -117,7 +117,7 @@ export default function PendingFinalizeGridTile({
                 className={`${
                     isMasonry ? 'w-full flex flex-col items-center justify-center' : aspectRatio
                 } relative overflow-hidden rounded-2xl border border-dashed transition-all duration-200 ${
-                    isCinematic ? 'border-white/25 bg-black/25' : 'border-gray-300 bg-gray-50'
+                    isCinematic ? 'border-white/25 bg-transparent' : 'border-gray-300/60 bg-transparent'
                 }`}
                 style={
                     isMasonry

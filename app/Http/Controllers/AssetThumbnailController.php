@@ -996,10 +996,12 @@ class AssetThumbnailController extends Controller
         if (! $isSupported && extension_loaded('imagick')) {
             if (($mimeType === 'image/tiff' || $mimeType === 'image/tif' || $extension === 'tiff' || $extension === 'tif') ||
                 ($mimeType === 'image/avif' || $extension === 'avif') ||
+                ($mimeType === 'image/heic' || $mimeType === 'image/heif' || $extension === 'heic' || $extension === 'heif') ||
                 ($mimeType === 'image/x-canon-cr2' || $extension === 'cr2')) {
                 $isSupported = true;
                 $supportReason = $mimeType === 'image/avif' || $extension === 'avif' ? 'AVIF'
-                    : (($mimeType === 'image/x-canon-cr2' || $extension === 'cr2') ? 'CR2' : 'TIFF');
+                    : (($mimeType === 'image/heic' || $mimeType === 'image/heif' || $extension === 'heic' || $extension === 'heif') ? 'HEIC'
+                    : (($mimeType === 'image/x-canon-cr2' || $extension === 'cr2') ? 'CR2' : 'TIFF'));
             } elseif ($mimeType === 'image/vnd.adobe.photoshop' || $extension === 'psd' || $extension === 'psb') {
                 $isSupported = true;
                 $supportReason = $extension === 'psb' ? 'PSB' : 'PSD';

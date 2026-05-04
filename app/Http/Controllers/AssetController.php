@@ -8,8 +8,8 @@ use App\Enums\AssetType;
 use App\Enums\ThumbnailStatus;
 use App\Exceptions\PlanLimitExceededException;
 use App\Jobs\AiMetadataGenerationJob;
+use App\Jobs\AiMetadataSuggestionJob;
 use App\Jobs\AiTagAutoApplyJob;
-use App\Jobs\AITaggingJob;
 use App\Models\ActivityEvent;
 use App\Models\Asset;
 use App\Models\Brand;
@@ -2469,7 +2469,7 @@ class AssetController extends Controller
     }
 
     /**
-     * Re-run the AI tagging pipeline step (AITaggingJob) after clearing completion flags.
+     * Re-run AI vision + tag candidates (AiMetadataGenerationJob) on the ai queue after clearing completion flags.
      *
      * POST /app/assets/{asset}/ai-tagging/regenerate
      */
@@ -2536,7 +2536,14 @@ class AssetController extends Controller
         $asset->update(['metadata' => $metadata]);
 
         try {
-            AITaggingJob::dispatch($asset->id)->onQueue(config('queue.images_queue', 'images'));
+            $aiQueue = (string) config('queue.ai_queue', 'ai');
+            Bus::chain([
+                (new AiMetadataGenerationJob($asset->id, true))->onQueue($aiQueue),
+                (new AiTagAutoApplyJob($asset->id))->onQueue($aiQueue),
+                (new AiMetadataSuggestionJob($asset->id))->onQueue($aiQueue),
+            ])
+                ->onQueue($aiQueue)
+                ->dispatch();
 
             return response()->json([
                 'success' => true,

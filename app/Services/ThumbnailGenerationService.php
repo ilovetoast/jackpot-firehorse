@@ -23,6 +23,7 @@ use Illuminate\Support\Str;
  *
  * File type support:
  * - Images: jpg, png, webp, gif (direct thumbnail generation via GD library) ✓ IMPLEMENTED
+ * - HEIC/HEIF: thumbnail generation via Imagick (requires HEIF delegate) ✓ IMPLEMENTED
  * - TIFF: thumbnail generation via Imagick (requires Imagick PHP extension) ✓ IMPLEMENTED
  * - AVIF: thumbnail generation via Imagick (requires Imagick PHP extension) ✓ IMPLEMENTED
  * - PDF: first page extraction (page 1 only, via spatie/pdf-to-image) ✓ IMPLEMENTED
@@ -849,6 +850,35 @@ class ThumbnailGenerationService
             } catch (\ImagickException $e) {
                 throw new \RuntimeException("Downloaded file is not a valid AVIF image: {$e->getMessage()}");
             }
+        } elseif ($fileType === 'heic') {
+            if (! extension_loaded('imagick')) {
+                throw new \RuntimeException('HEIC file processing requires Imagick PHP extension');
+            }
+
+            try {
+                $imagick = new \Imagick;
+                $imagick->pingImage($tempPath.'[0]');
+                $imagick->setIteratorIndex(0);
+                $sourceImageWidth = (int) $imagick->getImageWidth();
+                $sourceImageHeight = (int) $imagick->getImageHeight();
+                $imagick->clear();
+                $imagick->destroy();
+
+                if ($sourceImageWidth === 0 || $sourceImageHeight === 0) {
+                    throw new \RuntimeException("HEIC file has invalid dimensions (size: {$sourceFileSize} bytes)");
+                }
+
+                Log::info('[ThumbnailGenerationService] Source HEIC file downloaded and verified', [
+                    'asset_id' => $asset->id,
+                    'temp_path' => $tempPath,
+                    'source_file_size' => $sourceFileSize,
+                    'source_image_width' => $sourceImageWidth,
+                    'source_image_height' => $sourceImageHeight,
+                    'file_type' => 'heic',
+                ]);
+            } catch (\ImagickException $e) {
+                throw new \RuntimeException("Downloaded file is not a valid HEIC image: {$e->getMessage()}");
+            }
         } elseif ($fileType === 'svg') {
             // SVG validation: Basic XML structure check
             $content = file_get_contents($tempPath, false, null, 0, 500);
@@ -907,7 +937,7 @@ class ThumbnailGenerationService
         $this->thumbProfilingLap('type_probe_and_dimensions_ms');
 
         if ($mode === ThumbnailMode::Preferred->value
-            && in_array($fileType, ['image', 'tiff', 'avif', 'cr2'], true)
+            && in_array($fileType, ['image', 'tiff', 'avif', 'cr2', 'heic'], true)
         ) {
             $crop = $this->applyPreferredSmartOrPrintCrop($tempPath);
             $this->preferredCropSummary = $crop;
@@ -925,10 +955,10 @@ class ThumbnailGenerationService
                     $sourceImageWidth = (int) ($imageInfo[0] ?? 0);
                     $sourceImageHeight = (int) ($imageInfo[1] ?? 0);
                 }
-            } elseif (($crop['applied'] ?? false) && in_array($fileType, ['tiff', 'avif', 'cr2'], true) && extension_loaded('imagick')) {
+            } elseif (($crop['applied'] ?? false) && in_array($fileType, ['tiff', 'avif', 'cr2', 'heic'], true) && extension_loaded('imagick')) {
                 try {
                     $imagickProbe = new \Imagick;
-                    $probePath = $fileType === 'cr2' ? $tempPath.'[0]' : $tempPath;
+                    $probePath = in_array($fileType, ['cr2', 'heic'], true) ? $tempPath.'[0]' : $tempPath;
                     $imagickProbe->pingImage($probePath);
                     $imagickProbe->setIteratorIndex(0);
                     $sourceImageWidth = (int) $imagickProbe->getImageWidth();
@@ -1166,7 +1196,7 @@ class ThumbnailGenerationService
             }
 
             // Source image dimensions (raster types only)
-            if (($fileType === 'image' || $fileType === 'tiff' || $fileType === 'cr2' || $fileType === 'avif') && $sourceImageWidth && $sourceImageHeight) {
+            if (($fileType === 'image' || $fileType === 'tiff' || $fileType === 'cr2' || $fileType === 'avif' || $fileType === 'heic') && $sourceImageWidth && $sourceImageHeight) {
                 Log::info('[ThumbnailGenerationService] Captured original source image dimensions', [
                     'asset_id' => $asset->id,
                     'source_image_width' => $sourceImageWidth,
@@ -2737,6 +2767,108 @@ class ThumbnailGenerationService
     }
 
     /**
+     * Generate thumbnail for HEIC/HEIF files using Imagick (libheif delegate).
+     */
+    protected function generateHeicThumbnail(string $sourcePath, array $styleConfig): string
+    {
+        if (! extension_loaded('imagick')) {
+            throw new \RuntimeException('HEIC thumbnail generation requires Imagick PHP extension');
+        }
+
+        if (! file_exists($sourcePath)) {
+            throw new \RuntimeException("Source HEIC file does not exist: {$sourcePath}");
+        }
+
+        $sourceFileSize = filesize($sourcePath);
+        if ($sourceFileSize === 0) {
+            throw new \RuntimeException('Source HEIC file is empty (size: 0 bytes)');
+        }
+
+        Log::info('[ThumbnailGenerationService] Generating HEIC thumbnail using Imagick', [
+            'source_path' => $sourcePath,
+            'source_file_size' => $sourceFileSize,
+            'style_config' => $styleConfig,
+        ]);
+
+        try {
+            $imagick = new \Imagick;
+            $imagick->readImage($sourcePath.'[0]');
+            $imagick->setIteratorIndex(0);
+            $imagick = $imagick->getImage();
+
+            $this->imagickNormalizeThumbnailOrientation($imagick, 'heic_imagick', [
+                'exif_orientation_tag' => ImageOrientationNormalizer::readExifOrientationTag($sourcePath),
+            ]);
+
+            $sourceWidth = $imagick->getImageWidth();
+            $sourceHeight = $imagick->getImageHeight();
+
+            if ($sourceWidth === 0 || $sourceHeight === 0) {
+                throw new \RuntimeException('HEIC image has invalid dimensions');
+            }
+
+            $targetWidth = $styleConfig['width'];
+            $targetHeight = $styleConfig['height'];
+            $fit = $styleConfig['fit'] ?? 'contain';
+
+            [$thumbWidth, $thumbHeight] = $this->calculateDimensions(
+                $sourceWidth,
+                $sourceHeight,
+                $targetWidth,
+                $targetHeight,
+                $fit
+            );
+
+            $filter = $this->isSmallSource($sourceWidth, $sourceHeight) ? \Imagick::FILTER_POINT : \Imagick::FILTER_LANCZOS;
+            $imagick->resizeImage($thumbWidth, $thumbHeight, $filter, 1, true);
+
+            if (! empty($styleConfig['blur']) && $styleConfig['blur'] === true) {
+                $imagick->blurImage(0, 2);
+            }
+
+            $outputFormat = config('assets.thumbnail.output_format', 'webp');
+            $imagick->setImageFormat($outputFormat);
+
+            $quality = $styleConfig['quality'] ?? 85;
+            $imagick->setImageCompressionQuality($quality);
+
+            $extension = $outputFormat === 'webp' ? 'webp' : 'jpg';
+            $thumbPath = tempnam(sys_get_temp_dir(), 'thumb_heic_').'.'.$extension;
+
+            $imagick->writeImage($thumbPath);
+            $imagick->clear();
+            $imagick->destroy();
+
+            if (! file_exists($thumbPath) || filesize($thumbPath) === 0) {
+                throw new \RuntimeException('HEIC thumbnail generation failed - output file is missing or empty');
+            }
+
+            Log::info('[ThumbnailGenerationService] HEIC thumbnail generated successfully', [
+                'source_path' => $sourcePath,
+                'thumb_path' => $thumbPath,
+                'thumb_width' => $thumbWidth,
+                'thumb_height' => $thumbHeight,
+                'thumb_size_bytes' => filesize($thumbPath),
+                'output_format' => $outputFormat,
+            ]);
+
+            return $thumbPath;
+        } catch (\ImagickException $e) {
+            Log::error('[ThumbnailGenerationService] HEIC thumbnail generation failed', [
+                'source_path' => $sourcePath,
+                'error' => $e->getMessage(),
+            ]);
+            throw new \RuntimeException("HEIC thumbnail generation failed: {$e->getMessage()}", 0, $e);
+        } catch (\Exception $e) {
+            Log::error('[ThumbnailGenerationService] HEIC thumbnail generation error', [
+                'source_path' => $sourcePath,
+                'error' => $e->getMessage(),
+            ]);
+            throw new \RuntimeException("HEIC thumbnail generation error: {$e->getMessage()}", 0, $e);
+        }
+    }
+
+    /**
      * Detect page count for a local PDF file.
      */
     protected function detectPdfPageCount(string $sourcePath): int
@@ -3973,6 +4105,10 @@ class ThumbnailGenerationService
 
         if ($ext === 'cr2' && in_array($resolved, ['image', 'unknown'], true)) {
             return 'cr2';
+        }
+
+        if (in_array($ext, ['heic', 'heif'], true) && in_array($resolved, ['image', 'unknown'], true)) {
+            return 'heic';
         }
 
         // SVG fallback: SVG is XML, not raster. When MIME is wrong or application/octet-stream,

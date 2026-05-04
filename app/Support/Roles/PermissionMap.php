@@ -182,6 +182,7 @@ class PermissionMap
                     'metadata.suggestions.view',
                     'metadata.suggestions.apply',
                     'metadata.suggestions.dismiss',
+                    'assets.retry_thumbnails',
                 ],
                 $ticketPermissions,
                 $downloadPublicLinkPermission
@@ -201,6 +202,7 @@ class PermissionMap
                     'metadata.suggestions.view',
                     'metadata.suggestions.apply',
                     'metadata.suggestions.dismiss',
+                    'assets.retry_thumbnails',
                 ],
                 $ticketPermissions,
                 $downloadPublicLinkPermission
@@ -327,6 +329,7 @@ class PermissionMap
                     'metadata.suggestions.view',
                     'metadata.suggestions.apply',
                     'metadata.suggestions.dismiss',
+                    'assets.retry_thumbnails',
                 ],
                 [
                     'tickets.create',

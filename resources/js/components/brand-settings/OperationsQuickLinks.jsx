@@ -16,20 +16,20 @@ import {
 import { SECTION_INTRO } from './brandSettingsCopy'
 import SettingsSectionIntro from './SettingsSectionIntro'
 
-const LINK_ICON = 'h-5 w-5 text-violet-600 shrink-0'
+const LINK_ICON = 'h-5 w-5 text-[var(--jp-bs-primary)] shrink-0'
 
 function CompanyJumpLink({ href, title, description, icon: Icon }) {
     return (
         <Link
             href={href}
-            className="group flex w-full items-center gap-3 rounded-lg border border-slate-200/90 bg-white px-4 py-3 text-left shadow-sm transition hover:border-violet-200 hover:bg-violet-50/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-2"
+            className="group flex w-full items-center gap-3 rounded-lg border border-slate-200/90 bg-white px-4 py-3 text-left shadow-sm transition hover:border-[var(--jp-bs-soft-border)] hover:bg-[var(--jp-bs-soft-bg)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--jp-bs-ring)] focus-visible:ring-offset-2"
         >
             {Icon && <Icon className={LINK_ICON} aria-hidden />}
             <div className="min-w-0 flex-1">
-                <p className="text-sm font-semibold text-slate-900 group-hover:text-violet-800">{title}</p>
+                <p className="text-sm font-semibold text-slate-900 group-hover:text-[var(--jp-bs-primary)]">{title}</p>
                 <p className="mt-0.5 text-xs text-slate-500 leading-relaxed">{description}</p>
             </div>
-            <span className="shrink-0 self-center text-slate-300 group-hover:text-violet-500" aria-hidden>
+            <span className="shrink-0 self-center text-slate-300 group-hover:text-[var(--jp-bs-primary)]" aria-hidden>
                 <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
                 </svg>
@@ -42,14 +42,14 @@ function OpCard({ href, title, description, icon: Icon }) {
     return (
         <Link
             href={href}
-            className="group flex gap-4 rounded-xl border border-slate-200/80 bg-white p-4 shadow-sm transition hover:border-violet-200 hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-2"
+            className="group flex gap-4 rounded-xl border border-slate-200/80 bg-white p-4 shadow-sm transition hover:border-[var(--jp-bs-soft-border)] hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--jp-bs-ring)] focus-visible:ring-offset-2"
         >
             {Icon && <Icon className={LINK_ICON} aria-hidden />}
             <div className="min-w-0 flex-1">
-                <p className="text-sm font-semibold text-slate-900 group-hover:text-violet-800">{title}</p>
+                <p className="text-sm font-semibold text-slate-900 group-hover:text-[var(--jp-bs-primary)]">{title}</p>
                 <p className="mt-1 text-xs text-slate-500 leading-relaxed">{description}</p>
             </div>
-            <span className="self-center text-slate-300 group-hover:text-violet-500" aria-hidden>
+            <span className="self-center text-slate-300 group-hover:text-[var(--jp-bs-primary)]" aria-hidden>
                 <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
                 </svg>

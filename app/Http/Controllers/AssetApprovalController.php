@@ -375,31 +375,23 @@ class AssetApprovalController extends Controller
                 $policyCheck = $policyService->shouldProceedWithAiTagging($asset);
                 
                 if ($policyCheck['should_proceed']) {
-                    // Check if AI jobs have already run (idempotency)
                     $metadata = $asset->metadata ?? [];
-                    $aiTaggingCompleted = $metadata['ai_tagging_completed'] ?? false;
-                    $aiMetadataCompleted = $metadata['ai_metadata_generation_completed'] ?? false;
-                    
-                    // Only dispatch if not already completed
-                    if (!$aiTaggingCompleted) {
-                        \App\Jobs\AITaggingJob::dispatch($asset->id)->onQueue(config('queue.images_queue', 'images'));
-                    }
-                    
-                    if (! $aiMetadataCompleted) {
-                        // Must run in order: metadata job creates tag candidates; auto-apply reads them; suggestions last.
+                    $visionDone = isset($metadata['_ai_metadata_generated_at']);
+
+                    if (! $visionDone) {
+                        $aiQueue = (string) config('queue.ai_queue', 'ai');
                         Bus::chain([
-                            new \App\Jobs\AiMetadataGenerationJob($asset->id),
-                            new \App\Jobs\AiTagAutoApplyJob($asset->id),
-                            new \App\Jobs\AiMetadataSuggestionJob($asset->id),
+                            (new \App\Jobs\AiMetadataGenerationJob($asset->id))->onQueue($aiQueue),
+                            (new \App\Jobs\AiTagAutoApplyJob($asset->id))->onQueue($aiQueue),
+                            (new \App\Jobs\AiMetadataSuggestionJob($asset->id))->onQueue($aiQueue),
                         ])
-                            ->onQueue(config('queue.images_queue', 'images'))
+                            ->onQueue($aiQueue)
                             ->dispatch();
                     }
-                    
+
                     Log::info('[AssetApprovalController] AI jobs dispatched after approval', [
                         'asset_id' => $asset->id,
-                        'ai_tagging_dispatched' => !$aiTaggingCompleted,
-                        'ai_metadata_dispatched' => !$aiMetadataCompleted,
+                        'ai_vision_dispatched' => ! $visionDone,
                     ]);
                 } else {
                     Log::info('[AssetApprovalController] AI jobs skipped after approval due to policy', [

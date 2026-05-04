@@ -191,6 +191,44 @@ return [
             ],
         ],
 
+        'heic' => [
+            'name' => 'HEIC / HEIF',
+            'description' => 'Apple HEIC/HEIF images (requires Imagick with HEIF delegate)',
+
+            'mime_types' => ['image/heic', 'image/heif'],
+            'extensions' => ['heic', 'heif'],
+
+            'capabilities' => [
+                'thumbnail' => true,
+                'metadata' => true,
+                'preview' => true,
+                'ai_analysis' => true,
+                'download_only' => false,
+            ],
+
+            'handlers' => [
+                'thumbnail' => 'generateHeicThumbnail',
+                'metadata' => 'extractAvifMetadata',
+            ],
+
+            'requirements' => [
+                'php_extensions' => ['imagick'],
+            ],
+
+            'errors' => [
+                'processing_failed' => 'HEIC processing requires Imagick and ImageMagick built with HEIF/libheif support.',
+                'corrupted' => 'Downloaded file is not a valid HEIC/HEIF image.',
+                'invalid_dimensions' => 'HEIC file has invalid dimensions.',
+            ],
+
+            'frontend_hints' => [
+                'can_preview_inline' => true,
+                'preview_component' => 'image',
+                'show_placeholder' => false,
+                'disable_upload_reason' => null,
+            ],
+        ],
+
         'pdf' => [
             'name' => 'PDF',
             'description' => 'PDF documents (first page thumbnail)',

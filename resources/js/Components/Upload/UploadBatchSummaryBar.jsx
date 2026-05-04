@@ -51,6 +51,8 @@ function UploadBatchSummaryBar({
     batchPhase,
     overallPercent,
     compact = false,
+    /** Brand workspace primary — progress fill; avoids indigo/blue competing with tenant accent */
+    brandPrimary = null,
 }) {
     const [detailsOpen, setDetailsOpen] = useState(false)
 
@@ -88,7 +90,7 @@ function UploadBatchSummaryBar({
                     )}
 
                     {!compact && phase && (
-                        <p className="mt-1.5 text-xs font-medium text-indigo-700" aria-live="polite">
+                        <p className="mt-1.5 text-xs font-medium text-gray-800" aria-live="polite">
                             {phase}
                         </p>
                     )}
@@ -99,7 +101,7 @@ function UploadBatchSummaryBar({
                             {(parts.length > 0 || phase) && (
                                 <button
                                     type="button"
-                                    className="text-xs font-medium text-indigo-700 hover:text-indigo-900"
+                                    className="text-xs font-medium text-gray-700 hover:text-gray-900"
                                     onClick={() => setDetailsOpen((o) => !o)}
                                 >
                                     {detailsOpen ? 'Hide details' : 'Details'}
@@ -111,7 +113,7 @@ function UploadBatchSummaryBar({
                     {compact && detailsOpen && (
                         <div className="mt-2 rounded-md border border-gray-100 bg-white/80 px-2 py-1.5 text-xs text-gray-700">
                             {parts.length > 0 && <p>{summaryTitle}</p>}
-                            {phase && <p className="mt-0.5 text-indigo-800">{phase}</p>}
+                            {phase && <p className="mt-0.5 text-gray-800">{phase}</p>}
                         </div>
                     )}
                 </div>
@@ -122,8 +124,11 @@ function UploadBatchSummaryBar({
                     </div>
                     <div className="mt-1 h-2 w-full overflow-hidden rounded-full bg-gray-200">
                         <div
-                            className="h-full rounded-full bg-indigo-600 transition-[width] duration-500 ease-out"
-                            style={{ width: `${displayPct}%` }}
+                            className="h-full rounded-full transition-[width] duration-500 ease-out"
+                            style={{
+                                width: `${displayPct}%`,
+                                backgroundColor: brandPrimary || '#4f46e5',
+                            }}
                         />
                     </div>
                 </div>
@@ -142,6 +147,7 @@ export default memo(UploadBatchSummaryBar, (prev, next) => {
     if (prev.imageCount !== next.imageCount) return false
     if (prev.batchPhase !== next.batchPhase) return false
     if (prev.compact !== next.compact) return false
+    if (prev.brandPrimary !== next.brandPrimary) return false
     if (Math.round(prev.overallPercent) !== Math.round(next.overallPercent)) return false
     const a = JSON.stringify(prev.counts || {})
     const b = JSON.stringify(next.counts || {})

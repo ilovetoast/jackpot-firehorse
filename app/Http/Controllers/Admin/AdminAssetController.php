@@ -698,13 +698,14 @@ class AdminAssetController extends Controller
         unset($metadata['processing_started']);
         unset($metadata['processing_started_at']);
 
-        // Clear old skip reasons for formats now supported (SVG, TIFF, AVIF, PSD)
+        // Clear old skip reasons for formats now supported (SVG, TIFF, AVIF, HEIC, PSD)
         $skipReason = $metadata['thumbnail_skip_reason'] ?? null;
         $mimeType = strtolower($asset->mime_type ?? '');
         $extension = strtolower(pathinfo($asset->original_filename ?? '', PATHINFO_EXTENSION));
         $isNowSupported = $skipReason === 'unsupported_format:tiff' && ($mimeType === 'image/tiff' || $mimeType === 'image/tif' || $extension === 'tiff' || $extension === 'tif') && extension_loaded('imagick')
             || $skipReason === 'unsupported_format:cr2' && ($mimeType === 'image/x-canon-cr2' || $extension === 'cr2') && extension_loaded('imagick')
             || $skipReason === 'unsupported_format:avif' && ($mimeType === 'image/avif' || $extension === 'avif') && extension_loaded('imagick')
+            || $skipReason === 'unsupported_format:heic' && ($mimeType === 'image/heic' || $mimeType === 'image/heif' || $extension === 'heic' || $extension === 'heif') && extension_loaded('imagick')
             || ($skipReason === 'unsupported_format:psd' || $skipReason === 'unsupported_file_type') && ($mimeType === 'image/vnd.adobe.photoshop' || $extension === 'psd' || $extension === 'psb') && extension_loaded('imagick')
             || $skipReason === 'unsupported_format:svg' && ($mimeType === 'image/svg+xml' || $extension === 'svg');
         if ($isNowSupported) {
@@ -1243,7 +1244,14 @@ class AdminAssetController extends Controller
                 \App\Jobs\ExtractMetadataJob::dispatch($asset->id)->onQueue(config('queue.images_queue', 'images'));
                 break;
             case 'rerun_ai_tagging':
-                \App\Jobs\AITaggingJob::dispatch($asset->id)->onQueue(config('queue.images_queue', 'images'));
+                $aiQueue = (string) config('queue.ai_queue', 'ai');
+                Bus::chain([
+                    (new \App\Jobs\AiMetadataGenerationJob($asset->id, true))->onQueue($aiQueue),
+                    (new \App\Jobs\AiTagAutoApplyJob($asset->id))->onQueue($aiQueue),
+                    (new \App\Jobs\AiMetadataSuggestionJob($asset->id))->onQueue($aiQueue),
+                ])
+                    ->onQueue($aiQueue)
+                    ->dispatch();
                 break;
             case 'publish':
                 app(AssetPublicationService::class)->publishFromAdminConsole($asset, Auth::user());

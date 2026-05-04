@@ -42,7 +42,7 @@ use Tests\TestCase;
  * ARCHITECTURAL NOTE:
  * Currently, jobs use two different models for handling thumbnail dependencies:
  * - Option A (Retry): PopulateAutomaticMetadataJob uses release() to retry
- * - Option B (Skip): AITaggingJob skips and marks as skipped
+ * - Option B (Skip): AiMetadataGenerationJob marks skipped after waitForThumbnail fails
  * 
  * Both models are valid. Long-term, consider standardizing on Option A for consistency.
  * See /docs/UPLOAD_AND_QUEUE.md (Pipeline sequencing) for details.
@@ -99,14 +99,10 @@ class PipelineSequencingTest extends TestCase
     }
 
     /**
-     * Test: AITaggingJob does not run when thumbnails are not ready
-     * 
-     * Verifies that AITaggingJob checks thumbnail_status and skips
-     * if thumbnails are not COMPLETED.
+     * {@see AITaggingJob} is a deprecated no-op; thumbnail gating for real tags lives in {@see AiMetadataGenerationJob}.
      */
-    public function test_ai_tagging_job_skips_when_thumbnails_not_ready(): void
+    public function test_legacy_ai_tagging_job_does_not_mutate_metadata_when_thumbnails_pending(): void
     {
-        // Create upload session
         $uploadSession = UploadSession::create([
             'tenant_id' => $this->tenant->id,
             'brand_id' => $this->brand->id,
@@ -117,7 +113,6 @@ class PipelineSequencingTest extends TestCase
             'uploaded_size' => 1024,
         ]);
 
-        // Create asset with thumbnails NOT ready (PENDING)
         $asset = Asset::create([
             'tenant_id' => $this->tenant->id,
             'brand_id' => $this->brand->id,
@@ -131,33 +126,14 @@ class PipelineSequencingTest extends TestCase
             'size_bytes' => 1024,
             'storage_bucket_id' => $this->bucket->id,
             'storage_root_path' => 'assets/test/test-image.jpg',
-            'thumbnail_status' => ThumbnailStatus::PENDING, // Thumbnails NOT ready
+            'thumbnail_status' => ThumbnailStatus::PENDING,
         ]);
 
-        // Run AITaggingJob
-        $job = new AITaggingJob($asset->id);
-        $job->handle();
-
-        // Reload asset to check metadata
+        (new AITaggingJob($asset->id))->handle();
         $asset->refresh();
-
-        // Assert job was skipped (marked as skipped in metadata)
         $metadata = $asset->metadata ?? [];
-        $this->assertTrue(
-            isset($metadata['_ai_tagging_skipped']) && $metadata['_ai_tagging_skipped'] === true,
-            'AITaggingJob should be marked as skipped when thumbnails are not ready'
-        );
-        $this->assertEquals(
-            'thumbnail_unavailable',
-            $metadata['_ai_tagging_skip_reason'] ?? null,
-            'Skip reason should be thumbnail_unavailable'
-        );
-        // AITaggingJob uses the skip model: no vision work ran, but the pipeline step is closed so
-        // downstream completion checks can proceed (see AITaggingJob::markAsSkipped).
-        $this->assertTrue(
-            isset($metadata['ai_tagging_completed']) && $metadata['ai_tagging_completed'] === true,
-            'Skipped AI tagging is still marked completed for pipeline sequencing'
-        );
+        $this->assertArrayNotHasKey('_ai_tagging_skipped', $metadata);
+        $this->assertArrayNotHasKey('ai_tagging_completed', $metadata);
     }
 
     /**
@@ -179,7 +155,7 @@ class PipelineSequencingTest extends TestCase
         // Since release() only works in queue context, we verify the gate by:
         // 1. Code inspection (gate check exists in handle() method)
         // 2. Documenting expected behavior
-        // 3. Verifying similar gate in AITaggingJob (which we can test)
+        // 3. Legacy AITaggingJob is a no-op; gating is tested via AiMetadataGenerationJob in other tests
         
         // Verify the gate check exists in PopulateAutomaticMetadataJob
         $reflection = new \ReflectionClass(PopulateAutomaticMetadataJob::class);
@@ -203,14 +179,10 @@ class PipelineSequencingTest extends TestCase
     }
 
     /**
-     * Test: Image-derived jobs run after thumbnails are marked ready
-     * 
-     * Verifies that when thumbnails are COMPLETED, image-derived jobs
-     * proceed normally.
+     * Thumbnail readiness is required before {@see AiMetadataGenerationJob}; {@see AITaggingJob} no longer flips completion flags.
      */
-    public function test_image_derived_jobs_run_after_thumbnails_ready(): void
+    public function test_legacy_ai_tagging_job_does_not_set_completion_when_thumbnails_ready(): void
     {
-        // Create upload session
         $uploadSession = UploadSession::create([
             'tenant_id' => $this->tenant->id,
             'brand_id' => $this->brand->id,
@@ -221,7 +193,6 @@ class PipelineSequencingTest extends TestCase
             'uploaded_size' => 1024,
         ]);
 
-        // Create asset with thumbnails READY (COMPLETED)
         $asset = Asset::create([
             'tenant_id' => $this->tenant->id,
             'brand_id' => $this->brand->id,
@@ -235,25 +206,12 @@ class PipelineSequencingTest extends TestCase
             'size_bytes' => 1024,
             'storage_bucket_id' => $this->bucket->id,
             'storage_root_path' => 'assets/test/test-image.jpg',
-            'thumbnail_status' => ThumbnailStatus::COMPLETED, // Thumbnails READY
+            'thumbnail_status' => ThumbnailStatus::COMPLETED,
         ]);
 
-        // Run AITaggingJob
-        $job = new AITaggingJob($asset->id);
-        $job->handle();
-
-        // Reload asset to check metadata
+        (new AITaggingJob($asset->id))->handle();
         $asset->refresh();
-
-        // Assert job completed (not skipped)
         $metadata = $asset->metadata ?? [];
-        $this->assertFalse(
-            isset($metadata['_ai_tagging_skipped']) && $metadata['_ai_tagging_skipped'] === true,
-            'AITaggingJob should NOT be skipped when thumbnails are ready'
-        );
-        $this->assertTrue(
-            isset($metadata['ai_tagging_completed']) && $metadata['ai_tagging_completed'] === true,
-            'AI tagging should be marked as completed when thumbnails are ready'
-        );
+        $this->assertArrayNotHasKey('ai_tagging_completed', $metadata);
     }
 }

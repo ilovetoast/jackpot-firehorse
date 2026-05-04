@@ -14,7 +14,7 @@ import BulkActionsModal, { computeSelectionSummary } from '../../Components/Bulk
 import BulkMetadataEditModal from '../../Components/BulkMetadataEditModal'
 import SelectionActionBar from '../../Components/SelectionActionBar'
 import { useSelection } from '../../contexts/SelectionContext'
-import { mergeAsset, warnIfOverwritingCompletedThumbnail } from '../../utils/assetUtils'
+import { mergeAsset, warnIfOverwritingCompletedThumbnail, dedupeAssetsById } from '../../utils/assetUtils'
 import { computeThumbnailPipelineGridSummary } from '../../utils/assetGridPipelineSummary'
 import {
     clearUploadPreviewsOlderThan,
@@ -131,7 +131,9 @@ export default function AssetsIndex({
     const [isAutoClosing, setIsAutoClosing] = useState(false)
     
     // Server-driven pagination: assets list and next page URL (single source of truth)
-    const [assetsList, setAssetsList] = useState(Array.isArray(assets) ? assets.filter(Boolean) : [])
+    const [assetsList, setAssetsList] = useState(() =>
+        dedupeAssetsById(Array.isArray(assets) ? assets.filter(Boolean) : [])
+    )
     const [nextPageUrl, setNextPageUrl] = useState(next_page_url ?? null)
     const [loading, setLoading] = useState(false)
     const loadMoreRef = useRef(null)
@@ -145,7 +147,7 @@ export default function AssetsIndex({
             loadMoreAbortRef.current.abort()
             loadMoreAbortRef.current = null
         }
-        const list = Array.isArray(assets) ? assets.filter(Boolean) : []
+        const list = dedupeAssetsById(Array.isArray(assets) ? assets.filter(Boolean) : [])
         setAssetsList(list)
         setNextPageUrl(next_page_url ?? null)
         if (typeof window !== 'undefined' && window.__assetGridStaleness) {
@@ -171,7 +173,9 @@ export default function AssetsIndex({
             const url = nextPageUrl + separator + 'load_more=1'
             const response = await axios.get(url, { signal: ac.signal })
             const data = response.data?.data ?? []
-            setAssetsList(prev => [...prev, ...(Array.isArray(data) ? data : [])])
+            setAssetsList((prev) =>
+                dedupeAssetsById([...(prev || []).filter(Boolean), ...(Array.isArray(data) ? data : [])])
+            )
             setNextPageUrl(response.data?.next_page_url ?? null)
         } catch (e) {
             if (e.name === 'CanceledError' || e.code === 'ERR_CANCELED') return

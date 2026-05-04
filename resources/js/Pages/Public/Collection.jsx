@@ -22,6 +22,8 @@ import { contrastTextOnPrimary } from '../../utils/contrastTextOnPrimary'
 import { publicShareCinemaLayers } from '../../utils/publicShareCinemaBackground'
 import { saveUrlAsDownload } from '../../utils/singleAssetDownload'
 import { JACKPOT_WORDMARK_INVERTED_SRC } from '../../Components/Brand/LogoMark'
+import { dedupeAssetsById } from '../../utils/assetUtils'
+import { formatBytesHuman } from '../../utils/formatBytesHuman'
 
 /** Show a “may take a while” notice in the ZIP modal above this file count (full collection or selected). */
 const LARGE_PUBLIC_ZIP_WARNING_THRESHOLD = 25
@@ -48,14 +50,6 @@ function startSignedZipDownloadFromIframe(zipUrl) {
             /* ignore */
         }
     }, 15 * 60 * 1000)
-}
-
-function formatBytes(n) {
-    if (n == null || Number.isNaN(Number(n))) return ''
-    const v = Number(n)
-    if (v < 1024) return `${v} B`
-    if (v < 1024 * 1024) return `${(v / 1024).toFixed(1)} KB`
-    return `${(v / (1024 * 1024)).toFixed(1)} MB`
 }
 
 /** Masonry layout icon (matches AssetGridViewOptionsDropdown layout control). */
@@ -114,7 +108,9 @@ export default function PublicCollection({
     /** Index in `assetsList` for Shift-click range select (download checkboxes). */
     const lastBucketAnchorIndexRef = useRef(null)
 
-    const [assetsList, setAssetsList] = useState(() => (Array.isArray(assets) ? assets.filter(Boolean) : []))
+    const [assetsList, setAssetsList] = useState(() =>
+        dedupeAssetsById(Array.isArray(assets) ? assets.filter(Boolean) : [])
+    )
     const [nextPageUrl, setNextPageUrl] = useState(next_page_url ?? null)
     const [loadingMore, setLoadingMore] = useState(false)
     const loadMoreRef = useRef(null)
@@ -130,7 +126,7 @@ export default function PublicCollection({
             loadMoreAbortRef.current.abort()
             loadMoreAbortRef.current = null
         }
-        setAssetsList(Array.isArray(assets) ? assets.filter(Boolean) : [])
+        setAssetsList(dedupeAssetsById(Array.isArray(assets) ? assets.filter(Boolean) : []))
         setNextPageUrl(next_page_url ?? null)
     }, [assets, next_page_url, q, type, sort, view, guestCollectionPath])
 
@@ -150,7 +146,7 @@ export default function PublicCollection({
             const url = `${nextPageUrl}${separator}load_more=1`
             const response = await axios.get(url, { signal: ac.signal })
             const data = response.data?.data ?? []
-            setAssetsList((prev) => [...prev, ...(Array.isArray(data) ? data : [])])
+            setAssetsList((prev) => dedupeAssetsById([...prev, ...(Array.isArray(data) ? data : [])]))
             setNextPageUrl(response.data?.next_page_url ?? null)
         } catch (e) {
             if (e.name === 'CanceledError' || e.code === 'ERR_CANCELED') return
@@ -688,7 +684,7 @@ export default function PublicCollection({
                                             <p className="text-sm font-medium truncate text-white/95">{asset.title || asset.original_filename || 'Untitled'}</p>
                                             <p className="text-xs truncate text-white/45">{asset.mime_type || ''}</p>
                                         </div>
-                                        <span className="hidden sm:block text-xs shrink-0 text-white/35">{formatBytes(asset.size_bytes)}</span>
+                                        <span className="hidden sm:block text-xs shrink-0 text-white/35">{formatBytesHuman(asset.size_bytes)}</span>
                                         {downloadCollectionEnabled && asset.download_url ? (
                                             <button
                                                 type="button"

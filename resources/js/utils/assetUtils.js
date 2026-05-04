@@ -165,3 +165,30 @@ export function warnIfOverwritingCompletedThumbnail(asset, incoming, context = '
         )
     }
 }
+
+/**
+ * Keep the first occurrence of each asset `id`. Prevents duplicate grid tiles when the same id
+ * appears twice (pagination overlap, merged responses, or client state bugs).
+ *
+ * @param {Array<unknown>} assets
+ * @returns {Array<unknown>}
+ */
+export function dedupeAssetsById(assets) {
+    if (!Array.isArray(assets) || assets.length === 0) {
+        return []
+    }
+    const seen = new Set()
+    const out = []
+    for (const a of assets) {
+        if (!a || a.id == null) {
+            continue
+        }
+        const k = String(a.id)
+        if (seen.has(k)) {
+            continue
+        }
+        seen.add(k)
+        out.push(a)
+    }
+    return out
+}

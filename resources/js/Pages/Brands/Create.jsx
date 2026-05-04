@@ -1,7 +1,9 @@
 import { useForm, Link, usePage } from '@inertiajs/react'
+import { useMemo } from 'react'
 import AppNav from '../../Components/AppNav'
 import AppHead from '../../Components/AppHead'
 import AppFooter from '../../Components/AppFooter'
+import { brandSettingsSurfaceVars } from '../../utils/colorUtils'
 
 export default function BrandsCreate() {
     const { auth } = usePage().props
@@ -18,6 +20,8 @@ export default function BrandsCreate() {
         settings: {},
     })
 
+    const accentSurfaceStyle = useMemo(() => brandSettingsSurfaceVars({ primary_color: data.primary_color }), [data.primary_color])
+
     const submit = (e) => {
         e.preventDefault()
         post('/app/brands', {
@@ -26,7 +30,7 @@ export default function BrandsCreate() {
     }
 
     return (
-        <div className="min-h-full">
+        <div className="jp-brand-settings-theme min-h-full" style={accentSurfaceStyle}>
             <AppHead title="Create Brand" />
             <AppNav brand={auth.activeBrand} tenant={null} />
             <main className="bg-gray-50">
@@ -60,7 +64,7 @@ export default function BrandsCreate() {
                                             required
                                             value={data.name}
                                             onChange={(e) => setData('name', e.target.value)}
-                                            className="block w-full rounded-md border-0 py-1.5 px-3 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6"
+                                            className="block w-full rounded-md border-0 py-1.5 px-3 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-[var(--jp-bs-ring)] sm:text-sm sm:leading-6"
                                             placeholder="Acme Corporation"
                                         />
                                         {errors.name && <p className="mt-2 text-sm text-red-600">{errors.name}</p>}
@@ -74,8 +78,8 @@ export default function BrandsCreate() {
                                     <button
                                         type="button"
                                         onClick={() => setData('show_in_selector', !data.show_in_selector)}
-                                        className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:ring-offset-2 ${
-                                            data.show_in_selector ? 'bg-indigo-600' : 'bg-gray-200'
+                                        className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-[var(--jp-bs-ring)] focus:ring-offset-2 ${
+                                            data.show_in_selector ? 'bg-[var(--jp-bs-primary)]' : 'bg-gray-200'
                                         }`}
                                         role="switch"
                                         aria-checked={data.show_in_selector}
@@ -128,7 +132,7 @@ export default function BrandsCreate() {
                                             id="primary_color"
                                             value={data.primary_color}
                                             onChange={(e) => setData('primary_color', e.target.value)}
-                                            className="block w-full rounded-md border-0 py-1.5 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6"
+                                            className="block w-full rounded-md border-0 py-1.5 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-[var(--jp-bs-ring)] sm:text-sm sm:leading-6"
                                             placeholder="#6366f1"
                                             pattern="^#[0-9A-Fa-f]{6}$"
                                         />
@@ -154,7 +158,7 @@ export default function BrandsCreate() {
                                             id="secondary_color"
                                             value={data.secondary_color}
                                             onChange={(e) => setData('secondary_color', e.target.value)}
-                                            className="block w-full rounded-md border-0 py-1.5 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6"
+                                            className="block w-full rounded-md border-0 py-1.5 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-[var(--jp-bs-ring)] sm:text-sm sm:leading-6"
                                             placeholder="#374151"
                                             pattern="^#[0-9A-Fa-f]{6}$"
                                         />
@@ -180,7 +184,7 @@ export default function BrandsCreate() {
                                             id="accent_color"
                                             value={data.accent_color}
                                             onChange={(e) => setData('accent_color', e.target.value)}
-                                            className="block w-full rounded-md border-0 py-1.5 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6"
+                                            className="block w-full rounded-md border-0 py-1.5 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-[var(--jp-bs-ring)] sm:text-sm sm:leading-6"
                                             placeholder="#818cf8"
                                             pattern="^#[0-9A-Fa-f]{6}$"
                                         />
@@ -256,7 +260,7 @@ export default function BrandsCreate() {
                                             id="nav_color"
                                             value={data.nav_color}
                                             onChange={(e) => setData('nav_color', e.target.value)}
-                                            className="block w-full rounded-md border-0 py-1.5 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6"
+                                            className="block w-full rounded-md border-0 py-1.5 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-[var(--jp-bs-ring)] sm:text-sm sm:leading-6"
                                             placeholder={data.primary_color || '#ffffff'}
                                             pattern="^#[0-9A-Fa-f]{6}$"
                                         />
@@ -287,7 +291,7 @@ export default function BrandsCreate() {
                                                 value="none"
                                                 checked={data.logo_filter === 'none'}
                                                 onChange={(e) => setData('logo_filter', e.target.value)}
-                                                className="h-4 w-4 text-indigo-600 focus:ring-indigo-600"
+                                                className="h-4 w-4 text-[var(--jp-bs-primary)] focus:ring-[var(--jp-bs-ring)]"
                                             />
                                             <span className="ml-2 text-sm text-gray-900">None (Original)</span>
                                         </label>
@@ -298,7 +302,7 @@ export default function BrandsCreate() {
                                                 value="white"
                                                 checked={data.logo_filter === 'white'}
                                                 onChange={(e) => setData('logo_filter', e.target.value)}
-                                                className="h-4 w-4 text-indigo-600 focus:ring-indigo-600"
+                                                className="h-4 w-4 text-[var(--jp-bs-primary)] focus:ring-[var(--jp-bs-ring)]"
                                             />
                                             <span className="ml-2 text-sm text-gray-900">White</span>
                                         </label>
@@ -309,7 +313,7 @@ export default function BrandsCreate() {
                                                 value="black"
                                                 checked={data.logo_filter === 'black'}
                                                 onChange={(e) => setData('logo_filter', e.target.value)}
-                                                className="h-4 w-4 text-indigo-600 focus:ring-indigo-600"
+                                                className="h-4 w-4 text-[var(--jp-bs-primary)] focus:ring-[var(--jp-bs-ring)]"
                                             />
                                             <span className="ml-2 text-sm text-gray-900">Black</span>
                                         </label>
@@ -329,7 +333,7 @@ export default function BrandsCreate() {
                                     >
                                         <div className="px-4 py-3 flex items-center justify-between">
                                             <div className="flex items-center">
-                                                <div className="h-8 w-8 rounded-full bg-indigo-600 flex items-center justify-center text-white font-bold text-sm">
+                                                <div className="h-8 w-8 rounded-full bg-[var(--jp-bs-primary)] flex items-center justify-center text-white font-bold text-sm">
                                                     {data.name?.charAt(0).toUpperCase() || 'B'}
                                                 </div>
                                             </div>
@@ -339,7 +343,7 @@ export default function BrandsCreate() {
                                                 }}>
                                                     User Name
                                                 </span>
-                                                <div className="h-8 w-8 rounded-full bg-indigo-600 flex items-center justify-center text-sm font-medium text-white">
+                                                <div className="h-8 w-8 rounded-full bg-[var(--jp-bs-primary)] flex items-center justify-center text-sm font-medium text-white">
                                                     U
                                                 </div>
                                             </div>
@@ -366,7 +370,7 @@ export default function BrandsCreate() {
                         <button
                             type="submit"
                             disabled={processing}
-                            className="rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:opacity-50"
+                            className="rounded-md bg-[var(--jp-bs-primary)] px-3 py-2 text-sm font-semibold text-[var(--jp-bs-primary-contrast)] shadow-sm hover:bg-[var(--jp-bs-primary-hover)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--jp-bs-ring)] disabled:opacity-50"
                         >
                             Create Brand
                         </button>

@@ -127,6 +127,22 @@ class ProcessAssetJob implements ShouldQueue
      *
      * Phase J.2.2: Enforcement guard for AI tagging controls
      */
+    /**
+     * When ProcessAssetJob dispatches no AI chain (policy or upload opt-out), the pipeline still expects
+     * {@see AssetCompletionService} to see ai_tagging_completed.
+     */
+    protected function markAiTaggingCompleteWhenNoAiJobsDispatched(Asset $asset): void
+    {
+        $asset->refresh();
+        $metadata = $asset->metadata ?? [];
+        if (! empty($metadata['ai_tagging_completed'])) {
+            return;
+        }
+        $metadata['ai_tagging_completed'] = true;
+        $metadata['ai_tagging_completed_at'] = now()->toIso8601String();
+        $asset->update(['metadata' => $metadata]);
+    }
+
     protected function getConditionalAiJobs(Asset $asset): array
     {
         // C9.2: Check upload-time AI skip flags (upload-level override)
@@ -548,7 +564,7 @@ class ProcessAssetJob implements ShouldQueue
             //   7.  ComputedMetadataJob            - Phase 5 computed metadata
             //   8.  PopulateAutomaticMetadataJob   - Phase B6/B8 candidates
             //   9.  ResolveMetadataCandidatesJob   - Phase B8 resolve candidates → asset_metadata
-            //   10. AITaggingJob                   - pipeline completion flag for tagging step
+            //   10. (removed) AITaggingJob stub — ai_tagging_completed is set in AiMetadataGenerationJob
             //   11. FinalizeAssetJob               - mark asset as completed
             //   12. PromoteAssetJob                - move temp/ → assets/
             //
@@ -596,8 +612,8 @@ class ProcessAssetJob implements ShouldQueue
                 new ComputedMetadataJob($asset->id), // Phase 5: Computed metadata
                 new PopulateAutomaticMetadataJob($asset->id), // Phase B6/B8: Create metadata candidates
                 new ResolveMetadataCandidatesJob($asset->id), // Phase B8: Resolve candidates to asset_metadata
-                // C9.2: Conditionally add AITaggingJob based on upload-time skip flag
-                ...($this->shouldSkipAiTagging($asset) ? [] : [new AITaggingJob($asset->id)]),
+                // AI tagging completion + tag candidates: {@see AiMetadataGenerationJob} on the `ai` queue (parallel).
+                // Do not use {@see AITaggingJob} here — it only flipped ai_tagging_completed before vision ran.
                 new FinalizeAssetJob($asset->id),
                 new PromoteAssetJob($asset->id),
             ]);
@@ -664,6 +680,9 @@ class ProcessAssetJob implements ShouldQueue
                         'ai_job_count' => count($aiJobsRouted),
                     ]
                 );
+            } else {
+                // Policy/upload skipped all AI jobs — still close the tagging step for AssetCompletionService.
+                $this->markAiTaggingCompleteWhenNoAiJobsDispatched($asset);
             }
 
             $vFresh2 = $version?->fresh();

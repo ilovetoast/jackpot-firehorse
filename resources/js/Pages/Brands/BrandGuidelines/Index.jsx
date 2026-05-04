@@ -18,6 +18,7 @@ import {
     pageThemeToMainStyle,
     isLogoBlockOverridden,
 } from '../../../Components/BrandGuidelines/brandGuidelinesPresentationModel'
+import { brandSettingsSurfaceVars } from '../../../utils/colorUtils'
 
 function unwrapValue(field) {
     if (field && typeof field === 'object' && !Array.isArray(field) && 'value' in field) return field.value
@@ -273,6 +274,8 @@ function BrandGuidelinesIndexInner({
 }) {
     const sidebarCtx = useSidebarEditor()
     const { auth, headlineAppearanceCatalog = [] } = usePage().props
+
+    const brandAccentSurfaceStyle = useMemo(() => brandSettingsSurfaceVars(brand), [brand])
 
     useEffect(() => {
         if (brand?.id && auth?.activeBrand?.id && brand.id !== auth.activeBrand.id) {
@@ -571,9 +574,10 @@ function BrandGuidelinesIndexInner({
 
     return (
         <div
-            className={showCallout ? 'h-screen overflow-hidden flex flex-col bg-[#0B0B0D]' : `min-h-full ${!usePageThemeLayer ? 'bg-white' : ''}`}
+            className={showCallout ? 'jp-brand-settings-theme h-screen overflow-hidden flex flex-col bg-[#0B0B0D]' : `jp-brand-settings-theme min-h-full ${!usePageThemeLayer ? 'bg-white' : ''}`}
             data-gl-spacing={globalSpacing}
             data-gl-corners={globalCorners}
+            style={brandAccentSurfaceStyle}
         >
             {usePageThemeLayer && (
                 <>
@@ -664,8 +668,8 @@ function BrandGuidelinesIndexInner({
                 </>
             )}
             {showProcessingBanner && (
-                <div className="bg-indigo-50 border-b border-indigo-100 px-4 py-3 flex items-center justify-between gap-4">
-                    <p className="text-sm text-indigo-800">
+                <div className="bg-[var(--jp-bs-soft-bg)] border-b border-[var(--jp-bs-soft-border)] px-4 py-3 flex items-center justify-between gap-4">
+                    <p className="text-sm text-[var(--jp-bs-primary)]">
                         {builderProcessing ? (
                             <>Brand research for <strong>{brand.name}</strong> is still processing in the background. We&apos;ll notify you when it&apos;s ready.</>
                         ) : (
@@ -677,12 +681,12 @@ function BrandGuidelinesIndexInner({
                             <button
                                 type="button"
                                 onClick={() => router.get(resumeUrl || route('brands.brand-guidelines.builder', { brand: brand.id, step: 'research-summary' }))}
-                                className="inline-flex rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700"
+                                className="inline-flex rounded-md bg-[var(--jp-bs-primary)] px-3 py-1.5 text-sm font-medium text-[var(--jp-bs-primary-contrast)] hover:bg-[var(--jp-bs-primary-active)]"
                             >
                                 Review Research
                             </button>
                         )}
-                        <button type="button" onClick={dismissBanner} className="p-1.5 rounded text-indigo-600 hover:bg-indigo-100" aria-label="Dismiss">
+                        <button type="button" onClick={dismissBanner} className="p-1.5 rounded text-[var(--jp-bs-primary)] hover:bg-[var(--jp-bs-soft-bg-strong)]" aria-label="Dismiss">
                             <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" /></svg>
                         </button>
                     </div>
@@ -1549,9 +1553,9 @@ function BrandGuidelinesIndexInner({
                             }
                             const blockIsCustom = (id) => isLogoBlockOverridden(sidebarCtx?.draftOverrides?.sections, 'sec-logo', id)
                             const editRing = (id) => {
-                                const sel = isSel(id) ? 'ring-2 ring-violet-500 ring-offset-2' : ''
+                                const sel = isSel(id) ? 'ring-2 ring-[var(--jp-bs-ring)] ring-offset-2' : ''
                                 const ovr = canCustomize && sidebarCtx?.isEditing && !isSel(id) && blockIsCustom(id) ? 'ring-1 ring-amber-200/60' : ''
-                                const hov = canCustomize && sidebarCtx?.isEditing ? 'cursor-pointer transition hover:ring-1 hover:ring-violet-300' : ''
+                                const hov = canCustomize && sidebarCtx?.isEditing ? 'cursor-pointer transition hover:ring-1 hover:ring-[var(--jp-bs-soft-border)]' : ''
                                 return `${sel} ${ovr} ${hov}`.trim()
                             }
                             const renderBlockLabel = (blockId, defaultText, positionClasses, defaultColorClass, textSizeClass = 'text-[10px]') => {

@@ -7,6 +7,7 @@ import {
     XMarkIcon,
     ChevronRightIcon,
 } from '@heroicons/react/24/outline'
+import { formatBytesHuman } from '../../../utils/formatBytesHuman'
 
 export default function UploadFailuresIndex({ auth, uploads, stats, filters }) {
     const [drawerOpen, setDrawerOpen] = useState(false)
@@ -37,13 +38,6 @@ export default function UploadFailuresIndex({ auth, uploads, stats, filters }) {
             [key]: value,
             page: 1,
         })
-    }
-
-    const formatBytes = (bytes) => {
-        if (bytes == null) return '—'
-        if (bytes < 1024) return `${bytes} B`
-        if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-        return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
     }
 
     const formatDate = (iso) => {
@@ -264,11 +258,11 @@ export default function UploadFailuresIndex({ auth, uploads, stats, filters }) {
                                         </div>
                                         <div>
                                             <p className="text-xs font-medium text-gray-500 uppercase">Bytes uploaded</p>
-                                            <p className="text-sm text-gray-900">{formatBytes(drawerData.bytes_uploaded)}</p>
+                                            <p className="text-sm text-gray-900">{formatBytesHuman(drawerData.bytes_uploaded)}</p>
                                         </div>
                                         <div>
                                             <p className="text-xs font-medium text-gray-500 uppercase">Expected size</p>
-                                            <p className="text-sm text-gray-900">{formatBytes(drawerData.expected_size)}</p>
+                                            <p className="text-sm text-gray-900">{formatBytesHuman(drawerData.expected_size)}</p>
                                         </div>
                                     </div>
                                     {drawerData.failure_trace && (

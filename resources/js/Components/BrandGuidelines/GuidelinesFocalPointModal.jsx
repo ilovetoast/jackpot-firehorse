@@ -180,7 +180,7 @@ export default function GuidelinesFocalPointModal({
     }, [assetId, brandId, onSaved, onClose, saveMode])
 
     return (
-        <Dialog open={open} onClose={saving ? () => {} : onClose} className="relative z-[80]">
+        <Dialog open={open} onClose={saving ? () => {} : onClose} className="relative z-[10070] isolate">
             <div className="fixed inset-0 bg-black/70" aria-hidden="true" />
             <div className="fixed inset-0 flex items-center justify-center p-4">
                 <DialogPanel className="w-full max-w-lg rounded-2xl bg-[#111] border border-white/10 shadow-2xl p-5 text-white">

@@ -108,7 +108,7 @@ class ComputedMetadataService
         $fileType = $fileTypeService->detectFileTypeFromAsset($asset);
         
         // Check if it's an image type (image, tiff, avif)
-        return in_array($fileType, ['image', 'tiff', 'cr2', 'avif']);
+        return in_array($fileType, ['image', 'tiff', 'cr2', 'avif', 'heic']);
     }
 
     /**

@@ -17,6 +17,7 @@
  */
 
 import { useState, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { XMarkIcon } from '@heroicons/react/24/outline'
 import ConfirmDialog from './ConfirmDialog'
 
@@ -398,16 +399,27 @@ export default function TagListUnified({
                 </div>
             )}
 
-            <ConfirmDialog
-                open={confirmRemove.open}
-                onClose={() => setConfirmRemove({ open: false, tagId: null, tagName: null })}
-                onConfirm={() => confirmRemove.tagId != null && removeTag(confirmRemove.tagId, confirmRemove.tagName)}
-                title="Remove tag"
-                message={confirmRemove.tagName ? `Are you sure you want to remove the tag "${confirmRemove.tagName}"?` : ''}
-                confirmText="Remove"
-                cancelText="Cancel"
-                variant="warning"
-            />
+            {typeof document !== 'undefined' &&
+                createPortal(
+                    <ConfirmDialog
+                        open={confirmRemove.open}
+                        onClose={() => setConfirmRemove({ open: false, tagId: null, tagName: null })}
+                        onConfirm={() =>
+                            confirmRemove.tagId != null && removeTag(confirmRemove.tagId, confirmRemove.tagName)
+                        }
+                        title="Remove tag"
+                        message={
+                            confirmRemove.tagName
+                                ? `Are you sure you want to remove the tag "${confirmRemove.tagName}"?`
+                                : ''
+                        }
+                        confirmText="Remove"
+                        cancelText="Cancel"
+                        variant="warning"
+                        zIndexClass="z-[10070]"
+                    />,
+                    document.body,
+                )}
 
             {/* Show hidden count if there are more tags (only in standard view) */}
             {!detailed && hiddenCount > 0 && (

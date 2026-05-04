@@ -9,7 +9,7 @@ use App\Enums\ThumbnailStatus;
 use App\Enums\UploadStatus;
 use App\Enums\UploadType;
 use App\Events\AssetUploaded;
-use App\Jobs\AITaggingJob;
+use App\Jobs\AiMetadataGenerationJob;
 use App\Jobs\ProcessAssetJob;
 use App\Models\Asset;
 use App\Models\Brand;
@@ -33,11 +33,11 @@ use Tests\TestCase;
  * Pipeline flow:
  * 1. UploadCompletionService completes upload → emits AssetUploaded event
  * 2. ProcessAssetOnUpload listener → dispatches ProcessAssetJob
- * 3. ProcessAssetJob → chains AITaggingJob and other processing jobs
+ * 3. ProcessAssetJob → images chain + conditional AI jobs (e.g. AiMetadataGenerationJob on the ai queue)
  * 
  * Test asserts ONE of:
  * - ProcessAssetJob is dispatched (event → listener → job)
- * - AITaggingJob is part of the chain
+ * - AI metadata generation job class exists (structural)
  * - Pipeline metadata flag is set
  * 
  * Do NOT:
@@ -148,14 +148,11 @@ class ProcessingPipelineHealthTest extends TestCase
     }
 
     /**
-     * Test: ProcessAssetJob includes AITaggingJob in chain
-     * 
-     * This test verifies that AITaggingJob is part of the processing chain.
-     * We test this by running ProcessAssetJob and checking metadata flags.
+     * Structural check: real vision/tag candidates come from {@see AiMetadataGenerationJob}, not the legacy AITaggingJob stub.
      */
-    public function test_process_asset_job_includes_ai_tagging_in_chain(): void
+    public function test_ai_metadata_generation_job_exists_for_pipeline_health(): void
     {
-        // Create an asset with completed thumbnails (required for AI tagging)
+        // Create an asset with completed thumbnails (typical precondition for AI metadata)
         $uploadSession = UploadSession::create([
             'tenant_id' => $this->tenant->id,
             'brand_id' => $this->brand->id,
@@ -182,18 +179,12 @@ class ProcessingPipelineHealthTest extends TestCase
             'thumbnail_status' => ThumbnailStatus::COMPLETED, // Required for AI tagging
         ]);
 
-        // Run ProcessAssetJob directly (simulating the chain)
-        // Note: We can't easily test the full Bus::chain() in a unit test,
-        // but we can verify the job structure includes AITaggingJob
         $job = new ProcessAssetJob($asset->id);
-        
-        // Verify job can be instantiated
         $this->assertEquals($asset->id, $job->assetId, 'ProcessAssetJob should accept asset ID');
-        
-        // Verify AITaggingJob class exists (structural check)
+
         $this->assertTrue(
-            class_exists(AITaggingJob::class),
-            'AITaggingJob class must exist for pipeline health'
+            class_exists(AiMetadataGenerationJob::class),
+            'AiMetadataGenerationJob class must exist for pipeline health'
         );
     }
 

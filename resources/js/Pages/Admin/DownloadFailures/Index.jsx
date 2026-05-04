@@ -8,6 +8,7 @@ import {
     XMarkIcon,
     ChevronRightIcon,
 } from '@heroicons/react/24/outline'
+import { formatBytesHuman } from '../../../utils/formatBytesHuman'
 
 export default function DownloadFailuresIndex({ auth, downloads, stats, filters }) {
     const [drawerOpen, setDrawerOpen] = useState(false)
@@ -38,13 +39,6 @@ export default function DownloadFailuresIndex({ auth, downloads, stats, filters 
             [key]: value,
             page: 1,
         })
-    }
-
-    const formatBytes = (bytes) => {
-        if (bytes == null) return '—'
-        if (bytes < 1024) return `${bytes} B`
-        if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-        return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
     }
 
     const formatDate = (iso) => {
@@ -164,7 +158,7 @@ export default function DownloadFailuresIndex({ auth, downloads, stats, filters 
                                                     <td className="px-4 py-3 text-sm font-mono text-gray-900">{d.id.slice(0, 8)}…</td>
                                                     <td className="px-4 py-3 text-sm text-gray-700">{d.tenant?.name ?? '—'}</td>
                                                     <td className="px-4 py-3 text-sm text-gray-700">{d.asset_count ?? '—'}</td>
-                                                    <td className="px-4 py-3 text-sm text-gray-700">{formatBytes(d.total_bytes)}</td>
+                                                    <td className="px-4 py-3 text-sm text-gray-700">{formatBytesHuman(d.total_bytes)}</td>
                                                     <td className="px-4 py-3 text-sm text-gray-700">{d.failure_reason ?? '—'}</td>
                                                     <td className="px-4 py-3 text-sm text-gray-700">{d.failure_count ?? 0}</td>
                                                     <td className="px-4 py-3">
@@ -254,7 +248,7 @@ export default function DownloadFailuresIndex({ auth, downloads, stats, filters 
                                         </div>
                                         <div>
                                             <p className="text-xs font-medium text-gray-500 uppercase">Total bytes</p>
-                                            <p className="text-sm text-gray-900">{formatBytes(drawerData.total_bytes)}</p>
+                                            <p className="text-sm text-gray-900">{formatBytesHuman(drawerData.total_bytes)}</p>
                                         </div>
                                         <div>
                                             <p className="text-xs font-medium text-gray-500 uppercase">Failure reason</p>

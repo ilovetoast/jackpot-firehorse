@@ -28,14 +28,15 @@ class ThumbnailRetryService
      *
      * Validates:
      * - File type is supported for thumbnail generation
-     * - Retry limit has not been exceeded
+     * - Manual retry limit has not been exceeded (unless $enforceManualRetryLimit is false)
      * - Asset is not currently processing
      * - Asset has storage path and bucket
      *
-     * @param Asset $asset
+     * @param  bool  $enforceManualRetryLimit  When false, skips the configured manual retry cap so
+     *                                         system dispatches (user id 0) do not consume the user's manual quota.
      * @return array{allowed: bool, reason?: string}
      */
-    public function canRetry(Asset $asset): array
+    public function canRetry(Asset $asset, bool $enforceManualRetryLimit = true): array
     {
         // Check if file type is supported
         if (!$this->isFileTypeSupported($asset)) {
@@ -45,13 +46,14 @@ class ThumbnailRetryService
             ];
         }
 
-        // Check if retry limit has been exceeded
-        $maxRetries = config('assets.thumbnail.max_retries', 3);
-        if ($asset->thumbnail_retry_count >= $maxRetries) {
-            return [
-                'allowed' => false,
-                'reason' => "Maximum retry attempts ({$maxRetries}) exceeded for this asset",
-            ];
+        if ($enforceManualRetryLimit) {
+            $maxRetries = config('assets.thumbnail.max_retries', 3);
+            if ($asset->thumbnail_retry_count >= $maxRetries) {
+                return [
+                    'allowed' => false,
+                    'reason' => "Maximum retry attempts ({$maxRetries}) exceeded for this asset",
+                ];
+            }
         }
 
         // Check if asset is already processing
@@ -184,8 +186,10 @@ class ThumbnailRetryService
      */
     public function dispatchRetry(Asset $asset, int $userId): array
     {
-        // Validate retry eligibility
-        $canRetry = $this->canRetry($asset);
+        $countsTowardManualLimit = $userId > 0;
+
+        // Validate retry eligibility (system dispatches skip manual attempt cap)
+        $canRetry = $this->canRetry($asset, $countsTowardManualLimit);
         if (!$canRetry['allowed']) {
             Log::warning('[ThumbnailRetryService] Retry not allowed', [
                 'asset_id' => $asset->id,
@@ -216,8 +220,13 @@ class ThumbnailRetryService
                 ($mimeType === 'image/tiff' || $mimeType === 'image/tif' || $extension === 'tiff' || $extension === 'tif') &&
                 extension_loaded('imagick')) {
                 $isNowSupported = true;
-            } elseif ($skipReason === 'unsupported_format:avif' && 
+            } elseif ($skipReason === 'unsupported_format:avif' &&
                       ($mimeType === 'image/avif' || $extension === 'avif') &&
+                      extension_loaded('imagick')) {
+                $isNowSupported = true;
+            } elseif ($skipReason === 'unsupported_format:heic' &&
+                      ($mimeType === 'image/heic' || $mimeType === 'image/heif' ||
+                          $extension === 'heic' || $extension === 'heif') &&
                       extension_loaded('imagick')) {
                 $isNowSupported = true;
             } elseif ($skipReason === 'unsupported_format:cr2' &&
@@ -241,24 +250,26 @@ class ThumbnailRetryService
             }
         }
         
+        $previousStatus = $asset->thumbnail_status?->value ?? 'unknown';
         $retries = $metadata['thumbnail_retries'] ?? [];
         $retries[] = [
             'attempted_at' => now()->toIso8601String(),
             'triggered_by_user_id' => $userId,
-            'previous_status' => $asset->thumbnail_status?->value ?? 'unknown',
-            'retry_number' => $asset->thumbnail_retry_count + 1,
+            'previous_status' => $previousStatus,
+            'retry_number' => $countsTowardManualLimit ? ($asset->thumbnail_retry_count + 1) : null,
+            'system_dispatch' => ! $countsTowardManualLimit,
         ];
         $metadata['thumbnail_retries'] = $retries;
 
-        // Update retry count and metadata
-        // IMPORTANT: We do NOT mutate Asset.status here - status represents visibility only
-        // However, if asset was SKIPPED, reset thumbnail_status to PENDING to allow processing
+        // Manual UI retries increment thumbnail_retry_count; system nudges (user id 0) do not.
         $updateData = [
-            'thumbnail_retry_count' => $asset->thumbnail_retry_count + 1,
-            'thumbnail_last_retry_at' => now(),
             'metadata' => $metadata,
         ];
-        
+        if ($countsTowardManualLimit) {
+            $updateData['thumbnail_retry_count'] = $asset->thumbnail_retry_count + 1;
+            $updateData['thumbnail_last_retry_at'] = now();
+        }
+
         // Reset SKIPPED or FAILED status to PENDING to allow regeneration
         if ($asset->thumbnail_status === ThumbnailStatus::SKIPPED || $asset->thumbnail_status === ThumbnailStatus::FAILED) {
             $updateData['thumbnail_status'] = ThumbnailStatus::PENDING;
@@ -266,26 +277,22 @@ class ThumbnailRetryService
             unset($metadata['thumbnail_timeout'], $metadata['thumbnail_timeout_at'], $metadata['thumbnail_timeout_reason']);
             $updateData['metadata'] = $metadata;
         }
-        
+
+        $jobRetryNumber = $countsTowardManualLimit ? ($asset->thumbnail_retry_count + 1) : 0;
+
         $asset->update($updateData);
 
-        // Dispatch RetryThumbnailGenerationJob which wraps GenerateThumbnailsJob
-        // This respects the locked pipeline by not modifying GenerateThumbnailsJob
-        $retryNumber = $asset->thumbnail_retry_count + 1;
-        RetryThumbnailGenerationJob::dispatch($asset->id, $userId, $retryNumber)->onQueue(config('queue.images_queue', 'images'));
+        RetryThumbnailGenerationJob::dispatch($asset->id, $userId, $jobRetryNumber)->onQueue(config('queue.images_queue', 'images'));
 
-        // Note: Job ID is not available immediately after dispatch
-        // The job ID will be available inside the job execution via $this->job->getJobId()
-        // For now, we'll track retries without the job ID in metadata
-        $asset->update(['metadata' => $metadata]);
+        $asset->refresh();
 
-        // Log retry attempt for audit trail
         Log::info('[ThumbnailRetryService] Thumbnail retry dispatched', [
             'asset_id' => $asset->id,
             'user_id' => $userId,
             'retry_count' => $asset->thumbnail_retry_count,
-            'previous_status' => $asset->thumbnail_status?->value ?? 'unknown',
-            'retry_number' => $retryNumber,
+            'previous_status' => $previousStatus,
+            'retry_number' => $jobRetryNumber,
+            'counts_toward_manual_limit' => $countsTowardManualLimit,
         ]);
 
         return [

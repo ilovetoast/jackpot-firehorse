@@ -7,13 +7,11 @@
 import { useForm } from '@inertiajs/react'
 import { usePage } from '@inertiajs/react'
 import { useCdn403Recovery } from '../../hooks/useCdn403Recovery'
+import { formatBytesHuman } from '../../utils/formatBytesHuman'
 
 function formatBytes(bytes) {
   if (bytes == null || bytes === 0) return null
-  const k = 1024
-  const sizes = ['B', 'KB', 'MB', 'GB']
-  const i = Math.floor(Math.log(bytes) / Math.log(k))
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i]
+  return formatBytesHuman(bytes)
 }
 
 function formatExpiration(iso) {

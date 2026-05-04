@@ -44,7 +44,6 @@ function isAiOrSceneField(field) {
     if (
         k.includes('environment_type') ||
         k.includes('subject_type') ||
-        k.includes('scene_classification') ||
         k.includes('caption') ||
         k.includes('detected_objects') ||
         k.includes('color_palette') ||
@@ -53,7 +52,7 @@ function isAiOrSceneField(field) {
         return true
     }
     if (/\bai\b/.test(label) && label.length < 80) return true
-    if (label.includes('scene')) return true
+    if (label.includes('scene classification')) return true
     return false
 }
 

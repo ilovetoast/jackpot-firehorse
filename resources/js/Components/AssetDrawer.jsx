@@ -54,6 +54,7 @@ import AssetEmbeddedMetadataPanel from './AssetEmbeddedMetadataPanel'
 import PendingMetadataList from './PendingMetadataList'
 import ManageAssetModal from './ManageAssetModal'
 import ThumbnailPreview from './ThumbnailPreview'
+import LightboxRasterImage from './LightboxRasterImage'
 import {
     getUploadPreviewSnapshotForAsset,
     subscribeUploadPreviewRegistry,
@@ -1860,7 +1861,7 @@ export default function AssetDrawer({
     // Extract file extension
     // Use displayAsset (with live updates) instead of prop asset
     const fileExtension = displayAsset.file_extension || displayAsset.original_filename?.split('.').pop()?.toUpperCase() || 'FILE'
-    const isImage = displayAsset.mime_type?.startsWith('image/') || ['JPG', 'JPEG', 'PNG', 'GIF', 'WEBP', 'SVG', 'BMP', 'TIF', 'TIFF'].includes(fileExtension.toUpperCase())
+    const isImage = displayAsset.mime_type?.startsWith('image/') || ['JPG', 'JPEG', 'PNG', 'GIF', 'WEBP', 'SVG', 'BMP', 'TIF', 'TIFF', 'HEIC', 'HEIF', 'AVIF', 'CR2'].includes(fileExtension.toUpperCase())
     
     // Assets that support thumbnail preview (images, PDFs, PSDs, EPS, AI)
     const hasThumbnailSupport = isImage || 
@@ -1924,14 +1925,8 @@ export default function AssetDrawer({
         displayEnhancedMeta.skip_reason === ENHANCED_SKIP_REASON_TOO_SMALL
 
     const isExecutionDrawer = selectionAssetType === 'execution'
-    /** Deliverables / executions: show full art (crop marks, etc.) without cropping the preview pane. */
-    const drawerPreviewForceObjectFit = useMemo(() => {
-        const slug = String(displayAsset?.category?.slug || '').toLowerCase()
-        if (isExecutionDrawer || slug === 'executions') {
-            return 'contain'
-        }
-        return null
-    }, [displayAsset?.category?.slug, isExecutionDrawer])
+    /** Quick view drawer: letterbox previews (`object-contain`) so the full asset is visible in the pane. */
+    const drawerPreviewForceObjectFit = 'contain'
 
     const showExecutionPreviewChrome =
         isExecutionDrawer &&
@@ -3159,6 +3154,33 @@ export default function AssetDrawer({
         thumbnailsFailed,
     ])
 
+    /** In-preview strip when the library cannot show a raster (mirrors lightbox guidance). */
+    const drawerPreviewUnavailableBanner = useMemo(() => {
+        if (!displayAsset?.id || isVirtualGoogleFont || isVideo) return null
+        if (!hasThumbnailSupport) return null
+        const st = getThumbnailState(displayAsset, thumbnailRetryCount)
+        if (st.state === 'PENDING' || st.state === 'AVAILABLE') return null
+        if (st.state === 'NOT_SUPPORTED') {
+            return "Preview isn't available for this file in the browser. You can still use the details below or download the original."
+        }
+        if (st.state === 'FAILED') {
+            return previewMissingDetailText
+                ? String(previewMissingDetailText)
+                : "We couldn't generate a preview for this file. Try Processing & automation to retry thumbnails, or download the original."
+        }
+        if (st.state === 'SKIPPED') {
+            return 'Thumbnail generation was skipped for this asset. Download the original to view the file.'
+        }
+        return null
+    }, [
+        displayAsset,
+        thumbnailRetryCount,
+        hasThumbnailSupport,
+        isVideo,
+        isVirtualGoogleFont,
+        previewMissingDetailText,
+    ])
+
     // Preview & Styles and Processing & Automation stay collapsed by default (status remains visible in section headers).
 
     // Handle manual thumbnail generation (for previously skipped assets)
@@ -4068,13 +4090,13 @@ export default function AssetDrawer({
                                         setVideoPreviewLoaded(false)
                                     }}
                                 >
-                                    {/* Hover clip: short MP4 fills preview frame (object-cover); poster unchanged */}
+                                    {/* Hover clip: short MP4 letterboxed to match drawer preview (object-contain); poster unchanged */}
                                     {isHoveringVideo && displayAsset.video_preview_url && !isMobile && !videoPreviewFailed && (
                                         <div className="absolute inset-0 z-10 overflow-hidden bg-black">
                                             <video
                                                 ref={videoPreviewRef}
                                                 src={displayAsset.video_preview_url}
-                                                className="absolute inset-0 h-full w-full object-cover"
+                                                className="absolute inset-0 h-full w-full object-contain"
                                                 autoPlay
                                                 muted
                                                 loop
@@ -4104,7 +4126,7 @@ export default function AssetDrawer({
                                         thumbnailVersion={thumbnailVersion}
                                         liveThumbnailUpdates
                                         shouldAnimateThumbnail={shouldAnimateThumbnail}
-                                        forceObjectFit={drawerPreviewForceObjectFit || 'cover'}
+                                        forceObjectFit={drawerPreviewForceObjectFit}
                                         forcedImageUrl={drawerForcedPreviewUrl}
                                         forcedImageSpinnerOverlay={drawerForcedModeSpinnerOverlay}
                                         ephemeralLocalPreviewUrl={drawerEphemeralLocalPreviewUrl}
@@ -4288,10 +4310,11 @@ export default function AssetDrawer({
                                             liveThumbnailUpdates
                                             shouldAnimateThumbnail={shouldAnimateThumbnail}
                                             preferLargeForVector
-                                            forceObjectFit={drawerPreviewForceObjectFit || undefined}
+                                            forceObjectFit={drawerPreviewForceObjectFit}
                                             forcedImageUrl={drawerForcedPreviewUrl}
                                             forcedImageSpinnerOverlay={drawerForcedModeSpinnerOverlay}
                                             ephemeralLocalPreviewUrl={drawerEphemeralLocalPreviewUrl}
+                                            gifPlaybackControl
                                         />
                                     )}
                                     {/* Zoom overlay (only shown when thumbnail is available) */}
@@ -4326,6 +4349,11 @@ export default function AssetDrawer({
                                 />
                             )}
                         </div>
+                        {drawerPreviewUnavailableBanner ? (
+                            <div className="pointer-events-none absolute bottom-0 left-0 right-0 z-[25] border-t border-gray-200/90 bg-white/95 px-3 py-2 backdrop-blur-[2px]">
+                                <p className="text-[11px] leading-snug text-gray-600">{drawerPreviewUnavailableBanner}</p>
+                            </div>
+                        ) : null}
                     </div>
 
                     {displayAsset?.id &&
@@ -7015,21 +7043,13 @@ export default function AssetDrawer({
                                     return <LightboxPreviewPlaceholder asset={currentCarouselAsset} />
                                 }
                                 return (
-                                    <img
-                                        key={`${currentCarouselAsset.id}-original-${trimmedUrl.slice(0, 96)}`}
-                                        src={trimmedUrl}
+                                    <LightboxRasterImage
+                                        asset={currentCarouselAsset}
+                                        posterUrl={trimmedUrl}
+                                        transitionDirection={transitionDirection}
                                         alt={currentCarouselAsset.title || currentCarouselAsset.original_filename || 'Asset preview'}
-                                        className="h-auto w-auto max-h-full max-w-full object-contain transition-all duration-300 ease-in-out"
-                                        style={{
-                                            transform: transitionDirection === 'left'
-                                                ? 'translateX(30px)'
-                                                : transitionDirection === 'right'
-                                                  ? 'translateX(-30px)'
-                                                  : 'translateX(0)',
-                                            opacity: transitionDirection ? 0 : 1,
-                                        }}
-                                        onLoad={() => setLightboxImageError(false)}
-                                        onError={() => setLightboxImageError(true)}
+                                        onImageLoad={() => setLightboxImageError(false)}
+                                        onImageError={() => setLightboxImageError(true)}
                                     />
                                 )
                             }

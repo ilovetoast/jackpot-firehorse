@@ -217,6 +217,28 @@ export function hexToRgba(hexColor, alpha = 1) {
 }
 
 /**
+ * CSS variables for Brand Settings and related surfaces (Edit, Guidelines, DNA bootstrap, brand list).
+ * Set on a wrapper `style={brandSettingsSurfaceVars(brand)}` and use Tailwind arbitrary values such as
+ * `bg-[var(--jp-bs-primary)]`, `text-[var(--jp-bs-primary)]`, `focus:ring-[var(--jp-bs-ring)]`.
+ *
+ * @param {Object|null|undefined} brand — expects `primary_color`; falls back to indigo when missing
+ * @returns {Record<string, string>}
+ */
+export function brandSettingsSurfaceVars(brand) {
+    const primary = normalizeHexColor(brand?.primary_color)
+    return {
+        '--jp-bs-primary': primary,
+        '--jp-bs-primary-hover': darkenColor(primary, 16),
+        '--jp-bs-primary-active': darkenColor(primary, 28),
+        '--jp-bs-primary-contrast': getContrastTextColor(primary),
+        '--jp-bs-soft-bg': hexToRgba(primary, 0.09),
+        '--jp-bs-soft-bg-strong': hexToRgba(primary, 0.14),
+        '--jp-bs-soft-border': hexToRgba(primary, 0.28),
+        '--jp-bs-ring': primary,
+    }
+}
+
+/**
  * Darken a hex color by subtracting from each RGB channel.
  * Matches the Add Execution / Add Asset button hover behavior.
  * @param {string} hexColor - Hex color (e.g. "#6366f1")

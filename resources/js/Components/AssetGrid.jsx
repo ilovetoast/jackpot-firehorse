@@ -41,6 +41,7 @@ import {
     prunePendingFinalizeVisibleInAssetList,
     subscribeUploadPreviewRegistry,
 } from '../utils/uploadPreviewRegistry'
+import { dedupeAssetsById } from '../utils/assetUtils'
 
 const MARQUEE_DRAG_THRESHOLD_PX = 5
 /** Matches Tailwind `gap-7` (1.75rem) for column width math */
@@ -101,7 +102,10 @@ export default function AssetGrid({
     /** Public share: title + file ext on one row like main asset grid (no pill on thumb) */
     splitTitleFooter = false,
 }) {
-    const safeAssets = (assets || []).filter(Boolean)
+    const safeAssets = useMemo(
+        () => dedupeAssetsById((assets || []).filter(Boolean)),
+        [assets]
+    )
     const selection = useSelectionOptional()
 
     const pendingFinalizeSnapshot = useSyncExternalStore(
@@ -142,7 +146,7 @@ export default function AssetGrid({
                         const eAid = e?.assetId != null ? normalizeAssetId(e.assetId) : null
                         return e && !eAid && pendingUploadIdentityKey(e.filename) === fk
                     })
-                    if (matchingAssets.length === 1 && pendingPeers.length === 1 && pendingPeers[0] === cid) {
+                    if (matchingAssets.length >= 1 && pendingPeers.length === 1 && pendingPeers[0] === cid) {
                         return false
                     }
                 }

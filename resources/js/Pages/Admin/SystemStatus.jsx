@@ -196,6 +196,30 @@ export default function AdminSystemStatus({ systemHealth, recentFailedJobs, asse
                                                 {systemHealth?.queue?.failed_count ?? 0}
                                             </span>
                                         </div>
+                                        {systemHealth?.queue?.queue_driver === 'database' &&
+                                            Array.isArray(systemHealth?.queue?.pending_by_queue) &&
+                                            systemHealth.queue.pending_by_queue.length > 0 && (
+                                            <div className="mt-2 rounded-md border border-slate-100 bg-slate-50 px-2 py-2">
+                                                <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                                                    Pending by queue
+                                                </p>
+                                                <ul className="space-y-1">
+                                                    {systemHealth.queue.pending_by_queue.map((row) => (
+                                                        <li key={row.queue} className="flex justify-between text-xs tabular-nums">
+                                                            <span className="truncate pr-2 font-mono text-slate-700" title={row.queue}>
+                                                                {row.queue}
+                                                            </span>
+                                                            <span className="shrink-0 font-medium text-slate-900">{row.count}</span>
+                                                        </li>
+                                                    ))}
+                                                </ul>
+                                            </div>
+                                        )}
+                                        {systemHealth?.queue?.queue_driver === 'redis' ? (
+                                            <p className="mt-1 text-[10px] text-gray-500">
+                                                Per-queue depth for Redis/Horizon is not shown here; open Horizon for workers.
+                                            </p>
+                                        ) : null}
                                         {systemHealth?.queue?.last_processed_at && (
                                             <div className="text-xs text-gray-500 mt-2">
                                                 Last processed: {formatDate(systemHealth.queue.last_processed_at)}

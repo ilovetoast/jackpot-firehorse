@@ -139,6 +139,7 @@ class AiMetadataGenerationJob implements ShouldQueue
                 $metadata['_ai_metadata_status'] = 'completed';
                 $asset->update(['metadata' => $metadata]);
             }
+            $this->mergeAiTaggingPipelineComplete($asset);
 
             return;
         }
@@ -150,6 +151,7 @@ class AiMetadataGenerationJob implements ShouldQueue
                 'asset_id' => $asset->id,
                 'tenant_id' => $asset->tenant_id,
             ]);
+            $this->mergeAiTaggingPipelineComplete($asset);
 
             return;
         }
@@ -251,6 +253,9 @@ class AiMetadataGenerationJob implements ShouldQueue
             } else {
                 unset($metadata['ai_tagging_zero_recommendations']);
             }
+
+            $metadata['ai_tagging_completed'] = true;
+            $metadata['ai_tagging_completed_at'] = now()->toIso8601String();
 
             $asset->update(['metadata' => $metadata]);
 
@@ -380,6 +385,7 @@ class AiMetadataGenerationJob implements ShouldQueue
         $metadata['_ai_metadata_skipped_at'] = now()->toIso8601String();
         $metadata['_ai_metadata_status'] = "skipped:{$reason}"; // Explicit status for debugging
         $asset->update(['metadata' => $metadata]);
+        $this->mergeAiTaggingPipelineComplete($asset);
     }
 
     /**
@@ -394,6 +400,23 @@ class AiMetadataGenerationJob implements ShouldQueue
         $metadata['_ai_metadata_error'] = $error;
         $metadata['_ai_metadata_failed_at'] = now()->toIso8601String();
         $metadata['_ai_metadata_status'] = 'failed'; // Explicit status for debugging
+        $asset->update(['metadata' => $metadata]);
+        $this->mergeAiTaggingPipelineComplete($asset);
+    }
+
+    /**
+     * Mark the pipeline "AI tagging" step complete only after vision job outcomes are known.
+     * Historically {@see AITaggingJob} set this flag on the images queue before the ai queue ran,
+     * which showed "tagging completed" with zero tag candidates when no `ai` worker was running.
+     */
+    protected function mergeAiTaggingPipelineComplete(Asset $asset): void
+    {
+        $asset->refresh();
+        $metadata = $asset->metadata ?? [];
+        $metadata['ai_tagging_completed'] = true;
+        if (empty($metadata['ai_tagging_completed_at'])) {
+            $metadata['ai_tagging_completed_at'] = now()->toIso8601String();
+        }
         $asset->update(['metadata' => $metadata]);
     }
 

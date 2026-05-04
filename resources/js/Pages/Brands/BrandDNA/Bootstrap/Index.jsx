@@ -1,10 +1,12 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { useForm, Link, router, usePage } from '@inertiajs/react'
 import AppNav from '../../../../Components/AppNav'
 import { TrashIcon } from '@heroicons/react/24/outline'
+import { brandSettingsSurfaceVars } from '../../../../utils/colorUtils'
 
 export default function BrandBootstrapIndex({ brand, runs }) {
     const { auth, flash = {} } = usePage().props
+    const bootstrapAccentStyle = useMemo(() => brandSettingsSurfaceVars(brand), [brand])
     const { data, setData, post, processing, errors } = useForm({ url: '' })
     const [deleteRunId, setDeleteRunId] = useState(null)
 
@@ -46,7 +48,7 @@ export default function BrandBootstrapIndex({ brand, runs }) {
     }
 
     return (
-        <div className="min-h-full">
+        <div className="jp-brand-settings-theme min-h-full" style={bootstrapAccentStyle}>
             <AppNav brand={auth?.activeBrand} tenant={null} />
             <main className="bg-gray-50">
                 <div className="mx-auto max-w-4xl px-4 sm:px-6 lg:px-8 py-8">
@@ -71,12 +73,12 @@ export default function BrandBootstrapIndex({ brand, runs }) {
                                 value={data.url}
                                 onChange={(e) => setData('url', e.target.value)}
                                 placeholder="https://example.com/brand"
-                                className="block flex-1 rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                                className="block flex-1 rounded-md border-gray-300 shadow-sm focus:border-[var(--jp-bs-primary)] focus:ring-[var(--jp-bs-ring)] sm:text-sm"
                             />
                             <button
                                 type="submit"
                                 disabled={processing}
-                                className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+                                className="rounded-md bg-[var(--jp-bs-primary)] px-4 py-2 text-sm font-medium text-[var(--jp-bs-primary-contrast)] hover:bg-[var(--jp-bs-primary-active)] disabled:opacity-50"
                             >
                                 {processing ? 'Creating…' : 'Generate Brand DNA'}
                             </button>
@@ -123,7 +125,7 @@ export default function BrandBootstrapIndex({ brand, runs }) {
                                                         <span className="text-xs text-gray-500">Draft Created: v{run.approved_version?.version_number ?? '?'}</span>
                                                         <Link
                                                             href={typeof route === 'function' ? route('brands.edit', { brand: brand.id, tab: 'strategy' }) : `/app/brands/${brand.id}/edit?tab=strategy`}
-                                                            className="rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-700"
+                                                            className="rounded-md bg-[var(--jp-bs-primary)] px-3 py-1.5 text-xs font-medium text-[var(--jp-bs-primary-contrast)] hover:bg-[var(--jp-bs-primary-active)]"
                                                         >
                                                             View Draft
                                                         </Link>

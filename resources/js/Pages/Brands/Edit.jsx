@@ -1,5 +1,5 @@
 import { useForm, Link, router, usePage } from '@inertiajs/react'
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import axios from 'axios'
 import AppNav from '../../Components/AppNav'
@@ -15,9 +15,12 @@ import {
     getContrastRatio,
     resolveSidebarReferenceColor,
     hexToRgba,
+    brandSettingsSurfaceVars,
 } from '../../utils/colorUtils'
 import BrandWorkbenchMasthead from '../../components/brand-workspace/BrandWorkbenchMasthead'
-import { BRAND_WORKBENCH_CONTENT, JACKPOT_VIOLET } from '../../components/brand-workspace/brandWorkspaceTokens'
+import { BRAND_WORKBENCH_CONTENT } from '../../components/brand-workspace/brandWorkspaceTokens'
+import { BrandWorkbenchChrome } from '../../contexts/BrandWorkbenchChromeContext'
+import { buildBrandWorkbenchChromePackage } from '../../utils/brandWorkbenchTheme'
 import { BRAND_SETTINGS_MASTHEAD, SECTION_INTRO } from '../../components/brand-settings/brandSettingsCopy'
 import SettingsSectionIntro from '../../components/brand-settings/SettingsSectionIntro'
 import OperationsQuickLinks from '../../components/brand-settings/OperationsQuickLinks'
@@ -66,7 +69,7 @@ function JsonSyntaxHighlighted({ data }) {
 
     const highlighted = json.replace(
         /("(?:\\.|[^"\\])*")\s*:/g,
-        '<span class="text-violet-600 font-medium">$1</span>:'
+        '<span class="wb-json-key font-medium">$1</span>:'
     ).replace(
         /:\s*("(?:\\.|[^"\\])*")/g,
         ': <span class="text-emerald-600">$1</span>'
@@ -75,7 +78,7 @@ function JsonSyntaxHighlighted({ data }) {
         ': <span class="text-amber-600">$1</span>'
     ).replace(
         /:\s*(true|false)/g,
-        ': <span class="text-violet-600 font-medium">$1</span>'
+        ': <span class="wb-json-key font-medium">$1</span>'
     ).replace(
         /:\s*(null)/g,
         ': <span class="text-gray-400 italic">$1</span>'
@@ -90,7 +93,7 @@ function JsonSyntaxHighlighted({ data }) {
 }
 
 // ——— Research Data Modal ———
-function ResearchDataModal({ open, onClose, title, loading, data, error }) {
+function ResearchDataModal({ open, onClose, title, loading, data, error, themeChrome = null, accentSurfaceStyle = null }) {
     const tabs = data ? Object.keys(data).filter(k => data[k] != null) : []
     const [activeTab, setActiveTabState] = useState(tabs[0] || '')
 
@@ -109,7 +112,8 @@ function ResearchDataModal({ open, onClose, title, loading, data, error }) {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose}>
             <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
             <div
-                className="relative bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[85vh] flex flex-col overflow-hidden"
+                className={`relative bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[85vh] flex flex-col overflow-hidden ${themeChrome ? 'brand-workbench-theme' : ''}`.trim()}
+                style={{ ...(accentSurfaceStyle || {}), ...(themeChrome?.vars || {}) }}
                 onClick={e => e.stopPropagation()}
             >
                 {/* Header */}
@@ -124,7 +128,7 @@ function ResearchDataModal({ open, onClose, title, loading, data, error }) {
                 {loading && (
                     <div className="flex-1 flex items-center justify-center py-20">
                         <div className="flex flex-col items-center gap-3">
-                            <div className="animate-spin rounded-full h-8 w-8 border-2 border-violet-500 border-t-transparent" />
+                            <div className="animate-spin rounded-full h-8 w-8 border-2 border-[var(--jp-bs-primary)] border-t-transparent" />
                             <span className="text-sm text-gray-500">Loading data…</span>
                         </div>
                     </div>
@@ -150,7 +154,7 @@ function ResearchDataModal({ open, onClose, title, loading, data, error }) {
                                         onClick={() => setActiveTabState(key)}
                                         className={`px-3 py-1.5 rounded-md text-xs font-medium whitespace-nowrap transition ${
                                             activeTab === key
-                                                ? 'bg-violet-50 text-violet-700 ring-1 ring-violet-200'
+                                                ? 'bg-[var(--jp-bs-soft-bg)] text-[var(--jp-bs-primary)] ring-1 ring-[var(--jp-bs-soft-border)]'
                                                 : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'
                                         }`}
                                     >
@@ -181,7 +185,7 @@ function ResearchDataModal({ open, onClose, title, loading, data, error }) {
 }
 
 // ——— Research Insights Panel ———
-function ResearchInsightsPanel({ insights, brandId }) {
+function ResearchInsightsPanel({ insights, brandId, workbenchChrome: wbChromePanel = null, accentSurfaceStyle = null }) {
     const [modalOpen, setModalOpen] = useState(false)
     const [modalTitle, setModalTitle] = useState('')
     const [modalLoading, setModalLoading] = useState(false)
@@ -191,7 +195,7 @@ function ResearchInsightsPanel({ insights, brandId }) {
     if (!insights) return (
         <div className="rounded-xl bg-white shadow-sm ring-1 ring-gray-200/20 overflow-hidden px-6 py-10 sm:px-10 sm:py-12 text-center">
             <p className="text-gray-400 text-sm">No research data yet. Run the Brand Guidelines Builder or Research page to generate insights.</p>
-            <Link href={`/app/brands/${brandId}/research`} className="mt-3 inline-flex items-center text-sm font-medium text-violet-600 hover:text-violet-500">
+            <Link href={`/app/brands/${brandId}/research`} className="mt-3 inline-flex items-center text-sm font-medium text-[var(--jp-bs-primary)] hover:text-[var(--jp-bs-primary)]">
                 Go to Research →
             </Link>
         </div>
@@ -202,8 +206,8 @@ function ResearchInsightsPanel({ insights, brandId }) {
     const statusBadge = (status) => {
         const map = {
             completed: 'bg-emerald-50 text-emerald-700 ring-emerald-600/20',
-            processing: 'bg-violet-50 text-violet-800 ring-violet-600/20',
-            running: 'bg-violet-50 text-violet-800 ring-violet-600/20',
+            processing: 'bg-[var(--jp-bs-soft-bg)] text-[var(--jp-bs-primary)] ring-[var(--jp-bs-soft-border)]',
+            running: 'bg-[var(--jp-bs-soft-bg)] text-[var(--jp-bs-primary)] ring-[var(--jp-bs-soft-border)]',
             pending: 'bg-gray-50 text-gray-600 ring-gray-500/10',
             failed: 'bg-red-50 text-red-700 ring-red-600/10',
         }
@@ -300,6 +304,8 @@ function ResearchInsightsPanel({ insights, brandId }) {
                 loading={modalLoading}
                 data={modalData}
                 error={modalError}
+                themeChrome={wbChromePanel}
+                accentSurfaceStyle={accentSurfaceStyle}
             />
 
             {/* Latest Extracted Data */}
@@ -318,7 +324,7 @@ function ResearchInsightsPanel({ insights, brandId }) {
                             {latest_snapshot_data.coherence_score != null && (
                                 <div className="text-right">
                                     <p className="text-[10px] uppercase tracking-wider text-gray-400 font-medium">Coherence</p>
-                                    <p className="text-2xl font-bold text-violet-600">{Math.round(latest_snapshot_data.coherence_score)}%</p>
+                                    <p className="text-2xl font-bold text-[var(--jp-bs-primary)]">{Math.round(latest_snapshot_data.coherence_score)}%</p>
                                 </div>
                             )}
                         </div>
@@ -469,8 +475,8 @@ function ResearchInsightsPanel({ insights, brandId }) {
                                             <svg className="w-4 h-4 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" /></svg>
                                         </div>
                                     ) : (
-                                        <div className="w-8 h-8 rounded-lg bg-violet-50 flex items-center justify-center" title="Website Crawl">
-                                            <svg className="w-4 h-4 text-violet-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 013 12c0-1.605.42-3.113 1.157-4.418" /></svg>
+                                        <div className="w-8 h-8 rounded-lg bg-[var(--jp-bs-soft-bg)] flex items-center justify-center" title="Website Crawl">
+                                            <svg className="w-4 h-4 text-[var(--jp-bs-primary)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 013 12c0-1.605.42-3.113 1.157-4.418" /></svg>
                                         </div>
                                     )}
                                 </div>
@@ -481,7 +487,7 @@ function ResearchInsightsPanel({ insights, brandId }) {
                                         </span>
                                         {statusBadge(run.status)}
                                         {run.extraction_mode === 'vision' && (
-                                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-50 text-purple-600 font-medium ring-1 ring-purple-500/10">Vision</span>
+                                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--jp-bs-soft-bg)] text-[var(--jp-bs-primary)] font-medium ring-1 ring-[var(--jp-bs-soft-border)]">Vision</span>
                                         )}
                                     </div>
                                     <div className="flex items-center gap-3 mt-0.5 text-xs text-gray-500">
@@ -517,8 +523,8 @@ function ResearchInsightsPanel({ insights, brandId }) {
                                 onClick={() => openSnapshotDetail(snap)}
                                 className="w-full text-left px-6 sm:px-8 py-4 flex items-center gap-4 hover:bg-gray-50/80 transition cursor-pointer group"
                             >
-                                <div className="flex-shrink-0 w-8 h-8 rounded-lg bg-violet-50 flex items-center justify-center">
-                                    <svg className="w-4 h-4 text-violet-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z" /></svg>
+                                <div className="flex-shrink-0 w-8 h-8 rounded-lg bg-[var(--jp-bs-soft-bg)] flex items-center justify-center">
+                                    <svg className="w-4 h-4 text-[var(--jp-bs-primary)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z" /></svg>
                                 </div>
                                 <div className="flex-1 min-w-0">
                                     <div className="flex items-center gap-2">
@@ -544,7 +550,7 @@ function ResearchInsightsPanel({ insights, brandId }) {
             <div className="text-center pt-2">
                 <Link
                     href={`/app/brands/${brandId}/research`}
-                    className="inline-flex items-center gap-1.5 text-sm font-medium text-violet-600 hover:text-violet-500"
+                    className="inline-flex items-center gap-1.5 text-sm font-medium text-[var(--jp-bs-primary)] hover:text-[var(--jp-bs-primary)]"
                 >
                     Open Full Research Page
                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" /></svg>
@@ -837,7 +843,7 @@ function VisualReferenceCategoryPicker({ brandId, referenceCategories, onChange,
                             className={`flex-1 text-xs font-medium px-3 py-2 rounded-md transition-colors ${activeCategory === cat.key ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
                         >
                                 {cat.label}
-                            {count > 0 && <span className="ml-1 text-[10px] bg-violet-100 text-violet-700 rounded-full px-1.5">{count}</span>}
+                            {count > 0 && <span className="ml-1 text-[10px] bg-[var(--jp-bs-soft-bg-strong)] text-[var(--jp-bs-primary)] rounded-full px-1.5">{count}</span>}
                         </button>
                     )
                 })}
@@ -859,7 +865,7 @@ function VisualReferenceCategoryPicker({ brandId, referenceCategories, onChange,
                     type="checkbox"
                     checked={!!cats[activeCatDef.key]?.use_for_scoring}
                     onChange={(e) => handleScoringToggle(activeCatDef.key, e.target.checked)}
-                    className="h-4 w-4 rounded border-gray-300 text-violet-600 focus:ring-violet-600"
+                    className="h-4 w-4 rounded border-gray-300 text-[var(--jp-bs-primary)] focus:ring-[var(--jp-bs-ring)]"
                 />
                 <span className="text-xs text-gray-600">Use <strong>{activeCatDef.label}</strong> for alignment checks</span>
             </label>
@@ -874,6 +880,18 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
     const can = (p) => effectivePermissions.includes(p)
     const canViewCompanySettings = can('company_settings.view')
     const companyBreadcrumbName = auth?.activeCompany?.name?.trim() || ''
+    const brandWorkbenchChrome = useMemo(
+        () => buildBrandWorkbenchChromePackage(brand, auth?.activeCompany),
+        [
+            brand?.id,
+            brand?.primary_color,
+            brand?.accent_color,
+            brand?.secondary_color,
+            brand?.workspace_button_style,
+            auth?.activeCompany?.id,
+            auth?.activeCompany?.primary_color,
+        ]
+    )
     const brandWorkspaceAccent =
         brand?.primary_color && String(brand.primary_color).trim().startsWith('#')
             ? brand.primary_color
@@ -969,6 +987,8 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
         },
         portal_settings: portal_settings || {},
     })
+
+    const brandAccentStyle = useMemo(() => brandSettingsSurfaceVars(brand), [brand])
 
     const [logoVariantGenerating, setLogoVariantGenerating] = useState(false)
     const [logoVariantError, setLogoVariantError] = useState(null)
@@ -1160,7 +1180,7 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                         onChange={(e) => setScoringRuleInputs((prev) => ({ ...prev, [ruleKey]: e.target.value }))}
                         onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addScoringRuleItem(ruleKey, inputVal))}
                         placeholder={placeholder}
-                        className="block flex-1 rounded-md border-gray-300 shadow-sm focus:border-violet-500 focus:ring-violet-500 sm:text-sm"
+                        className="block flex-1 rounded-md border-gray-300 shadow-sm focus:border-[var(--jp-bs-primary)] focus:ring-[var(--jp-bs-ring)] sm:text-sm"
                     />
                     <button type="button" onClick={() => addScoringRuleItem(ruleKey, inputVal)} className="rounded-md bg-gray-100 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-200">Add</button>
                 </div>
@@ -1222,11 +1242,14 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
 
 
     return (
-        <div className="flex min-h-screen flex-col bg-slate-50">
+        <div
+            className="jp-brand-settings-theme flex min-h-screen flex-col bg-slate-50"
+            style={brandAccentStyle}
+        >
             <AppHead title="Brand Settings" />
             <AppNav brand={auth.activeBrand} tenant={null} />
             <main className="flex-1">
-                <div className={BRAND_WORKBENCH_CONTENT}>
+                <BrandWorkbenchChrome package={brandWorkbenchChrome} className={BRAND_WORKBENCH_CONTENT}>
                     <BrandWorkbenchMasthead
                         companyName={companyBreadcrumbName || undefined}
                         brandName={brand.name}
@@ -1267,8 +1290,8 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                             style={
                                                 isActive
                                                     ? {
-                                                          borderBottomColor: JACKPOT_VIOLET,
-                                                          color: JACKPOT_VIOLET,
+                                                          borderBottomColor: brandWorkbenchChrome.linkHex,
+                                                          color: brandWorkbenchChrome.linkHex,
                                                       }
                                                     : undefined
                                             }
@@ -1304,14 +1327,14 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                         onClick={() => { setActiveTab(item.id); updateTabInUrl(item.id) }}
                                         className={`shrink-0 rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors whitespace-nowrap lg:w-full ${
                                             activeTab === item.id
-                                                ? 'text-violet-950'
+                                                ? 'text-[var(--jp-bs-primary)]'
                                                 : 'text-gray-600 hover:bg-slate-100 hover:text-gray-900'
                                         }`}
                                         style={
                                             activeTab === item.id
                                                 ? {
-                                                      backgroundColor: hexToRgba(JACKPOT_VIOLET, 0.1),
-                                                      boxShadow: `inset 3px 0 0 0 ${JACKPOT_VIOLET}`,
+                                                      backgroundColor: hexToRgba(brandWorkbenchChrome.linkHex, 0.1),
+                                                      boxShadow: `inset 3px 0 0 0 ${brandWorkbenchChrome.linkHex}`,
                                                   }
                                                 : undefined
                                         }
@@ -1327,27 +1350,27 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
 
                     {/* Upgrade banner for free plan users */}
                     {isDnaTab && isFreePlan && (
-                        <div className="mb-6 rounded-xl border border-violet-200 bg-gradient-to-r from-violet-50 to-purple-50 p-5">
+                        <div className="mb-6 rounded-xl border border-[var(--jp-bs-soft-border)] bg-gradient-to-r from-[var(--jp-bs-soft-bg)] to-slate-50 p-5">
                             <div className="flex items-start gap-3">
-                                <div className="flex-shrink-0 mt-0.5 rounded-lg bg-violet-100 p-2">
-                                    <svg className="w-5 h-5 text-violet-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                                <div className="flex-shrink-0 mt-0.5 rounded-lg bg-[var(--jp-bs-soft-bg-strong)] p-2">
+                                    <svg className="w-5 h-5 text-[var(--jp-bs-primary)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                                         <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.455 2.456L21.75 6l-1.036.259a3.375 3.375 0 00-2.455 2.456z" />
                                     </svg>
                                 </div>
                                 <div className="flex-1">
-                                    <h3 className="text-sm font-semibold text-violet-900">You're on the Free plan</h3>
-                                    <p className="mt-1 text-sm text-violet-700/70">
+                                    <h3 className="text-sm font-semibold text-[var(--jp-bs-primary)]">You're on the Free plan</h3>
+                                    <p className="mt-1 text-sm text-[var(--jp-bs-primary)] opacity-70">
                                         You can manually configure your Brand DNA settings below. Upgrade to unlock the AI-powered Brand Guidelines Builder, automated research, and all presentation styles.
                                     </p>
                                     <div className="mt-3 flex items-center gap-3">
                                         <Link
                                             href={route('billing.index')}
-                                            className="inline-flex items-center gap-1.5 rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-violet-700 transition"
+                                            className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--jp-bs-primary)] px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-[var(--jp-bs-primary-active)] transition"
                                         >
                                             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg>
                                             Upgrade Plan
                                         </Link>
-                                        <span className="text-xs text-violet-600/50">Presentation style limited to Clean on the free plan</span>
+                                        <span className="text-xs text-[var(--jp-bs-primary)] opacity-50">Presentation style limited to Clean on the free plan</span>
                                     </div>
                                 </div>
                             </div>
@@ -1383,17 +1406,17 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                             <button
                                 type="button"
                                 onClick={() => setExecutionAlignmentOpen(!executionAlignmentOpen)}
-                                className="w-full flex items-center justify-between rounded-xl bg-gradient-to-br from-violet-50/80 to-slate-50/80 px-6 py-4 ring-1 ring-violet-100/50 text-left hover:from-violet-50 hover:to-slate-50 transition-colors"
+                                className="w-full flex items-center justify-between rounded-xl bg-gradient-to-br from-[var(--jp-bs-soft-bg)] to-slate-50/80 px-6 py-4 ring-1 ring-[var(--jp-bs-soft-border)] text-left hover:from-[var(--jp-bs-soft-bg)] hover:to-slate-50 transition-colors"
                             >
-                                <h2 className="text-sm font-semibold uppercase tracking-wide text-violet-800/90">Execution Alignment Overview</h2>
-                                <svg className={`h-5 w-5 text-violet-400 transition-transform ${executionAlignmentOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" /></svg>
+                                <h2 className="text-sm font-semibold uppercase tracking-wide text-[var(--jp-bs-primary)] opacity-90">Execution Alignment Overview</h2>
+                                <svg className={`h-5 w-5 text-[var(--jp-bs-primary)] opacity-60 transition-transform ${executionAlignmentOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" /></svg>
                             </button>
                             {executionAlignmentOpen && (
-                                <div className="rounded-b-xl bg-gradient-to-br from-violet-50/80 to-slate-50/80 px-6 pb-6 ring-1 ring-violet-100/50 -mt-1">
+                                <div className="rounded-b-xl bg-gradient-to-br from-[var(--jp-bs-soft-bg)] to-slate-50/80 px-6 pb-6 ring-1 ring-[var(--jp-bs-soft-border)] -mt-1">
                                     <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-4">
                                         <div className="rounded-lg bg-white/70 px-4 py-3 backdrop-blur-sm">
                                             <p className="text-xs font-medium text-slate-500">Average On-Brand Score</p>
-                                            <p className="mt-1 text-2xl font-bold text-violet-700">
+                                            <p className="mt-1 text-2xl font-bold text-[var(--jp-bs-primary)]">
                                                 {compliance_aggregate.avg_score != null ? `${compliance_aggregate.avg_score.toFixed(1)}%` : 'No data yet.'}
                                             </p>
                                         </div>
@@ -1523,7 +1546,7 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                             id="archetype"
                                             value={modelPayload.strategy?.archetype ?? ''}
                                             onChange={(e) => setModelPayloadField('strategy.archetype', e.target.value || null)}
-                                            className="mt-2 block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-violet-600 focus:border-violet-500 text-sm"
+                                            className="mt-2 block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-[var(--jp-bs-ring)] focus:border-[var(--jp-bs-primary)] text-sm"
                                         >
                                             <option value="">Select archetype</option>
                                             {ARCHETYPES.map((a) => (
@@ -1533,34 +1556,34 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                     </div>
                                     <div>
                                         <label htmlFor="tone" className="block text-sm font-medium text-gray-900">Tone</label>
-                                        <input type="text" id="tone" value={modelPayload.strategy?.tone ?? ''} onChange={(e) => setModelPayloadField('strategy.tone', e.target.value || null)} className="mt-2 block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-violet-600 focus:border-violet-500 text-sm" placeholder="e.g. Professional, Playful" />
+                                        <input type="text" id="tone" value={modelPayload.strategy?.tone ?? ''} onChange={(e) => setModelPayloadField('strategy.tone', e.target.value || null)} className="mt-2 block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-[var(--jp-bs-ring)] focus:border-[var(--jp-bs-primary)] text-sm" placeholder="e.g. Professional, Playful" />
                                     </div>
                                     <div>
                                         <label htmlFor="voice_description" className="block text-sm font-medium text-gray-900">Voice description</label>
-                                        <textarea id="voice_description" rows={5} value={modelPayload.strategy?.voice_description ?? ''} onChange={(e) => setModelPayloadField('strategy.voice_description', e.target.value || null)} className="mt-2 block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-violet-600 focus:border-violet-500 text-sm leading-relaxed" placeholder="How your brand sounds in communication" />
+                                        <textarea id="voice_description" rows={5} value={modelPayload.strategy?.voice_description ?? ''} onChange={(e) => setModelPayloadField('strategy.voice_description', e.target.value || null)} className="mt-2 block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-[var(--jp-bs-ring)] focus:border-[var(--jp-bs-primary)] text-sm leading-relaxed" placeholder="How your brand sounds in communication" />
                                     </div>
                                     <div>
                                         <label className="block text-sm font-medium text-gray-900">Traits</label>
                                         <p className="text-xs text-gray-500 mt-1 mb-2">Comma-separated or add one per line</p>
-                                        <textarea rows={3} value={(modelPayload.strategy?.traits || []).join(', ')} onChange={(e) => setModelPayloadField('strategy.traits', e.target.value.split(/[,\n]/).map((s) => s.trim()).filter(Boolean))} className="block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-violet-600 focus:border-violet-500 text-sm leading-relaxed" placeholder="e.g. Bold, Innovative, Trustworthy" />
+                                        <textarea rows={3} value={(modelPayload.strategy?.traits || []).join(', ')} onChange={(e) => setModelPayloadField('strategy.traits', e.target.value.split(/[,\n]/).map((s) => s.trim()).filter(Boolean))} className="block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-[var(--jp-bs-ring)] focus:border-[var(--jp-bs-primary)] text-sm leading-relaxed" placeholder="e.g. Bold, Innovative, Trustworthy" />
                                     </div>
                                     <div>
                                         <label htmlFor="purpose_why" className="block text-sm font-medium text-gray-900">Purpose — Why</label>
-                                        <textarea id="purpose_why" rows={3} value={modelPayload.purpose?.why ?? ''} onChange={(e) => setModelPayloadField('purpose.why', e.target.value || null)} className="mt-2 block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-violet-600 focus:border-violet-500 text-sm leading-relaxed" placeholder="Why does your brand exist?" />
+                                        <textarea id="purpose_why" rows={3} value={modelPayload.purpose?.why ?? ''} onChange={(e) => setModelPayloadField('purpose.why', e.target.value || null)} className="mt-2 block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-[var(--jp-bs-ring)] focus:border-[var(--jp-bs-primary)] text-sm leading-relaxed" placeholder="Why does your brand exist?" />
                                     </div>
                                     <div>
                                         <label htmlFor="purpose_what" className="block text-sm font-medium text-gray-900">Purpose — What</label>
-                                        <textarea id="purpose_what" rows={3} value={modelPayload.purpose?.what ?? ''} onChange={(e) => setModelPayloadField('purpose.what', e.target.value || null)} className="mt-2 block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-violet-600 focus:border-violet-500 text-sm leading-relaxed" placeholder="What does your brand do?" />
+                                        <textarea id="purpose_what" rows={3} value={modelPayload.purpose?.what ?? ''} onChange={(e) => setModelPayloadField('purpose.what', e.target.value || null)} className="mt-2 block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-[var(--jp-bs-ring)] focus:border-[var(--jp-bs-primary)] text-sm leading-relaxed" placeholder="What does your brand do?" />
                                     </div>
                                     <div>
                                         <label className="block text-sm font-medium text-gray-900">Beliefs</label>
-                                        <textarea rows={4} value={(modelPayload.beliefs || []).join('\n')} onChange={(e) => setModelPayloadField('beliefs', e.target.value.split('\n').map((s) => s.trim()).filter(Boolean))} className="mt-2 block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-violet-600 focus:border-violet-500 text-sm leading-relaxed" placeholder="One belief per line" />
+                                        <textarea rows={4} value={(modelPayload.beliefs || []).join('\n')} onChange={(e) => setModelPayloadField('beliefs', e.target.value.split('\n').map((s) => s.trim()).filter(Boolean))} className="mt-2 block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-[var(--jp-bs-ring)] focus:border-[var(--jp-bs-primary)] text-sm leading-relaxed" placeholder="One belief per line" />
                                     </div>
                                     <div>
                                         <label className="block text-sm font-medium text-gray-900">Values</label>
-                                        <textarea rows={4} value={(modelPayload.values || []).join('\n')} onChange={(e) => setModelPayloadField('values', e.target.value.split('\n').map((s) => s.trim()).filter(Boolean))} className="mt-2 block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-violet-600 focus:border-violet-500 text-sm leading-relaxed" placeholder="One value per line" />
+                                        <textarea rows={4} value={(modelPayload.values || []).join('\n')} onChange={(e) => setModelPayloadField('values', e.target.value.split('\n').map((s) => s.trim()).filter(Boolean))} className="mt-2 block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-[var(--jp-bs-ring)] focus:border-[var(--jp-bs-primary)] text-sm leading-relaxed" placeholder="One value per line" />
                                     </div>
-                                    <button type="submit" disabled={dnaSaving} className="rounded-md bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-500 disabled:opacity-50">
+                                    <button type="submit" disabled={dnaSaving} className="rounded-md bg-[var(--jp-bs-primary)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--jp-bs-primary-hover)] disabled:opacity-50">
                                         {dnaSaving ? 'Saving…' : 'Save Brand DNA'}
                                     </button>
                                 </div>
@@ -1581,25 +1604,25 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                 <div className="mt-6 space-y-6">
                                     <div>
                                         <label htmlFor="industry" className="block text-sm font-medium text-gray-900">Industry</label>
-                                        <input type="text" id="industry" value={modelPayload.positioning?.industry ?? ''} onChange={(e) => setModelPayloadField('positioning.industry', e.target.value || null)} className="mt-2 block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-violet-600 focus:border-violet-500 text-sm" />
+                                        <input type="text" id="industry" value={modelPayload.positioning?.industry ?? ''} onChange={(e) => setModelPayloadField('positioning.industry', e.target.value || null)} className="mt-2 block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-[var(--jp-bs-ring)] focus:border-[var(--jp-bs-primary)] text-sm" />
                                     </div>
                                     <div>
                                         <label htmlFor="target_audience" className="block text-sm font-medium text-gray-900">Target audience</label>
-                                        <textarea id="target_audience" rows={3} value={modelPayload.positioning?.target_audience ?? ''} onChange={(e) => setModelPayloadField('positioning.target_audience', e.target.value || null)} className="mt-2 block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-violet-600 focus:border-violet-500 text-sm leading-relaxed" />
+                                        <textarea id="target_audience" rows={3} value={modelPayload.positioning?.target_audience ?? ''} onChange={(e) => setModelPayloadField('positioning.target_audience', e.target.value || null)} className="mt-2 block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-[var(--jp-bs-ring)] focus:border-[var(--jp-bs-primary)] text-sm leading-relaxed" />
                                     </div>
                                     <div>
                                         <label htmlFor="market_category" className="block text-sm font-medium text-gray-900">Market category</label>
-                                        <input type="text" id="market_category" value={modelPayload.positioning?.market_category ?? ''} onChange={(e) => setModelPayloadField('positioning.market_category', e.target.value || null)} className="mt-2 block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-violet-600 focus:border-violet-500 text-sm" />
+                                        <input type="text" id="market_category" value={modelPayload.positioning?.market_category ?? ''} onChange={(e) => setModelPayloadField('positioning.market_category', e.target.value || null)} className="mt-2 block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-[var(--jp-bs-ring)] focus:border-[var(--jp-bs-primary)] text-sm" />
                                     </div>
                                     <div>
                                         <label htmlFor="competitive_position" className="block text-sm font-medium text-gray-900">Competitive position</label>
-                                        <input type="text" id="competitive_position" value={modelPayload.positioning?.competitive_position ?? ''} onChange={(e) => setModelPayloadField('positioning.competitive_position', e.target.value || null)} className="mt-2 block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-violet-600 focus:border-violet-500 text-sm" />
+                                        <input type="text" id="competitive_position" value={modelPayload.positioning?.competitive_position ?? ''} onChange={(e) => setModelPayloadField('positioning.competitive_position', e.target.value || null)} className="mt-2 block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-[var(--jp-bs-ring)] focus:border-[var(--jp-bs-primary)] text-sm" />
                                     </div>
                                     <div>
                                         <label htmlFor="tagline" className="block text-sm font-medium text-gray-900">Tagline</label>
-                                        <input type="text" id="tagline" value={modelPayload.positioning?.tagline ?? ''} onChange={(e) => setModelPayloadField('positioning.tagline', e.target.value || null)} className="mt-2 block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-violet-600 focus:border-violet-500 text-sm" />
+                                        <input type="text" id="tagline" value={modelPayload.positioning?.tagline ?? ''} onChange={(e) => setModelPayloadField('positioning.tagline', e.target.value || null)} className="mt-2 block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-[var(--jp-bs-ring)] focus:border-[var(--jp-bs-primary)] text-sm" />
                                     </div>
-                                    <button type="submit" disabled={dnaSaving} className="rounded-md bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-500 disabled:opacity-50">
+                                    <button type="submit" disabled={dnaSaving} className="rounded-md bg-[var(--jp-bs-primary)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--jp-bs-primary-hover)] disabled:opacity-50">
                                         {dnaSaving ? 'Saving…' : 'Save Brand DNA'}
                                     </button>
                                 </div>
@@ -1620,21 +1643,21 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                 <div className="mt-6 space-y-6">
                                     <div>
                                         <label htmlFor="brand_look" className="block text-sm font-medium text-gray-900">Brand look</label>
-                                        <textarea id="brand_look" rows={4} value={modelPayload.expression?.brand_look ?? ''} onChange={(e) => setModelPayloadField('expression.brand_look', e.target.value || null)} className="mt-2 block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-violet-600 focus:border-violet-500 text-sm leading-relaxed" placeholder="Visual style, photography style" />
+                                        <textarea id="brand_look" rows={4} value={modelPayload.expression?.brand_look ?? ''} onChange={(e) => setModelPayloadField('expression.brand_look', e.target.value || null)} className="mt-2 block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-[var(--jp-bs-ring)] focus:border-[var(--jp-bs-primary)] text-sm leading-relaxed" placeholder="Visual style, photography style" />
                                     </div>
                                     <div>
                                         <label htmlFor="brand_voice" className="block text-sm font-medium text-gray-900">Brand voice</label>
-                                        <textarea id="brand_voice" rows={4} value={modelPayload.expression?.brand_voice ?? ''} onChange={(e) => setModelPayloadField('expression.brand_voice', e.target.value || null)} className="mt-2 block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-violet-600 focus:border-violet-500 text-sm leading-relaxed" />
+                                        <textarea id="brand_voice" rows={4} value={modelPayload.expression?.brand_voice ?? ''} onChange={(e) => setModelPayloadField('expression.brand_voice', e.target.value || null)} className="mt-2 block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-[var(--jp-bs-ring)] focus:border-[var(--jp-bs-primary)] text-sm leading-relaxed" />
                                     </div>
                                     <div>
                                         <label className="block text-sm font-medium text-gray-900">Tone keywords</label>
-                                        <textarea rows={3} value={(modelPayload.expression?.tone_keywords || []).join(', ')} onChange={(e) => setModelPayloadField('expression.tone_keywords', e.target.value.split(/[,\n]/).map((s) => s.trim()).filter(Boolean))} className="mt-2 block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-violet-600 focus:border-violet-500 text-sm leading-relaxed" placeholder="Comma-separated" />
+                                        <textarea rows={3} value={(modelPayload.expression?.tone_keywords || []).join(', ')} onChange={(e) => setModelPayloadField('expression.tone_keywords', e.target.value.split(/[,\n]/).map((s) => s.trim()).filter(Boolean))} className="mt-2 block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-[var(--jp-bs-ring)] focus:border-[var(--jp-bs-primary)] text-sm leading-relaxed" placeholder="Comma-separated" />
                                     </div>
                                     <div>
                                         <label className="block text-sm font-medium text-gray-900">Photography attributes</label>
-                                        <textarea rows={3} value={(modelPayload.expression?.photography_attributes || []).join(', ')} onChange={(e) => setModelPayloadField('expression.photography_attributes', e.target.value.split(/[,\n]/).map((s) => s.trim()).filter(Boolean))} className="mt-2 block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-violet-600 focus:border-violet-500 text-sm leading-relaxed" placeholder="Comma-separated" />
+                                        <textarea rows={3} value={(modelPayload.expression?.photography_attributes || []).join(', ')} onChange={(e) => setModelPayloadField('expression.photography_attributes', e.target.value.split(/[,\n]/).map((s) => s.trim()).filter(Boolean))} className="mt-2 block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-[var(--jp-bs-ring)] focus:border-[var(--jp-bs-primary)] text-sm leading-relaxed" placeholder="Comma-separated" />
                                     </div>
-                                    <button type="submit" disabled={dnaSaving} className="rounded-md bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-500 disabled:opacity-50">
+                                    <button type="submit" disabled={dnaSaving} className="rounded-md bg-[var(--jp-bs-primary)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--jp-bs-primary-hover)] disabled:opacity-50">
                                         {dnaSaving ? 'Saving…' : 'Save Brand DNA'}
                                     </button>
                                 </div>
@@ -1644,7 +1667,7 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                     )}
                     {activeTab === 'standards' && (
                     <div id="standards" className="scroll-mt-8 space-y-8">
-                        <div className="rounded-xl border border-violet-200/80 bg-violet-50/40 px-4 py-3 sm:px-5 sm:py-4">
+                        <div className="rounded-xl border border-[var(--jp-bs-soft-border)] bg-[var(--jp-bs-soft-bg)] px-4 py-3 sm:px-5 sm:py-4">
                             <p className="text-sm font-semibold text-slate-900">
                                 {SECTION_INTRO.standardsVsIdentity.title}
                             </p>
@@ -1692,7 +1715,7 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                                             links[i] = e.target.value
                                                             setModelPayloadField('standards.external_font_links', links)
                                                         }}
-                                                        className="flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 placeholder-slate-400 focus:ring-2 focus:ring-violet-500 focus:border-violet-500"
+                                                        className="flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 placeholder-slate-400 focus:ring-2 focus:ring-[var(--jp-bs-ring)] focus:border-[var(--jp-bs-primary)]"
                                                     />
                                                     <button
                                                         type="button"
@@ -1712,7 +1735,7 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                                     const links = [...(modelPayload.standards?.external_font_links || []), '']
                                                     setModelPayloadField('standards.external_font_links', links)
                                                 }}
-                                                className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-violet-700 transition-colors"
+                                                className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-[var(--jp-bs-primary)] transition-colors"
                                             >
                                                 <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
                                                 Add font CSS URL
@@ -1751,12 +1774,12 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                     <div>
                                         <label htmlFor="heading_style" className="block text-sm font-medium text-gray-900">Heading style</label>
                                         <p className="text-xs text-gray-500 mb-1.5">How headings should appear (e.g. "Bold uppercase", "32px semi-bold").</p>
-                                        <input type="text" id="heading_style" value={modelPayload.standards?.heading_style ?? ''} onChange={(e) => setModelPayloadField('standards.heading_style', e.target.value || null)} className="block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-violet-600 focus:border-violet-500 text-sm" placeholder="e.g. Bold, uppercase, 2rem" />
+                                        <input type="text" id="heading_style" value={modelPayload.standards?.heading_style ?? ''} onChange={(e) => setModelPayloadField('standards.heading_style', e.target.value || null)} className="block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-[var(--jp-bs-ring)] focus:border-[var(--jp-bs-primary)] text-sm" placeholder="e.g. Bold, uppercase, 2rem" />
                                     </div>
                                     <div>
                                         <label htmlFor="body_style" className="block text-sm font-medium text-gray-900">Body style</label>
                                         <p className="text-xs text-gray-500 mb-1.5">How body text should appear (e.g. "Regular 16px/1.6", "Light 14px").</p>
-                                        <input type="text" id="body_style" value={modelPayload.standards?.body_style ?? ''} onChange={(e) => setModelPayloadField('standards.body_style', e.target.value || null)} className="block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-violet-600 focus:border-violet-500 text-sm" placeholder="e.g. Regular, 16px / 1.6 line height" />
+                                        <input type="text" id="body_style" value={modelPayload.standards?.body_style ?? ''} onChange={(e) => setModelPayloadField('standards.body_style', e.target.value || null)} className="block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-[var(--jp-bs-ring)] focus:border-[var(--jp-bs-primary)] text-sm" placeholder="e.g. Regular, 16px / 1.6 line height" />
                                     </div>
                                 </div>
 
@@ -1782,14 +1805,14 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                             rows={4}
                                             value={modelPayload.standards?.headline_treatment ?? ''}
                                             onChange={(e) => setModelPayloadField('standards.headline_treatment', e.target.value.trim() || null)}
-                                            className="block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-violet-600 focus:border-violet-500 text-sm leading-relaxed"
+                                            className="block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-[var(--jp-bs-ring)] focus:border-[var(--jp-bs-primary)] text-sm leading-relaxed"
                                             placeholder="e.g. Leading em dash or accent bar; display type in ALL CAPS; optional pill container on dark backgrounds; hairline rule below…"
                                         />
                                     </div>
                                 </div>
 
                                 <div className="mt-6">
-                                    <button type="submit" disabled={dnaSaving} className="rounded-md bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-500 disabled:opacity-50">
+                                    <button type="submit" disabled={dnaSaving} className="rounded-md bg-[var(--jp-bs-primary)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--jp-bs-primary-hover)] disabled:opacity-50">
                                         {dnaSaving ? 'Saving…' : 'Save Brand DNA'}
                                     </button>
                                 </div>
@@ -1812,12 +1835,12 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                             <button
                                                 type="button"
                                                 onClick={syncIdentityColorsToDna}
-                                                className="text-xs font-medium text-violet-700 hover:text-violet-900"
+                                                className="text-xs font-medium text-[var(--jp-bs-primary)] hover:text-[var(--jp-bs-primary)]"
                                             >
                                                 Add colors from Brand Identity
                                             </button>
                                         </div>
-                                        <textarea rows={3} value={(modelPayload.standards?.allowed_colors || []).join(', ')} onChange={(e) => setModelPayloadField('standards.allowed_colors', e.target.value.split(/[,\n]/).map((s) => s.trim()).filter(Boolean))} className="mt-2 block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-violet-600 focus:border-violet-500 text-sm leading-relaxed" placeholder="Hex codes, comma-separated (e.g. #6366f1, #8b5cf6)" />
+                                        <textarea rows={3} value={(modelPayload.standards?.allowed_colors || []).join(', ')} onChange={(e) => setModelPayloadField('standards.allowed_colors', e.target.value.split(/[,\n]/).map((s) => s.trim()).filter(Boolean))} className="mt-2 block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-[var(--jp-bs-ring)] focus:border-[var(--jp-bs-primary)] text-sm leading-relaxed" placeholder="Hex codes, comma-separated (e.g. #6366f1, #8b5cf6)" />
                                         {(modelPayload.standards?.allowed_colors || []).length > 0 && (
                                             <div className="flex flex-wrap gap-2 mt-2">
                                                 {(modelPayload.standards?.allowed_colors || []).map((c, i) => (
@@ -1831,15 +1854,15 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                     </div>
                                     <div>
                                         <label className="block text-sm font-medium text-gray-900">Banned colors</label>
-                                        <textarea rows={3} value={(modelPayload.standards?.banned_colors || []).join(', ')} onChange={(e) => setModelPayloadField('standards.banned_colors', e.target.value.split(/[,\n]/).map((s) => s.trim()).filter(Boolean))} className="mt-2 block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-violet-600 focus:border-violet-500 text-sm leading-relaxed" placeholder="Hex codes, comma-separated" />
+                                        <textarea rows={3} value={(modelPayload.standards?.banned_colors || []).join(', ')} onChange={(e) => setModelPayloadField('standards.banned_colors', e.target.value.split(/[,\n]/).map((s) => s.trim()).filter(Boolean))} className="mt-2 block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-[var(--jp-bs-ring)] focus:border-[var(--jp-bs-primary)] text-sm leading-relaxed" placeholder="Hex codes, comma-separated" />
                                     </div>
                                     <div>
                                         <label className="block text-sm font-medium text-gray-900">Allowed fonts (for scoring)</label>
                                         <p className="text-xs text-gray-500 mb-1.5">Auto-populated from the Typography section above. Add additional names if needed.</p>
-                                        <textarea rows={3} value={(modelPayload.standards?.allowed_fonts || []).join(', ')} onChange={(e) => setModelPayloadField('standards.allowed_fonts', e.target.value.split(/[,\n]/).map((s) => s.trim()).filter(Boolean))} className="mt-2 block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-violet-600 focus:border-violet-500 text-sm leading-relaxed" placeholder="Comma-separated" />
+                                        <textarea rows={3} value={(modelPayload.standards?.allowed_fonts || []).join(', ')} onChange={(e) => setModelPayloadField('standards.allowed_fonts', e.target.value.split(/[,\n]/).map((s) => s.trim()).filter(Boolean))} className="mt-2 block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-[var(--jp-bs-ring)] focus:border-[var(--jp-bs-primary)] text-sm leading-relaxed" placeholder="Comma-separated" />
                                     </div>
 
-                                    <button type="submit" disabled={dnaSaving} className="rounded-md bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-500 disabled:opacity-50">
+                                    <button type="submit" disabled={dnaSaving} className="rounded-md bg-[var(--jp-bs-primary)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--jp-bs-primary-hover)] disabled:opacity-50">
                                         {dnaSaving ? 'Saving…' : 'Save Brand DNA'}
                                     </button>
                                 </div>
@@ -1853,7 +1876,7 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                     <h2 className="text-xl font-semibold text-gray-900">Logo Variants</h2>
                                     <p className="mt-2 text-sm text-gray-600 leading-relaxed">
                                         <span className="font-medium text-slate-700">Preview only</span> — these tiles mirror the logo files from{' '}
-                                        <button type="button" onClick={() => { setActiveTab('identity'); updateTabInUrl('identity') }} className="text-violet-600 hover:text-violet-800 font-medium underline underline-offset-2">Identity &rarr; Brand Images</button>
+                                        <button type="button" onClick={() => { setActiveTab('identity'); updateTabInUrl('identity') }} className="text-[var(--jp-bs-primary)] hover:text-[var(--jp-bs-primary)] font-medium underline underline-offset-2">Identity &rarr; Brand Images</button>
                                         . To upload or change assets, use Identity; this section shows what guidelines and AI will reference.
                                     </p>
                                 </div>
@@ -1885,11 +1908,11 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                     </div>
                                 )}
                                 {(data.logo_preview || brand.logo_path) && !data.logo_dark_preview && !brand.logo_dark_path && (
-                                    <div className="mt-4 rounded-lg border border-violet-200 bg-violet-50 p-3 flex items-start gap-2">
-                                        <svg className="w-4 h-4 text-violet-500 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" /></svg>
-                                        <p className="text-xs text-violet-800">
+                                    <div className="mt-4 rounded-lg border border-[var(--jp-bs-soft-border)] bg-[var(--jp-bs-soft-bg)] p-3 flex items-start gap-2">
+                                        <svg className="w-4 h-4 text-[var(--jp-bs-primary)] flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" /></svg>
+                                        <p className="text-xs text-[var(--jp-bs-primary)]">
                                             No dark-background logo set. If your primary logo is light-colored, it may be invisible on white pages.
-                                            Upload a version for dark backgrounds under <button type="button" onClick={() => { setActiveTab('identity'); updateTabInUrl('identity'); setTimeout(() => document.getElementById('logo-dark-section')?.scrollIntoView({ behavior: 'smooth' }), 200) }} className="text-violet-800 font-medium underline underline-offset-2">Identity &rarr; Logo (Dark Background)</button>.
+                                            Upload a version for dark backgrounds under <button type="button" onClick={() => { setActiveTab('identity'); updateTabInUrl('identity'); setTimeout(() => document.getElementById('logo-dark-section')?.scrollIntoView({ behavior: 'smooth' }), 200) }} className="text-[var(--jp-bs-primary)] font-medium underline underline-offset-2">Identity &rarr; Logo (Dark Background)</button>.
                                         </p>
                                     </div>
                                 )}
@@ -1903,9 +1926,9 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                     <h2 className="text-xl font-semibold text-gray-900">Logo usage</h2>
                                     <p className="mt-2 text-sm text-gray-600 leading-relaxed">
                                         Text rules and guideline behavior for the logo you already set in{' '}
-                                        <button type="button" onClick={() => { setActiveTab('identity'); updateTabInUrl('identity') }} className="text-violet-600 hover:text-violet-800 font-medium underline underline-offset-2">Identity</button>
+                                        <button type="button" onClick={() => { setActiveTab('identity'); updateTabInUrl('identity') }} className="text-[var(--jp-bs-primary)] hover:text-[var(--jp-bs-primary)] font-medium underline underline-offset-2">Identity</button>
                                         . For reference imagery (mood boards, examples), use{' '}
-                                        <button type="button" onClick={() => { setActiveTab('references'); updateTabInUrl('references') }} className="text-violet-600 hover:text-violet-800 font-medium underline underline-offset-2">Brand DNA → References</button>.
+                                        <button type="button" onClick={() => { setActiveTab('references'); updateTabInUrl('references') }} className="text-[var(--jp-bs-primary)] hover:text-[var(--jp-bs-primary)] font-medium underline underline-offset-2">Brand DNA → References</button>.
                                     </p>
                                 </div>
                                 <div className="mt-6 space-y-6">
@@ -1914,7 +1937,7 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                         <div className="flex items-center justify-between mb-4">
                                             <div>
                                                 <h4 className="text-sm font-semibold text-gray-900">Logo Usage Guidelines</h4>
-                                                <p className="text-xs text-gray-500 mt-0.5">Rules for how the logo should and shouldn&apos;t be used in brand guidelines. Uses the logo uploaded in <button type="button" onClick={() => { setActiveTab('identity'); updateTabInUrl('identity') }} className="text-violet-600 hover:text-violet-800 font-medium underline underline-offset-2">Identity</button>.</p>
+                                                <p className="text-xs text-gray-500 mt-0.5">Rules for how the logo should and shouldn&apos;t be used in brand guidelines. Uses the logo uploaded in <button type="button" onClick={() => { setActiveTab('identity'); updateTabInUrl('identity') }} className="text-[var(--jp-bs-primary)] hover:text-[var(--jp-bs-primary)] font-medium underline underline-offset-2">Identity</button>.</p>
                                             </div>
                                         </div>
 
@@ -1925,7 +1948,7 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                                 role="switch"
                                                 aria-checked={modelPayload.standards?.show_logo_visual_treatment !== false}
                                                 onClick={() => setModelPayloadField('standards.show_logo_visual_treatment', !(modelPayload.standards?.show_logo_visual_treatment !== false))}
-                                                className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-violet-600 focus:ring-offset-2 ${modelPayload.standards?.show_logo_visual_treatment !== false ? 'bg-violet-600' : 'bg-gray-200'}`}
+                                                className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-[var(--jp-bs-ring)] focus:ring-offset-2 ${modelPayload.standards?.show_logo_visual_treatment !== false ? 'bg-[var(--jp-bs-primary)]' : 'bg-gray-200'}`}
                                             >
                                                 <span className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${modelPayload.standards?.show_logo_visual_treatment !== false ? 'translate-x-5' : 'translate-x-0'}`} />
                                             </button>
@@ -1942,7 +1965,7 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                                 <label className="flex items-start gap-3 cursor-pointer">
                                                     <input
                                                         type="checkbox"
-                                                        className="mt-0.5 h-4 w-4 rounded border-gray-300 text-violet-600 focus:ring-violet-600"
+                                                        className="mt-0.5 h-4 w-4 rounded border-gray-300 text-[var(--jp-bs-primary)] focus:ring-[var(--jp-bs-ring)]"
                                                         checked={!!modelPayload.standards?.auto_generate_logo_on_dark}
                                                         onChange={(e) => setModelPayloadField('standards.auto_generate_logo_on_dark', e.target.checked)}
                                                     />
@@ -1954,7 +1977,7 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                                 <label className="flex items-start gap-3 cursor-pointer">
                                                     <input
                                                         type="checkbox"
-                                                        className="mt-0.5 h-4 w-4 rounded border-gray-300 text-violet-600 focus:ring-violet-600"
+                                                        className="mt-0.5 h-4 w-4 rounded border-gray-300 text-[var(--jp-bs-primary)] focus:ring-[var(--jp-bs-ring)]"
                                                         checked={!!modelPayload.standards?.auto_generate_logo_on_light}
                                                         onChange={(e) => setModelPayloadField('standards.auto_generate_logo_on_light', e.target.checked)}
                                                     />
@@ -1990,7 +2013,7 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                                                     const val = guidelines[key] ?? ''
                                                                     const isActive = !!val
                                                                     return (
-                                                                        <div key={key} className={`rounded-lg border p-3 transition-all ${isActive ? (category === 'dont' ? 'border-red-200 bg-red-50/30' : 'border-violet-200 bg-violet-50/30') : 'border-gray-200 bg-gray-50/50'}`}>
+                                                                        <div key={key} className={`rounded-lg border p-3 transition-all ${isActive ? (category === 'dont' ? 'border-red-200 bg-red-50/30' : 'border-[var(--jp-bs-soft-border)] bg-[var(--jp-bs-soft-bg)]') : 'border-gray-200 bg-gray-50/50'}`}>
                                                                             <div className="flex items-center justify-between mb-2">
                                                                                 <div className="flex items-center gap-2">
                                                                                     <input
@@ -2005,7 +2028,7 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                                                                             }
                                                                                             setModelPayloadField('standards.logo_usage_guidelines', next)
                                                                                         }}
-                                                                                        className="h-4 w-4 rounded border-gray-300 text-violet-600 focus:ring-violet-600"
+                                                                                        className="h-4 w-4 rounded border-gray-300 text-[var(--jp-bs-primary)] focus:ring-[var(--jp-bs-ring)]"
                                                                                     />
                                                                                     <span className={`text-xs font-semibold uppercase tracking-wide ${category === 'dont' ? 'text-red-600' : 'text-gray-700'}`}>{label}</span>
                                                                                 </div>
@@ -2018,7 +2041,7 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                                                                         const next = { ...guidelines, [key]: e.target.value }
                                                                                         setModelPayloadField('standards.logo_usage_guidelines', next)
                                                                                     }}
-                                                                                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-violet-600 sm:text-xs resize-none"
+                                                                                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-[var(--jp-bs-ring)] sm:text-xs resize-none"
                                                                                     placeholder={`Describe the ${label.toLowerCase()} rule...`}
                                                                                 />
                                                                             )}
@@ -2039,7 +2062,7 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                                                                 clear_space: (src) => (
                                                                                     <div className="relative w-full aspect-[3/2] bg-white rounded-lg flex items-center justify-center">
                                                                                         <div className="relative">
-                                                                                            <div className="absolute inset-0 -m-3 border-2 border-dashed border-violet-400/50 rounded" />
+                                                                                            <div className="absolute inset-0 -m-3 border-2 border-dashed border-[var(--jp-bs-soft-border)] rounded" />
                                                                                             <img src={src} alt="" className="h-6 max-w-[60px] object-contain" />
                                                                                         </div>
                                                                                     </div>
@@ -2122,7 +2145,7 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                                                         background_contrast: 'Ensure sufficient contrast between the logo and its background. Avoid placing on busy imagery without a container.',
                                                                     })
                                                                 }}
-                                                                className="rounded-md bg-violet-50 px-3 py-1.5 text-sm font-medium text-violet-600 hover:bg-violet-100 transition-colors"
+                                                                className="rounded-md bg-[var(--jp-bs-soft-bg)] px-3 py-1.5 text-sm font-medium text-[var(--jp-bs-primary)] hover:bg-[var(--jp-bs-soft-bg-strong)] transition-colors"
                                                             >
                                                                 Add Standard Defaults
                                                             </button>
@@ -2133,7 +2156,7 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                         })()}
                                     </div>
 
-                                    <button type="submit" disabled={dnaSaving} className="rounded-md bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-500 disabled:opacity-50">
+                                    <button type="submit" disabled={dnaSaving} className="rounded-md bg-[var(--jp-bs-primary)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--jp-bs-primary-hover)] disabled:opacity-50">
                                         {dnaSaving ? 'Saving…' : 'Save Brand DNA'}
                                     </button>
                                 </div>
@@ -2150,7 +2173,7 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                     <h2 className="text-xl font-semibold text-gray-900">Brand DNA rules</h2>
                                     <p className="mt-2 text-sm text-gray-600 leading-relaxed">
                                         Configure fonts, colors, and keywords used by Brand Intelligence. Visual reference images are chosen under{' '}
-                                        <button type="button" onClick={() => { setActiveTab('references'); updateTabInUrl('references') }} className="text-violet-600 hover:text-violet-800 font-medium underline underline-offset-2">References</button>.
+                                        <button type="button" onClick={() => { setActiveTab('references'); updateTabInUrl('references') }} className="text-[var(--jp-bs-primary)] hover:text-[var(--jp-bs-primary)] font-medium underline underline-offset-2">References</button>.
                                     </p>
                                 </div>
                                 <div className="mt-6 space-y-6">
@@ -2160,7 +2183,7 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                     {renderTagArrayField('banned_keywords', 'Banned Keywords', 'Words to penalize')}
                                     {renderTagArrayField('photography_attributes', 'Photography Attributes', 'e.g. minimal, lifestyle')}
 
-                                    <button type="submit" disabled={dnaSaving} className="rounded-md bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-500 disabled:opacity-50">
+                                    <button type="submit" disabled={dnaSaving} className="rounded-md bg-[var(--jp-bs-primary)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--jp-bs-primary-hover)] disabled:opacity-50">
                                         {dnaSaving ? 'Saving…' : 'Save Brand DNA'}
                                     </button>
                                 </div>
@@ -2177,7 +2200,7 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                     <h2 className="text-xl font-semibold text-gray-900">Visual references</h2>
                                     <p className="mt-2 text-sm text-gray-600 leading-relaxed max-w-2xl">
                                         Pick example assets that represent your brand look. When enabled per category, they anchor Brand Intelligence when measuring on-brand alignment. Typography, color, and keyword rules live under{' '}
-                                        <button type="button" onClick={() => { setActiveTab('alignment'); updateTabInUrl('alignment') }} className="text-violet-600 hover:text-violet-800 font-medium underline underline-offset-2">Alignment</button>.
+                                        <button type="button" onClick={() => { setActiveTab('alignment'); updateTabInUrl('alignment') }} className="text-[var(--jp-bs-primary)] hover:text-[var(--jp-bs-primary)] font-medium underline underline-offset-2">Alignment</button>.
                                     </p>
                                 </div>
                                 <div className="mt-6 space-y-6">
@@ -2187,7 +2210,7 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                         onChange={(updated) => setModelPayloadField('standards.reference_categories', updated)}
                                         noTopDivider
                                     />
-                                    <button type="submit" disabled={dnaSaving} className="rounded-md bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-500 disabled:opacity-50">
+                                    <button type="submit" disabled={dnaSaving} className="rounded-md bg-[var(--jp-bs-primary)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--jp-bs-primary-hover)] disabled:opacity-50">
                                         {dnaSaving ? 'Saving…' : 'Save Brand DNA'}
                                     </button>
                                 </div>
@@ -2217,7 +2240,7 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                             preview: (
                                                 <div className="h-40 rounded-lg bg-white border border-gray-200 p-4 flex flex-col gap-2.5 overflow-hidden">
                                                     <div className="flex items-center gap-2">
-                                                        <div className="w-0.5 h-4 bg-violet-500 rounded-full" />
+                                                        <div className="w-0.5 h-4 bg-[var(--jp-bs-primary)] rounded-full" />
                                                         <div className="h-2.5 w-20 bg-gray-800 rounded" />
                                                     </div>
                                                     <div className="space-y-1.5">
@@ -2240,7 +2263,7 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                             features: ['Background imagery', 'Overlay & multiply blends', 'Textured sections', 'Atmospheric depth'],
                                             preview: (
                                                 <div className="h-40 rounded-lg bg-gray-900 p-4 flex flex-col gap-2.5 overflow-hidden relative">
-                                                    <div className="absolute inset-0 opacity-30" style={{ background: 'linear-gradient(135deg, #6366f1 0%, #0f172a 50%, #6366f1 100%)' }} />
+                                                    <div className="absolute inset-0 opacity-30" style={{ background: 'linear-gradient(135deg, var(--jp-bs-primary) 0%, #0f172a 50%, var(--jp-bs-primary) 100%)' }} />
                                                     <div className="absolute inset-0 opacity-20" style={{ backgroundImage: 'url("data:image/svg+xml,%3Csvg width=\'40\' height=\'40\' viewBox=\'0 0 40 40\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cg fill=\'%23fff\' fill-opacity=\'0.08\'%3E%3Cpath d=\'M0 0h20v20H0zM20 20h20v20H20z\'/%3E%3C/g%3E%3C/svg%3E")' }} />
                                                     <div className="relative z-10 flex flex-col gap-2.5">
                                                         <div className="h-3 w-24 bg-white/80 rounded" />
@@ -2302,7 +2325,7 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                                     isLocked
                                                         ? 'border-gray-200 opacity-50 cursor-not-allowed'
                                                         : isSelected
-                                                            ? 'border-violet-600 ring-2 ring-violet-600 shadow-md'
+                                                            ? 'border-[var(--jp-bs-primary)] shadow-md'
                                                             : 'border-gray-200 hover:border-gray-300 hover:shadow-sm'
                                                 }`}
                                             >
@@ -2314,7 +2337,7 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                                     <div className="flex items-center justify-between mb-1">
                                                         <h3 className="text-sm font-semibold text-gray-900">{style.label}</h3>
                                                         {isSelected && !isLocked && (
-                                                            <svg className="h-5 w-5 text-violet-600" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" /></svg>
+                                                            <svg className="h-5 w-5 text-[var(--jp-bs-primary)]" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" /></svg>
                                                         )}
                                                     </div>
                                                     <p className="text-xs text-gray-500 leading-relaxed mb-3">{style.description}</p>
@@ -2343,7 +2366,7 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                 </div>
 
                                 <div className="mt-6">
-                                    <button type="submit" disabled={dnaSaving} className="rounded-md bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-500 disabled:opacity-50">
+                                    <button type="submit" disabled={dnaSaving} className="rounded-md bg-[var(--jp-bs-primary)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--jp-bs-primary-hover)] disabled:opacity-50">
                                         {dnaSaving ? 'Saving…' : 'Save Brand DNA'}
                                     </button>
                                 </div>
@@ -2353,7 +2376,7 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                     )}
 
                     {activeTab === 'research' && (
-                    <ResearchInsightsPanel insights={research_insights} brandId={brand.id} />
+                    <ResearchInsightsPanel insights={research_insights} brandId={brand.id} workbenchChrome={brandWorkbenchChrome} accentSurfaceStyle={brandAccentStyle} />
                     )}
 
                 </form>
@@ -2399,19 +2422,19 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
 
                     {/* Resume onboarding — shown when setup was never completed */}
                     {onboardingStatus && !onboardingStatus.is_completed && !onboardingStatus.is_activated && (
-                        <div className="rounded-xl bg-violet-50 ring-1 ring-violet-100/60 overflow-hidden">
+                        <div className="rounded-xl bg-[var(--jp-bs-soft-bg)] ring-1 ring-[var(--jp-bs-soft-border)]/60 overflow-hidden">
                             <div className="px-5 py-4 sm:px-6 flex items-center justify-between gap-4">
                                 <div className="min-w-0">
-                                    <p className="text-sm font-semibold text-violet-900">
+                                    <p className="text-sm font-semibold text-[var(--jp-bs-primary)]">
                                         Brand setup isn't finished yet
                                     </p>
-                                    <p className="mt-0.5 text-xs text-violet-700/70 leading-relaxed">
+                                    <p className="mt-0.5 text-xs text-[var(--jp-bs-primary)] opacity-70 leading-relaxed">
                                         The guided setup helps configure your workspace faster. You can resume where you left off.
                                     </p>
                                 </div>
                                 <Link
                                     href="/app/onboarding"
-                                    className="shrink-0 inline-flex items-center gap-1.5 rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-violet-500 transition-colors"
+                                    className="shrink-0 inline-flex items-center gap-1.5 rounded-lg bg-[var(--jp-bs-primary)] px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-[var(--jp-bs-primary-hover)] transition-colors"
                                 >
                                     Resume setup
                                     <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3" /></svg>
@@ -2442,7 +2465,7 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                         })
                                     }
                                 }}
-                                className="inline-flex items-center gap-1.5 text-xs text-gray-400 hover:text-violet-600 transition-colors"
+                                className="inline-flex items-center gap-1.5 text-xs text-gray-400 hover:text-[var(--jp-bs-primary)] transition-colors"
                             >
                                 <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182" /></svg>
                                 Re-run guided setup
@@ -2471,7 +2494,7 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                             required
                                             value={data.name}
                                             onChange={(e) => setData('name', e.target.value)}
-                                            className="block w-full rounded-md border-0 py-1.5 px-3 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-violet-600 sm:text-sm sm:leading-6"
+                                            className="block w-full rounded-md border-0 py-1.5 px-3 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-[var(--jp-bs-ring)] sm:text-sm sm:leading-6"
                                         />
                                         {errors.name && <p className="mt-2 text-sm text-red-600">{errors.name}</p>}
                                     </div>
@@ -2484,8 +2507,8 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                     <button
                                         type="button"
                                         onClick={() => setData('show_in_selector', !data.show_in_selector)}
-                                        className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-violet-600 focus:ring-offset-2 ${
-                                            data.show_in_selector ? 'bg-violet-600' : 'bg-gray-200'
+                                        className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-[var(--jp-bs-ring)] focus:ring-offset-2 ${
+                                            data.show_in_selector ? 'bg-[var(--jp-bs-primary)]' : 'bg-gray-200'
                                         }`}
                                         role="switch"
                                         aria-checked={data.show_in_selector}
@@ -2869,7 +2892,7 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                                         onClick={() => setData('icon_style', opt.value)}
                                                         className={`relative rounded-lg border-2 p-3 text-left transition-all ${
                                                             data.icon_style === opt.value
-                                                                ? 'border-violet-500 ring-1 ring-violet-500'
+                                                                ? 'border-[var(--jp-bs-primary)] ring-1 ring-[var(--jp-bs-ring)]'
                                                                 : 'border-gray-200 hover:border-gray-300'
                                                         }`}
                                                     >
@@ -3024,14 +3047,14 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                         </div>
                         {/* Quick Actions Bar */}
                         {portal_url && (
-                            <div className="rounded-xl bg-gradient-to-r from-violet-50 to-purple-50 border border-violet-100 px-5 py-4 flex items-center justify-between">
+                            <div className="rounded-xl bg-gradient-to-r from-[var(--jp-bs-soft-bg)] to-slate-50 border border-[var(--jp-bs-soft-border)] px-5 py-4 flex items-center justify-between">
                                 <div className="min-w-0">
                                     <p className="text-sm font-medium text-gray-800">Public Portal</p>
                                     <a
                                         href={portal_url}
                                         target="_blank"
                                         rel="noopener noreferrer"
-                                        className="text-xs font-mono text-violet-600 hover:text-violet-700 truncate block"
+                                        className="text-xs font-mono text-[var(--jp-bs-primary)] hover:text-[var(--jp-bs-primary)] truncate block"
                                     >
                                         {portal_url}
                                     </a>
@@ -3040,7 +3063,7 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                     href={portal_url}
                                     target="_blank"
                                     rel="noopener noreferrer"
-                                    className="flex-shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-violet-600 text-white text-xs font-medium hover:bg-violet-700 transition-colors"
+                                    className="flex-shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--jp-bs-primary)] text-white text-xs font-medium hover:bg-[var(--jp-bs-primary-active)] transition-colors"
                                 >
                                     <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor">
                                         <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
@@ -3151,7 +3174,7 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                                 autoSaveBrandField({ settings: newSettings })
                                             }}
                                             className={`relative flex items-center gap-3 p-4 rounded-lg border-2 transition-all text-left ${
-                                                (data.settings?.nav_display_mode || 'logo') === 'logo' ? 'border-violet-600 ring-2 ring-violet-600 bg-violet-50/30' : 'border-gray-200 hover:border-gray-300'
+                                                (data.settings?.nav_display_mode || 'logo') === 'logo' ? 'border-[var(--jp-bs-primary)] bg-[var(--jp-bs-soft-bg)]' : 'border-gray-200 hover:border-gray-300'
                                             }`}
                                         >
                                             <div className="flex-shrink-0 w-10 h-10 rounded-lg bg-gray-100 flex items-center justify-center">
@@ -3163,7 +3186,7 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                             </div>
                                             {(data.settings?.nav_display_mode || 'logo') === 'logo' && (
                                                 <div className="absolute top-2 right-2">
-                                                    <svg className="h-4 w-4 text-violet-600" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" /></svg>
+                                                    <svg className="h-4 w-4 text-[var(--jp-bs-primary)]" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" /></svg>
                                                 </div>
                                             )}
                                         </button>
@@ -3175,7 +3198,7 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                                 autoSaveBrandField({ settings: newSettings })
                                             }}
                                             className={`relative flex items-center gap-3 p-4 rounded-lg border-2 transition-all text-left ${
-                                                data.settings?.nav_display_mode === 'text' ? 'border-violet-600 ring-2 ring-violet-600 bg-violet-50/30' : 'border-gray-200 hover:border-gray-300'
+                                                data.settings?.nav_display_mode === 'text' ? 'border-[var(--jp-bs-primary)] bg-[var(--jp-bs-soft-bg)]' : 'border-gray-200 hover:border-gray-300'
                                             }`}
                                         >
                                             <div className="flex-shrink-0 w-10 h-10 rounded-lg bg-gray-100 flex items-center justify-center">
@@ -3187,7 +3210,7 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                             </div>
                                             {data.settings?.nav_display_mode === 'text' && (
                                                 <div className="absolute top-2 right-2">
-                                                    <svg className="h-4 w-4 text-violet-600" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" /></svg>
+                                                    <svg className="h-4 w-4 text-[var(--jp-bs-primary)]" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" /></svg>
                                                 </div>
                                             )}
                                         </button>
@@ -3231,7 +3254,7 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                                             autoSaveBrandField({ logo_filter: opt.value })
                                                         }}
                                                         className={`flex-1 min-w-[120px] flex flex-col items-center p-3 rounded-lg border-2 transition-all ${
-                                                            (data.logo_filter || 'none') === opt.value ? 'border-violet-600 ring-2 ring-violet-600' : 'border-gray-200 hover:border-gray-300'
+                                                            (data.logo_filter || 'none') === opt.value ? 'border-[var(--jp-bs-primary)]' : 'border-gray-200 hover:border-gray-300'
                                                         }`}
                                                     >
                                                         <div className="w-full h-10 rounded-md mb-2 bg-white border border-gray-100 flex items-center justify-center overflow-hidden">
@@ -3294,7 +3317,7 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                                 }}
                                                 className={`relative flex flex-1 flex-col rounded-lg border-2 p-4 text-left transition-all ${
                                                     (data.settings?.workspace_sidebar_style || 'solid') === opt.value
-                                                        ? 'border-violet-600 ring-2 ring-violet-600 bg-violet-50/30'
+                                                        ? 'border-[var(--jp-bs-primary)] bg-[var(--jp-bs-soft-bg)]'
                                                         : 'border-gray-200 hover:border-gray-300'
                                                 }`}
                                             >
@@ -3335,7 +3358,7 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                                     }}
                                                     className={`flex items-center gap-2 rounded-lg border-2 px-3 py-2.5 text-left transition-all ${
                                                         isActive
-                                                            ? 'border-violet-600 ring-2 ring-violet-600 bg-violet-50/30'
+                                                            ? 'border-[var(--jp-bs-primary)] bg-[var(--jp-bs-soft-bg)]'
                                                             : isDisabled
                                                                 ? 'border-gray-100 opacity-40 cursor-not-allowed'
                                                                 : 'border-gray-200 hover:border-gray-300'
@@ -3440,12 +3463,12 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                                                     }}
                                                                     className={`relative flex flex-col items-center p-3 rounded-lg border-2 transition-all ${
                                                                         isActive
-                                                                            ? 'border-violet-600 ring-2 ring-violet-600'
+                                                                            ? 'border-[var(--jp-bs-primary)]'
                                                                             : 'border-gray-200 hover:border-gray-300'
                                                                     }`}
                                                                 >
                                                                     {opt.recommended && (
-                                                                        <span className="absolute -top-1.5 -right-1.5 inline-flex items-center rounded-full bg-violet-600 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-white shadow-sm">
+                                                                        <span className="absolute -top-1.5 -right-1.5 inline-flex items-center rounded-full bg-[var(--jp-bs-primary)] px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-white shadow-sm">
                                                                             Rec
                                                                         </span>
                                                                     )}
@@ -3516,7 +3539,7 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                                         autoSaveBrandField({ settings: newSettings })
                                                     }}
                                                     className={`flex-1 flex flex-col items-center p-3 rounded-lg border-2 transition-all ${
-                                                        (data.settings?.asset_grid_style ?? 'clean') === opt.value ? 'border-violet-600 ring-2 ring-violet-600' : 'border-gray-200 hover:border-gray-300'
+                                                        (data.settings?.asset_grid_style ?? 'clean') === opt.value ? 'border-[var(--jp-bs-primary)]' : 'border-gray-200 hover:border-gray-300'
                                                     }`}
                                                 >
                                                     <span className="text-sm font-medium text-gray-900">{opt.label}</span>
@@ -3568,7 +3591,7 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                                             autoSaveBrandField({ nav_color: opt.color })
                                                         }}
                                                         className={`relative flex flex-col items-center p-3 rounded-lg border-2 transition-all ${
-                                                            isSelected ? 'border-violet-600 ring-2 ring-violet-600' : 'border-gray-200 hover:border-gray-300'
+                                                            isSelected ? 'border-[var(--jp-bs-primary)]' : 'border-gray-200 hover:border-gray-300'
                                                         }`}
                                                     >
                                                         <div
@@ -3578,7 +3601,7 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                                         <span className="text-xs font-medium text-gray-900">{opt.label}</span>
                                                         {isSelected && (
                                                             <div className="absolute top-1.5 right-1.5">
-                                                                <svg className="h-4 w-4 text-violet-600" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" /></svg>
+                                                                <svg className="h-4 w-4 text-[var(--jp-bs-primary)]" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" /></svg>
                                                             </div>
                                                         )}
                                                     </button>
@@ -3733,7 +3756,7 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                         <button
                             type="submit"
                             disabled={processing}
-                            className="rounded-md bg-violet-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-violet-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-600 disabled:opacity-50"
+                            className="rounded-md bg-[var(--jp-bs-primary)] px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-[var(--jp-bs-primary-hover)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--jp-bs-ring)] disabled:opacity-50"
                         >
                             {processing ? 'Updating...' : 'Update Brand'}
                         </button>
@@ -3742,7 +3765,7 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                 )}
                     </div>{/* end main content */}
                 </div>{/* end two-column layout */}
-                </div>
+                </BrandWorkbenchChrome>
                     </main>
                     <AppFooter variant="settings" />
                 </div>

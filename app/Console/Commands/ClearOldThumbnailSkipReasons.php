@@ -9,7 +9,7 @@ use Illuminate\Console\Command;
 /**
  * Clear Old Thumbnail Skip Reasons Command
  * 
- * Clears skip reasons for formats that are now supported (e.g., TIFF, AVIF via Imagick).
+ * Clears skip reasons for formats that are now supported (e.g., TIFF, AVIF, HEIC via Imagick).
  * This allows previously skipped assets to be regenerated.
  */
 class ClearOldThumbnailSkipReasons extends Command
@@ -20,7 +20,7 @@ class ClearOldThumbnailSkipReasons extends Command
      * @var string
      */
     protected $signature = 'thumbnails:clear-skip-reasons 
-                            {--format= : Specific format to clear (tiff, cr2, avif, psd, svg, or all)}
+                            {--format= : Specific format to clear (tiff, cr2, avif, heic, psd, svg, or all)}
                             {--dry-run : Show what would be cleared without making changes}
                             {--force : Force regeneration by setting status to PENDING}';
 
@@ -29,7 +29,7 @@ class ClearOldThumbnailSkipReasons extends Command
      *
      * @var string
      */
-    protected $description = 'Clear old thumbnail skip reasons for formats that are now supported (TIFF, CR2, AVIF, PSD, SVG)';
+    protected $description = 'Clear old thumbnail skip reasons for formats that are now supported (TIFF, CR2, AVIF, HEIC, PSD, SVG)';
 
     /**
      * Execute the console command.
@@ -42,7 +42,7 @@ class ClearOldThumbnailSkipReasons extends Command
 
         // Check if Imagick is available
         if (!extension_loaded('imagick')) {
-            $this->warn('Imagick extension is not loaded. TIFF/AVIF/PSD support requires Imagick.');
+            $this->warn('Imagick extension is not loaded. TIFF/AVIF/HEIC/PSD support requires Imagick.');
             if (!$this->confirm('Continue anyway? (Skip reasons will be cleared but thumbnails cannot be generated)')) {
                 return 0;
             }
@@ -100,6 +100,16 @@ class ClearOldThumbnailSkipReasons extends Command
                 if (extension_loaded('imagick')) {
                     $shouldClear = true;
                     $formatName = 'AVIF';
+                }
+            }
+
+            // Check HEIC/HEIF
+            if (($format === 'all' || $format === 'heic') &&
+                $skipReason === 'unsupported_format:heic' &&
+                ($mimeType === 'image/heic' || $mimeType === 'image/heif' || $extension === 'heic' || $extension === 'heif')) {
+                if (extension_loaded('imagick')) {
+                    $shouldClear = true;
+                    $formatName = 'HEIC';
                 }
             }
 

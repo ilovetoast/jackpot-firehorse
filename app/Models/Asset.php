@@ -1352,7 +1352,7 @@ class Asset extends Model
         $fileTypeService = app(\App\Services\FileTypeService::class);
         $fileType = $fileTypeService->detectFileTypeFromAsset($this);
 
-        return in_array($fileType, ['image', 'tiff', 'cr2', 'avif', 'svg', 'pdf', 'video', 'ai'], true);
+        return in_array($fileType, ['image', 'tiff', 'cr2', 'avif', 'heic', 'svg', 'pdf', 'video', 'ai'], true);
     }
 
     /**

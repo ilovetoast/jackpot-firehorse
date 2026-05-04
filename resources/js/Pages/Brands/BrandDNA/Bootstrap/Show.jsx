@@ -1,6 +1,7 @@
 import { Link, router, usePage } from '@inertiajs/react'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import AppNav from '../../../../Components/AppNav'
+import { brandSettingsSurfaceVars } from '../../../../utils/colorUtils'
 
 const STAGE_LABELS = {
     scraping_homepage: 'Analyzing homepage',
@@ -61,6 +62,7 @@ const DEFAULT_PAYLOAD = {
 
 export default function BrandBootstrapShow({ brand, run }) {
     const { auth } = usePage().props
+    const bootstrapShowAccentStyle = useMemo(() => brandSettingsSurfaceVars(brand), [brand])
     const [rawJsonOpen, setRawJsonOpen] = useState(false)
     const [stageLogOpen, setStageLogOpen] = useState(false)
     const [payload, setPayload] = useState(() => mergePayload(DEFAULT_PAYLOAD, run?.ai_output_payload || {}))
@@ -232,7 +234,7 @@ export default function BrandBootstrapShow({ brand, run }) {
                                     <option key={r.value ?? 'none'} value={r.value ?? ''}>{r.label}</option>
                                 ))}
                             </select>
-                            <button type="button" onClick={() => removeColorFromPalette(i)} className="text-indigo-400 hover:text-indigo-600">×</button>
+                            <button type="button" onClick={() => removeColorFromPalette(i)} className="text-slate-400 hover:text-[var(--jp-bs-primary)]">×</button>
                         </div>
                     ))}
                 </div>
@@ -265,9 +267,9 @@ export default function BrandBootstrapShow({ brand, run }) {
                 <label className="block text-xs font-medium text-gray-500">{label}</label>
                 <div className="flex flex-wrap gap-1.5">
                     {items.map((t, i) => (
-                        <span key={i} className="inline-flex items-center gap-1 rounded-full bg-indigo-50 px-2 py-0.5 text-xs text-indigo-800">
+                        <span key={i} className="inline-flex items-center gap-1 rounded-full bg-[var(--jp-bs-soft-bg)] px-2 py-0.5 text-xs text-[var(--jp-bs-primary)]">
                             {t}
-                            <button type="button" onClick={() => removeScoringRuleItem(ruleKey, i)} className="text-indigo-400 hover:text-indigo-600">×</button>
+                            <button type="button" onClick={() => removeScoringRuleItem(ruleKey, i)} className="text-slate-400 hover:text-[var(--jp-bs-primary)]">×</button>
                         </span>
                     ))}
                 </div>
@@ -278,7 +280,7 @@ export default function BrandBootstrapShow({ brand, run }) {
                         onChange={(e) => setScoringRuleInputs((prev) => ({ ...prev, [ruleKey]: e.target.value }))}
                         onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addScoringRuleItem(ruleKey, inputVal))}
                         placeholder={placeholder}
-                        className="block flex-1 rounded border border-gray-200 px-2 py-1 text-xs focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                        className="block flex-1 rounded border border-gray-200 px-2 py-1 text-xs focus:border-[var(--jp-bs-primary)] focus:ring-1 focus:ring-[var(--jp-bs-ring)]"
                     />
                     <button type="button" onClick={() => addScoringRuleItem(ruleKey, inputVal)} className="rounded bg-gray-100 px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-200">Add</button>
                 </div>
@@ -287,7 +289,7 @@ export default function BrandBootstrapShow({ brand, run }) {
     }
 
     return (
-        <div className="min-h-full">
+        <div className="jp-brand-settings-theme min-h-full" style={bootstrapShowAccentStyle}>
             <AppNav brand={auth?.activeBrand} tenant={null} />
             <main className="bg-gray-50">
                 <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
@@ -374,14 +376,14 @@ export default function BrandBootstrapShow({ brand, run }) {
                                                 <button
                                                     type="button"
                                                     onClick={() => updatePayload('typography', 'primary_font_style', font)}
-                                                    className="text-xs text-indigo-600 hover:text-indigo-800"
+                                                    className="text-xs text-[var(--jp-bs-primary)] hover:text-[var(--jp-bs-primary-active)]"
                                                 >
                                                     Set as primary
                                                 </button>
                                                 <button
                                                     type="button"
                                                     onClick={() => updatePayload('typography', 'secondary_font_style', font)}
-                                                    className="text-xs text-indigo-600 hover:text-indigo-800"
+                                                    className="text-xs text-[var(--jp-bs-primary)] hover:text-[var(--jp-bs-primary-active)]"
                                                 >
                                                     Set as secondary
                                                 </button>
@@ -405,7 +407,7 @@ export default function BrandBootstrapShow({ brand, run }) {
                                                 <h3 className="text-xs font-medium text-slate-500">Messaging Clusters</h3>
                                                 <div className="mt-1 flex flex-wrap gap-1.5">
                                                     {aiSignals.messaging_themes.map((t, i) => (
-                                                        <span key={i} className="rounded-full bg-indigo-100 px-2.5 py-0.5 text-xs text-indigo-800">{t}</span>
+                                                        <span key={i} className="rounded-full bg-[var(--jp-bs-soft-bg)] px-2.5 py-0.5 text-xs text-[var(--jp-bs-primary)]">{t}</span>
                                                     ))}
                                                 </div>
                                             </div>
@@ -453,7 +455,7 @@ export default function BrandBootstrapShow({ brand, run }) {
                                                                         },
                                                                     }))
                                                                 }}
-                                                                className="text-xs text-indigo-600 hover:text-indigo-800"
+                                                                className="text-xs text-[var(--jp-bs-primary)] hover:text-[var(--jp-bs-primary-active)]"
                                                             >
                                                                 Set as primary
                                                             </button>
@@ -469,7 +471,7 @@ export default function BrandBootstrapShow({ brand, run }) {
                                                                         },
                                                                     }))
                                                                 }}
-                                                                className="text-xs text-indigo-600 hover:text-indigo-800"
+                                                                className="text-xs text-[var(--jp-bs-primary)] hover:text-[var(--jp-bs-primary-active)]"
                                                             >
                                                                 Set as secondary
                                                             </button>
@@ -483,7 +485,7 @@ export default function BrandBootstrapShow({ brand, run }) {
                                                 <h3 className="text-xs font-medium text-slate-500">Confidence Score</h3>
                                                 <div className="mt-2 h-2 w-full rounded-full bg-slate-200">
                                                     <div
-                                                        className="h-2 rounded-full bg-indigo-500 transition-all"
+                                                        className="h-2 rounded-full bg-[var(--jp-bs-primary)] transition-all"
                                                         style={{ width: `${Math.min(100, Math.max(0, aiSignals.confidence_score ?? 0))}%` }}
                                                     />
                                                 </div>
@@ -523,7 +525,7 @@ export default function BrandBootstrapShow({ brand, run }) {
                                                         type="text"
                                                         value={payload.identity?.[f] ?? ''}
                                                         onChange={(e) => updatePayload('identity', f, e.target.value)}
-                                                        className="mt-0.5 block w-full rounded border border-gray-200 px-2 py-1.5 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                                                        className="mt-0.5 block w-full rounded border border-gray-200 px-2 py-1.5 text-sm focus:border-[var(--jp-bs-primary)] focus:ring-1 focus:ring-[var(--jp-bs-ring)]"
                                                     />
                                                 </div>
                                             ))}
@@ -555,9 +557,9 @@ export default function BrandBootstrapShow({ brand, run }) {
                                                 <label className="block text-xs text-gray-500">Traits</label>
                                                 <div className="mt-1 flex flex-wrap gap-1.5">
                                                     {(payload.personality?.traits ?? []).map((t, i) => (
-                                                        <span key={i} className="inline-flex items-center gap-1 rounded-full bg-indigo-50 px-2 py-0.5 text-xs text-indigo-800">
+                                                        <span key={i} className="inline-flex items-center gap-1 rounded-full bg-[var(--jp-bs-soft-bg)] px-2 py-0.5 text-xs text-[var(--jp-bs-primary)]">
                                                             {t}
-                                                            <button type="button" onClick={() => removeTrait(i)} className="text-indigo-400 hover:text-indigo-600">×</button>
+                                                            <button type="button" onClick={() => removeTrait(i)} className="text-slate-400 hover:text-[var(--jp-bs-primary)]">×</button>
                                                         </span>
                                                     ))}
                                                 </div>
