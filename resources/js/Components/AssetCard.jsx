@@ -34,6 +34,7 @@ import {
     subscribeUploadPreviewRegistry,
 } from '../utils/uploadPreviewRegistry'
 import { getAssetCardVisualState } from '../utils/assetCardVisualState'
+import { assetNeedsThumbnailPipelineAttention } from '../utils/assetGridPipelineSummary'
 
 function searchTokensForHighlight(q) {
     if (!q || typeof q !== 'string') return []
